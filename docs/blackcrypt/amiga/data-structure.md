@@ -633,8 +633,8 @@ Each entry has a baked-in source offset and tile dimensions:
 | Entry | Source Offset | Dimensions | Count | Description |
 |-------|---------------|------------|-------|-------------|
 | desc00 | `0x5160` (20,832) | 128×105×6bpp | 1 | Character creation UI |
-| desc01 | `0x7F50` (32,592) | 192×47×6bpp | 1 | Unknown UI panel |
-| desc02 | `0xD758` (55,128) | 128×62×6bpp | 1 | Unknown UI panel |
+| desc01 | `0x7F50` (32,592) | 192×47×6bpp | 1 | Character gen logo / Enter Crypt UI |
+| desc02 | `0xD758` (55,128) | 128×62×6bpp | 1 | Adjust character stats panel |
 | desc03–07 | `0xAE68`–`0xB3A8` | 32×14×6bpp | 5 | **Mystic sigils** (spell/ability icons, gold palette 26-30) |
 | desc08–11 | `0xB658`–`0xCF18` | 128×22×6bpp | 4 | **Class guild banners** (Fighter, Cleric, Magic User, Druid) |
 | desc12–22 | `0xF286`–`0xF5CE` | 16×7×6bpp | 11 | **Numeral font** (gold, for HP/stats display) |
