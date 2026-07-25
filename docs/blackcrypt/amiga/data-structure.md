@@ -359,7 +359,7 @@ algorithm as bcdfu LAB_0043, `0x00` = end of stream).
 
 | Property         | Value                                      |
 |------------------|--------------------------------------------|
-| Dimensions       | **64px wide × variable height × 6bpp** sequential planar |
+| Dimensions       | **96px wide × variable height × 4bpp word-interleaved planar** |
 | Compression      | RLE (bcdfu LAB_0043), multiple streams per file |
 | Color mode       | 6bpp EHB (dungeon palette at bcdfq `+0x02C6`) |
 | Pixel layout     | bit 7 = leftmost pixel                     |
@@ -392,27 +392,33 @@ algorithm as bcdfu LAB_0043, `0x00` = end of stream).
 | bcdfm  | 0x9307   | 180  | —    |
 | bcdfn  | 0x82EA   | 197  | —    |
 
-#### Extraction
+#### Rendering (confirmed)
 
-Each file contains multiple RLE streams. The largest stream (starting at the
-first non-zero byte after the header) contains the main monster sheet. Additional
-streams contain individual monster variants or animation frames.
+Each RLE stream decompresses to **96px wide × 4bpp sequential planar** with an
+8-byte header. Each row has its left/right halves swapped (pixels 0–47 ↔ 48–95)
+and must be un-swapped after decompression. The 16 unique colors map to the
+dungeon palette at bcdfq `+0x02C6`.
+
+The decompressed data contains a monster atlas: the full-size sprite at the top,
+with progressively smaller versions stacked vertically for different viewing
+distances.
 
 ```python
-def extract_monsters(data):
-    streams = []
-    pos = 0
-    while pos < len(data):
-        if data[pos] == 0:
-            pos += 1; continue
-        decomp, next_pos = rle_decompress(data, pos)
-        if len(decomp) >= 312:  # minimum meaningful size
-            # Render at 64px wide 6bpp
-            h = len(decomp) // 48  # 48 bytes/row at 64px 6bpp
-            pixels = decode_6bpp_planar(decomp[:48*h], 64, h)
-            streams.append(pixels)
-        pos = next_pos
-    return streams
+def render_monster(data, width=96, planes=4):
+    bpr = width // 8 * planes  # 48 bytes/row
+    h = len(data) // bpr
+    half = width // 2
+    pb = width // 8
+    for y in range(h):
+        for x in range(width):
+            # un-swap left/right halves
+            xe = (x + half) % width
+            col = 0
+            for bp in range(planes):
+                off = bp * pb * h + y * pb + (xe // 8)
+                if (data[off] >> (7 - (xe % 8))) & 1:
+                    col |= 1 << bp
+            yield col
 ```
 
 ---
