@@ -18,7 +18,7 @@ alongside the main executable `BlackCrypt` and a small `configuration.dat`.
 | `BlackCrypt`     | 12,700 B  | HUNK executable             | AmigaDOS    | Opens overlays + config            |
 | `bcdfa`          | 197,894 B | RLE icon/item tile set      | **bcdfq**   | 477 RLE streams → 280 tiles × 64×24×6bpp seq-planar (faces, automap, items) |
 | `bcdfb`–`bcdfn`  | 48–72 KB  | Structured image files      | **bcdfq**   | 12B BE header + directory + 32px-wide planar strips |
-| `bcdfo`          | 63,010 B  | Character portraits         | bcdfp        | 109 tiles × 32×24×6bpp seq-planar at offset $60; confirmed EHB colors |
+| `bcdfo`          | 63,010 B  | Character portraits + UI elements | bcdfp        | 109 portraits × 32×24×6bpp at offset $60, plus UI tiles at assembly-specified offsets (see bcdfp LAB_010D) |
 | `bcdfp`          | 23,960 B  | HUNK overlay (CODE+DATA)    | BlackCrypt   | Blitter, BCSub, item/class tables  |
 | `bcdfq`          | 87,220 B  | HUNK overlay + appended data | BlackCrypt  | 5KB code + 82KB appended textures (reads self) |
 | `bcdfr`          | 138,560 B | Full-screen images (4 screens, per-screen BPP) | bcdfq | 32KB Raven (4bpp, 320×200) + 48KB Title (6bpp, 320×200) + 10,560B Logo (6bpp, 320×44) + 48KB Plot (6bpp, 320×200) — chunk sizes from bcdfq LAB_0022/27/2B/2F |
