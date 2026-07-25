@@ -636,7 +636,7 @@ Each entry has a baked-in source offset and tile dimensions:
 | desc01 | `0x7F50` (32,592) | 192×47×6bpp | 1 | Unknown UI panel |
 | desc02 | `0xD758` (55,128) | 128×62×6bpp | 1 | Unknown UI panel |
 | desc03–07 | `0xAE68`–`0xB3A8` | 32×14×6bpp | 5 | Small UI widgets |
-| desc08–11 | `0xB658`–`0xCF18` | 128×22×6bpp | 4 | Medium UI strips |
+| desc08–11 | `0xB658`–`0xCF18` | 128×22×6bpp | 4 | **Class guild banners** (Fighter, Cleric, Magic User, Druid) |
 | desc12–22 | `0xF286`–`0xF5CE` | 16×7×6bpp | 11 | **Numeral font** (gold, for HP/stats display) |
 
 ---
