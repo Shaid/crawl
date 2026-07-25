@@ -147,16 +147,24 @@ bcdfz has 6, bcdfy has 4 (all zeros).
 All 751 DOS VGA images extracted from clipper.clp. EHB palette rendering confirmed
 correct for bcdfo portraits and bcdfa icon tiles.
 
-### Phase 2: Data Format Analysis (In Progress)
+### Phase 2: Data Format Analysis (Mostly Complete)
 
 **Goal:** Understand the internal structure of each payload and post-payload data.
 
-1. **Analyze P0 depth shading table** — 32-byte progressive mask header.
-2. **Analyze P1 background data** — 42,754 bytes, 256 unique values.
-3. **Analyze bcdfb–bcdfn directory format** — parse 12B BE header + directory
-   records to extract 32px-wide image strips.
-4. **Find front-facing wall tiles** — the 32×24 tiles used by the blitter must be
-   in bcdfq's appended data or bcdfr. Trace bcdfq chunk readers.
+**Completed:**
+- P2 confirmed as 208×356 @ 6bpp floor/ceiling atlas ✓
+- P4/P5 confirmed as 80×193 @ 6bpp wall side textures ✓
+- P3 confirmed as 320×269 viewport mask ✓
+- P0 identified as depth shading lookup table ✓
+- bcdfa confirmed as 280 tiles × 64×24×6bpp RLE icon set ✓
+- bcdfr confirmed as 4 mixed-BPP screens (chunk reader sizes) ✓
+- bcdfo confirmed: 109 portraits + UI elements at descriptor offsets ✓
+- Palettes mapped: 3 in bcdfq (title 16-color, title 32-color, dungeon 32-color) ✓
+
+**Remaining:**
+- P1: 42,754 bytes, 256 unique values — may be color ramp or palette mapping
+- bcdfb–bcdfn directory format for image strips
+- Front-facing wall tiles — must be in bcdfq appended data or bcdfr chunks
 
 ### Phase 3: Overlay Disassembly (In Progress)
 

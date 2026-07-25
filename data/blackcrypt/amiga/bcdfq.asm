@@ -447,10 +447,14 @@ LAB_002D:
 	MOVEM.L	(A7)+,D4/A2-A3
 	RTS
 LAB_002E:
+; ── Chunk size table: 4 × 0x0A50 (2640) = 10,560 bytes ──
+; Loaded by LAB_002B. Content: Black Crypt logo banner (6bpp, 320×44).
+; Note: IRA displays these as EORI instructions — they are raw data words.
 	EORI.W	#$0a50,(A0)
 	EORI.W	#$0a50,(A0)
 	DC.W	$0000
 LAB_002F:
+; ── Reads a fixed 0xBB80 (48,000) bytes — Intro plot text screen (6bpp, 320×200) ──
 	MOVEM.L	D2-D3,-(A7)
 	MOVE.L	12(A5),D2
 	ADDI.L	#$0000bb80,D2

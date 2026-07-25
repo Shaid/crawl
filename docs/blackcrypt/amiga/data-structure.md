@@ -599,12 +599,45 @@ Each read is followed by a call to LAB_0043 (RLE decompressor).
 
 ---
 
-### bcdfo — Boot / Raw Disk
+### bcdfr — Full-Screen Images (Title/Intro Screens)
 
-The file (63,010 B) begins with a repeating `ff ff ff fe` pattern — this is
-**not** a standard AmigaDOS boot block (which would start with `DOS\0`).
-The purpose of this file is unknown; it may be a raw disk sector dump or a
-proprietary boot loader format.
+| Property         | Value                                      |
+|------------------|--------------------------------------------|
+| File size        | 138,560 B                                  |
+| Chunk layout     | Set by bcdfq chunk readers (LAB_0022/27/2B/2F) |
+| Chunk 1          | 32,000 B — Raven logo (4bpp, 320×200, sequential planar) |
+| Chunk 2          | 48,000 B — Title screen (6bpp, 320×200, sequential planar) |
+| Chunk 3          | 10,560 B — Black Crypt logo banner (6bpp, 320×44, sequential planar) |
+| Chunk 4          | 48,000 B — Intro plot text (6bpp, 320×200, sequential planar) |
+
+Each screen uses its own BPP with sequential planar layout. The palettes are stored
+in `bcdfq` (see Palette section):
+- Raven logo: 16-color palette at bcdfq `+0x0266` (black + golds + grays)
+- Title + Logo: 32-color palette at bcdfq `+0x0286` (white + golds + grays + reds)
+- Plot text: 32-color dungeon palette at bcdfq `+0x02C6`
+
+### bcdfo — Character Portraits + UI Elements
+
+| Property         | Value                                      |
+|------------------|--------------------------------------------|
+| File size        | 63,010 B                                   |
+| Loader           | bcdfp LAB_00AB → LAB_00AE (reads entire file) |
+| Header           | 96 bytes of `0xFF 0xFF 0xFF 0xFE` repeating |
+| Portraits        | 109 tiles × 32×24×6bpp sequential planar, starting at buffer+$60 |
+| UI elements      | Stored at assembly-specified offsets (bcdfp LAB_010D descriptor table) |
+
+#### UI Element Descriptor Table (bcdfp LAB_010D — 28-byte entries)
+
+Each entry has a baked-in source offset and tile dimensions:
+
+| Entry | Source Offset | Dimensions | Count | Description |
+|-------|---------------|------------|-------|-------------|
+| desc00 | `0x5160` (20,832) | 128×105×6bpp | 1 | Character creation UI |
+| desc01 | `0x7F50` (32,592) | 192×47×6bpp | 1 | Unknown UI panel |
+| desc02 | `0xD758` (55,128) | 128×62×6bpp | 1 | Unknown UI panel |
+| desc03–07 | `0xAE68`–`0xB3A8` | 32×14×6bpp | 5 | Small UI widgets |
+| desc08–11 | `0xB658`–`0xCF18` | 128×22×6bpp | 4 | Medium UI strips |
+| desc12–22 | `0xF286`–`0xF5CE` | 16×7×6bpp | 11 | **Numeral font** (gold, for HP/stats display) |
 
 ---
 
