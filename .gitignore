@@ -17,3 +17,4 @@ dist/
 # Misc
 *.pyc
 __pycache__/
+*.uss
