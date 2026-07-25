@@ -359,7 +359,11 @@ algorithm as bcdfu LAB_0043, `0x00` = end of stream).
 
 | Property         | Value                                      |
 |------------------|--------------------------------------------|
-| Dimensions       | **96px wide × variable height × 4bpp word-interleaved planar** |
+| Dimensions       | **320px wide × 415 rows × 4bpp sequential planar** (blit source atlas; blitter reads 32px per sprite at BLTSIZE `$0602`) |
+| Compression      | RLE (bcdfu LAB_0043), multiple streams per file |
+| Header           | 136 bytes before pixel data |
+| Color mode       | 4bpp (16 colors max, dungeon palette at bcdfq `+0x02C6`) |
+| Pixel layout     | bit 7 = leftmost pixel |
 | Compression      | RLE (bcdfu LAB_0043), multiple streams per file |
 | Color mode       | 6bpp EHB (dungeon palette at bcdfq `+0x02C6`) |
 | Pixel layout     | bit 7 = leftmost pixel                     |
