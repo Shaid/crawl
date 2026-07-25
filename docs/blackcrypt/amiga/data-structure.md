@@ -17,7 +17,7 @@ alongside the main executable `BlackCrypt` and a small `configuration.dat`.
 |------------------|-----------|-----------------------------|-------------|------------------------------------|
 | `BlackCrypt`     | 12,700 B  | HUNK executable             | AmigaDOS    | Opens overlays + config            |
 | `bcdfa`          | 197,894 B | RLE icon/item tile set      | **bcdfq**   | 477 RLE streams → 280 tiles × 64×24×6bpp seq-planar (faces, automap, items) |
-| `bcdfb`–`bcdfn`  | 48–72 KB  | Structured image files      | **bcdfq**   | 12B BE header + directory + 32px-wide planar strips |
+| `bcdfb`–`bcdfn`  | 48–72 KB  | RLE monster sprites (per dungeon level) | bcdfq | 64×variable×6bpp, RLE-compressed streams (same algorithm as bcdfu). Each file = all monsters for one level. |
 | `bcdfo`          | 63,010 B  | Character portraits + UI elements | bcdfp        | 109 portraits × 32×24×6bpp at offset $60, plus UI tiles at assembly-specified offsets (see bcdfp LAB_010D) |
 | `bcdfp`          | 23,960 B  | HUNK overlay (CODE+DATA)    | BlackCrypt   | Blitter, BCSub, item/class tables  |
 | `bcdfq`          | 87,220 B  | HUNK overlay + appended data | BlackCrypt  | 5KB code + 82KB appended textures (reads self) |
@@ -349,11 +349,22 @@ def decode_tile(tile_data):
 ```
 ---
 
-### bcdfb–bcdfn — Structured Image Files
+### bcdfb–bcdfn — RLE Monster Sprites (Per Dungeon Level)
 
-These 13 files (`bcdfb` through `bcdfn`) share a common layout:
+These 13 files each contain **all monster graphics for one dungeon level**.
+Each file stores monster frames as individually RLE-compressed streams (same
+algorithm as bcdfu LAB_0043, `0x00` = end of stream).
 
-#### Global Header (12 bytes)
+#### Format
+
+| Property         | Value                                      |
+|------------------|--------------------------------------------|
+| Dimensions       | **64px wide × variable height × 6bpp** sequential planar |
+| Compression      | RLE (bcdfu LAB_0043), multiple streams per file |
+| Color mode       | 6bpp EHB (dungeon palette at bcdfq `+0x02C6`) |
+| Pixel layout     | bit 7 = leftmost pixel                     |
+
+#### 12-byte header
 
 | Offset | Size | Description                                 |
 |--------|------|---------------------------------------------|
@@ -381,44 +392,28 @@ These 13 files (`bcdfb` through `bcdfn`) share a common layout:
 | bcdfm  | 0x9307   | 180  | —    |
 | bcdfn  | 0x82EA   | 197  | —    |
 
-Note: Some files have row=0 (bcdfi, bcdfk, bcdfm, bcdfn) and bcdfc has a third
-field `0x00B1` at offset 0x08 instead of the usual `0x00000000` — suggesting the
-header may be 14 bytes in some cases, or the row index is in a different
-position.
+#### Extraction
 
-#### Image Data Sections
+Each file contains multiple RLE streams. The largest stream (starting at the
+first non-zero byte after the header) contains the main monster sheet. Additional
+streams contain individual monster variants or animation frames.
 
-After the global header, the file contains image data organized into sections.
-Each section is described by metadata records in an area between the global
-header and the first image data offset. The data sections use 32-pixel-wide
-planar image data (24 bytes per row) at variable heights.
-
-**Verified section counts and size ranges:**
-
-| File   | File Size | Sections | Size Range    |
-|--------|-----------|----------|---------------|
-| bcdfb  | 60,913    | 10       | 312–1,512     |
-| bcdfc  | 68,905    | 18       | 56–4,150      |
-| bcdfd  | 63,309    | 23       | 64–8,194      |
-| bcdfe  | 65,316    | 16       | 68–1,800      |
-| bcdff  | 48,845    | 17       | 56–896        |
-| bcdfg  | 67,970    | 15       | 188–1,100     |
-| bcdfh  | 58,741    | 10       | 172–2,472     |
-| bcdfi  | 52,884    | 9        | 200–1,260     |
-| bcdfj  | 61,103    | 21       | 50–3,551      |
-| bcdfk  | 50,301    | 9        | 184–1,392     |
-| bcdfl  | 71,960    | 14       | 62–1,176      |
-| bcdfm  | 48,743    | 9        | 212–1,032     |
-| bcdfn  | 48,420    | 10       | 208–1,016     |
-
-Not all sections are aligned to 24 bytes (tile row size). The aligned ones
-(about 40% of sections across all files) encode 32-pixel-wide planar strips of
-varying heights — e.g., 1,488 B = 62 rows, 648 B = 27 rows, 312 B = 13 rows.
-The non-aligned sections likely have small prefixes (6–16 bytes of metadata)
-before the image data.
-
-These image strips are likely pre-rendered wall views at different distances,
-used to compose the dungeon viewport at runtime.
+```python
+def extract_monsters(data):
+    streams = []
+    pos = 0
+    while pos < len(data):
+        if data[pos] == 0:
+            pos += 1; continue
+        decomp, next_pos = rle_decompress(data, pos)
+        if len(decomp) >= 312:  # minimum meaningful size
+            # Render at 64px wide 6bpp
+            h = len(decomp) // 48  # 48 bytes/row at 64px 6bpp
+            pixels = decode_6bpp_planar(decomp[:48*h], 64, h)
+            streams.append(pixels)
+        pos = next_pos
+    return streams
+```
 
 ---
 

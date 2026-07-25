@@ -1,211 +1,228 @@
 #!/usr/bin/env python3
-"""Render all confirmed Black Crypt assets as color PNGs."""
-import os, struct
+"""One-shot render of all confirmed Black Crypt assets."""
+import struct, os
 from PIL import Image
 
 OUT = 'data/blackcrypt/extracted'
 AMIGA = 'data/blackcrypt/amiga'
 PAYLOADS = 'data/blackcrypt/extracted/payloads'
-
-# EHB palette: 32 × 12-bit Amiga → 64 × 24-bit RGB
-PAL_12BIT = [
-    0x000,0xC86,0xF00,0xB00,0xD80,0xFE0,0x0F0,0x0B0,
-    0x040,0x0DD,0x00F,0x07C,0xFD9,0xEB8,0xF0F,0xE09,
-    0x720,0x952,0xA53,0x33B,0x222,0x444,0x666,0x999,
-    0xCCC,0xFFF,0xB60,0xC70,0xC80,0xD90,0xEB0,0xFC0,
-]
-PALETTE = []
-for i in range(64):
-    v = PAL_12BIT[i if i < 32 else i - 32]
-    r = (v >> 8) & 0xF
-    g = (v >> 4) & 0xF
-    b = v & 0xF
-    if i >= 32:
-        r, g, b = r >> 1, g >> 1, b >> 1
-    PALETTE.extend([r * 17, g * 17, b * 17])
-
-def rle_decompress(data):
-    """bcdfu.asm LAB_0043 RLE: ctrl 0x00=end; bit0=1→literal (byte>>1) bytes; bit0=0→fill next byte (byte>>1) times"""
-    out = bytearray()
-    pos = 0
-    while pos < len(data):
-        ctrl = data[pos]; pos += 1
-        if ctrl == 0:
-            break
-        count = ctrl >> 1
-        if ctrl & 1:
-            end = min(pos + count, len(data))
-            out.extend(data[pos:end])
-            pos += count
-        else:
-            fill = data[pos] if pos < len(data) else 0
-            pos += 1
-            out.extend([fill] * count)
-    return bytes(out)
-
-def decode_6bpp(data, width, height, planes=6):
-    """Sequential planar 6bpp → pixel array. Bit 7 = leftmost pixel."""
-    pb = width // 8
-    pixels = []
-    for y in range(height):
-        for x in range(width):
-            col = 0
-            for bp in range(planes):
-                off = bp * pb * height + y * pb + (x // 8)
-                if off < len(data) and (data[off] >> (7 - (x % 8))) & 1:
-                    col |= 1 << bp
-            pixels.append(col)
-    return pixels
-
-def make_color_image(pixels, width, height):
-    """Convert pixel array to RGB PIL Image using EHB palette."""
-    img = Image.new('RGB', (width, height))
-    for y in range(height):
-        for x in range(width):
-            c = pixels[y * width + x]
-            off = c * 3
-            img.putpixel((x, y), (PALETTE[off], PALETTE[off + 1], PALETTE[off + 2]))
-    return img
-
-def make_sheet(images, cols=8, scale=4):
-    """Layout multiple images in a grid, scaled up."""
-    if not images:
-        return None
-    w, h = images[0].size
-    rows = (len(images) + cols - 1) // cols
-    sheet = Image.new('RGB', (cols * w * scale, rows * h * scale), (0, 0, 0))
-    for i, img in enumerate(images):
-        sx = (i % cols) * w * scale
-        sy = (i // cols) * h * scale
-        sheet.paste(img.resize((w * scale, h * scale), Image.NEAREST), (sx, sy))
-    return sheet
-
 os.makedirs(OUT, exist_ok=True)
 
-# ── 1. bcdfo character portraits (32×24×6bpp, sequential planar) ──
-print("=== bcdfo portraits ===")
-with open(os.path.join(AMIGA, 'bcdfo'), 'rb') as f:
-    bcdfo = f.read()
-W, H, TS = 32, 24, 576
-# tiles start at offset 96 (based on blitter source offset $60)
-base = 96
-n_tiles = (len(bcdfo) - base) // TS
-portraits = []
-for i in range(n_tiles):
-    td = bcdfo[base + i * TS : base + (i + 1) * TS]
-    px = decode_6bpp(td, W, H)
-    portraits.append(make_color_image(px, W, H))
-sheet = make_sheet(portraits, cols=8, scale=4)
-if sheet:
-    sheet.save(os.path.join(OUT, '01_bcdfo_portraits_4x.png'))
-print(f"  {len(portraits)} portraits saved")
+# ── Palette ──────────────────────────────────────────────────────
+PAL_12 = [0x000,0xC86,0xF00,0xB00,0xD80,0xFE0,0x0F0,0x0B0,0x040,0x0DD,0x00F,0x07C,0xFD9,0xEB8,0xF0F,0xE09,0x720,0x952,0xA53,0x33B,0x222,0x444,0x666,0x999,0xCCC,0xFFF,0xB60,0xC70,0xC80,0xD90,0xEB0,0xFC0]
 
-# ── 2. bcdfx P2 dungeon textures (208×356×6bpp) ──
-for src in ['bcdfx', 'bcdfz']:
-    fname = f'{src}_p2_raw.bin'
-    path = os.path.join(PAYLOADS, fname)
-    if os.path.exists(path):
-        print(f"\n=== {src} P2 dungeon atlas ===")
-        data = open(path, 'rb').read()
-        W2, H2 = 208, 356
-        px = decode_6bpp(data, W2, H2)
-        img = make_color_image(px, W2, H2)
-        img.save(os.path.join(OUT, f'02_{src}_p2_atlas_208x356.png'))
-        # Also greyscale for reference
-        gs = Image.new('L', (W2, H2))
+def pal_rgb(v, hb=False):
+    r,g,b=(v>>8)&0xF,(v>>4)&0xF,v&0xF
+    if hb: r,g,b=r>>1,g>>1,b>>1
+    return (r*17,g*17,b*17)
+
+def read_pal(data, off, n):
+    return [struct.unpack('>H', data[off+i*2:off+i*2+2])[0] for i in range(n)]
+
+# Read bcdfq palettes
+with open(f'{AMIGA}/bcdfq', 'rb') as f: bcdfq = f.read()
+raven_pal = read_pal(bcdfq, 0x0266, 16)
+title_pal = read_pal(bcdfq, 0x0286, 32)
+dung_pal  = read_pal(bcdfq, 0x02C6, 32)
+
+# ── Decode helpers ────────────────────────────────────────────────
+def decode_seq(data, w, h, planes=6):
+    pb = w // 8
+    px = []
+    for y in range(h):
+        for x in range(w):
+            c = 0
+            for bp in range(planes):
+                off = bp * pb * h + y * pb + (x // 8)
+                if off < len(data) and (data[off] >> (7-(x%8))) & 1:
+                    c |= 1 << bp
+            px.append(c)
+    return px
+
+def save_grey(px, w, h, maxc, name):
+    gs = bytes(int(c*255/maxc) for c in px)
+    Image.frombytes('L', (w, h), gs).save(f'{OUT}/{name}_grey.png')
+
+def save_color(px, w, h, pal, name, is_6bpp=True):
+    img = Image.new('RGB', (w, h))
+    for y in range(h):
+        for x in range(w):
+            c = px[y*w + x]
+            if not is_6bpp:
+                img.putpixel((x,y), pal_rgb(pal[c]))
+            else:
+                idx = c if c < 32 else c - 32
+                img.putpixel((x,y), pal_rgb(pal[idx], c >= 32))
+    img.save(f'{OUT}/{name}_color.png')
+
+# ── 01. bcdfo character portraits (32×24×6bpp, offset $60) ──────
+print('01 bcdfo portraits...')
+with open(f'{AMIGA}/bcdfo', 'rb') as f: bcdfo = f.read()
+W,H,TS = 32,24,576
+base,n = 96, (len(bcdfo)-96)//TS
+for scale in [2,4]:
+    cols,rows = 10,(n+9)//10
+    sc, sg = Image.new('RGB',(cols*W*scale,rows*H*scale)), Image.new('L',(cols*W*scale,rows*H*scale))
+    for i in range(n):
+        px = decode_seq(bcdfo[base+i*TS:base+(i+1)*TS],W,H)
+        img_c = Image.new('RGB',(W,H)); img_g = Image.new('L',(W,H))
+        for y in range(H):
+            for x in range(W):
+                c=px[y*W+x]; o=c*3
+                # 6bpp EHB: map pixel value to palette
+                idx = c if c < 32 else c - 32
+                hb = c >= 32
+                img_c.putpixel((x,y),pal_rgb(PAL_12[idx], hb))
+                img_g.putpixel((x,y),int(c*255/63))
+        sc.paste(img_c.resize((W*scale,H*scale),Image.NEAREST),((i%cols)*W*scale,(i//cols)*H*scale))
+        sg.paste(img_g.resize((W*scale,H*scale),Image.NEAREST),((i%cols)*W*scale,(i//cols)*H*scale))
+    sc.save(f'{OUT}/01_portraits_{scale}x_color.png')
+    sg.save(f'{OUT}/01_portraits_{scale}x_grey.png')
+print(f'   {n} portraits')
+
+# ── 02. bcdfx/z P2 floor/ceiling atlas ────────────────────────────
+print('02 dungeon textures...')
+for src in ['bcdfx','bcdfz']:
+    p2 = open(f'{PAYLOADS}/{src}_p2_raw.bin','rb').read()
+    for w,h,ch in [(208,356,'P2')]:
+        px = decode_seq(p2,w,h,6)
+        save_grey(px,w,h,63,f'02_{src}_{ch}_{w}x{h}')
+print('   P2 floor/ceiling atlases')
+
+# ── 03. bcdfx/z P4/P5 wall sides ──────────────────────────────────
+print('03 wall sides...')
+for src in ['bcdfx','bcdfz']:
+    for p in ['p4','p5']:
+        pdat = open(f'{PAYLOADS}/{src}_{p}_raw.bin','rb').read()
+        px = decode_seq(pdat,80,193,6)
+        save_grey(px,80,193,63,f'03_{src}_{p}_80x193')
+print('   P4/P5 wall sides')
+
+# ── 04. bcdfx/z P3 viewport mask ──────────────────────────────────
+print('04 viewport mask...')
+for src in ['bcdfx','bcdfz']:
+    p3 = open(f'{PAYLOADS}/{src}_p3_raw.bin','rb').read()
+    img = Image.new('L',(320,269))
+    for y in range(269):
+        for xb in range(40):
+            b = p3[y*40+xb]
+            for bit in range(8):
+                img.putpixel((xb*8+bit,y),255 if (b>>(7-bit))&1 else 0)
+    img.save(f'{OUT}/04_{src}_p3_mask.png')
+print('   P3 masks')
+
+# ── 06. bcdfa icon tiles (64×24×6bpp, RLE) ───────────────────────
+print('06 bcdfa icons...')
+def rle_decompress(data, start):
+    out,pos=bytearray(),start
+    while pos < len(data):
+        ctrl=data[pos];pos+=1
+        if ctrl==0: return bytes(out),pos
+        n=ctrl>>1
+        if ctrl&1: out.extend(data[pos:pos+n]); pos+=n
+        else: out.extend([data[pos]]*n); pos+=1
+    return bytes(out),pos
+
+with open(f'{AMIGA}/bcdfa','rb') as f: bcdfa=f.read()
+streams=[]; pos=0
+while pos<len(bcdfa):
+    d,pos=rle_decompress(bcdfa,pos)
+    if d: streams.append(d)
+
+W2,H2,TS2 = 64,24,1152
+all_tiles=[]
+for sdata in streams:
+    n2=len(sdata)//TS2
+    for ti in range(n2):
+        px=decode_seq(sdata[ti*TS2:(ti+1)*TS2],W2,H2)
+        all_tiles.append(px)
+
+cols2,rows2 = 8,(len(all_tiles)+7)//8
+sc2,sg2 = Image.new('RGB',(cols2*W2*4,rows2*H2*4)), Image.new('L',(cols2*W2*4,rows2*H2*4))
+for i,px in enumerate(all_tiles):
+        img_c=Image.new('RGB',(W2,H2)); img_g=Image.new('L',(W2,H2))
         for y in range(H2):
             for x in range(W2):
-                gs.putpixel((x, y), int(px[y * W2 + x] * 255 / 63))
-        gs.save(os.path.join(OUT, f'02_{src}_p2_atlas_grey.png'))
-        print(f"  Saved color + greyscale")
+                c=px[y*W2+x]
+                idx=c if c<32 else c-32; hb=c>=32
+                img_c.putpixel((x,y),pal_rgb(PAL_12[idx],hb))
+                img_g.putpixel((x,y),int(c*255/63))
+        sc2.paste(img_c.resize((W2*4,H2*4),Image.NEAREST),((i%cols2)*W2*4,(i//cols2)*H2*4))
+        sg2.paste(img_g.resize((W2*4,H2*4),Image.NEAREST),((i%cols2)*W2*4,(i//cols2)*H2*4))
+sc2.save(f'{OUT}/06_bcdfa_tiles_color.png')
+sg2.save(f'{OUT}/06_bcdfa_tiles_grey.png')
+print(f'   {len(all_tiles)} tiles')
 
-# ── 3. bcdfx P4/P5 wall sides (80×193×6bpp) ──
-for src in ['bcdfx', 'bcdfz']:
-    for p in ['p4', 'p5']:
-        fname = f'{src}_{p}_raw.bin'
-        path = os.path.join(PAYLOADS, fname)
-        if os.path.exists(path):
-            print(f"\n=== {src} {p.upper()} wall side ===")
-            data = open(path, 'rb').read()
-            W3, H3 = 80, 193
-            px = decode_6bpp(data, W3, H3)
-            img = make_color_image(px, W3, H3)
-            img.save(os.path.join(OUT, f'03_{src}_{p}_wall_80x193.png'))
-            # Greyscale
-            gs = Image.new('L', (W3, H3))
-            for y in range(H3):
-                for x in range(W3):
-                    gs.putpixel((x, y), int(px[y * W3 + x] * 255 / 63))
-            gs.save(os.path.join(OUT, f'03_{src}_{p}_wall_grey.png'))
-            print(f"  Saved color + greyscale")
-
-# ── 4. bcdfx P3 viewport mask (binary mask) ──
-for src in ['bcdfx', 'bcdfz']:
-    fname = f'{src}_p3_raw.bin'
-    path = os.path.join(PAYLOADS, fname)
-    if os.path.exists(path):
-        print(f"\n=== {src} P3 viewport mask ===")
-        data = open(path, 'rb').read()
-        W4 = 320
-        bpr = W4 // 8  # 40 bytes/row
-        H4 = len(data) // bpr
-        img = Image.new('L', (W4, H4))
-        for y in range(H4):
-            for x_byte in range(bpr):
-                b = data[y * bpr + x_byte]
-                for bit in range(8):
-                    px_x = x_byte * 8 + bit
-                    if px_x < W4:
-                        val = 255 if (b >> (7 - bit)) & 1 else 0
-                        img.putpixel((px_x, y), val)
-        img.save(os.path.join(OUT, f'04_{src}_p3_mask_{W4}x{H4}.png'))
-        print(f"  {W4}×{H4} mask saved")
-
-# ── 5. bcdfa — try RLE decompression + render at known dimensions ──
-print("\n=== bcdfa (trying RLE decompress + multiple layouts) ===")
-with open(os.path.join(AMIGA, 'bcdfa'), 'rb') as f:
-    bcdfa_raw = f.read()
-
-decomp = rle_decompress(bcdfa_raw)
-print(f"  RLE: {len(bcdfa_raw)}→{len(decomp)} bytes ({len(decomp)/len(bcdfa_raw):.0%})")
-
-# Try rendering decompressed data at various dimensions
-tries = [
-    (32, 24),
-    (48, 24),
-    (48, 16),
-    (64, 24),
+# ── 07. bcdfo UI elements (from bcdfp LAB_010D descriptors) ──────
+print('07 bcdfo UI elements...')
+ui_entries = [
+    ('chargen_ui',      0x5160,128,105),
+    ('chargen_logo',    0x7F50,192, 47),
+    ('stats_panel',     0xD758,128, 62),
+    ('sigil_0',         0xAE68, 32, 14),
+    ('sigil_1',         0xAFB8, 32, 14),
+    ('sigil_2',         0xB108, 32, 14),
+    ('sigil_3',         0xB258, 32, 14),
+    ('sigil_4',         0xB3A8, 32, 14),
+    ('guild_fighter',   0xB658,128, 22),
+    ('guild_cleric',    0xBE98,128, 22),
+    ('guild_mage',      0xC6D8,128, 22),
+    ('guild_druid',     0xCF18,128, 22),
 ]
-sheet_tries = []
-for w, h in tries:
-    ts2 = w // 8 * h * 6
-    n = min(8, len(decomp) // ts2)
-    if n == 0:
-        continue
-    imgs = []
-    for i in range(n):
-        td = decomp[i * ts2:(i + 1) * ts2]
-        px = decode_6bpp(td, w, h)
-        imgs.append(make_color_image(px, w, h))
-    s = make_sheet(imgs, cols=min(n, 4), scale=3)
-    if s:
-        s.save(os.path.join(OUT, f'05_bcdfa_rle_{w}x{h}_3x.png'))
-        print(f"  RLE {w}×{h}: {n} tiles rendered")
+numeral_offs = [0xF286,0xF2DA,0xF32E,0xF382,0xF3D6,0xF42A,0xF47E,0xF4D2,0xF526,0xF57A,0xF5CE]
+for name,off,w,h in ui_entries:
+    td=bcdfo[off:off+w//8*h*6]
+    px=decode_seq(td,w,h)
+    save_grey(px,w,h,63,f'07_{name}_{w}x{h}')
+    sc=2 if w<=32 else 1
+    Image.frombytes('L',(w,h),bytes(int(c*255/63) for c in px)).resize((w*(2+sc),h*(2+sc)),Image.NEAREST).save(f'{OUT}/07_{name}_{w}x{h}_{2+sc}x.png')
 
-# Also try raw (non-RLE) at different planar layouts for bcdfa
-# Raw sequential planar 32×24
-raw_imgs = []
-for i in range(min(8, len(bcdfa_raw) // TS)):
-    td = bcdfa_raw[i * TS:(i + 1) * TS]
-    px = decode_6bpp(td, W, H)
-    raw_imgs.append(make_color_image(px, W, H))
-s = make_sheet(raw_imgs, cols=4, scale=3)
-if s:
-    s.save(os.path.join(OUT, f'05_bcdfa_raw_32x24_3x.png'))
-    print(f"  Raw 32×24: {len(raw_imgs)} tiles rendered")
+# Numerals sheet
+n_sheet=Image.new('L',(16*11*3,7*3))
+for i,off in enumerate(numeral_offs):
+    px=decode_seq(bcdfo[off:off+84],16,7)
+    n_sheet.paste(Image.frombytes('L',(16,7),bytes(int(c*255/63) for c in px)).resize((48,21),Image.NEAREST),(i*48,0))
+n_sheet.save(f'{OUT}/07_numerals_sheet.png')
+print('   character creation UI, logo, stats panel, sigils, guild banners, numerals')
 
-print(f"\nDone! All files in {OUT}/")
-print("Files to check:")
-for f in sorted(os.listdir(OUT)):
-    if f.endswith('.png'):
-        print(f"  {f}")
+# ── 08. bcdfr screens (from bcdfq chunk readers) ──────────────────
+print('08 bcdfr screens...')
+with open(f'{AMIGA}/bcdfr','rb') as f: bcdfr=f.read()
+screens = [
+    ('s0_raven', bcdfr[:32000],     320,200,4, raven_pal,False),
+    ('s1_title', bcdfr[32000:80000], 320,200,6, title_pal,True),
+    ('s2_logo',  bcdfr[80000:90560], 320, 44,6, title_pal,True),
+    ('s3_plot',  bcdfr[90560:],      320,200,6, dung_pal, True),
+]
+for name,td,w,h,planes,pal,is_6bpp in screens:
+    px=decode_seq(td,w,h,planes)
+    save_grey(px,w,h,(1<<planes)-1,f'08_{name}')
+    save_color(px,w,h,pal,f'08_{name}',is_6bpp)
+print('   Raven logo, Title, BC banner, Plot text')
+
+# ── 09. bcdfb wall strips (48×4bpp, 10 sections) ─────────────────
+print('09 bcdfb wall strips...')
+with open(f'{AMIGA}/bcdfb','rb') as f: bcdfb_data=f.read()
+W3,planes3=48,4
+bpr3=W3//8*planes3  # 24
+sizes=[312,648,744,864,1008,1032,1128,1200,1368,1512]
+heights=[s//bpr3 for s in sizes]
+
+# Find starting offset by scanning for first section boundary
+# The 12-byte header then directory. Let's try the first section after directory.
+# bcdfb has 10 sections. Directory = 10 * 28 = 280 bytes. Start at offset 12+280=292.
+for start_off in [292]:
+    off=start_off
+    strip=Image.new('L',(W3*3,sum(heights)))
+    yp=0; ok=True
+    for si,sz in enumerate(sizes):
+        h=heights[si]
+        if off+sz>len(bcdfb_data): ok=False; break
+        px=decode_seq(bcdfb_data[off:off+sz],W3,h,planes3)
+        strip.paste(Image.frombytes('L',(W3,h),bytes(int(c*255/15) for c in px)).resize((W3*3,h),Image.NEAREST),(0,yp))
+        yp+=h; off+=sz
+    if ok:
+        strip.save(f'{OUT}/09_bcdfb_walls_4bpp.png')
+        print(f'   offset {start_off}: {len(sizes)} sections, {sum(heights)} rows')
+
+print(f'\nDone. {OUT}/')
