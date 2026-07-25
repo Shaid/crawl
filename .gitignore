@@ -9,3 +9,11 @@ data/blackcrypt/dos/
 # Extracted/output
 data/blackcrypt/extracted/
 data/blackcrypt/.raw
+
+# Node/web (unrelated to RE)
+node_modules/
+dist/
+
+# Misc
+*.pyc
+__pycache__/
