@@ -1,0 +1,11 @@
+# Large binary game data files
+data/blackcrypt/amiga/bcdf*
+data/blackcrypt/amiga/BlackCrypt
+data/blackcrypt/amiga/*.cnf
+data/blackcrypt/amiga/adf/
+data/blackcrypt/dosvga/
+data/blackcrypt/dos/
+
+# Extracted/output
+data/blackcrypt/extracted/
+data/blackcrypt/.raw
