@@ -1528,6 +1528,20 @@ LAB_0046:
 	UNLK	A5
 	RTS
 LAB_0047:
+; ── Map data loader (reads bcdfs) ──
+; Opens "bcdfs" (~220KB), reads into buffer at -30962(A4).
+; bcdfs is NOT a save file — it contains ALL 13 maps with layouts,
+; item/monster placements, switches, and event data.
+;
+; After loading:
+;   -30228(A4): 52-byte offset table (13 longwords → 13 map offsets)
+;   -30962(A4): map data buffer (advanced by $34 = 52 after offset table copy)
+;
+; Then constructs "GAMESAVE:OrigDungeons" via LAB_020E (strcpy) and
+; writes dungeon state for persistent save (gold, inventory, stats).
+; The actual map geometry is read-only from bcdfs.
+;
+; See docs at https://id909.prv.pl/blackcrypt/bcdfs.html for full format.
 	LINK.W	A5,#-14
 	MOVEM.L	D2-D3/A2,-(A7)
 	MOVE.W	#$0003,-(A7)
@@ -2700,6 +2714,12 @@ LAB_00AA:
 	MOVEM.L	(A7)+,D2/A2-A6
 	RTS
 LAB_00AB:
+; ── Load bcdfo (portrait + UI data file) ──
+; bcdfo = 63,010 bytes. Contains:
+;   - 109 character portraits (32×24×6bpp sequential planar, $240 = 576 bytes each)
+;   - UI element graphics (descriptor table at LAB_010D, data at calculated offsets)
+;   - 28-byte descriptor entries for each UI element
+; Loaded into buffer allocated by LAB_00AE, pointer stored in A5 frame.
 	MOVEM.L	A5-A6,-(A7)
 	BSR.W	LAB_0105
 	LEA	LAB_00AC(PC),A0
@@ -2709,7 +2729,7 @@ LAB_00AB:
 LAB_00AC:
 	DC.L	LAB_00AD
 	DS.L	1
-	DC.L	$0000f622,$ffffffff
+	DC.L	$0000f622,$ffffffff	; $F622 = 62,978 bytes (file size, excl. header)
 LAB_00AD:
 	DC.B	"bcdfo",0
 LAB_00AE:
@@ -3078,14 +3098,25 @@ LAB_00D2:
 	MOVEM.L	(A7)+,A5-A6
 	RTS
 LAB_00D3:
+; ── VBlank Interrupt Handler — drives 3D viewport + monster rendering ──
+; Entry from VBlank interrupt vector. Saves registers, then dispatches
+; through a jump table (LAB_00D4) to rendering phases.
+; Also manages A5+$043C (rendering state flag), A5+$03CE (sprite pointer),
+; A5+$03C6 (sprite data buffer base from bcdfv).
+; ── Inline code (not disassembled — IRA encoded as DC.L) ──
 	DC.L	$48e7fffe,$2a7a0eda,$2c6d0450,$462d0459
 	DC.L	$526d045a
 	DC.W	$4879
 	DC.L	LAB_00D4
+; Jump table entries: LAB_00D4 + 0,2,4,6,8,A,C,E = rendering phase targets
 	DC.L	$487a0624,$487a03b2,$487a1972,$487a0046
 	DC.L	$487a01e8,$487a015a,$487a003e,$487a06a6
 	DC.L	$60000090,$205f4ed0
 LAB_00D4:
+; ── Phase dispatch — interpreted from inline code ──
+; Processes: copper list updates, sprite state checks (A5+$03D8),
+; sprite-active flag (A5+$03D9), direction/movement (A5+$03DA).
+; Falls through to direction-specific wall + monster rendering.
 	DC.L	$302e001e,$02400070,$3d40009c,$1b7c0001
 	DC.L	$04584cdf,$7fff4e73,$48e7fffe,$61000dd6
 	DC.L	$3d7c0008,$009c4cdf,$7fff4e73,$6000ffce
@@ -3130,6 +3161,11 @@ LAB_00D6:
 	DC.L	$660641fa,$00143018,$2b480438,$206d0454
 	DC.L	$3140004e,$6000fe7e
 LAB_00D7:
+; ── Direction Dispatch Table + 3D Viewport Renderer (inline) ──
+; Decoded meaning: stores player direction to A5+$00C4 (X) and $00C5 (Y).
+; For each direction 0=N, 1=E, 2=S, 3=W, calls different rendering
+; functions via BSR.W that render walls AND monsters for that view angle.
+; Uses A5+$0082/X, A5+$0084/Y for wall collision/visibility checks.
 	DC.L	$05100610,$07100810,$09100a20,$0b300c40
 	DC.L	$0d510e62,$0f730f84,$0f950f95,$0f950f95
 	DC.L	$0f950f95,$0f840f73,$0e620d51,$0c400b30
@@ -3176,6 +3212,25 @@ LAB_00D9:
 	CLR.W	(A0)+
 	DBF	D0,LAB_00D9
 	RTS
+; ── Monster Sprite Rendering Pipeline (post-LAB_00D8) ──
+; These DC.L blocks contain all 3D viewport monster rendering.
+; Decoded from inline raw data. Key operations:
+; 1. Checks A5+$043C rendering state flag
+; 2. Loads sprite data ptr from A5+$03CE, writes $1000 to copper
+; 3. Sets sprite-active flag at A5+$03D9 to 1
+; 4. Loads alternate sprite ptr from A5+$03BE
+; 5. Checks sprite state at A5+$03D8, decrements counter if active
+; 6. Reads sprite type/index from A5+$03D6
+; 7. Indexes sprite table with D3*8 from A5+$0004 base
+; 8. Copies 8 descriptor entries (stride $0052) — each has width/height at +$2A
+; 9. Loads sprite descriptor base from A5+$03C2
+; 10. Writes height to desc+6, width to desc+2
+; 11. Direction handler: A5+$03DA selects animation frame via lookup table
+; 12. Loads sprite data buffer base A5+$03C6, skips $000C header bytes
+; 13. Copy loop: 8 words, stride $000C between plane words in destination
+; 14. Sprite blit: BSR.W to a function that reaches LAB_011E or does inline $0FCA blit
+; 15. Reads BLTSIZE from desc+6, ANDs with viewport bounds A5+$00CE
+; 16. Stores result to A5+$043C, clears sprite-active flag
 	DC.L	$4a6d043c,$660e206d,$03ce30bc,$10001b7c
 	DC.L	$000103d9,$206d03be,$4a2d03d8,$67085910
 	DC.L	$6b126000,$00c64a2d,$04596700,$00be5310
@@ -3601,6 +3656,15 @@ LAB_0101:
 	ADDQ.L	#1,A2
 	BRA.W	LAB_00FF
 LAB_0102:
+; ── Text Rendering Blitter ──
+; Renders a line of text characters to screen.
+; A1 = 12(A5) = character bitmap buffer (color data, advances per plane)
+; A3 = 16(A5) = character render buffer (fixed, as mask)
+; A2 = screen Y-offset table at 988(A5)
+; Plane stride: 256 bytes ($100). BLTSIZE: $0211 (height=8, width_words=17).
+; Screen modulo: 6 bytes (272 px wide = 34 bytes, 40-34=6).
+; 6 iterations (DBF D0,5). Font from 0(A5)+$A148.
+; Uses minterm $0FCA (same mask+color setup as sprite blitter).
 	MOVEA.L	12(A5),A1
 	MOVEA.L	16(A5),A3
 	MOVEA.L	988(A5),A2

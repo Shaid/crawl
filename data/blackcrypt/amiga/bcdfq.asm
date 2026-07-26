@@ -14,7 +14,12 @@ DMACON		EQU	$DFF096
 
 	SECTION S_0,CODE
 
+; ── bcdfq — Intro + Music Overlay ──
+; Loaded as overlay by BlackCrypt. Handles intro/title screens (bcdfr), 
+; OctaMED music engine, and 4 palette variants (at offsets 0x266/0x286/0x2C6).
+; ZERO dungeon rendering code — all 3D rendering is in bcdfp.
 SECSTRT_0:
+; ── Entry: init library bases, copy overlay params from A4 ──
 	LEA	LAB_0008+2(PC),A5
 	MOVE.L	A0,38(A5)
 	MOVEQ	#0,D0
@@ -40,7 +45,7 @@ SECSTRT_0:
 	MOVEA.L	16(A5),A0
 	MOVEA.L	4(A5),A6
 	JSR	-252(A6)
-	MOVE.W	#$0020,DMACON
+	MOVE.W	#$0020,DMACON		; disable DMA during setup
 	BSR.W	LAB_0019
 	TST.W	D0
 	BNE.W	LAB_0004
@@ -100,6 +105,15 @@ LAB_0004:
 	BCHG	D0,D0
 	DC.W	$00c8
 	ORI.B	#$00,D6
+; ── Hunk header / library names / palette data ──
+; These ORI/DC.W lines are IRA misinterpreting raw data as 68000 instructions.
+; Contains: hunk header info, "graphics.library", "intuition.library", "dos.library"
+; library name strings (DC.B at LAB_0005-0007), then palette data at the end.
+;
+; Palettes (offsets relative to section start):
+;   +$0266: 16-color palette — Raven logo (gold/brown monochrome)
+;   +$0286: 32-color palette — Title/Logo screens (white/yellow + grey ramps)
+;   +$02C6: 32-color EHB palette — Dungeon gameplay (verified vs Amiberry screenshot)
 	ORI.L	#$01cf0000,D0
 	ORI.B	#$00,D0
 	ORI.B	#$00,D0
@@ -120,6 +134,7 @@ LAB_0004:
 	ORI.B	#$00,D0
 	ORI.B	#$00,D0
 	DC.W	$000f
+; ── Library name strings ──
 LAB_0005:
 	BEQ.S	LAB_0009+2
 	BSR.S	LAB_0009+2
@@ -304,29 +319,29 @@ LAB_0018:
 	DC.W	$00df
 	DC.W	$f0d8
 LAB_0019:
+; ── Open bcdfr (intro/title screen data) ──
 	MOVE.L	D2,-(A7)
-	LEA	LAB_001C(PC),A0
+	LEA	LAB_001C(PC),A0		; filename "bcdfr"
 	MOVE.L	A0,D1
-	MOVE.L	#$000003ed,D2
+	MOVE.L	#$000003ed,D2		; mode = 1005 (OLDFILE/READ)
 	MOVEA.L	0(A5),A6
-	JSR	-30(A6)
-	MOVE.L	D0,28(A5)
+	JSR	-30(A6)			; Open()
+	MOVE.L	D0,28(A5)		; store file handle
 	BNE.S	LAB_001A
-	MOVEQ	#1,D0
+	MOVEQ	#1,D0			; error
 	BRA.S	LAB_001B
 LAB_001A:
-	MOVEQ	#0,D0
+	MOVEQ	#0,D0			; success
 LAB_001B:
 	MOVE.L	(A7)+,D2
 	RTS
 LAB_001C:
-	DC.W	$6263
-	BCC.S	LAB_0023+4
-	MOVEQ	#0,D1
+	DC.B	"bcdfr",0
 LAB_001D:
-	MOVE.L	28(A5),D1
+; ── Close bcdfr ──
+	MOVE.L	28(A5),D1		; file handle
 	MOVEA.L	0(A5),A6
-	JSR	-36(A6)
+	JSR	-36(A6)			; Close()
 	RTS
 LAB_001E:
 	MOVEA.L	12(A5),A1

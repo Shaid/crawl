@@ -11,9 +11,16 @@ EXT_0002	EQU	$3838
 
 	SECTION S_0,CODE
 
+; ── Black Crypt Main Executable ──
+; Hunk layout: CODE=12,496B, DATA=360B, BSS=4B
+; Entry: JMP to LAB_0113 → main entry (LAB_0000). Sets up BCSub protocol,
+; loads overlays (bcdfp, bcdfq, bcdft, bcdfu), handles game loop.
+; A4 = overlay data frame, A5 = local data frame, A6 = library base.
+; Overlays communicate via "BCMain"/"BCSub" message ports.
 SECSTRT_0:
-	JMP	LAB_0113(PC)
+	JMP	LAB_0113(PC)		; jump to main init
 LAB_0000:
+; ── Main entry point ──
 	LINK.W	A5,#-8
 	MOVEM.L	D2-D4/A2-A3,-(A7)
 	MOVE.L	A6,-4(A5)
@@ -1728,6 +1735,27 @@ LAB_0090:
 	MOVEM.L	(A7)+,D2/A2-A3
 	UNLK	A5
 	RTS
+; ── String table ──
+; IRA disassembles these ASCII strings as 68k code because the data section
+; boundary is not marked. Actual decoded content:
+;
+; LAB_0091: "GAMEDISK1:\0" (bytes: 47 41 4d 45 44 49 53 4b 31 3a 00)
+; LAB_0093: "bcdfq\0"       (bytes: 62 63 64 66 71 00)
+; LAB_0094: "bcdfp\0"       (bytes: 62 63 64 66 70 00)
+; LAB_0095: "bcdft\0"       (bytes: 62 63 64 66 74 00)
+; LAB_0096: "GAMEDISK2:\0"  (bytes: 47 41 4d 45 44 49 53 4b 32 3a 00)
+; LAB_0097: "bcdfu\0"       (bytes: 62 63 64 66 75 00)
+; LAB_0098: "Configuration.Dat\0"
+; LAB_0099: "BCMain\0"      — message port name for overlay IPC
+; LAB_009A: "GAME MENU\0"
+; LAB_009B: "MAIN MENU\0"
+; LAB_009C: "GAME SCREEN\0"
+; LAB_009D: "EXIT\0"
+; LAB_009E: "MAGIC MAP...\0" etc.
+;
+; Files bcdfb-bcdfn are NOT listed here — they are never loaded by name
+; at runtime. bcdfq/p/t/u are the only overlays loaded via LoadSeg.
+; bcdfo and bcdfv are loaded by bcdfp/bcdfu overlays respectively.
 LAB_0091:
 	ORI.W	#$414d,D7
 	DC.W	$4544
@@ -3781,6 +3809,11 @@ LAB_0112:
 	MOVEQ	#-1,D0
 	RTS
 LAB_0113:
+; ── Main initialization ──
+; Sets up dos.library base, allocates overlay data frame memory,
+; creates BCMain port, loads overlays (bcdfq, bcdfp, bcdft, bcdfu).
+; bcdfq loads first (intro/music), then bcdfp (game logic overlay).
+; After bcdfp becomes active, bcdfu (sound) is loaded on demand.
 	BSR.S	LAB_011B
 	LEA	-32674(A4),A1
 	LEA	-32674(A4),A2
@@ -3830,12 +3863,13 @@ LAB_011B:
 	LEA	SECSTRT_1+32766,A4
 	RTS
 LAB_011C:
+; ── BCSub protocol init — create BCMain port, allocate overlay data frame ──
 	MOVEM.L	A2-A3,-(A7)
 	MOVEA.L	16(A7),A3
 	MOVE.L	A6,-(A7)
-	MOVEA.L	-32576(A4),A6
-	MOVE.L	#$00010000,D1
-	MOVE.W	-32686(A4),D0
+	MOVEA.L	-32576(A4),A6		; exec.library base
+	MOVE.L	#$00010000,D1		; mem type = PUBLIC
+	MOVE.W	-32686(A4),D0		; size from hunk
 	MOVE.L	D1,-(A7)
 	EXT.L	D0
 	MOVE.L	D0,D1
@@ -3843,25 +3877,28 @@ LAB_011C:
 	ADD.L	D1,D0
 	LSL.L	#1,D0
 	MOVE.L	(A7)+,D1
-	JSR	-198(A6)
+	JSR	-198(A6)		; AllocMem(size, MEMF_PUBLIC)
 	MOVEA.L	(A7)+,A6
-	MOVE.L	D0,-32484(A4)
-	BNE.S	LAB_011D
+	MOVE.L	D0,-32484(A4)		; store overlay data frame ptr
+	BNE.S	LAB_011D		; branch if alloc succeeded
+	; Out of memory — abort
 	MOVEM.L	D7/A5-A6,-(A7)
 	MOVEA.L	-32576(A4),A6
 	SUBA.L	A5,A5
 	MOVE.L	#$00010000,D7
-	JSR	-108(A6)
+	JSR	-108(A6)		; Alert(AG_MEMFAIL)
 	MOVEM.L	(A7)+,D7/A5-A6
 	MOVEA.L	-32488(A4),A7
 	RTS
 LAB_011D:
+; ── Port setup — create BCMain port, load overlays ──
 	MOVEA.L	-32484(A4),A0
 	CLR.W	4(A0)
 	MOVEA.L	-32484(A4),A0
 	MOVE.W	#$0001,16(A0)
 	MOVEA.L	-32484(A4),A0
 LAB_011E:
+; ── Create "MANX" (BCMain) message port ──
 	MOVE.W	#$0001,10(A0)
 	MOVEA.L	-32488(A4),A0
 	MOVE.L	-32488(A4),D0
@@ -3869,19 +3906,20 @@ LAB_011E:
 	ADDQ.L	#8,D0
 	MOVE.L	D0,-32480(A4)
 	MOVEA.L	-32480(A4),A0
-	MOVE.L	#$4d414e58,(A0)
+	MOVE.L	#$4d414e58,(A0)		; "MANX" = port magic
 	MOVE.L	A6,-(A7)
 	MOVEA.L	-32576(A4),A6
 	SUBA.L	A1,A1
-	JSR	-294(A6)
+	JSR	-294(A6)		; FindTask(NULL) → get current task
 	MOVEA.L	(A7)+,A6
-	MOVEA.L	D0,A2
-	TST.L	172(A2)
+	MOVEA.L	D0,A2			; A2 = our Task struct
+	TST.L	172(A2)			; check if this is main/boot task
 	BEQ.S	LAB_0120
+	; Main task path: load overlays via LoadSeg
 	MOVE.L	A3,-(A7)
 	MOVE.L	16(A7),-(A7)
 	MOVE.L	A2,-(A7)
-	JSR	LAB_0125(PC)
+	JSR	LAB_0125(PC)		; Load overlay (LoadSeg)
 	MOVE.L	#$00000001,-32476(A4)
 	MOVEA.L	-32484(A4),A0
 	ADDQ.L	#4,A0
@@ -3892,30 +3930,32 @@ LAB_011E:
 	LEA	12(A7),A7
 	BRA.S	LAB_0122
 LAB_0120:
+	; Boot task path: create BCSub port for overlay IPC
 	MOVE.L	A6,-(A7)
 	MOVEA.L	-32576(A4),A6
-	LEA	92(A2),A0
-	JSR	-384(A6)
+	LEA	92(A2),A0		; 92 = tc_UserData (msg port ptr)
+	JSR	-384(A6)		; GetMsg()
 	MOVEA.L	(A7)+,A6
 	MOVE.L	A6,-(A7)
 	MOVEA.L	-32576(A4),A6
 	LEA	92(A2),A0
-	JSR	-372(A6)
+	JSR	-372(A6)		; WaitPort()
 	MOVEA.L	(A7)+,A6
 	MOVE.L	D0,-32472(A4)
 	MOVEA.L	-32472(A4),A0
 	TST.L	36(A0)
 	BEQ.S	LAB_0121
+	; Process overlay command
 	MOVE.L	A6,-(A7)
 	MOVEA.L	-32572(A4),A6
 	MOVEA.L	-32472(A4),A0
 	MOVEA.L	36(A0),A0
 	MOVE.L	(A0),D1
-	JSR	-126(A6)
+	JSR	-126(A6)		; ReplyMsg()
 	MOVEA.L	(A7)+,A6
 	MOVE.L	-32472(A4),-(A7)
 	MOVE.L	A2,-(A7)
-	JSR	LAB_013D(PC)
+	JSR	LAB_013D(PC)		; process overlay command
 	ADDQ.W	#8,A7
 LAB_0121:
 	MOVE.L	-32472(A4),-32468(A4)

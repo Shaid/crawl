@@ -349,105 +349,83 @@ def decode_tile(tile_data):
 ```
 ---
 
-### bcdfb–bcdfn — Monster Sprite Files (Per Dungeon Level)
+### bcdfb–bcdfn — Monster Sprite Files (Per Dungeon Level) — CORRECTED
 
-These 13 files each contain **all monster graphics for one dungeon level**.
-Pixel data is **raw (NOT RLE compressed)**, stored as **7 sequential bitplanes**
-per sprite block.
+These 13 files each contain **all monster graphics for one dungeon level**,
+plus a **copper list** for color animation. Data is **RLE compressed**
+(using bcdfu LAB_0043 algorithm) and contains multiple separate streams.
 
-**Filenames are NOT referenced in any disassembled overlay** — loading mechanism
-is currently unknown (not in bcdfp, bcdfq, bcdfu, or bcdft assemblies).
+**CORRECTION:** The previously documented "raw data with 7 bitplanes" format
+was incorrect. The "type ID" and "col/row indices" at the file start are
+the first bytes of the first RLE stream, not a header.
 
-#### 12-byte File Header
+#### 5-byte "header" (actually part of first RLE stream)
 
 | Offset | Size | Description                                 |
 |--------|------|---------------------------------------------|
-| 0x00   | 2    | 0x0000 (padding)                            |
+| 0x00   | 2    | 0x0000 (RLE fill: fill N bytes with next)  |
 | 0x02   | 2    | file type identifier (unique per file)      |
-| 0x04   | 2    | column / X index (e.g. 178 for bcdfb)      |
-| 0x06   | 2    | row / Y index (e.g. 179 for bcdfb)         |
-| 0x08   | 4    | 0x00000000 (padding)                        |
+| 0x04   | 1    | 0x00 = RLE end-of-stream marker            |
 
-**Verified file type identifiers:**
+**Verified type identifiers** (from the first RLE stream):
 
-| File   | Type ID  | Col  | Row  |
-|--------|----------|------|------|
-| bcdfb  | 0xBA31   | 178  | 179  |
-| bcdfc  | 0xBEB9   | 79   | 176  |
-| bcdfd  | 0xAAF7   | 77   | 78   |
-| bcdfe  | 0xAE8C   | 75   | 76   |
-| bcdfi  | 0x9AF6   | 182  | —    |
-| bcdfj  | 0xAE25   | 196  | 191  |
-| bcdfk  | 0x9AF1   | 188  | —    |
-| bcdfl  | 0xDAF0   | 190  | 198  |
-| bcdfm  | 0x9307   | 180  | —    |
-| bcdfn  | 0x82EA   | 197  | —    |
+| File   | Type ID  | Notes                     |
+|--------|----------|---------------------------|
+| bcdfb  | 0xBA31   | byte +4 = 0xB2 (Two Head bb) |
+| bcdfc  | 0xBEB9   |                           |
+| bcdfd  | 0xAAF7   |                           |
+| bcdfe  | 0xAE8C   |                           |
+| bcdfi  | 0x9AF6   |                           |
+| bcdfj  | 0xAE25   |                           |
+| bcdfk  | 0x9AF1   |                           |
+| bcdfl  | 0xDAF0   |                           |
+| bcdfm  | 0x9307   |                           |
+| bcdfn  | 0x82EA   |                           |
 
-#### 28-byte Directory Entry (starting at offset 12)
+#### Multi-stream RLE structure
 
-Each entry describes one sprite frame/zoom level. Entries are grouped in
-triples (3 entries per sprite block — 3 distance/zoom levels).
+Each file contains ~100 RLE-compressed streams. The RLE algorithm is
+bcdfu.asm LAB_0043 (see RLE section below).
 
-| Field | Offset | Size | Description |
-|-------|--------|------|-------------|
-| data_offset | +0 | 4 | Absolute file offset to pixel data |
-| bpr | +4 | 4 | Bytes per row × height = single bitplane size |
-| reserved | +8 | 4 | 0x00000000 |
-| bltsize | +12 | 2 | BLTSIZE + 1 = ((h-1) << 6) | (w_words + 1) |
-| modulo | +14 | 2 | Screen modulo = (320 - w) / 8 - 2 |
-| reserved | +16 | 4 | 0x00000000 |
-| type | +20 | 2 | 0x0100 = normal frame, 0x0500 = alternate mode |
-| width | +22 | 2 | Width in pixels |
-| height | +24 | 2 | Height in rows |
-| reserved | +26 | 2 | 0x00000000 |
+**Stream categories** (based on byte distribution analysis):
+- **Streams 0-63**: metadata/sprite descriptor data (small, high 0/FF ratio)
+  - Contains width/height pairs (e.g., 0x0060 0x007c = 96×124)
+  - Contains the `bb` values (e.g., 0x00B2 = Two Head, 0x00B3 = Rock Eye)
+- **Stream 64 (~66KB, main stream)**: **COPPER LIST** for color animation
+  - NOT sprite data! Starts with `0008 0021 0008 0021 0600 0b10 0ffe 0040`
+  - Followed by patterns of 0x0000 and 0xFFFF = Amiga copper WAIT/MOVE
+  - This is a compressed color animation list, not graphics
+- **Streams 65-82**: actual sprite pixel data (varied bytes, low 0/FF ratio)
+  - 6-plane interleaved bitplane data
+  - Sizes: 129B to 7299B per stream
+  - EHB mode (64 colors), color 0 = transparent
+- **Streams 83+**: more metadata/copper data
 
-**Key invariant:** `bpr = (width / 8) × height` (single bitplane size).
-**7-plane gap:** Consecutive sprite blocks are separated by exactly
-`7 × bpr` bytes — confirming 7 sequential bitplanes per block.
+**Key mistake to avoid:** The 66KB main stream is NOT 14 frames of 64×96
+sprites. The earlier false match was coincidence — 66,536 doesn't actually
+divide evenly by 4608 (64×96×6bpp = 4608B) since 66,536 = 8 × 8317 (prime).
 
-#### Sprite Block Data Layout
+#### Real sprite extraction
 
-```
-block_base = directory_entry.data_offset
-plane_0 = block_base              ; may be transparency mask (73% zeros in bcdfb)
-plane_1 = block_base + 1 × bpr   ; color bitplane 0
-plane_2 = block_base + 2 × bpr   ; color bitplane 1
-plane_3 = block_base + 3 × bpr   ; color bitplane 2
-plane_4 = block_base + 4 × bpr   ; color bitplane 3
-plane_5 = block_base + 5 × bpr   ; color bitplane 4
-plane_6 = block_base + 6 × bpr   ; color bitplane 5
-```
+To extract sprites, the metadata streams (0-63) must be parsed to find
+the sprite descriptors (width, height, data offset, etc.), then those
+descriptors used to locate the sprite pixel data in streams 65+.
 
-**7 planes × 6bpp = EHB mode (64 colors).** Plane 0 may serve as a
-transparency mask (read by blitter channel A in LAB_011E's minterm $CA),
-with planes 1–6 providing the 6-bit color index.
+**Known sprite stream sizes (bcdfb):**
+| Stream | Size | Likely content |
+|--------|------|-----------------|
+| 66 | 1342B | sprite(s) |
+| 68 | 2683B | sprite(s) |
+| 76 | 7299B | sprite(s) (largest) |
+| 77 | 5627B | sprite(s) |
+| 78 | 827B | small sprite |
+| 79 | 240B | tiny sprite |
+| 80 | 2635B | sprite(s) |
+| 81 | 129B | tiny sprite |
+| 82 | 639B | small sprite |
 
-#### Directory Entry Grouping
-
-Entries reference **blocks, not individual planes.** Multiple directory entries
-may point to the same block data (same data_offset) with different type fields:
-- Type `0x0100`: Normal rendering mode (flag bit0=0 → LAB_011E path)
-- Type `0x0500`: Alternate mode (flag bit0=1 → LAB_0124 clipping path)
-
-Example from bcdfb (387 entries at offset 12):
-
-| Entry | Type | Width | Height | Data Offset | Block |
-|-------|------|-------|--------|-------------|-------|
-| 0 | 0x0100 | 96 | 124 | 10836 | A (near) |
-| 1 | 0x0100 | 96 | 124 | 10836 | A (near) |
-| 2 | 0x0100 | 96 | 126 | 21252 | B (mid) |
-| 3 | 0x0500 | 96 | 124 | 10836 | A (clip) |
-| 4 | 0x0100 | 64 | 79 | 31836 | C (far) |
-| ... | ... | ... | ... | ... | ... |
-
-#### Screen Modulo Values
-
-| Sprite Width | Modulo | Hex |
-|-------------|--------|-----|
-| 96 | 26 | 0x001A |
-| 64 | 30 | 0x001E |
-| 48 | 32 | 0x0020 |
-| 32 | 34 | 0x0022 |
+These streams have been saved as raw byte images in
+`data/blackcrypt/extracted/bcdfb_streams/` for manual inspection.
 
 ---
 

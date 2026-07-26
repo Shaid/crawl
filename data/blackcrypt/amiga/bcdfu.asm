@@ -502,6 +502,29 @@ LAB_0032:
 	BNE.S	LAB_0032		;00b00: 66fa
 	RTS				;00b02: 4e75
 LAB_0033:
+; ── Open bcdfv (sound + monster sprite data) ──
+; bcdfv (192KB) is a multi-block container. It contains both sound data
+; AND RLE-compressed monster sprite graphics.
+; 
+; The file is read SEQUENTIALLY (no seeking). Each block is read into a
+; memory buffer at 12(A5)+$BB80, then RLE-decompressed (LAB_0043) back to
+; 12(A5)+next_offset. This builds up the complete sprite/sound buffer.
+;
+; Buffer layout (offsets relative to 12(A5)):
+;   +$0000: RLE decompression destination (filled sequentially)
+;   +$BB80: Read buffer for compressed blocks (overwritten each block)
+;
+; Blocks:
+;   1. Read $4EB0 bytes, RLE decompress → start of buffer (32000B output)
+;   2. Read $6754 bytes, RLE decompress → append (48000B output)
+;   3. Read $678C bytes, stored raw → append
+;   4. Read from $EA60 (actually a memory offset), decompress to buffer+$BB80+$2EE0
+;   5. Read 0x5067 bytes (from file offset after previous reads), RLE decompress → append
+;   6. Read 0x0B10 bytes (from file offset), stored raw → append
+;
+; Monster sprites: 64×96 pixels, 6-plane interleaved EHB bitplanes.
+; The decompressed data contains ~17+ frames per map (see bcdfb-bcdfn for
+; the per-map file format equivalent).
 	MOVE.L	D2,-(A7)		;00b04: 2f02
 	LEA	LAB_0036(PC),A0		;00b06: 41fa0022
 	MOVE.L	A0,D1			;00b0a: 2208
@@ -527,6 +550,9 @@ LAB_0037:
 	JSR	-36(A6)			;00b38: 4eaeffdc
 	RTS				;00b3c: 4e75
 LAB_0038:
+; ── Block 1: Read & decompress monster sprite data ──
+; Reads first $4EB0 (20144) bytes from bcdfv into buffer+$BB80.
+; RLE-decompresses into buffer+0 (appends ~32000 bytes of sprite data).
 	MOVEM.L	D2-D3,-(A7)		;00b3e: 48e73000
 	MOVE.L	12(A5),D2		;00b42: 242d000c
 	ADDI.L	#$0000bb80,D2		;00b46: 06820000bb80
@@ -541,6 +567,9 @@ LAB_0038:
 	MOVEM.L	(A7)+,D2-D3		;00b6e: 4cdf000c
 	RTS				;00b72: 4e75
 LAB_0039:
+; ── Block 2: Read & decompress monster sprite data (continued) ──
+; Reads $6754 (26452) bytes from current bcdfv position into buffer+$BB80.
+; RLE-decompresses into buffer (appends ~48000 bytes).
 	MOVEM.L	D2-D3,-(A7)		;00b74: 48e73000
 	MOVE.L	12(A5),D2		;00b78: 242d000c
 	ADDI.L	#$0000bb80,D2		;00b7c: 06820000bb80
@@ -555,6 +584,9 @@ LAB_0039:
 	MOVEM.L	(A7)+,D2-D3		;00ba4: 4cdf000c
 	RTS				;00ba8: 4e75
 LAB_003A:
+; ── Block 3: Read raw sound data (not RLE) ──
+; Reads $678C (26508) bytes raw from file into buffer+$BB80.
+; This block overwrites the RLE read buffer area.
 	MOVEM.L	D2-D3,-(A7)		;00baa: 48e73000
 	MOVE.L	12(A5),D2		;00bae: 242d000c
 	ADDI.L	#$0000bb80,D2		;00bb2: 06820000bb80
@@ -565,6 +597,9 @@ LAB_003A:
 	MOVEM.L	(A7)+,D2-D3		;00bca: 4cdf000c
 	RTS				;00bce: 4e75
 LAB_003B:
+; ── Block 5: Read & RLE-decompress from compound buffer ──
+; Reads $5067 bytes from file into buffer+$BB80 (overwrites previous data).
+; Then RLE-decompresses from buffer+$BB80, output appended to sprite/sound buffer.
 	MOVEM.L	D2-D3,-(A7)		;00bd0: 48e73000
 	MOVE.L	12(A5),D2		;00bd4: 242d000c
 	ADDI.L	#$00017700,D2		;00bd8: 068200017700
@@ -580,6 +615,9 @@ LAB_003B:
 	MOVEM.L	(A7)+,D2-D3		;00c06: 4cdf000c
 	RTS				;00c0a: 4e75
 LAB_003C:
+; ── Block 6: Read raw data to high buffer ──
+; Reads $0B10 (2832) bytes raw from file into buffer+$1A5E0.
+; This area is past the sprite/sound data region.
 	MOVEM.L	D2-D3,-(A7)		;00c0c: 48e73000
 	MOVE.L	12(A5),D2		;00c10: 242d000c
 	ADDI.L	#$0001a5e0,D2		;00c14: 06820001a5e0
@@ -590,6 +628,8 @@ LAB_003C:
 	MOVEM.L	(A7)+,D2-D3		;00c2c: 4cdf000c
 	RTS				;00c30: 4e75
 LAB_003D:
+; ── Copy block: buffer+$BB80 → buffer+0 (memcopy $176F longs) ──
+; Copies decompressed/raw data from read buffer back to main buffer.
 	MOVEA.L	12(A5),A1		;00c32: 226d000c
 	MOVEA.L	A1,A0			;00c36: 2049
 	ADDA.L	#$0000bb80,A0		;00c38: d1fc0000bb80
@@ -600,6 +640,9 @@ LAB_003E:
 	DBF	D0,LAB_003E		;00c48: 51c8fffa
 	RTS				;00c4c: 4e75
 LAB_003F:
+; ── Block 4: Read from memory offset $EA60, RLE via offset buffer ──
+; Reads D0 bytes from file into buffer+$EA60 (within main data area).
+; Then RLE-decompresses from buffer+$BB80+$2EE0, output appended.
 	MOVEM.L	D2-D3,-(A7)		;00c4e: 48e73000
 	MOVE.L	12(A5),D2		;00c52: 242d000c
 	ADDI.L	#$0000ea60,D2		;00c56: 06820000ea60
@@ -641,25 +684,33 @@ LAB_0042:
 	DBF	D0,LAB_0042		;00cda: 51c8fff6
 	RTS				;00cde: 4e75
 LAB_0043:
+; ── RLE decompressor ──
+; Input:  A0 = compressed data source
+;         A1 = decompression destination
+; Control byte (D0, read from A0):
+;   0x00 → end of stream (RTS)
+;   bit0=1 → literal: copy (byte>>1) bytes from A0 to A1
+;   bit0=0 → fill: write next byte, (byte>>1) times
+; Returns: A0/A1 advanced past processed data.
 	MOVEQ	#0,D0			;00ce0: 7000
 	MOVE.B	(A0)+,D0		;00ce2: 1018
-	BEQ.S	LAB_0047		;00ce4: 671a
-	LSR.B	#1,D0			;00ce6: e208
-	BCC.S	LAB_0045		;00ce8: 640a
-	SUBQ.W	#1,D0			;00cea: 5340
+	BEQ.S	LAB_0047		;00ce4: 671a		; 0 = end
+	LSR.B	#1,D0			;00ce6: e208		; D0 = count = byte>>1
+	BCC.S	LAB_0045		;00ce8: 640a		; bit0=0 → fill
+	SUBQ.W	#1,D0			;00cea: 5340		; literal: D0--
 LAB_0044:
-	MOVE.B	(A0)+,(A1)+		;00cec: 12d8
+	MOVE.B	(A0)+,(A1)+		;00cec: 12d8		; copy literal byte
 	DBF	D0,LAB_0044		;00cee: 51c8fffc
-	BRA.S	LAB_0043		;00cf2: 60ec
+	BRA.S	LAB_0043		;00cf2: 60ec		; next control byte
 LAB_0045:
-	MOVE.B	(A0)+,D1		;00cf4: 1218
-	SUBQ.W	#1,D0			;00cf6: 5340
+	MOVE.B	(A0)+,D1		;00cf4: 1218		; fill: read fill byte
+	SUBQ.W	#1,D0			;00cf6: 5340		; D0--
 LAB_0046:
-	MOVE.B	D1,(A1)+		;00cf8: 12c1
+	MOVE.B	D1,(A1)+		;00cf8: 12c1		; write fill byte
 	DBF	D0,LAB_0046		;00cfa: 51c8fffc
-	BRA.S	LAB_0043		;00cfe: 60e0
+	BRA.S	LAB_0043		;00cfe: 60e0		; next control byte
 LAB_0047:
-	RTS				;00d00: 4e75
+	RTS				;00d00: 4e75		; end of stream
 LAB_0048:
 	MOVE.L	D2,-(A7)		;00d02: 2f02
 	MOVEQ	#15,D2			;00d04: 740f

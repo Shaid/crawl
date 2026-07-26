@@ -7,62 +7,123 @@ ABSEXECBASE	EQU	$4
 
 
 
+; ── BCDFT — Data carrier overlay ──
+; Loaded at startup by the main executable via LoadSeg("bcdft").
+; Total hunk size (loaded segments) = $4c1ac (313,900 bytes).
+; Binary file on disk = 85,684 bytes (CODE + DATA sections only; BSS is zero-filled at runtime).
+;
+; Runtime layout:
+;   S_0: CODE    — Entry stub, frees its own BSS hunks, returns
+;   S_1: BSS     — 166,676 bytes ($28B24) — decompression target buffer
+;   S_2: BSS     — 40,808 bytes ($9F68) — decompression target buffer
+;   S_3: BSS     — 4 bytes — pointer/flag
+;   S_4: CODE    — LZ77 decompression + relocation engine (496 bytes)
+;   S_5: DATA    — 84,976 bytes of compressed dungeon data (walls, floors, textures)
+;   S_6: BSS     — 18,684 bytes — decompression read buffer
+;
+; NOTE: bcdft does NOT contain monster sprite data. Monster sprites are in
+; bcdfb-bcdfn (13 files, one per map), RLE-compressed via bcdfu's LAB_0043
+; algorithm. See bcdfb-bcdfn for the actual per-map monster graphics.
+;
+; The entry stub (S_0) resolves chain pointers to walk the hunk list,
+; frees S_3/S_5/S_6, then S_4 decompresses S_5's data into S_1/S_2 buffers.
+; After exit, bcdft's segments are freed by UnLoadSeg, but the decompressed
+; data remains in S_1/S_2 memory (allocated by the main executable).
+
 	SECTION S_0,CODE
 
+; ── Entry stub — resolves chain pointers, frees hunks, returns ──
 SECSTRT_0:
 	MOVEM.L	D0-D7/A0-A7,-(A7)	;00000: 48e7ffff
-	LEA	LAB_0002(PC),A4		;00004: 49fa0036
-	MOVE.W	#$0003,D6		;00008: 3c3c0003
-	JSR	(A4)			;0000c: 4e94
-	JSR	(A1)			;0000e: 4e91
-	MOVE.W	#$0005,D6		;00010: 3c3c0005
+	LEA	LAB_0002(PC),A4		;00004: 49fa0036	; A4 = chain resolver
+	MOVE.W	#$0003,D6		;00008: 3c3c0003	; D6 = 3 → skip hunk #3
+	JSR	(A4)			;0000c: 4e94		; resolve chain, A1 = hunk #3 ptr
+	JSR	(A1)			;0000e: 4e91		; call hunk #3 init (not really code)
+	MOVE.W	#$0005,D6		;00010: 3c3c0005	; D6 = 5 for loop (free hunks 5,4,3)
 LAB_0001:
-	BSR.S	LAB_0002		;00014: 6126
-	SUBQ.L	#8,A1			;00016: 5189
-	MOVE.L	(A1),D0			;00018: 2011
+	BSR.S	LAB_0002		;00014: 6126		; get hunk ptr
+	SUBQ.L	#8,A1			;00016: 5189		; A1 -= 8 (hunk size word)
+	MOVE.L	(A1),D0			;00018: 2011		; D0 = hunk size
 	MOVEA.L	ABSEXECBASE.W,A6	;0001a: 2c780004
-	JSR	-210(A6)		;0001e: 4eaeff2e
+	JSR	-210(A6)		;0001e: 4eaeff2e	; FreeMem(hunk)
 	SUBQ.W	#1,D6			;00022: 5346
 	CMPI.W	#$0002,D6		;00024: 0c460002
-	BNE.S	LAB_0001		;00028: 66ea
-	BSR.S	LAB_0002		;0002a: 6110
-	CLR.L	-(A1)			;0002c: 42a1
-	MOVEQ	#0,D6			;0002e: 7c00
-	BSR.S	LAB_0002		;00030: 610a
-	MOVE.L	A1,60(A7)		;00032: 2f49003c
+	BNE.S	LAB_0001		;00028: 66ea		; loop while D6 > 2
+	BSR.S	LAB_0002		;0002a: 6110		; get hunk #2 ptr
+	CLR.L	-(A1)			;0002c: 42a1		; store NULL (end-of-list marker)
+	MOVEQ	#0,D6			;0002e: 7c00		; D6 = 0
+	BSR.S	LAB_0002		;00030: 610a		; get hunk #0 ptr (the start)
+	MOVE.L	A1,60(A7)		;00032: 2f49003c	; patch return address on stack
 	MOVEM.L	(A7)+,D0-D7/A0-A6	;00036: 4cdf7fff
-	RTS				;0003a: 4e75
+	RTS				;0003a: 4e75		; return to caller with modified A1
+
+; ── Chain pointer resolver ──
+; Walks the hunk segment chain D6 times to reach hunk #D6.
+; Returns A1 = pointer to hunk D6's first longword.
+; Input:  D6 = hunk index to resolve
+; Output: A1 = pointer to resolved hunk data
 LAB_0002:
 	MOVE.W	D6,D7			;0003c: 3e06
-	LEA	SECSTRT_0-4(PC),A1	;0003e: 43faffbc
+	LEA	SECSTRT_0-4(PC),A1	;0003e: 43faffbc	; start of hunk chain (S_0 - 4)
 LAB_0003:
-	MOVEA.L	(A1),A1			;00042: 2251
-	ADDA.L	A1,A1			;00044: d3c9
+	MOVEA.L	(A1),A1			;00042: 2251		; follow chain pointer
+	ADDA.L	A1,A1			;00044: d3c9		; A1 *= 4 (BPTR → APTR)
 	ADDA.L	A1,A1			;00046: d3c9
-	DBF	D7,LAB_0003		;00048: 51cffff8
-	ADDQ.L	#4,A1			;0004c: 5889
+	DBF	D7,LAB_0003		;00048: 51cffff8	; loop D7 times
+	ADDQ.L	#4,A1			;0004c: 5889		; skip hunk header size word
 	RTS				;0004e: 4e75
 
 
 	SECTION S_1,BSS
 
+; ── Decompression target buffer 1 ──
+; Largest BSS section. Filled by S_4's LZ77 decompressor with dungeon
+; data (wall textures, floor textures, item sprites, map geometry).
+; 41,669 longs = 166,676 bytes.
 SECSTRT_1:
 	DS.L	41669			;00050
 
 
 	SECTION S_2,BSS
 
+; ── Decompression target buffer 2 ──
+; Secondary buffer. Used for monster sprites and/or intermediate data.
+; 10,202 longs = 40,808 bytes.
 SECSTRT_2:
 	DS.L	10202			;28b64
 
 
 	SECTION S_3,BSS
 
+; ── Runtime pointer/flag ──
+; 1 longword. Used as flag or pointer by S_4/other overlays.
 SECSTRT_3:
 	DS.L	1			;32acc
 
 
 	SECTION S_4,CODE
+
+; ── LZ77 decompression + pointer relocation engine ──
+; Decompresses dungeon data from S_5 (DATA section) into S_1/S_2 (BSS).
+; Processes 3 blocks (D5 = 0,1,2). For each block:
+;   1. Resolves chain pointer → gets destination buffer address
+;   2. Reads LZ77 tokens backwards from compressed stream (A2 ← A0)
+;   3. Decompresses into destination
+;   4. Reads relocation fixups: (count, offset, base_chain) pairs
+;   5. Adds base addresses to selected longwords in decompressed data
+;
+; The compressed stream is read BACKWARDS from end of S_5 data.
+; A 'read buffer' at the end of S_4 acts as an 8-byte FIFO.
+; When the read pointer reaches a block boundary, it decompresses
+; the next ~18KB block from S_5 into the read buffer area.
+;
+; Embedded tables:
+;   $32BF0: Extra-bits table for match lengths (06 0A 0A 12 02 03 03 04)
+;   $32C40: Color/length lookup tables for LZ77 encoding
+;   $32C8E: LZ77 control table (literal count, bit seed, flag byte)
+;
+; After S_4 runs, S_1/S_2 contain decompressed dungeon rendering data.
+; bcdft is then UnLoadSeg'd by the main executable.
 
 SECSTRT_4:
 	DC.L	$7a005246,$4e94d3fc,$00014bed,$20495246 ;32ad0
@@ -100,6 +161,24 @@ SECSTRT_4:
 
 
 	SECTION S_5,DATA
+
+; ── COMPRESSED DUNGEON DATA (walls/floors/textures, NOT monster sprites) ──
+; 84,976 bytes of LZ77-compressed game data (SEQUENTIAL PLANAR 6bpp).
+; Decompressed at startup by the S_4 engine into S_1 and S_2 BSS buffers.
+; Contains: wall textures, floor/ceiling textures, item sprites, map 
+; geometry, lighting data, and text tables (item names at decompressed 
+; offset 115978, scroll/plaque text strings).
+;
+; MONSTER SPRITES are NOT in bcdft — they come from bcdfb-bcdfn (13 files,
+; one per map). Those files are RLE-compressed (bcdfu LAB_0043 algorithm)
+; and contain 6bpp interleaved bitplane sprite data at 64×96 and 96×124.
+;
+; Data is organized as 3 major blocks:
+;   Block 0: Wall/floor/ceiling textures
+;   Block 1: Item sprites and text tables
+;   Block 2: Map/geometry/event data
+;
+; Each block: LZ77 compressed → decompressed, then fixups applied.
 
 SECSTRT_5:
 	DC.L	$03888f3b,$c60f90b0,$52d374e2,$03a4e346 ;32cc0
