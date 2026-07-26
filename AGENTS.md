@@ -37,6 +37,19 @@ LAB_010C:
 - BLTSIZE encoding: (height << 6) | width_in_words
 - 6bpp EHB: colors 0-31 base, 32-63 half-bright (color >> 1)
 - 12-bit Amiga RGB → 24-bit: each nibble × 17
+- **Minterm $0FCA**: D = (A AND B) OR (NOT A AND C) — mask+color sprite blit
+  - Channel A = transparency mask (1=pixel, 0=transparent), fixed per plane loop
+  - Channel B = color data, advances by stride each plane
+  - Channel C/D = screen (read/write), same pointer
+- **Minterm $09F0**: D = C — straight screen-to-screen copy
+- **Minterm $03CA**: D = B — opaque source-to-screen copy (no mask)
+- **Minterm $00F0**: D = C — full word fill/copy
+- **LAB_010D**: 28-byte descriptor table entries for UI elements (source offset, stride, BLTSIZE, modulo, flags, width, height)
+- **LAB_010E**: Render UI element by descriptor index → LAB_011E
+- **LAB_010F**: Render portrait by tile index → LAB_011E (uses LAB_010C as live descriptor)
+- **LAB_011E**: Main sprite blitter with clipping (flag bit0=LAB_0124 path)
+- **LAB_0110**: Simple opaque screen blitter (2-pass: aligned words + edge pixels)
+- **LAB_011B**: Screen-to-screen blit for scrolling
 
 ## Extracted Assets
 

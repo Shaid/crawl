@@ -349,34 +349,24 @@ def decode_tile(tile_data):
 ```
 ---
 
-### bcdfb–bcdfn — RLE Monster Sprites (Per Dungeon Level)
+### bcdfb–bcdfn — Monster Sprite Files (Per Dungeon Level)
 
 These 13 files each contain **all monster graphics for one dungeon level**.
-Each file stores monster frames as individually RLE-compressed streams (same
-algorithm as bcdfu LAB_0043, `0x00` = end of stream).
+Pixel data is **raw (NOT RLE compressed)**, stored as **7 sequential bitplanes**
+per sprite block.
 
-#### Format
+**Filenames are NOT referenced in any disassembled overlay** — loading mechanism
+is currently unknown (not in bcdfp, bcdfq, bcdfu, or bcdft assemblies).
 
-| Property         | Value                                      |
-|------------------|--------------------------------------------|
-| Dimensions       | **320px wide × 415 rows × 4bpp sequential planar** (blit source atlas; blitter reads 32px per sprite at BLTSIZE `$0602`) |
-| Compression      | RLE (bcdfu LAB_0043), multiple streams per file |
-| Header           | 136 bytes before pixel data |
-| Color mode       | 4bpp (16 colors max, dungeon palette at bcdfq `+0x02C6`) |
-| Pixel layout     | bit 7 = leftmost pixel |
-| Compression      | RLE (bcdfu LAB_0043), multiple streams per file |
-| Color mode       | 6bpp EHB (dungeon palette at bcdfq `+0x02C6`) |
-| Pixel layout     | bit 7 = leftmost pixel                     |
-
-#### 12-byte header
+#### 12-byte File Header
 
 | Offset | Size | Description                                 |
 |--------|------|---------------------------------------------|
-| 0x00   | 2    | padding (0x0000)                            |
-| 0x02   | 2    | file type identifier                        |
-| 0x04   | 2    | column / X index                            |
-| 0x06   | 2    | row / Y index                               |
-| 0x08   | 4    | padding (0x00000000)                        |
+| 0x00   | 2    | 0x0000 (padding)                            |
+| 0x02   | 2    | file type identifier (unique per file)      |
+| 0x04   | 2    | column / X index (e.g. 178 for bcdfb)      |
+| 0x06   | 2    | row / Y index (e.g. 179 for bcdfb)         |
+| 0x08   | 4    | 0x00000000 (padding)                        |
 
 **Verified file type identifiers:**
 
@@ -386,9 +376,6 @@ algorithm as bcdfu LAB_0043, `0x00` = end of stream).
 | bcdfc  | 0xBEB9   | 79   | 176  |
 | bcdfd  | 0xAAF7   | 77   | 78   |
 | bcdfe  | 0xAE8C   | 75   | 76   |
-| bcdff  | 0x8D29   | 186  | 195  |
-| bcdfg  | 0xCCDA   | 183  | 184  |
-| bcdfh  | 0xA9C3   | 181  | 185  |
 | bcdfi  | 0x9AF6   | 182  | —    |
 | bcdfj  | 0xAE25   | 196  | 191  |
 | bcdfk  | 0x9AF1   | 188  | —    |
@@ -396,34 +383,71 @@ algorithm as bcdfu LAB_0043, `0x00` = end of stream).
 | bcdfm  | 0x9307   | 180  | —    |
 | bcdfn  | 0x82EA   | 197  | —    |
 
-#### Rendering (confirmed)
+#### 28-byte Directory Entry (starting at offset 12)
 
-Each RLE stream decompresses to **96px wide × 4bpp sequential planar** with an
-8-byte header. Each row has its left/right halves swapped (pixels 0–47 ↔ 48–95)
-and must be un-swapped after decompression. The 16 unique colors map to the
-dungeon palette at bcdfq `+0x02C6`.
+Each entry describes one sprite frame/zoom level. Entries are grouped in
+triples (3 entries per sprite block — 3 distance/zoom levels).
 
-The decompressed data contains a monster atlas: the full-size sprite at the top,
-with progressively smaller versions stacked vertically for different viewing
-distances.
+| Field | Offset | Size | Description |
+|-------|--------|------|-------------|
+| data_offset | +0 | 4 | Absolute file offset to pixel data |
+| bpr | +4 | 4 | Bytes per row × height = single bitplane size |
+| reserved | +8 | 4 | 0x00000000 |
+| bltsize | +12 | 2 | BLTSIZE + 1 = ((h-1) << 6) | (w_words + 1) |
+| modulo | +14 | 2 | Screen modulo = (320 - w) / 8 - 2 |
+| reserved | +16 | 4 | 0x00000000 |
+| type | +20 | 2 | 0x0100 = normal frame, 0x0500 = alternate mode |
+| width | +22 | 2 | Width in pixels |
+| height | +24 | 2 | Height in rows |
+| reserved | +26 | 2 | 0x00000000 |
 
-```python
-def render_monster(data, width=96, planes=4):
-    bpr = width // 8 * planes  # 48 bytes/row
-    h = len(data) // bpr
-    half = width // 2
-    pb = width // 8
-    for y in range(h):
-        for x in range(width):
-            # un-swap left/right halves
-            xe = (x + half) % width
-            col = 0
-            for bp in range(planes):
-                off = bp * pb * h + y * pb + (xe // 8)
-                if (data[off] >> (7 - (xe % 8))) & 1:
-                    col |= 1 << bp
-            yield col
+**Key invariant:** `bpr = (width / 8) × height` (single bitplane size).
+**7-plane gap:** Consecutive sprite blocks are separated by exactly
+`7 × bpr` bytes — confirming 7 sequential bitplanes per block.
+
+#### Sprite Block Data Layout
+
 ```
+block_base = directory_entry.data_offset
+plane_0 = block_base              ; may be transparency mask (73% zeros in bcdfb)
+plane_1 = block_base + 1 × bpr   ; color bitplane 0
+plane_2 = block_base + 2 × bpr   ; color bitplane 1
+plane_3 = block_base + 3 × bpr   ; color bitplane 2
+plane_4 = block_base + 4 × bpr   ; color bitplane 3
+plane_5 = block_base + 5 × bpr   ; color bitplane 4
+plane_6 = block_base + 6 × bpr   ; color bitplane 5
+```
+
+**7 planes × 6bpp = EHB mode (64 colors).** Plane 0 may serve as a
+transparency mask (read by blitter channel A in LAB_011E's minterm $CA),
+with planes 1–6 providing the 6-bit color index.
+
+#### Directory Entry Grouping
+
+Entries reference **blocks, not individual planes.** Multiple directory entries
+may point to the same block data (same data_offset) with different type fields:
+- Type `0x0100`: Normal rendering mode (flag bit0=0 → LAB_011E path)
+- Type `0x0500`: Alternate mode (flag bit0=1 → LAB_0124 clipping path)
+
+Example from bcdfb (387 entries at offset 12):
+
+| Entry | Type | Width | Height | Data Offset | Block |
+|-------|------|-------|--------|-------------|-------|
+| 0 | 0x0100 | 96 | 124 | 10836 | A (near) |
+| 1 | 0x0100 | 96 | 124 | 10836 | A (near) |
+| 2 | 0x0100 | 96 | 126 | 21252 | B (mid) |
+| 3 | 0x0500 | 96 | 124 | 10836 | A (clip) |
+| 4 | 0x0100 | 64 | 79 | 31836 | C (far) |
+| ... | ... | ... | ... | ... | ... |
+
+#### Screen Modulo Values
+
+| Sprite Width | Modulo | Hex |
+|-------------|--------|-----|
+| 96 | 26 | 0x001A |
+| 64 | 30 | 0x001E |
+| 48 | 32 | 0x0020 |
+| 32 | 34 | 0x0022 |
 
 ---
 

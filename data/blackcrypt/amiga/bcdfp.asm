@@ -3789,99 +3789,117 @@ LAB_010D:
 	DC.L	$f5ce0000,$000e0000,$f27801c2,$00240000
 	DC.L	$00000200,$00100007
 LAB_010E:
+; ── Render UI element by descriptor index (D2) ──
+; MULU #$001c → 28-byte entry stride → LAB_010D + D2*28
+; Then falls through to LAB_011E for blitter setup.
 	MOVEM.L	D2/A5-A6,-(A7)
-	BSR.W	LAB_0105
-	MULU	#$001c,D2
+	BSR.W	LAB_0105                ; D2 = element index
+	MULU	#$001c,D2               ; 28 bytes per descriptor entry
 	LEA	LAB_010D(PC),A0
-	LEA	0(A0,D2.W),A0
-	BSR.W	LAB_011E
+	LEA	0(A0,D2.W),A0           ; A0 → descriptor entry
+	BSR.W	LAB_011E                ; blit to screen
 	MOVEM.L	(A7)+,D2/A5-A6
 	RTS
 LAB_010F:
+; ── Render portrait by tile index (D2) ──
+; Uses LAB_010C as the live descriptor. Sets source offset:
+;   A1 = $60 + D2 * $240 (96 + D2 * 576 bytes per tile)
+; Then writes into LAB_010C+2 (source offset) and calls LAB_011E.
+; Stride = $60 = 96 bytes/plane. BLTSIZE in LAB_010C = $0603 = 24×48 words.
 	MOVEM.L	D2/A5-A6,-(A7)
-	BSR.W	LAB_0105
+	BSR.W	LAB_0105                ; D2 = tile index
 	LEA	LAB_010C(PC),A0
-	MULU	#$0240,D2
-	MOVEA.L	#$00000060,A1
-	ADDA.L	D2,A1
-	MOVE.L	A1,2(A0)
-	BSR.W	LAB_011E
+	MULU	#$0240,D2               ; D2 = D2 * 576 (6 planes × 96 bytes)
+	MOVEA.L	#$00000060,A1           ; A1 = base offset = 96 (skip 1 plane of header?)
+	ADDA.L	D2,A1                   ; A1 += tile offset
+	MOVE.L	A1,2(A0)                ; patch LAB_010C source offset
+	BSR.W	LAB_011E                ; blit to screen
 	MOVEM.L	(A7)+,D2/A5-A6
 	RTS
 	DC.L	$2f0a2448,$204a6100,$000e45ea,$000a4a52
 	DC.L	$6af2245f
 	DC.W	$4e75
+; ── Simple screen blitter — minterm $03CA (source→screen, opaque) ──
+; A0 = 10-byte param block: [X:word][Y:word][src_off:long][h_words:word][vis_mask:word]
+; Uses 6 planes from screen offset table at 988(A5).
+; Minterm $03CA: D = B (straight copy, no masking).
+; Handles sub-word alignment via two passes: aligned words first, then partial edge.
+; vis_mask (8(A0)) selects visible planes (bit=1 → plane visible).
 LAB_0110:
 	MOVEM.L	D2-D3/A2,-(A7)
-	MOVE.W	#$ffff,68(A6)
-	CLR.W	70(A6)
-	MOVE.W	4(A0),D0
-	ANDI.W	#$fff0,D0
-	MOVE.W	#$0140,D1
-	SUB.W	D0,D1
-	LSR.W	#3,D1
-	SUBQ.W	#2,D1
-	MOVE.W	D1,102(A6)
-	MOVE.W	D1,96(A6)
-	MOVE.W	4(A0),D0
-	LSR.W	#4,D0
-	MOVE.W	6(A0),D3
-	LSL.W	#6,D3
-	ADD.W	D0,D3
-	ADDQ.W	#1,D3
+	MOVE.W	#$ffff,68(A6)           ; BLTAFWM = $FFFF
+	CLR.W	70(A6)                  ; BLTALWM = 0
+; Compute screen modulo = (320 - (width & $FFF0)) / 8 - 2
+	MOVE.W	4(A0),D0                ; D0 = width (pixels)
+	ANDI.W	#$fff0,D0               ; round down to 16-pixel boundary
+	MOVE.W	#$0140,D1               ; D1 = 320
+	SUB.W	D0,D1                   ; D1 = 320 - aligned_width
+	LSR.W	#3,D1                   ; D1 = bytes
+	SUBQ.W	#2,D1                   ; D1 = modulo
+	MOVE.W	D1,102(A6)              ; BLTDMOD = modulo
+	MOVE.W	D1,96(A6)               ; BLTCMOD = modulo
+; Compute BLTSIZE = (h << 6) | (aligned_width / 16)
+	MOVE.W	4(A0),D0                ; width
+	LSR.W	#4,D0                   ; words
+	MOVE.W	6(A0),D3                ; height
+	LSL.W	#6,D3                   ; h << 6
+	ADD.W	D0,D3                   ; D3 = BLTSIZE
+; Compute screen byte offset = Y * 40 + X / 8
 	MOVEQ	#40,D2
-	MULU	2(A0),D2
-	MOVE.W	0(A0),D0
-	LSR.W	#3,D0
-	ADD.W	D0,D2
-	MOVE.W	0(A0),D0
-	ROR.W	#4,D0
+	MULU	2(A0),D2                ; D2 = Y * 40
+	MOVE.W	0(A0),D0                ; D0 = X
+	LSR.W	#3,D0                   ; D0 = X / 8
+	ADD.W	D0,D2                   ; D2 = screen offset
+; First pass: aligned words (full 16-pixel groups)
+	MOVE.W	0(A0),D0                ; X position
+	ROR.W	#4,D0                   ; first-word shift for BLTCON1
 	ANDI.W	#$f000,D0
-	ORI.W	#$03ca,D0
-	MOVE.W	D0,64(A6)
-	CLR.W	66(A6)
-	MOVE.W	#$ffff,116(A6)
-	MOVEA.L	988(A5),A1
-	MOVE.W	8(A0),D1
-	MOVEQ	#5,D0
+	ORI.W	#$03ca,D0               ; minterm $CA + USEB+USED
+	MOVE.W	D0,64(A6)               ; BLTCON0
+	CLR.W	66(A6)                  ; BLTCON1 (no first-word shift)
+	MOVE.W	#$ffff,116(A6)          ; BLTCDAT = $FFFF (full word)
+	MOVEA.L	988(A5),A1              ; A1 = screen offset table
+	MOVE.W	8(A0),D1                ; D1 = visibility mask
+	MOVEQ	#5,D0                   ; 6 planes
 LAB_0111:
-	CLR.W	114(A6)
-	LSR.B	#1,D1
+	CLR.W	114(A6)                 ; BLTADAT = 0
+	LSR.B	#1,D1                   ; test plane visibility bit
 	BCC.S	LAB_0112
-	MOVE.W	#$ffff,114(A6)
+	MOVE.W	#$ffff,114(A6)          ; BLTADAT = $FFFF if visible
 LAB_0112:
-	MOVEA.L	(A1)+,A2
-	LEA	0(A2,D2.W),A2
-	MOVE.L	A2,84(A6)
-	MOVE.L	A2,72(A6)
-	MOVE.W	D3,88(A6)
+	MOVEA.L	(A1)+,A2                ; A2 = plane N screen ptr
+	LEA	0(A2,D2.W),A2            ; add byte offset
+	MOVE.L	A2,84(A6)               ; BLTDPT = write
+	MOVE.L	A2,72(A6)               ; BLTCPT = read
+	MOVE.W	D3,88(A6)               ; BLTSIZE = start blit
 LAB_0113:
-	BTST	#6,2(A6)
+	BTST	#6,2(A6)                ; wait for blitter
 	BNE.S	LAB_0113
-	DBF	D0,LAB_0111
+	DBF	D0,LAB_0111            ; next plane
+; Second pass: sub-word edge pixels (if width not 16-aligned)
 	MOVE.W	4(A0),D0
-	ANDI.W	#$000f,D0
-	BEQ.S	LAB_0117
+	ANDI.W	#$000f,D0               ; remaining pixels (< 16)
+	BEQ.S	LAB_0117                ; none → done
 	MOVEQ	#16,D1
-	SUB.W	D0,D1
+	SUB.W	D0,D1                   ; D1 = bits to mask out
 	MOVEQ	#-1,D0
-	LSL.W	D1,D0
-	MOVE.W	D0,68(A6)
-	MOVE.W	6(A0),D3
-	LSL.W	#6,D3
-	ADDQ.W	#2,D3
+	LSL.W	D1,D0                   ; D0 = left-edge mask
+	MOVE.W	D0,68(A6)               ; BLTAFWM = mask
+	MOVE.W	6(A0),D3                ; height
+	LSL.W	#6,D3                   ; BLTSIZE h part
+	ADDQ.W	#2,D3                   ; + 2 words for edge
 	MOVEQ	#40,D2
-	MULU	2(A0),D2
-	MOVE.W	0(A0),D0
+	MULU	2(A0),D2                ; Y * 40
+	MOVE.W	0(A0),D0                ; X
 	MOVE.W	4(A0),D1
-	ANDI.W	#$fff0,D1
-	ADD.W	D1,D0
-	LSR.W	#3,D0
-	ADD.W	D0,D2
-	MOVE.W	#$0024,96(A6)
-	MOVE.W	#$0024,102(A6)
+	ANDI.W	#$fff0,D1               ; aligned portion
+	ADD.W	D1,D0                   ; X + aligned_width
+	LSR.W	#3,D0                   ; byte offset
+	ADD.W	D0,D2                   ; screen offset for edge
+	MOVE.W	#$0024,96(A6)           ; BLTCMOD = 36 (edge blit)
+	MOVE.W	#$0024,102(A6)          ; BLTDMOD = 36
 	MOVEA.L	988(A5),A1
-	MOVE.W	8(A0),D1
+	MOVE.W	8(A0),D1                ; visibility mask
 	MOVEQ	#5,D0
 LAB_0114:
 	CLR.W	114(A6)
@@ -3928,34 +3946,43 @@ LAB_011A:
 	DC.W	$00c8
 	MOVEM.L	(A7)+,A5-A6
 	RTS
+; ── Screen-to-screen blit (minterm $09F0) — full rectangular copy ──
+; Param block at 1120(A5): [X:word][Y:word][h:word][w:word][pad:long]
+; Source from 992(A5) table, dest from 988(A5) table.
+; Minterm $09F0: D = C (straight copy from source to dest).
+; Used for screen-to-screen scrolling or redraw.
 LAB_011B:
-	MOVE.L	(A7),1120(A5)
-	MOVE.L	(A7)+,1116(A5)
-	ADDQ.L	#8,1116(A5)
+	MOVE.L	(A7),1120(A5)           ; save return addr → param block ptr
+	MOVE.L	(A7)+,1116(A5)          ; pop return addr
+	ADDQ.L	#8,1116(A5)             ; skip past saved params on stack
 	MOVEM.L	D2-D3/A2,-(A7)
-	MOVEA.L	1120(A5),A2
-	MOVE.W	#$0140,D2
-	SUB.W	4(A2),D2
-	LSR.W	#3,D2
-	MOVE.W	D2,100(A6)
-	MOVE.W	D2,102(A6)
-	MOVE.W	2(A2),D2
-	MULU	#$0028,D2
-	MOVE.W	(A2),D0
-	LSR.W	#3,D0
-	ADD.W	D0,D2
-	MOVE.W	6(A2),D3
-	LSL.W	#6,D3
-	MOVE.W	4(A2),D0
-	LSR.W	#4,D0
-	ADD.W	D0,D3
-	MOVEA.L	992(A5),A0
-	MOVEA.L	988(A5),A1
-	CLR.W	66(A6)
-	MOVE.W	#$09f0,64(A6)
-	MOVE.W	#$ffff,68(A6)
-	MOVE.W	#$ffff,70(A6)
-	MOVEQ	#5,D0
+	MOVEA.L	1120(A5),A2             ; A2 → param block
+; Compute modulos from screen width
+	MOVE.W	#$0140,D2               ; D2 = 320
+	SUB.W	4(A2),D2                ; D2 = 320 - width
+	LSR.W	#3,D2                   ; D2 = bytes
+	MOVE.W	D2,100(A6)              ; BLTBMOD
+	MOVE.W	D2,102(A6)              ; BLTDMOD
+; Compute byte offset = Y*40 + X/8
+	MOVE.W	2(A2),D2                ; Y
+	MULU	#$0028,D2               ; Y * 40
+	MOVE.W	(A2),D0                 ; X
+	LSR.W	#3,D0                   ; X / 8
+	ADD.W	D0,D2                   ; D2 = byte offset
+; Compute BLTSIZE = (h << 6) | (w / 16)
+	MOVE.W	6(A2),D3                ; h
+	LSL.W	#6,D3                   ; h << 6
+	MOVE.W	4(A2),D0                ; w
+	LSR.W	#4,D0                   ; w / 16
+	ADD.W	D0,D3                   ; D3 = BLTSIZE
+; Setup blitter registers
+	MOVEA.L	992(A5),A0              ; A0 = source screen table
+	MOVEA.L	988(A5),A1              ; A1 = dest screen table
+	CLR.W	66(A6)                  ; BLTCON1 = 0 (no shift)
+	MOVE.W	#$09f0,64(A6)           ; BLTCON0 = $09F0 (USEB+USED, minterm F0 = copy)
+	MOVE.W	#$ffff,68(A6)           ; BLTAFWM
+	MOVE.W	#$ffff,70(A6)           ; BLTALWM
+	MOVEQ	#5,D0                   ; 6 planes
 LAB_011C:
 	MOVEA.L	(A0)+,A2
 	LEA	0(A2,D2.W),A2
@@ -3971,147 +3998,201 @@ LAB_011D:
 	MOVEM.L	(A7)+,D2-D3/A2
 	MOVEA.L	1116(A5),A0
 	JMP	(A0)
+; ── Sprite blitter — minterm $CA (mask+color→screen, transparent) ──
+; A0 = descriptor entry (28 bytes, see LAB_010D)
+; A2 = screen Y-offset table (988(A5))
+; D0 = screen X, D1 = screen Y (set into desc+18/+20)
+;
+; Minterm $0FCA: D = (A AND B) OR (NOT A AND C)
+;   A = transparency mask (1=pixel, 0=transparent) — FIXED, does not advance per plane
+;   B = color data — advances by stride per plane
+;   C/D = screen (C=read, D=write) — both point to destination
+;
+; Descriptor entry fields used:
+;   +0:  word  → offset into A5 pointer table (base address)
+;   +2:  long  → source data offset (added to base)
+;   +6:  long  → stride per bitplane (added to B pointer each plane)
+;   +10: long  → alternate source offset (if flag bit1=1)
+;   +14: word  → BLTSIZE = (height<<6) | (blit_width_words)
+;                also written to BLTSIZV at 88(A6)
+;   +16: word  → screen modulo (320 - sprite_width) / 8 - 2
+;   +18: word  → X position (set at entry)
+;   +20: word  → Y position (set at entry)
+;   +22: word  → flags: bit0=alternate path (LAB_0124), bit1=alternate addressing
+;   +24: word  → width in pixels
+;   +26: word  → height in pixels
+;
+; 6 planes iterated (D0=5 DBF) — one per bitplane.
+; Mask pointer A3 is FIXED for all 6; B pointer A1 advances by +6(A0) each pass.
 LAB_011E:
-	MOVE.W	D0,18(A0)
-	MOVE.W	D1,20(A0)
-	BTST	#0,22(A0)
+	MOVE.W	D0,18(A0)               ; store X position
+	MOVE.W	D1,20(A0)               ; store Y position
+	BTST	#0,22(A0)               ; flag bit0: alternate rendering path?
 	BNE.W	LAB_0124
 	MOVEM.L	D2/A2-A3,-(A7)
-	MOVEA.L	988(A5),A2
-	MOVE.W	0(A0),D0
-	MOVEA.L	0(A5,D0.W),A3
-	BTST	#1,22(A0)
+	MOVEA.L	988(A5),A2              ; A2 = screen Y-offset table
+	MOVE.W	0(A0),D0                ; D0 = pointer table offset
+	MOVEA.L	0(A5,D0.W),A3           ; A3 = base address from pointer table
+	BTST	#1,22(A0)               ; flag bit1: alternate addressing mode?
 	BNE.S	LAB_011F
-	ADDA.L	2(A0),A3
+; flag bit1=0: A3 += source_off; A1 = A3 + stride (mask=base, color=base+stride)
+	ADDA.L	2(A0),A3                ; A3 = base + source_off (mask pointer)
 	MOVEA.L	A3,A1
-	ADDA.L	6(A0),A1
+	ADDA.L	6(A0),A1                ; A1 = base + source_off + stride (color pointer)
 	BRA.S	LAB_0120
+; flag bit1=1: A1 = base + source_off; A3 = base + alt_off
 LAB_011F:
 	MOVEA.L	A3,A1
-	ADDA.L	2(A0),A1
-	ADDA.L	10(A0),A3
+	ADDA.L	2(A0),A1                ; A1 = base + source_off (color pointer)
+	ADDA.L	10(A0),A3               ; A3 = base + alt_off (mask pointer)
 LAB_0120:
-	MOVE.W	#$ffff,68(A6)
-	CLR.W	70(A6)
-	MOVE.W	#$fffe,100(A6)
-	MOVE.W	#$fffe,98(A6)
-	MOVE.W	16(A0),96(A6)
-	MOVE.W	16(A0),102(A6)
-	MOVE.W	18(A0),D0
-	ROR.W	#4,D0
-	ANDI.W	#$f000,D0
-	MOVE.W	D0,66(A6)
-	ORI.W	#$0fca,D0
-	MOVE.W	D0,64(A6)
-	MOVE.W	20(A0),D1
+	MOVE.W	#$ffff,68(A6)           ; BLTAFWM = $FFFF (no mask on first word)
+	CLR.W	70(A6)                  ; BLTALWM = 0 (mask last word fully)
+	MOVE.W	#$fffe,100(A6)          ; BLTAMOD = -2 (source: 32 pixels = 4 bytes, 4-6=-2)
+	MOVE.W	#$fffe,98(A6)           ; BLTBMOD = -2 (color: same stride as mask)
+	MOVE.W	16(A0),96(A6)           ; BLTCMOD = screen modulo (from descriptor)
+	MOVE.W	16(A0),102(A6)          ; BLTDMOD = screen modulo (same as C)
+; Compute BLTCON1 first-word shift from X position
+	MOVE.W	18(A0),D0               ; D0 = X position (pixels)
+	ROR.W	#4,D0                   ; rotate to get first-word shift
+	ANDI.W	#$f000,D0               ; mask to shift bits (15-12)
+	MOVE.W	D0,66(A6)               ; BLTCON1 = first-word shift only
+	ORI.W	#$0fca,D0               ; combine with minterm $CA + USEA/B/C/D
+	MOVE.W	D0,64(A6)               ; BLTCON0 = $0FCA | shift
+; Compute screen byte offset = (Y * 40) + (X / 8)
+	MOVE.W	20(A0),D1               ; D1 = Y position
 	MOVE.W	D1,D2
-	LSL.W	#5,D1
-	LSL.W	#3,D2
-	ADD.W	D2,D1
-	MOVE.W	18(A0),D2
-	LSR.W	#3,D2
-	ADD.W	D1,D2
+	LSL.W	#5,D1                   ; D1 = Y * 32
+	LSL.W	#3,D2                   ; D2 = Y * 8
+	ADD.W	D2,D1                   ; D1 = Y * 40
+	MOVE.W	18(A0),D2               ; D2 = X
+	LSR.W	#3,D2                   ; D2 = X / 8 (byte offset)
+	ADD.W	D1,D2                   ; D2 = screen byte offset
 	EXT.L	D2
-	MOVEQ	#5,D0
+	MOVEQ	#5,D0                   ; 6 planes (DBF counts down from 5)
+; ── Blitter loop: 6 planes, mask fixed at A3, color advances by stride ──
 LAB_0121:
-	MOVE.L	A3,80(A6)
-	MOVE.L	A1,76(A6)
-	ADDA.L	6(A0),A1
+	MOVE.L	A3,80(A6)               ; BLTAPT = mask pointer (fixed)
+	MOVE.L	A1,76(A6)               ; BLTBPT = color pointer (advances)
+	ADDA.L	6(A0),A1                ; advance color to next plane
 	MOVE.L	D2,D1
-	ADD.L	(A2)+,D1
-	MOVE.L	D1,72(A6)
-	MOVE.L	D1,84(A6)
-	MOVE.W	14(A0),88(A6)
+	ADD.L	(A2)+,D1                ; add screen Y-offset from table
+	MOVE.L	D1,72(A6)               ; BLTCPT = screen (read)
+	MOVE.L	D1,84(A6)               ; BLTDPT = screen (write)
+	MOVE.W	14(A0),88(A6)           ; BLTSIZE = (height<<6)|width_words
 LAB_0122:
-	BTST	#6,2(A6)
+	BTST	#6,2(A6)                ; wait for blitter busy (DMACONR bit 6)
 	BNE.S	LAB_0122
-	DBF	D0,LAB_0121
+	DBF	D0,LAB_0121            ; next plane
 	MOVEM.L	(A7)+,D2/A2-A3
 	RTS
 LAB_0123:
-	DS.L	6
+	DS.L	6                      ; local param block for clipped blit
+; ── Sprite blitter alternate path — with screen-edge clipping ──
+; Entry: flag bit0 of descriptor+22 is set.
+; Computes BLTSIZE, modulos, and source offsets accounting for partial
+; visibility when sprite extends beyond screen edges (negative or >140/208).
+; Uses same minterm $CA (mask+color) as LAB_0121 but with adjusted params.
+; LAB_0123 = 24-byte scratch block:
+;   +0:  screen byte offset (long)
+;   +4:  computed BLTSIZE (word)
+;   +6:  left-edge first-word shift (word)
+;   +8:  first-word mask (word)
+;   +10: remaining width after clipping (word)
+;   +12: visible height after clipping (word)
+;   +14: skipped planes for left-edge sub-word (word)
+;   +16: skipped rows at top (word)
+;   +18: source byte offset into data (long)
 LAB_0124:
 	MOVEM.L	D2-D4/A2-A4,-(A7)
-	MOVEA.L	988(A5),A2
+	MOVEA.L	988(A5),A2              ; A2 = screen offset table
 	MOVE.W	0(A0),D0
-	MOVEA.L	0(A5,D0.W),A3
-	LEA	LAB_0123(PC),A4
-	MOVE.W	18(A0),D2
+	MOVEA.L	0(A5,D0.W),A3           ; A3 = base address
+	LEA	LAB_0123(PC),A4          ; A4 = scratch block
+; Compute screen byte offset = (Y*40) + (X/8), clamp negatives to 0
+	MOVE.W	18(A0),D2               ; X
 	BPL.S	LAB_0125
 	MOVEQ	#0,D2
 LAB_0125:
-	LSR.W	#3,D2
-	MOVE.W	20(A0),D1
+	LSR.W	#3,D2                   ; X / 8
+	MOVE.W	20(A0),D1               ; Y
 	BPL.S	LAB_0126
-	MOVEQ	#0,D1
+	MOVEQ	#0,D1                   ; clamp Y < 0
 LAB_0126:
 	MOVE.W	D1,D0
-	LSL.W	#5,D0
-	LSL.W	#3,D1
-	ADD.W	D0,D1
-	ADD.W	D1,D2
+	LSL.W	#5,D0                   ; Y * 32
+	LSL.W	#3,D1                   ; Y * 8
+	ADD.W	D0,D1                   ; Y * 40
+	ADD.W	D1,D2                   ; byte offset
 	EXT.L	D2
-	MOVE.L	D2,0(A4)
-	CLR.W	16(A4)
-	MOVE.W	26(A0),D0
-	MOVE.W	D0,12(A4)
-	MOVE.W	20(A0),D1
+	MOVE.L	D2,0(A4)                ; store screen offset
+	CLR.W	16(A4)                  ; clear top-row skip
+; Clip height: visible_h = sprite_h - top_clip
+	MOVE.W	26(A0),D0               ; D0 = full height
+	MOVE.W	D0,12(A4)               ; tentative visible height
+	MOVE.W	20(A0),D1               ; Y position
 	BPL.S	LAB_0127
-	NEG.W	D1
+; Y < 0: skip top |Y| rows
+	NEG.W	D1                       ; D1 = |Y|
 	CMP.W	D1,D0
-	BEQ.W	LAB_0130
+	BEQ.W	LAB_0130                ; fully off top → skip
 	BLT.W	LAB_0130
-	MOVE.W	D1,16(A4)
+	MOVE.W	D1,16(A4)               ; rows to skip
 	SUB.W	D1,D0
-	MOVE.W	D0,12(A4)
+	MOVE.W	D0,12(A4)               ; visible height
 	BRA.S	LAB_0128
+; Y ≥ 0: clip bottom if Y + h > 140 ($8C)
 LAB_0127:
-	ADD.W	D0,D1
-	SUBI.W	#$008c,D1
-	BEQ.S	LAB_0128
-	BMI.S	LAB_0128
+	ADD.W	D0,D1                   ; D1 = Y + h
+	SUBI.W	#$008c,D1               ; D1 -= 140
+	BEQ.S	LAB_0128                 ; exact fit
+	BMI.S	LAB_0128                 ; fits entirely
 	CMP.W	D1,D0
-	BEQ.W	LAB_0130
+	BEQ.W	LAB_0130                ; fully off bottom
 	BLT.W	LAB_0130
-	SUB.W	D1,D0
+	SUB.W	D1,D0                   ; reduce visible height
 	MOVE.W	D0,12(A4)
 LAB_0128:
-	MOVE.W	#$ffff,8(A4)
-	CLR.W	14(A4)
-	CLR.W	6(A4)
-	MOVE.W	24(A0),D0
-	MOVE.W	D0,10(A4)
-	MOVE.W	18(A0),D1
+; Clip width: full-width mask and shift
+	MOVE.W	#$ffff,8(A4)            ; default: full 16-bit mask
+	CLR.W	14(A4)                  ; no left-edge shift
+	CLR.W	6(A4)                   ; no sub-word planes
+	MOVE.W	24(A0),D0               ; full width
+	MOVE.W	D0,10(A4)               ; tentative visible width
+	MOVE.W	18(A0),D1               ; X position
 	BPL.S	LAB_012A
+; X < 0: skip left |X| pixels
 	NEG.W	D1
 	CMP.W	D1,D0
 	BEQ.W	LAB_0130
 	BLT.W	LAB_0130
 	MOVE.W	D1,D2
-	ANDI.W	#$000f,D2
+	ANDI.W	#$000f,D2               ; sub-word offset
 	BEQ.S	LAB_0129
-	SUBQ.L	#2,0(A4)
+; Sub-word left-edge: adjust mask and source offset
+	SUBQ.L	#2,0(A4)                ; back up screen offset by 2 bytes
 	MOVE.W	#$ffff,D3
-	LSR.W	D2,D3
+	LSR.W	D2,D3                   ; create left-edge mask
 	MOVE.W	D3,8(A4)
 	SUBI.W	#$0010,D2
 	NEG.W	D2
-	MOVE.W	D2,6(A4)
+	MOVE.W	D2,6(A4)                ; sub-word plane skip
 LAB_0129:
-	LSR.W	#4,D1
+	LSR.W	#4,D1                   ; full 16-bit groups to skip
 	BEQ.S	LAB_012B
 	LSL.W	#1,D1
-	MOVE.W	D1,14(A4)
+	MOVE.W	D1,14(A4)               ; bytes to skip in source
 	LSL.W	#3,D1
-	SUB.W	D1,D0
+	SUB.W	D1,D0                   ; reduce visible width
 	MOVE.W	D0,10(A4)
 	BRA.S	LAB_012B
+; X ≥ 0: clip right edge if X + w > 208 ($D0)
 LAB_012A:
 	MOVE.W	D1,D2
-	ANDI.W	#$000f,D2
+	ANDI.W	#$000f,D2               ; sub-word offset
 	MOVE.W	D2,6(A4)
-	ADD.W	D0,D1
-	SUBI.W	#$00cf,D1
+	ADD.W	D0,D1                   ; D1 = X + w
+	SUBI.W	#$00cf,D1               ; D1 -= 207
 	BEQ.S	LAB_012B
 	BMI.S	LAB_012B
 	CMP.W	D1,D0
@@ -4120,21 +4201,24 @@ LAB_012A:
 	ANDI.W	#$fff0,D1
 	BEQ.S	LAB_012B
 	SUB.W	D1,D0
-	MOVE.W	D0,10(A4)
+	MOVE.W	D0,10(A4)               ; clipped width
+; Compute final BLTSIZE = (visible_h << 6) | ((visible_w / 16) + 1)
 LAB_012B:
-	MOVE.W	12(A4),D0
-	LSL.W	#6,D0
-	MOVE.W	10(A4),D1
-	LSR.W	#4,D1
+	MOVE.W	12(A4),D0               ; visible height
+	LSL.W	#6,D0                   ; h << 6
+	MOVE.W	10(A4),D1               ; visible width
+	LSR.W	#4,D1                   ; w / 16
 	ADD.W	D1,D0
-	ADDQ.W	#1,D0
-	MOVE.W	D0,4(A4)
+	ADDQ.W	#1,D0                   ; +1 for partial word
+	MOVE.W	D0,4(A4)                ; BLTSIZE
+; Compute source byte offset = (bpr * top_skip) + left_skip
 	MOVEQ	#0,D0
-	MOVE.W	24(A0),D0
-	LSR.W	#3,D0
-	MULU	16(A4),D0
-	ADD.W	14(A4),D0
-	MOVE.L	D0,18(A4)
+	MOVE.W	24(A0),D0               ; full width
+	LSR.W	#3,D0                   ; bytes per row
+	MULU	16(A4),D0               ; * top rows skipped
+	ADD.W	14(A4),D0               ; + left bytes skipped
+	MOVE.L	D0,18(A4)               ; source byte offset
+; Set up mask/color pointers (same logic as LAB_011E)
 	BTST	#1,22(A0)
 	BNE.S	LAB_012C
 	ADDA.L	2(A0),A3
@@ -4146,41 +4230,44 @@ LAB_012C:
 	ADDA.L	2(A0),A1
 	ADDA.L	10(A0),A3
 LAB_012D:
-	MOVE.W	8(A4),68(A6)
-	CLR.W	70(A6)
-	MOVE.W	24(A0),D0
-	SUB.W	10(A4),D0
-	LSR.W	#3,D0
+; Setup blitter with clipping parameters
+	MOVE.W	8(A4),68(A6)           ; BLTAFWM = clipped mask
+	CLR.W	70(A6)                  ; BLTALWM
+	MOVE.W	24(A0),D0               ; full width
+	SUB.W	10(A4),D0               ; - visible width
+	LSR.W	#3,D0                   ; bytes to skip
 	MOVE.W	D0,D1
-	ADD.W	16(A0),D1
-	MOVE.W	D1,96(A6)
-	MOVE.W	D1,102(A6)
+	ADD.W	16(A0),D1               ; + screen modulo
+	MOVE.W	D1,96(A6)               ; BLTCMOD
+	MOVE.W	D1,102(A6)              ; BLTDMOD
 	SUBQ.W	#2,D0
-	MOVE.W	D0,100(A6)
-	MOVE.W	D0,98(A6)
+	MOVE.W	D0,100(A6)              ; BLTBMOD
+	MOVE.W	D0,98(A6)               ; BLTAMOD
+; BLTCON1 first-word shift from sub-word offset
 	MOVE.W	6(A4),D0
 	ROR.W	#4,D0
 	MOVE.W	D0,66(A6)
-	ORI.W	#$0fca,D0
+	ORI.W	#$0fca,D0               ; minterm $CA
 	MOVE.W	D0,64(A6)
-	MOVEQ	#5,D0
+	MOVEQ	#5,D0                   ; 6 planes
+; Blitter loop with source byte offset applied
 LAB_012E:
 	MOVE.L	A3,D1
-	ADD.L	18(A4),D1
-	MOVE.L	D1,80(A6)
+	ADD.L	18(A4),D1              ; mask + source offset
+	MOVE.L	D1,80(A6)               ; BLTAPT
 	MOVE.L	A1,D1
-	ADD.L	18(A4),D1
-	MOVE.L	D1,76(A6)
-	ADDA.L	6(A0),A1
+	ADD.L	18(A4),D1              ; color + source offset
+	MOVE.L	D1,76(A6)               ; BLTBPT
+	ADDA.L	6(A0),A1               ; advance color to next plane
 	MOVE.L	0(A4),D1
-	ADD.L	(A2)+,D1
-	MOVE.L	D1,72(A6)
-	MOVE.L	D1,84(A6)
-	MOVE.W	4(A4),88(A6)
+	ADD.L	(A2)+,D1               ; screen offset + Y table entry
+	MOVE.L	D1,72(A6)               ; BLTCPT
+	MOVE.L	D1,84(A6)               ; BLTDPT
+	MOVE.W	4(A4),88(A6)           ; BLTSIZE
 LAB_012F:
-	BTST	#6,2(A6)
+	BTST	#6,2(A6)                ; wait for blitter
 	BNE.S	LAB_012F
-	DBF	D0,LAB_012E
+	DBF	D0,LAB_012E            ; next plane
 LAB_0130:
 	MOVEM.L	(A7)+,D2-D4/A2-A4
 	RTS

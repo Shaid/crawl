@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One-shot render of all confirmed Black Crypt assets."""
 import struct, os
+import numpy as np
 from PIL import Image
 
 OUT = 'data/blackcrypt/extracted'
@@ -38,6 +39,19 @@ def decode_seq(data, w, h, planes=6):
                     c |= 1 << bp
             px.append(c)
     return px
+
+def decode_seq_fast(data, w, h, planes=6):
+    """Vectorized numpy version of decode_seq. Returns numpy uint8 array."""
+    pb = w // 8
+    total = pb * h * planes
+    if len(data) < total:
+        return None
+    buf = np.frombuffer(data[:total], dtype=np.uint8).reshape(planes, h, pb)
+    # Extract each bit into a (planes, h, w) boolean array
+    bits = np.unpackbits(buf, axis=2, bitorder='big')[:, :, :w]
+    # Weight each plane and sum: plane i contributes 2^i
+    weights = (1 << np.arange(planes)).reshape(planes, 1, 1)
+    return (bits * weights).sum(axis=0).astype(np.uint8)
 
 def save_grey(px, w, h, maxc, name):
     gs = bytes(int(c*255/maxc) for c in px)
@@ -200,29 +214,109 @@ for name,td,w,h,planes,pal,is_6bpp in screens:
     save_color(px,w,h,pal,f'08_{name}',is_6bpp)
 print('   Raven logo, Title, BC banner, Plot text')
 
-# ── 09. bcdfb wall strips (48×4bpp, 10 sections) ─────────────────
-print('09 bcdfb wall strips...')
-with open(f'{AMIGA}/bcdfb','rb') as f: bcdfb_data=f.read()
-W3,planes3=48,4
-bpr3=W3//8*planes3  # 24
-sizes=[312,648,744,864,1008,1032,1128,1200,1368,1512]
-heights=[s//bpr3 for s in sizes]
+# ── 09. bcdfb–bcdfn monster sprites (7-plane: mask + 6bpp EHB) ───
+print('09 bcdfb–bcdfn monster sprites...')
+MONSTER_FILES = ['bcdfb','bcdfc','bcdfd','bcdfe','bcdff','bcdfg',
+                 'bcdfh','bcdfi','bcdfj','bcdfk','bcdfl','bcdfm','bcdfn']
 
-# Find starting offset by scanning for first section boundary
-# The 12-byte header then directory. Let's try the first section after directory.
-# bcdfb has 10 sections. Directory = 10 * 28 = 280 bytes. Start at offset 12+280=292.
-for start_off in [292]:
-    off=start_off
-    strip=Image.new('L',(W3*3,sum(heights)))
-    yp=0; ok=True
-    for si,sz in enumerate(sizes):
-        h=heights[si]
-        if off+sz>len(bcdfb_data): ok=False; break
-        px=decode_seq(bcdfb_data[off:off+sz],W3,h,planes3)
-        strip.paste(Image.frombytes('L',(W3,h),bytes(int(c*255/15) for c in px)).resize((W3*3,h),Image.NEAREST),(0,yp))
-        yp+=h; off+=sz
-    if ok:
-        strip.save(f'{OUT}/09_bcdfb_walls_4bpp.png')
-        print(f'   offset {start_off}: {len(sizes)} sections, {sum(heights)} rows')
+def parse_monster_dir(data):
+    """Parse 12-byte header + 28-byte directory entries."""
+    entries = []
+    n_entries = (len(data) - 12) // 28
+    for i in range(n_entries):
+        off = 12 + i * 28
+        data_off = struct.unpack('>I', data[off:off+4])[0]
+        bpr = struct.unpack('>I', data[off+4:off+8])[0]
+        typ = struct.unpack('>H', data[off+20:off+22])[0]
+        w = struct.unpack('>H', data[off+22:off+24])[0]
+        h = struct.unpack('>H', data[off+24:off+26])[0]
+        entries.append((data_off, bpr, typ, w, h))
+    return entries
+
+def render_monster_sprite(data, data_off, bpr, w, h):
+    """Render 7-plane sprite: plane0=mask, planes1-6=6bpp EHB color.
+    Returns (mask_arr, color_arr) as numpy uint8 arrays, or (None, None)."""
+    total = bpr * 7
+    if data_off + total > len(data):
+        return None, None
+    blk = data[data_off:data_off + total]
+    mask = decode_seq_fast(blk[:bpr], w, h, planes=1)
+    color = decode_seq_fast(blk[bpr:], w, h, planes=6)
+    if mask is None or color is None:
+        return None, None
+    return mask, color
+
+def save_monster_grey(mask, color, w, h, name):
+    """Save greyscale preview of monster sprite (color only, no mask)."""
+    gs = (color.astype(np.float32) * 255 / 63).astype(np.uint8)
+    Image.frombytes('L', (w, h), gs.tobytes()).save(f'{OUT}/{name}_grey.png')
+
+def save_monster_color(mask, color, w, h, pal, name):
+    """Save color monster sprite with transparency (checkerboard bg)."""
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    # Checkerboard background
+    xx, yy = np.meshgrid(np.arange(w), np.arange(h))
+    ck = ((xx // 4 + yy // 4) & 1).astype(np.uint8)
+    ck_val = np.where(ck, 64, 96).astype(np.uint8)
+    img[:, :, 0] = ck_val
+    img[:, :, 1] = ck_val
+    img[:, :, 2] = ck_val
+    # Build 64-entry RGB palette
+    pal64 = np.zeros((64, 3), dtype=np.uint8)
+    for i in range(64):
+        idx = i if i < 32 else i - 32
+        hb = i >= 32
+        pal64[i] = pal_rgb(pal[idx], hb)
+    # Map color values to RGB
+    flat_c = color.flatten()
+    rgb = pal64[flat_c].reshape(h, w, 3)
+    # Apply mask: transparent → keep checkerboard
+    m = mask.flatten().astype(bool)
+    m2d = m.reshape(h, w)
+    for c in range(3):
+        ch = img[:, :, c]
+        ch[m2d] = rgb[:, :, c][m2d]
+        img[:, :, c] = ch
+    Image.fromarray(img).save(f'{OUT}/{name}_color.png')
+
+total_sprites = 0
+for fname in MONSTER_FILES:
+    fpath = f'{AMIGA}/{fname}'
+    if not os.path.exists(fpath):
+        continue
+    with open(fpath, 'rb') as f: mdata = f.read()
+    entries = parse_monster_dir(mdata)
+    # Collect unique (data_off, bpr, w, h) to avoid duplicate renders
+    seen = {}
+    sprites = []
+    for data_off, bpr, typ, w, h in entries:
+        if data_off + bpr * 7 > len(mdata) or w == 0 or h == 0:
+            continue
+        key = (data_off, w, h)
+        if key not in seen:
+            seen[key] = len(sprites)
+            sprites.append((data_off, bpr, typ, w, h, fname))
+    # Render each unique sprite
+    for idx, (data_off, bpr, typ, w, h, src) in enumerate(sprites):
+        if w == 0 or h == 0 or bpr == 0:
+            continue
+        if bpr != (w // 8) * h:
+            continue
+        if data_off + bpr * 7 > len(mdata):
+            continue
+        mask, color = render_monster_sprite(mdata, data_off, bpr, w, h)
+        if mask is None or color is None:
+            continue
+        if mask.shape != (h, w) or color.shape != (h, w):
+            continue
+        tag = f'09_{src}_{idx:03d}_{w}x{h}'
+        try:
+            save_monster_grey(mask, color, w, h, tag)
+            save_monster_color(mask, color, w, h, dung_pal, tag)
+            total_sprites += 1
+        except Exception as e:
+            print(f'   WARN {tag}: {e} mask={mask.shape} color={color.shape}')
+    print(f'   {fname}: {len(entries)} entries, {len(sprites)} unique sprites')
+print(f'   Total: {total_sprites} sprites')
 
 print(f'\nDone. {OUT}/')

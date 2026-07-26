@@ -33,9 +33,11 @@ main executable.
 - **maindung.gam** (DOS): Dungeon data — identical structure to Amiga `bcdfs`,
   differing only in endianness.
 
-- **bcdfb–bcdfn**: Structured image files — 13 files with 12-byte BE headers and
-  directory records, containing 32px-wide 6bpp planar strips at varying heights.
-  Directory format not yet fully parsed (heuristic extraction produced false positives).
+- **bcdfb–bcdfn**: Monster sprite files — 13 files with 12-byte BE headers and
+  28-byte directory entries, containing **7 sequential raw bitplanes** per sprite
+  block (plane 0 = mask, planes 1–6 = 6bpp EHB color). Directory format fully
+  decoded. Filenames NOT referenced in any disassembled overlay — loading mechanism
+  unknown. **189 unique sprites rendered** across 13 files (3 zoom levels per monster).
 - **bcdfr**: 4 full-screen images with per-screen BPP, sized by bcdfq chunk readers:
   Raven logo (4bpp, 320×200, 32KB), Title screen (6bpp, 320×200, 48KB),
   BC logo banner (6bpp, 320×44, 10,560B), Plot text (6bpp, 320×200, 48KB).
@@ -45,8 +47,6 @@ main executable.
 
 #### Undecoded
 
-- **bcdfb–bcdfn directory format**: Proper directory record parsing needed — heuristic
-  approach found too many false positives. Records appear to use 28-byte entries.
 - **bcdfq appended data**: 81,908 B of chunked data after HUNK code — contains tile
   and texture resources loaded via self-reading mechanism.
 - **P1 (42,754 B)**: Background/fill data — not a standard image dimension at any
@@ -122,9 +122,12 @@ bcdfz has 6, bcdfy has 4 (all zeros).
    CHIP buffer loaded by bcdfp, but bcdfa contains 64×24 icons, bcdfo has 32×24
    portraits, and bcdfx P2 is a 208×356 texture atlas. The actual 32×24 dungeon
    wall tiles may be in bcdfq's appended data or bcdfr.
-4. **What do the bcdfb–bcdfn image strips represent?** They contain 32px-wide
-   pre-rendered wall views at varying heights — likely composed at runtime into
-   the dungeon viewport. Directory format needs proper parsing. 
+4. **How are bcdfb–bcdfn loaded at runtime?** Filenames do NOT appear in any
+   disassembled overlay (bcdfp, bcdfq, bcdfu, bcdft). Loading code must be in
+   an undiscovered overlay or constructed dynamically.
+5. **What do the +0C/+0E fields in monster directory entries represent?** +0C
+   varies with sprite size (e.g. 0x1F07 for 96×124), +0E = screen modulo.
+   +0C appears related to BLTSIZE but off by 1 from expected value.
 
 ---
 
