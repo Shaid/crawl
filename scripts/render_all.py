@@ -141,7 +141,7 @@ with open(f'{AMIGA}/bcdfa','rb') as f: bcdfa=f.read()
 streams=[]; pos=0
 while pos<len(bcdfa):
     d,pos=rle_decompress(bcdfa,pos)
-    if d: streams.append(d)
+    streams.append(d)  # include empty — index must match stream number
 
 W2,H2,TS2 = 64,24,1152
 all_tiles=[]
@@ -219,19 +219,48 @@ print('09 bcdfb–bcdfn monster sprites...')
 MONSTER_FILES = ['bcdfb','bcdfc','bcdfd','bcdfe','bcdff','bcdfg',
                  'bcdfh','bcdfi','bcdfj','bcdfk','bcdfl','bcdfm','bcdfn']
 
-def parse_monster_dir(data):
-    """Parse 12-byte header + 28-byte directory entries."""
+def parse_monster_dir(raw):
+    """Parse 12-byte header + 42 × 28-byte directory entries from RAW data."""
     entries = []
-    n_entries = (len(data) - 12) // 28
+    n_entries = 42
     for i in range(n_entries):
         off = 12 + i * 28
-        data_off = struct.unpack('>I', data[off:off+4])[0]
-        bpr = struct.unpack('>I', data[off+4:off+8])[0]
-        typ = struct.unpack('>H', data[off+20:off+22])[0]
-        w = struct.unpack('>H', data[off+22:off+24])[0]
-        h = struct.unpack('>H', data[off+24:off+26])[0]
+        if off + 28 > len(raw):
+            break
+        data_off = struct.unpack('>I', raw[off:off+4])[0]
+        bpr = struct.unpack('>I', raw[off+4:off+8])[0]
+        typ = struct.unpack('>H', raw[off+20:off+22])[0]
+        w = struct.unpack('>H', raw[off+22:off+24])[0]
+        h = struct.unpack('>H', raw[off+24:off+26])[0]
         entries.append((data_off, bpr, typ, w, h))
     return entries
+
+def rle_decompress_streams(raw, header_size=12, n_entries=42):
+    """RLE decompress multiple streams from raw file, skipping header+dir.
+    Returns concatenated decompressed data. Matches extract_bcdfb_bcdfn.py's approach."""
+    dir_end = header_size + n_entries * 28
+    all_dec = bytearray()
+    pos = dir_end
+    while pos < len(raw):
+        while pos < len(raw) and raw[pos] == 0:
+            pos += 1
+        if pos >= len(raw):
+            break
+        j = pos
+        out = bytearray()
+        while j < len(raw):
+            ctrl = raw[j]; j += 1
+            if ctrl == 0:
+                break
+            n = ctrl >> 1
+            if ctrl & 1:
+                out.extend(raw[j:j+n]); j += n
+            else:
+                if j < len(raw):
+                    out.extend([raw[j]] * n); j += 1
+        all_dec.extend(out)
+        pos = j
+    return bytes(all_dec)
 
 def render_monster_sprite(data, data_off, bpr, w, h):
     """Render 7-plane sprite: plane0=mask, planes1-6=6bpp EHB color.
@@ -284,39 +313,112 @@ for fname in MONSTER_FILES:
     fpath = f'{AMIGA}/{fname}'
     if not os.path.exists(fpath):
         continue
-    with open(fpath, 'rb') as f: mdata = f.read()
-    entries = parse_monster_dir(mdata)
-    # Collect unique (data_off, bpr, w, h) to avoid duplicate renders
-    seen = {}
-    sprites = []
+    with open(fpath, 'rb') as f: raw_data = f.read()
+    entries = parse_monster_dir(raw_data)
+    mdata = rle_decompress_streams(raw_data)
+    # Group entries by data_off — each group = one sprite with N frames
+    from collections import OrderedDict
+    groups = OrderedDict()
     for data_off, bpr, typ, w, h in entries:
-        if data_off + bpr * 7 > len(mdata) or w == 0 or h == 0:
-            continue
-        key = (data_off, w, h)
-        if key not in seen:
-            seen[key] = len(sprites)
-            sprites.append((data_off, bpr, typ, w, h, fname))
-    # Render each unique sprite
-    for idx, (data_off, bpr, typ, w, h, src) in enumerate(sprites):
         if w == 0 or h == 0 or bpr == 0:
-            continue
-        if bpr != (w // 8) * h:
             continue
         if data_off + bpr * 7 > len(mdata):
             continue
-        mask, color = render_monster_sprite(mdata, data_off, bpr, w, h)
-        if mask is None or color is None:
+        if data_off not in groups:
+            groups[data_off] = []
+        groups[data_off].append((data_off, bpr, typ, w, h, fname))
+
+    for data_off, group in groups.items():
+        bpr = group[0][1]; w = group[0][3]; h = group[0][4]
+        if bpr != (w // 8) * h:
             continue
-        if mask.shape != (h, w) or color.shape != (h, w):
-            continue
-        tag = f'09_{src}_{idx:03d}_{w}x{h}'
-        try:
-            save_monster_grey(mask, color, w, h, tag)
-            save_monster_color(mask, color, w, h, dung_pal, tag)
-            total_sprites += 1
-        except Exception as e:
-            print(f'   WARN {tag}: {e} mask={mask.shape} color={color.shape}')
-    print(f'   {fname}: {len(entries)} entries, {len(sprites)} unique sprites')
-print(f'   Total: {total_sprites} sprites')
+        n_frames = len(group)
+        bpr_row = w // 8
+        base_h = h // n_frames
+        rem = h % n_frames
+
+        for fi in range(n_frames):
+            fh = base_h + (1 if fi < rem else 0)
+            start_row = sum(base_h + (1 if fj < rem else 0) for fj in range(fi))
+            # Extract just this frame's bitplane data
+            frame_bpr = bpr_row * fh
+            blk = bytearray()
+            for plane in range(7):
+                plane_off = data_off + plane * bpr
+                blk.extend(mdata[plane_off + start_row * bpr_row : plane_off + start_row * bpr_row + frame_bpr])
+            mask = decode_seq_fast(bytes(blk[:frame_bpr]), w, fh, planes=1)
+            color = decode_seq_fast(bytes(blk[frame_bpr:]), w, fh, planes=6)
+            if mask is None or color is None:
+                continue
+            tag = f'09_{group[0][5]}_{data_off:05x}_{fi:02d}_{w}x{fh}'
+            try:
+                save_monster_grey(mask, color, w, fh, tag)
+                save_monster_color(mask, color, w, fh, dung_pal, tag)
+                total_sprites += 1
+            except Exception as e:
+                print(f'   WARN {tag}: {e} mask={mask.shape} color={color.shape}')
+    print(f'   {fname}: total {total_sprites} frames')
+print(f'   Total: {total_sprites} frames')
+
+# ── 10. bcdfa BCSPEED.GFK sprite animations (32×14 @4bpp) ─────────
+print('10 bcdfa BCSPEED.GFK sprites...')
+# Re-create bcdfa streams (reuse from section 06)
+streams.clear()
+pos = 0
+while pos < len(bcdfa):
+    d, pos = rle_decompress(bcdfa, pos)
+    streams.append(d)  # include empty — index must match stream number
+
+# Parse stream 407 (BCSPEED.GFK)
+s407 = streams[407]
+gfk_marker = b'BCSPEED\x00GFK\x00'
+gfk_markers = []
+idx = 0
+while True:
+    idx = s407.find(gfk_marker, idx)
+    if idx == -1:
+        break
+    gfk_markers.append(idx)
+    idx += len(gfk_marker)
+
+gfk_entries = []
+for i in range(len(gfk_markers)):
+    m = gfk_markers[i]
+    type_val = struct.unpack('>H', s407[m + len(gfk_marker):m + len(gfk_marker) + 2])[0]
+    data_start = 0 if i == 0 else gfk_markers[i - 1] + len(gfk_marker) + 2
+    entry_data = s407[data_start:m]
+    gfk_entries.append((type_val, entry_data))
+    print(f'   GFK entry {i}: type=0x{type_val:04x}, {len(entry_data)} bytes')
+
+# Render all GFK sprites as 32×14 @4bpp, EHB palette
+GFK_W, GFK_H, GFK_P = 32, 14, 4
+GFK_BPR = GFK_W // 8  # 4 bytes/row/plane
+GFK_FRAME = GFK_BPR * GFK_H * GFK_P  # 224 bytes per frame
+import math
+
+for ei, (type_val, edata) in enumerate(gfk_entries):
+    if len(edata) < GFK_FRAME:
+        continue
+    n_frames = len(edata) // GFK_FRAME
+    cols = min(n_frames, 8)
+    rows = (n_frames + cols - 1) // cols
+    sheet = Image.new('RGB', (cols * GFK_W * 4, rows * GFK_H * 4), (0, 0, 0))
+    for fi in range(n_frames):
+        frame_data = edata[fi * GFK_FRAME:(fi + 1) * GFK_FRAME]
+        px = decode_seq(frame_data, GFK_W, GFK_H, GFK_P)
+        img = Image.new('RGB', (GFK_W, GFK_H))
+        for y in range(GFK_H):
+            for x in range(GFK_W):
+                c = px[y * GFK_W + x]
+                img.putpixel((x, y), pal_rgb(dung_pal[c], False))
+        sheet.paste(img.resize((GFK_W * 4, GFK_H * 4), Image.NEAREST),
+                    ((fi % cols) * GFK_W * 4, (fi // cols) * GFK_H * 4))
+    sheet.save(f'{OUT}/10_bcspeed_gfk_e{ei:02d}_type{type_val:04x}.png')
+print(f'   {len(gfk_entries)} GFK entries rendered')
+
+# ── 11. Visual confirmation of item graphics location ──────────────
+print('11 item graphics — from bcdfo portrait tiles + LAB_010D UI')
+print('   Items in inventory/character screen: bcdfo 32x24 tiles (109 portraits)')
+print('   Items on dungeon floor: in bcdft S_5 (LZ77-compressed, not yet extractable)')
 
 print(f'\nDone. {OUT}/')

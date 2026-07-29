@@ -2,7 +2,7 @@
 
 ## Overview
 
-Black Crypt (1992, Attention to Detail / Psygnosis) is a first-person dungeon
+Black Crypt (1992, Raven Software / Electronic Arts) is a first-person dungeon
 crawler for the Amiga. It uses the Amiga's EHB (Extra Half-Brite) display mode
 (6 bitplanes, 64 colors) and supports anaglyph 3D glasses.
 
@@ -16,16 +16,16 @@ alongside the main executable `BlackCrypt` and a small `configuration.dat`.
 | File             | Size      | Type                        | Loader      | Notes                              |
 |------------------|-----------|-----------------------------|-------------|------------------------------------|
 | `BlackCrypt`     | 12,700 B  | HUNK executable             | AmigaDOS    | Opens overlays + config            |
-| `bcdfa`          | 197,894 B | RLE icon/item tile set      | **bcdfq**   | 477 RLE streams → 280 tiles × 64×24×6bpp seq-planar (faces, automap, items) |
-| `bcdfb`–`bcdfn`  | 48–72 KB  | RLE monster sprites (per dungeon level) | bcdfq | 64×variable×6bpp, RLE-compressed streams (same algorithm as bcdfu). Each file = all monsters for one level. |
+| `bcdfa`          | 197,894 B | RLE container/archive        | **bcdfq**   | 887 RLE streams (408KB decompressed). Container format with "BCSPEED.GFK"/"BCSPEED.PRG" markers — NOT simple sequential tiles. |
+| `bcdfb`–`bcdfn`  | 48–72 KB  | RLE monster sprites (per dungeon level) | bcdfv | 42 × 28-byte directory entries per file + 7-plane sequential bitplane data (mask + 6bpp EHB). RLE-compressed. 495 animation frames extracted. |
 | `bcdfo`          | 63,010 B  | Character portraits + UI elements | bcdfp        | 109 portraits × 32×24×6bpp at offset $60, plus UI tiles at assembly-specified offsets (see bcdfp LAB_010D) |
-| `bcdfp`          | 23,960 B  | HUNK overlay (CODE+DATA)    | BlackCrypt   | Blitter, BCSub, item/class tables  |
-| `bcdfq`          | 87,220 B  | HUNK overlay + appended data | BlackCrypt  | 5KB code + 82KB appended textures (reads self) |
+| `bcdfp`          | 23,960 B  | HUNK overlay (CODE+DATA)    | BlackCrypt   | All 3D rendering, blitter routines, BCSub, item/class tables, save/load |
+| `bcdfq`          | 87,220 B  | HUNK overlay + appended data | BlackCrypt  | Intro screens + music engine. Contains monster palette at FILE offset `0x2C6` and dungeon palette at CODE+`0x2C6` |
 | `bcdfr`          | 138,560 B | Full-screen images (4 screens, per-screen BPP) | bcdfq | 32KB Raven (4bpp, 320×200) + 48KB Title (6bpp, 320×200) + 10,560B Logo (6bpp, 320×44) + 48KB Plot (6bpp, 320×200) — chunk sizes from bcdfq LAB_0022/27/2B/2F |
 | `bcdfs`          | 171,005 B | Dungeon/map data            | bcdfp        | Read in `LAB_0022/27/2B` chunks    |
-| `bcdft`          | 85,684 B  | HUNK overlay (7 hunks)      | BlackCrypt   | 80B dispatch + compiled data tables; NO file I/O |
-| `bcdfu`          | 141,388 B | HUNK overlay (GAMEDISK2:)   | BlackCrypt   | Graphics sys, 4 palettes, MMD0, text |
-| `bcdfv`          | 191,917 B | RLE-compressed screen data  | bcdfu        | Decompresses to 32,000 B (4bpp)   |
+| `bcdft`          | 85,684 B  | HUNK overlay (7 hunks)      | BlackCrypt   | LZ77-compressed game data (item names, strings, quest text, tables — **NOT** textures). Decompressed via musashi emulator (`tools/bcdft_decompress/`). |
+| `bcdfu`          | 141,388 B | HUNK overlay (GAMEDISK2:)   | BlackCrypt   | RLE decompressor, music/sound, text strings. Monster palette at FILE offset `0x2C6` |
+| `bcdfv`          | 191,917 B | Multi-block container (sound + sprites) | bcdfu        | RLE-compressed blocks for intro screens + game data (see bcdfv section) |
 | `bcdfw`          | 457 B     | Workbench drawer icon       | —            | `0xE3100001`                       |
 | `bcdfx`          | 144,169 B | RLE multi-payload (GAMEDISK2) | **bcdfu**  | 10 RLE payloads: P2=208×356 floor atlas, P4/P5=80×193 walls, P0=depth table, P3=viewport mask, P6–P9=fill/misc |
 | `bcdfy`          | 117,937 B | RLE multi-payload (GAMEDISK2) | **bcdfu**  | Mostly 0xFF fill, sparse payloads (P0–P3), 178 RLE streams |
@@ -100,12 +100,135 @@ Hunk 2: BSS    — 4 B (public)
 ### bcdfp (overlay)
 
 Loads `GAMEDISK1:bcdfs`. References `OrigDungeons` and `TempDungeons`.
+**Contains ALL 3D dungeon rendering code** — bcdfq has zero dungeon rendering.
 
 ```
 Hunk 0: CODE   — 22,032 B (public, 4 reloc32 entries)
 Hunk 1: DATA   — 1,748 B + 1,976 BSS (public, 14 reloc32 entries)
 Hunk 2: BSS    — 4 B (public)
 ```
+
+#### Monster Sprite Rendering Pipeline
+
+The monster sprite rendering code is entirely within **inline raw data blocks**
+that IRA encoded as `DC.L` (failed to disassemble). There are **no labeled
+callers** of LAB_011E for monster sprites in the disassembly.
+
+**VBlank Handler LAB_00D3** (line 3100): Drives the 3D viewport rendering
+pipeline. Dispatches through a jump table to rendering phases.
+
+**Direction Dispatch** (lines 3156–3183): For each player direction (N/E/S/W),
+calls different viewport + monster rendering functions via `BSR.W`.
+
+**Sprite Descriptor Construction** (inline, ~line 3212–3213):
+- Loads sprite data pointer from `A5+$03CE`
+- Loads sprite descriptor base from `A5+$03C2`
+- Writes sprite dimensions to descriptor +2 (width) and +6 (height/BLTSIZE)
+- Loads sprite data buffer base from `A5+$03C6` (bcdfv decompressed data)
+- Skips 12 bytes of header (`LEA $000C(A1),A1`)
+- Copies sprite data: `MOVE.W (A0)+,(A1)+` + `LEA $000C(A1),A1` (stride 12)
+
+**Sprite Copy Loop** (inline):
+```asm
+MOVEQ #7,D0            ; 8 iterations
+loop: MOVE.W (A0)+,(A1)+
+      LEA $000C(A1),A1  ; stride 12 between planes
+      DBF D0,loop
+```
+
+**Key A5 Offsets for Monster Sprite Rendering:**
+
+| Offset | Purpose |
+|--------|---------|
+| A5+$03BE | Alternate sprite pointer |
+| A5+$03C2 | Sprite descriptor base pointer (A2 in blitter) |
+| A5+$03C6 | Sprite data buffer base (bcdfv decompressed data) |
+| A5+$03CE | Sprite data pointer (current monster) |
+| A5+$03D6 | Sprite type/index |
+| A5+$03D8 | Sprite state longword |
+| A5+$03D9 | Sprite-active flag (byte) |
+| A5+$03DA | Sprite direction/movement byte |
+| A5+$043C | Rendering state flag |
+
+#### Text Rendering Blitter (LAB_0103, line 3646)
+
+A separate blitter for rendering text characters:
+- Plane stride: 256 bytes ($100)
+- BLTSIZE: $0211 = height=8, width_words=17 (272 pixels/34 bytes per row)
+- Screen modulo: 6 bytes
+- 6 iterations (DBF D0,5)
+- Font data loaded from 0(A5)+$A148
+
+#### Character Record Layout (from WHDLoad trainer)
+
+0xA8 (168) bytes per character, 4 characters:
+- +$00: name
+- +$4E: current HP (w)
+- +$50: max HP (w)
+- +$52: experience (l)
+- +$56: gold (w)
+- +$64..$68: current STR/INT/WIS/CON/CHR (b)
+- +$6E..$72: max STR/INT/WIS/CON/CHR (b)
+- +$A2: level/XP (w)
+
+Base: $1758(A5), offsets: +0, +$A8, +$150, +$1F8
+
+---
+
+### Amiga Hardware & Disassembly Conventions
+
+#### Register usage
+
+- **A6** = library base (dos, exec, graphics)
+- **A5** = local data frame (game state, pointers, scratch)
+- **A4** = overlay data
+
+#### DOS LVO offsets
+
+| Function | LVO    |
+|----------|--------|
+| Open     | -30    |
+| Close    | -36    |
+| Read     | -42    |
+| Write    | -48    |
+| Lock     | -84    |
+
+#### BLTSIZE encoding
+
+`BLTSIZE = (height << 6) | width_in_words`
+
+Example: `$0603` = height 24, width 3 words (48 pixels).
+
+#### 6bpp EHB (Extra Half-Brite)
+
+Colors 0–31 are normal; colors 32–63 are half-bright copies (color >> 1).
+12-bit Amiga RGB → 24-bit: multiply each nibble by 17 (e.g., `0xC86` → RGB 204,136,102).
+
+#### Blitter minterms
+
+| Minterm  | Operation | Use case |
+|----------|-----------|----------|
+| `$0FCA`  | D = (A AND B) OR (NOT A AND C) | Mask+color sprite blit (A=mask, B=color, C/D=screen) |
+| `$09F0`  | D = C | Screen-to-screen copy |
+| `$03CA`  | D = B | Opaque source-to-screen copy (no mask) |
+| `$00F0`  | D = C | Full word fill/copy |
+
+#### IRA disassembly quirk
+
+BCLR instructions at label data are raw bytes, not code — IRA sometimes
+misidentifies data as instructions.
+
+#### Key blitter functions (bcdfp.asm)
+
+| Function | Description |
+|----------|-------------|
+| LAB_010D | 28-byte descriptor table for UI elements (source offset, stride, BLTSIZE, modulo, flags, width, height) |
+| LAB_010E | Render UI element by descriptor index → LAB_011E |
+| LAB_010F | Render portrait by tile index → LAB_011E (uses LAB_010C as live descriptor) |
+| LAB_0110 | Simple opaque screen blitter (2-pass: aligned words + edge pixels) |
+| LAB_011B | Screen-to-screen blit for scrolling |
+| LAB_011E | Main sprite blitter with clipping (minterm $0FCA, 6 plane iterations) |
+| LAB_0124 | Alternate sprite blitter with screen-edge clipping |
 
 ### bcdfq (overlay with CHIP data)
 
@@ -142,8 +265,17 @@ Hunk 1: DATA
 ```
 
 Contains 3 MMD0 music modules, 8SVX sound effects, game narrative text
-strings, and **4 palette variants** at offsets `0x03C8`, `0x0408`, `0x0448`,
-and `0x0488`. Each palette is 32 × 16-bit Amiga color registers (64 bytes).
+strings, and **palette data** at two critical locations:
+
+1. **Monster sprite palette**: FILE offset `0x2C6` (32 colors + 32 half-bright).
+   Has RED (255,0,0), ORANGE, TAN — correct for monster rendering.
+   ⚠ Loading from `36+0x2C6` gives the dungeon palette (blue ogres).
+
+2. **Dungeon wall/floor palette**: CODE + `0x2C6` = file offset `36 + 0x2C6 = 0x2EA`
+   (32 colors + 32 half-bright). Has BROWNS, BLUES, GREYS for the 3D view.
+
+Both are 32 × 16-bit Amiga color registers (64 bytes) with EHB half-bright
+computed as `(r//2, g//2, b//2)` for indices 32-63.
 Colors 0–25 are identical across all variants; colors 26–31 vary (likely for
 different dungeon areas or lighting conditions).
 
@@ -153,14 +285,49 @@ Imports: `graphics.library`, `intuition.library`, `dos.library`. Accesses
 ### bcdft (overlay — data carrier, 7 hunks)
 
 ```
-Hunk 0: CODE   — 80 B (thin dispatch wrapper)
-Hunk 1–6:      — CODE/DATA sections (overlay hunks)
+Hunk 0: CODE   — 80 B (entry stub / chain resolver)
+Hunk 1: BSS    — 166 KB target (S_1: decompressed output)
+Hunk 2: BSS    — 40 KB target (S_2: decompressed output)
+Hunk 3: BSS    — 4 bytes (S_3: temporary)
+Hunk 4: CODE   — LZ77 decompression engine (S_4)
+Hunk 5: DATA   — 84,976 B LZ77-compressed dungeon data (S_5)
+Hunk 6: BSS    — 18 KB read buffer (S_6)
 ```
 
-Primarily compiled data tables (game logic, level data). The code section
-is a minimal dispatch stub that delegates to `bcdfu` and `bcdfp`. No strings
-or library imports of its own — acts as a data carrier loaded at runtime.
+**S_0 entry**: Chain resolver frees S_3/S_5/S_6, returns modified A1.
+**S_4 engine**: Custom backwards-reading LZ77 + pointer relocation fixups.
+Reads S_5 data backwards from its end using an 8-byte FIFO, 3-pass
+structure (destinations: S_1=166KB, S_2=40KB, S_3=4B), and embedded
+table-driven bit-tree decoding for lengths and offsets.
+
+**S_5 contents**: Item names, game strings, quest text, spell names,
+class/race data, and game logic tables. **NOT** wall/floor pixel textures —
+those come from bcdfx/y/z as RLE-decompressed 6bpp planar bitmaps.
+
+No strings or library imports of its own — acts as a data carrier loaded at runtime.
 **Confirmed: 7 hunks, NO DOS library calls, NO file I/O whatsoever.**
+
+**Decompression**: Achieved by running the actual S_4 code (496 bytes of 68k)
+inside a [musashi](https://github.com/kstenerud/musashi) CPU emulator.
+See `tools/bcdft_decompress/` for the build/run:
+```bash
+cd tools/bcdft_decompress && bash build.sh run
+```
+Output: 166,676 bytes, ~113KB non-zero, to `data/blackcrypt/extracted/bcdft_decompressed.bin`.
+
+**Known strings in output** (verified against game strings):
+| String | Offset |
+|--------|--------|
+| `POTION OF WATER BREATHING` | 118,185 |
+| `POTION OF HEALING` | 116,628 |
+| `CANNOT PLACE ITEM IN INVENTORY` | 120,287 |
+| `CANNOT USE THIS SPELLBOOK` | 120,388 |
+| `THIS ITEM DOES NOT FIT IN` | 120,617 |
+| `FIGHTER / CLERIC / MAGIC USER / DRUID` | 108,681 |
+| `SPELL FAILED` | 119,198 |
+| `RAISE DEAD / CURE POISON / SHIELD / DISPEL MAGIC` | 108,068 |
+
+**WHDLoad slave**: matches by hunk size $4C1AC, patches at $496BA/$496C2 (trainer).
 
 ---
 
@@ -197,30 +364,39 @@ source pointer `A1 += plane_stride` each plane → **sequential planar**, not wo
 | bcdfs | bcdfp | `bcdfp.asm:2601` | Dungeon/map data |
 | bcdfr | bcdfq `LAB_0019` | `bcdfq.asm:306-321` | Fullscreen images, buffer `$BB80` |
 | bcdfv | bcdfu | `bcdfu.asm:523` | Animation/script data |
-| **bcdfa–n** | **UNKNOWN** | *exhaustively searched* | No `Open()` string in any binary; not in UAE CHIP RAM during gameplay |
-| **bcdfx**   | **UNKNOWN** | *exhaustively searched* | Not referenced in any disassembled overlay; loading code in undisassembled overlays (bcdfc–bcdfn range) |
+| bcdfb–bcdfn | bcdfv | `bcdfu.asm:611` | 13 dungeon level graphic stores, loaded via bcdfv |
+| **bcdfa**    | **UNKNOWN** | *exhaustively searched* | No `Open()` string in any binary |
+| **bcdfx**   | **UNKNOWN** | *exhaustively searched* | Not referenced in any disassembled overlay |
 | **bcdfy**   | **UNKNOWN** | *exhaustively searched* | Same as bcdfx |
 | **bcdfz**   | **UNKNOWN** | *exhaustively searched* | Same as bcdfx |
 
-**Loader theory for bcdfa–n:** BCMain (bcdfq) reads these files from its own
-appended data on the current disk. The file sizes (48–72 KB each) combined with
-bcdfq's appended 82 KB suggest that bcdfq on each disk contains the tile data
-for that disk's dungeon level. bcdfq's chunk readers (LAB_0022/LAB_0027/LAB_002B)
-read sequential data blocks using size tables, and the total data read (81,908 B)
-covers the tile atlas, palette, screen data, and other level-specific resources.
+**Loader theory for bcdfa:** No loading mechanism found in disassembled overlays.
+bcdfa may be a legacy/unused file from development, or loaded via code not yet
+disassembled.
 
 **Loader theory for bcdfx/bcdfy/bcdfz:** These are standalone RLE data files
 on GAMEDISK2: and GAMEDISK3: that provide dungeon texture atlases (P2 = wall/floor
-textures at 208×356×6bpp). However, bcdfq's appended data on GAMEDISK1: (81,908 B)
-is smaller than bcdfx (144,169 B), suggesting the standalone files may contain
-additional data beyond what bcdfq carries. The most likely loading mechanism is:
+textures at 208×356×6bpp). Not referenced in any disassembled overlay — may be
+loaded via code not yet disassembled.
 
-1. bcdfq is loaded from the current disk via LoadSeg("bcdfq")
-2. bcdfq opens itself and reads appended data (tiles, palette, screens)
-3. The texture data from bcdfx/bcdfz is loaded via the RLE decompressor
-   (bcdfu LAB_0043) from the standalone files, triggered by bcdfp's game logic
-4. No code references "bcdfx"/"bcdfy"/"bcdfz" by name — the filenames may be
-   constructed at runtime or the files may be accessed through directory scanning
+#### File Loading Summary (WHDLoad version)
+
+Only these files are ever loaded by name:
+
+| File | Loaded By | Contents |
+|------|-----------|----------|
+| bcdfp | BlackCrypt (LoadSeg) | Game logic, blitters, save/load |
+| bcdfq | BlackCrypt (LoadSeg) | Intro screens, music engine |
+| bcdft | BlackCrypt (LoadSeg) | LZ77-compressed game data (item names, strings, quest text, tables — 85KB) |
+| bcdfu | BlackCrypt (LoadSeg) | RLE decompressor, sound engine |
+| bcdfo | bcdfp (LAB_00AE) | 109 portraits + UI graphics (63KB) |
+| bcdfs | bcdfp (LAB_0047) | Map data (all 13 maps, NOT a save file) |
+| bcdfv | bcdfu (LAB_0033) | Sound + monster sprite data (192KB) |
+| Configuration.Dat | BlackCrypt | Game config (8 bytes) |
+
+bcdfb–bcdfn (13 files) are per-map monster sprite files on floppy. In the WHDLoad
+version, bcdfb–bcdfn filenames are NOT referenced — data comes from bcdfv.
+bcdfx/bcdfy/bcdfz — purpose unknown, never loaded by name.
 
 ### Original floppy disk layout (ADF directory)
 
@@ -267,171 +443,186 @@ the same disk level.
 
 ---
 
-### bcdfa — RLE Icon/Item Tile Set
+### bcdfa — BCSPEED Animation Archive
 
 | Property         | Value                                      |
 |------------------|--------------------------------------------|
 | File size        | 197,894 B                                  |
 | Compressed       | Yes — same RLE scheme as bcdfv (bcdfu LAB_0043) |
-| RLE streams      | 477 individual streams (separated by `0x00` terminators) |
-| Tile count       | **280 tiles** (across 36 streams ≥1152 B) |
-| Tile size        | 1,152 B = 6 × 192 (64×24×6 sequential planar) |
-| Pixel layout     | **Sequential planar**, bit 7 = leftmost pixel |
-| Color mode       | 6bpp EHB (confirmed correct)               |
-| Palette          | Same EHB palette (see Palette section)     |
-| Content          | Character/monster face icons, automap icons, item icons (necklaces, amulets) |
+| RLE streams      | **887** individual streams (separated by `0x00` terminators) |
+| Decompressed     | 408,030 bytes total                        |
+| Content          | Combat/movement animation system (BCSPEED). NOT item tiles. |
+| Loaded by        | **UNKNOWN** — no `Open()` string in any disassembled overlay |
 
-bcdfa is a set of icon and UI tiles, **not** dungeon wall tiles. Its format differs from
-what was previously assumed:
+**BCSPEED** is the game's combat/movement animation system for sprites, spells,
+and cursors. The name refers to animation speed/timing. It is **not** an
+executable program — GFK and PRG are data formats parsed by the game engine.
 
-1. **Compression:** Each tile (or group of tiles) is an independently RLE-compressed
-   stream, terminated by a `0x00` control byte. The entire file contains 477 such
-   streams concatenated.
+#### Stream Categories
 
-2. **Dimensions:** Decompressed tiles are **64×24** pixels, not 32×24. This was
-   confirmed by visual inspection — tiles show recognizable content at 64-wide,
-   with "stride issues" (garbled output) at 56, 60, 68, and other widths.
+| Stream Range | Content | Details |
+|--------------|---------|---------|
+| 0 | Viewport mask | 18,932 B decompressed — repeating `1FFFFFF8` pattern (32px bitmask for 3D dungeon viewport) |
+| 1 | Viewport mask | 18,184 B decompressed — repeating `FFFFF000` pattern (alternate mask) |
+| 2–406 | Metadata | Small streams, non-graphical data |
+| 407 | **BCSPEED.GFK** | 17,190 B decompressed — **16 sprite bitmap entries** (74 frames, 32×14×4bpp) |
+| 408–707 | Metadata | Intermediate streams |
+| 708–739 | **BCSPEED.PRG** | **283 animation keyframe entries** across 30 streams (see below) |
 
-3. **Content categories:**
-   - Streams 0–1: Character/monster face icons and automap mini-icons
-   - Stream 423 (65 tiles): Largest stream — possibly main item icon set
-   - Stream 114 (29 tiles), 424 (27 tiles): Additional icon groups
-   - Stream 425 (11 tiles): Necklaces, amulets, and jewelry
-   - Most remaining streams (<1,152 B): Non-graphical metadata (item properties, stats)
+#### BCSPEED.GFK — Sprite Bitmaps (Stream 407)
 
-4. **Rendering:** Sequential planar 6bpp at 64×24 with the standard EHB palette
-   produces correctly colored icons. Bit 7 = leftmost pixel. No reverse bit ordering
-   needed.
+Stream layout: 333-byte preamble + 16 × (marker + type + sprite data).
 
-5. **Remainder bytes:** Most streams have leftover bytes (e.g., 500 B for stream 0)
-   that don't fit a whole tile. These may be per-stream metadata or padding.
+**Per-entry format:**
 
-#### Tile layout
+| Offset | Size | Description |
+|--------|------|-------------|
+| +0 | 12 | `BCSPEED\0GFK\0` marker (null-terminated strings) |
+| +12 | 2 | Type (big-endian) = frame count (0x0002–0x0006) |
+| +14 | type×224 | Sprite data (32×14×4bpp sequential planar) |
 
-```
-Tile N within stream S at offset N×1152:
-  +$00 plane0 192 B  (24 rows × 8 bytes at 64px wide)
-  +$C0 plane1 192 B
-  +$180 plane2 … through +$600 plane5
-bit = 7 - (x % 8) within each byte
-```
+**Sprite format:**
+- **224 bytes per frame** = 32/8 × 4 planes × 14 rows
+- Sequential planar decode (4 planes: plane0=LSB through plane3=MSB)
+- Each pixel = 4-bit color index (0–15), greyscale: value × 17 = brightness
 
-#### Extraction
+**Entry table:**
 
-```python
-def rle_decompress_stream(data, start):
-    out, pos = bytearray(), start
-    while pos < len(data):
-        ctrl = data[pos]; pos += 1
-        if ctrl == 0:
-            return bytes(out), pos
-        count = ctrl >> 1
-        if ctrl & 1:
-            out.extend(data[pos:pos+count])
-            pos += count
-        else:
-            out.extend([data[pos]] * count)
-            pos += 1
-    return bytes(out), pos
+| Entry | Type | Frames | Notes |
+|-------|------|--------|-------|
+| 0 | 0x03 | 3 (+1 extra) | 281 extra bytes after type×224 (possible4th frame) |
+| 1–8 | 0x05 | 5 each | |
+| 9 | 0x03 | 3 | |
+| 10 | 0x05 | 5 | |
+| 11 | 0x04 | 4 | |
+| 12 | 0x05 | 5 | |
+| 13 | 0x06 | 6 | |
+| 14 | 0x05 | 5 | |
+| 15 | 0x02 | 2 | |
 
-# Each stream produces tiles at 64×24×6bpp
-def decode_tile(tile_data):
-    W, H, planes = 64, 24, 6
-    pb = W // 8  # 8 bytes per row per plane
-    for y in range(H):
-        for x in range(W):
-            col = 0
-            for bp in range(planes):
-                off = bp * pb * H + y * pb + (x // 8)
-                if (tile_data[off] >> (7 - (x % 8))) & 1:
-                    col |= 1 << bp
-            yield col
-```
+Total: **74 frames** across 16 entries. Extracted to `data/blackcrypt/extracted/bcspeed_gfk/`.
+
+**Preamble (333 bytes):** Data before first marker. Contains 1 full sprite frame + 109 extra bytes. Purpose unknown — may be a default cursor or global sprite.
+
+#### BCSPEED.PRG — Animation Keyframes (Streams 708–739)
+
+283 animation keyframe entries across 30 streams. Each stream = one "actor" (monster).
+
+**7 distinct action types:**
+
+| Action Type | Description |
+|-------------|-------------|
+| 0x000b | Walk N/S/E/W |
+| 0x0010 | Walk diagonal |
+| 0x0009 | Attack |
+| 0x0013 | Spell |
+| 0x000d | Damage |
+| 0x0015 | Die |
+| 0x001f | Idle |
+
+**Stream distribution:**
+- Streams 708–718: 16–18 entries each (full action set)
+- Streams 719–724: 14 entries each
+- Streams 725–737: taper to 1 entry (type 0x0015 = death animation only)
+
+Each keyframe entry is a 3-byte record: direction (0x40/0xFF), displacement (-3/+3), flags.
 ---
 
 ### bcdfb–bcdfn — Monster Sprite Files (Per Dungeon Level) — CORRECTED
 
-These 13 files each contain **all monster graphics for one dungeon level**,
-plus a **copper list** for color animation. Data is **RLE compressed**
-(using bcdfu LAB_0043 algorithm) and contains multiple separate streams.
+These 13 files each contain **all monster graphics for one dungeon level**.
+Data is **RLE compressed** (using bcdfu LAB_0043 algorithm) and contains
+a fixed-size directory + concatenated sprite data.
 
-**CORRECTION:** The previously documented "raw data with 7 bitplanes" format
-was incorrect. The "type ID" and "col/row indices" at the file start are
-the first bytes of the first RLE stream, not a header.
+#### File Structure
 
-#### 5-byte "header" (actually part of first RLE stream)
+```
+Offset 0x00: 12-byte header
+Offset 0x0C: 42 × 28-byte directory entries (1176 bytes)
+Offset 0x4A4: RLE-compressed sprite data streams
+```
 
-| Offset | Size | Description                                 |
-|--------|------|---------------------------------------------|
-| 0x00   | 2    | 0x0000 (RLE fill: fill N bytes with next)  |
-| 0x02   | 2    | file type identifier (unique per file)      |
-| 0x04   | 1    | 0x00 = RLE end-of-stream marker            |
+#### 12-byte Header
 
-**Verified type identifiers** (from the first RLE stream):
+| Offset | Size | Description |
+|--------|------|-------------|
+| 0x00   | 2    | Padding (0x0000) |
+| 0x02   | 2    | Map/level ID (varies per file) |
+| 0x04   | 2    | Extra ID (varies per file) |
+| 0x06   | 2    | Extra ID (varies per file) |
+| 0x08   | 4    | Padding (0x00000000) |
 
-| File   | Type ID  | Notes                     |
-|--------|----------|---------------------------|
-| bcdfb  | 0xBA31   | byte +4 = 0xB2 (Two Head bb) |
-| bcdfc  | 0xBEB9   |                           |
-| bcdfd  | 0xAAF7   |                           |
-| bcdfe  | 0xAE8C   |                           |
-| bcdfi  | 0x9AF6   |                           |
-| bcdfj  | 0xAE25   |                           |
-| bcdfk  | 0x9AF1   |                           |
-| bcdfl  | 0xDAF0   |                           |
-| bcdfm  | 0x9307   |                           |
-| bcdfn  | 0x82EA   |                           |
+**Note:** Previous documentation incorrectly identified the header as part of the first RLE stream. It is a fixed 12-byte header.
 
-#### Multi-stream RLE structure
+#### 42 × 28-byte Directory Entries
 
-Each file contains ~100 RLE-compressed streams. The RLE algorithm is
-bcdfu.asm LAB_0043 (see RLE section below).
+Each directory entry describes one sprite (or alternate frame):
 
-**Stream categories** (based on byte distribution analysis):
-- **Streams 0-63**: metadata/sprite descriptor data (small, high 0/FF ratio)
-  - Contains width/height pairs (e.g., 0x0060 0x007c = 96×124)
-  - Contains the `bb` values (e.g., 0x00B2 = Two Head, 0x00B3 = Rock Eye)
-- **Stream 64 (~66KB, main stream)**: **COPPER LIST** for color animation
-  - NOT sprite data! Starts with `0008 0021 0008 0021 0600 0b10 0ffe 0040`
-  - Followed by patterns of 0x0000 and 0xFFFF = Amiga copper WAIT/MOVE
-  - This is a compressed color animation list, not graphics
-- **Streams 65-82**: actual sprite pixel data (varied bytes, low 0/FF ratio)
-  - 6-plane interleaved bitplane data
-  - Sizes: 129B to 7299B per stream
-  - EHB mode (64 colors), color 0 = transparent
-- **Streams 83+**: more metadata/copper data
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| +0     | 4    | data_offset | Offset into concatenated decompressed stream |
+| +4     | 4    | bpr | Bytes per row = (width/8) × height |
+| +8     | 4    | reserved | Always 0 |
+| +12    | 2    | bltsize | BLTSIZE = (height << 6) | (width/16 + 1) |
+| +14    | 2    | modulo | Screen modulo (usually 0) |
+| +16    | 4    | reserved | Always 0 |
+| +20    | 2    | type | 0x0100 = normal, 0x0500 = alternate frame |
+| +22    | 2    | width | Width in pixels |
+| +24    | 2    | height | Height in rows |
+| +26    | 2    | reserved | Always 0 |
 
-**Key mistake to avoid:** The 66KB main stream is NOT 14 frames of 64×96
-sprites. The earlier false match was coincidence — 66,536 doesn't actually
-divide evenly by 4608 (64×96×6bpp = 4608B) since 66,536 = 8 × 8317 (prime).
+#### Sprite Data Layout
 
-#### Real sprite extraction
+After RLE decompression of the entire file, the decompressed bytes form a
+**concatenated stream**. Directory entries index into this stream by
+`data_offset`. Each sprite entry is:
 
-To extract sprites, the metadata streams (0-63) must be parsed to find
-the sprite descriptors (width, height, data offset, etc.), then those
-descriptors used to locate the sprite pixel data in streams 65+.
+```
+plane_0 = stream[data_offset : data_offset + bpr]          ; mask (1-bit, 1=opaque)
+plane_1 = stream[data_offset + bpr : data_offset + bpr*2]  ; color bit 0
+plane_2 = stream[data_offset + bpr*2 : data_offset + bpr*3] ; color bit 1
+...
+plane_6 = stream[data_offset + bpr*6 : data_offset + bpr*7] ; color bit 5
+```
 
-**Known sprite stream sizes (bcdfb):**
-| Stream | Size | Likely content |
-|--------|------|-----------------|
-| 66 | 1342B | sprite(s) |
-| 68 | 2683B | sprite(s) |
-| 76 | 7299B | sprite(s) (largest) |
-| 77 | 5627B | sprite(s) |
-| 78 | 827B | small sprite |
-| 79 | 240B | tiny sprite |
-| 80 | 2635B | sprite(s) |
-| 81 | 129B | tiny sprite |
-| 82 | 639B | small sprite |
+**7 sequential bitplanes per sprite:** plane 0 = transparency mask, planes 1–6 = 6bpp EHB color.
 
-These streams have been saved as raw byte images in
-`data/blackcrypt/extracted/bcdfb_streams/` for manual inspection.
+#### Verified Sprite Dimensions (from bcdfb)
+
+| Entry | Width | Height | Data Offset | Type | Notes |
+|-------|-------|--------|-------------|------|-------|
+| 0-1   | 96    | 124    | 10836       | 0x0100 | Two Head (normal frames) |
+| 2     | 96    | 126    | 21252       | 0x0100 | Two Head (alternate) |
+| 3     | 96    | 124    | 10836       | 0x0500 | Two Head (alternate frame, shares data) |
+| 4-5   | 64    | 79     | 31836       | 0x0100 | Rock Eye |
+| 6     | 64    | 81     | 36260       | 0x0100 | Rock Eye (alternate) |
+| 7     | 64    | 79     | 31836       | 0x0500 | Rock Eye (alternate frame, shares data) |
+| 8-9   | 48    | 52     | 40796       | 0x0100 | Small monster |
+| 10    | 48    | 53     | 42980       | 0x0100 | Small monster (alternate) |
+| 11    | 48    | 52     | 40796       | 0x0500 | Small monster (alternate frame) |
+| 12+   | 64    | 55     | 56154       | 0x0100 | Other monsters |
+
+#### Current Extraction Status
+
+`scripts/extract_bcdfb_bcdfn.py` RLE-decompresses each file, reads the 42-entry
+directory, and extracts 7-plane sequential bitplane sprites. Output goes to
+`data/blackcrypt/extracted/monsters_corrected/`.
+
+**Result:** 495 individual animation frames extracted across all 13 files.
+Mask (plane 0) is correct — sprites show proper opacity and unique colors.
+There is a **24-pixel circular shift** in the decoded output that remains
+unresolved (likely an alignment issue in the sprite copy loop at A5+$03C6).
+
+**Animation frame splitting:** Entries sharing the same `data_off` are animation
+frames of the same sprite. Frame heights are distributed evenly across the total
+height: `base_h = height // n_frames`, with some frames getting `base_h + 1`.
+Frames are concatenated within each plane (frame0 rows, frame1 rows, etc.).
 
 ---
 
 ### RLE Decompression (shared across bcdfv, bcdfx, bcdfy, bcdfz)
 
-Found in `bcdfu.asm` at LAB_0043 (line 643). A simple, fast RLE scheme used
+Found in `bcdfu.asm` at LAB_0043 (line 686). A simple, fast RLE scheme used
 for all data files on GAMEDISK2 and GAMEDISK3.
 
 #### Algorithm
@@ -567,30 +758,47 @@ layouts (e.g., 320×200 at 4bpp = 32,000 B). The payloads likely contain:
 - Game resource data (item graphics, dungeon textures, UI elements)
 - Possibly multiple images per payload with a sub-header
 
-Cross-referencing with DOS VGA `clipper.clp` entries (see `docs/blackcrypt/dos/`)
+Cross-referencing with Windows VGA `clipper.clp` entries (see `docs/blackcrypt/dos/`)
 suggests these payloads may contain the Amiga equivalents of DOS items, monsters,
 faces, and dungeon textures.
 
 ---
 
-### bcdfv — RLE-Compressed Screen Data
+### bcdfv — Sound + Monster Sprite Data (Multi-Block Container)
 
 | Property    | Value                              |
 |-------------|------------------------------------|
-| File size   | 191,917 B                          |
+| File size   | 191,917 B (0x2EDAD)                |
 | Compression | RLE (same scheme as bcdfx/bcdfy/bcdfz) |
-| Decomp size | 32,000 B (exact)                   |
-| Format      | 4bpp planar, 320×200               |
+| Content     | Sound + monster sprite data for all dungeon levels |
+| Loaded by   | bcdfu LAB_0033                     |
 
-`bcdfu.asm` opens `bcdfv` via DOS Open (`-30`) and reads it in sequential
-chunks using DOS Read (`-42`). Each chunk is decompressed using the RLE
-routine at LAB_0043 (see below).
+bcdfu.asm opens `bcdfv` via DOS Open (`-30`) and reads it in sequential
+blocks using DOS Read (`-42`). The file is a multi-block container — not a
+single compressed screen. All 191,917 bytes are accounted for across two
+phases of loading.
 
-The decompressed 32,000 bytes = 40 bytes/row × 200 rows × 4 bitplanes,
-confirming a standard Amiga 4-bitplane screen. The screen likely contains
-a dungeon viewport frame, animation sequence, or scripted visual effect.
+#### Phase 1 (intro screens) — overwritten by Phase 2
 
-#### bcdfu.asm file I/O pattern
+| Line | Block | Read Size | Type | Destination |
+|------|-------|-----------|------|-------------|
+| 61   | 1     | $4EB0 (20,144) | RLE | buffer+0 → 32,000B output |
+| 68   | 5     | $5067 (20,583) | RLE | $17700 → $BB80 → 48,000B |
+| 74   | 6     | $0B10 (2,832)  | RAW | $1A5E0 |
+| 76   | 4     | $2500 (9,472)  | RLE | $EA60 → $BB80 |
+| 72   | —     | —              | COPY | LAB_003D: $BB80 → buffer+0, 48,000 bytes |
+
+**9× LAB_0022 calls** (intro screens): total $14525 (83,237) bytes.
+
+#### Phase 2 (game data — final buffer state)
+
+| Line | Block | Read Size | Type | Destination |
+|------|-------|-----------|------|-------------|
+| 131  | 2     | $6754 (26,452) | RLE | $BB80 → buffer+0 (**40,000B output**) |
+| 132  | 3     | $678C (26,508) | RAW | $BB80 |
+| 148  | 7     | $0A81 (2,689)  | RLE | $EA60 → $BB80 (**4,590B output**, overwrites Block 3 start) |
+
+#### File I/O Pattern (bcdfu.asm)
 
 | Function     | Operation       | Buffer offset | Chunk size  |
 |--------------|-----------------|---------------|-------------|
@@ -600,9 +808,9 @@ a dungeon viewport frame, animation sequence, or scripted visual effect.
 | LAB_003A     | DOS Read        | `12(A5)`+?    | 0x678C (26,508) |
 | LAB_003B     | DOS Read        | `12(A5)`+?    | 0x5067 (20,583) |
 | LAB_003C     | DOS Read        | `12(A5)`+?    | 0x0B10 (2,832)  |
-| LAB_0040     | DOS Read        | `12(A5)`+?    | 0x0A81 (2,689)  |
 
-Each read is followed by a call to LAB_0043 (RLE decompressor).
+Each RLE read is followed by a call to LAB_0043 (RLE decompressor).
+LAB_003D copies 48,000 bytes from $BB80 to buffer+0.
 
 ---
 
@@ -701,7 +909,7 @@ palette.
 The EHB half-bright copies (colors 32–63) are automatically generated by the
 Amiga hardware as half-intensity versions of colors 0–31.
 
-**DOS VGA palette:** A palette search in the DOS demo (`crypt.exe`,
+**Windows VGA palette:** A palette search in the Windows demo (`crypt.exe`,
 `clipper.clp`) did not find a clean 256-color VGA DAC table. The DOS palette
 may use 8-bit-per-channel encoding, may be embedded within a larger resource
 structure, or may be generated programmatically.
@@ -710,7 +918,7 @@ structure, or may be generated programmatically.
 
 ### bcdfs Format — Cross-Platform Verification
 
-The DOS VGA demo (`data/blackcrypt/dosvga/maindung.gam`) contains a subset of the
+The Windows VGA demo (`data/blackcrypt/dosvga/maindung.gam`) contains a subset of the
 same dungeon data, allowing cross-validation of the Amiga format.
 
 **Confirmed identical:**
@@ -826,11 +1034,11 @@ resources as follows:
 
 ```
 GAMEDISK1:bcdfp      — code overlay (game logic)
-GAMEDISK1:bcdfq      — code overlay + 82KB appended data (tiles, textures, palette)
-GAMEDISK1:bcdft      — code overlay (data carrier, 7 hunks, no file I/O)
+GAMEDISK1:bcdfq      — code overlay + 82KB appended data (intro screens, music engine)
+GAMEDISK1:bcdft      — code overlay (LZ77-compressed dungeon data, 7 hunks)
 GAMEDISK1:bcdfs      — map / dungeon layout data (read by bcdfp)
 GAMEDISK2:bcdfu      — code overlay + music, sound, text (RLE decompressor)
-GAMEDISK2:bcdfv      — animation/screen data (RLE, 192KB → 32KB)
+GAMEDISK2:bcdfv      — sound + monster sprite data (multi-block RLE container, 192KB)
 GAMEDISK2:bcdfx      — RLE multi-payload (dungeon textures for level 2)
 GAMEDISK3:bcdfy      — RLE multi-payload (mostly empty, sparse level data)
 GAMEDISK3:bcdfz      — RLE multi-payload (dungeon textures for level 3)

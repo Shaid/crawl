@@ -12,19 +12,26 @@ Documented here to avoid repeating dead ends:
 - **Screenshot capture**: Amiberry IPC screenshot endpoint works (`/runtime/screenshot`)
 
 ### What DOES NOT work (root cause unknown):
-- **bcdfb-bcdfn** (monster sprites): 12B header + 28B directory entries + 7-plane sequential bitplanes. Format validated (offsets, bpr, dimensions all self-consistent). Rendering produces noise. Palette confirmed correct. Shape match with PC demo ~70% at best.
-- **bcdfa** (item tiles): RLE + sequential planar 6bpp. Both 64×24 (280 tiles) and 32×24 (599 tiles) produce unrecognizable output.
+- **bcdfb-bcdfn** (monster sprites): **FIXED** — Files are RLE-compressed (bcdfu LAB_0043). Each file has exactly **42 directory entries** with 12-byte header + 28-byte entries. Entries sharing `data_off` are **animation frames** of the same sprite. The frame heights are distributed evenly across the total height (bpr = bpr_row × total_height). Sequential planar decode is correct — 7 planes (mask + 6bpp EHB). RLE decompression produces data with sprites in order; directory offsets index into this decompressed data. 495 individual animation frames extracted across all 13 files. See `data/blackcrypt/extracted/monsters_corrected/`.
+- **bcdfa** (BCSPEED animation archive): Container with 887 RLE streams. Contains 16 BCSPEED.GFK sprite bitmaps (32×14 @4bpp, 2-6 frames each) in stream 407, 283 BCSPEED.PRG animation keyframe entries across streams 708-739 with 7 action types (walk N/S/E/W/diag, attack, spell, damage, die, idle), and viewport masks in streams 0-1. **NOT item tiles** — the 64×24 tile assumption was wrong.
+- **Item icons**: From **bcdfo** portrait tiles (32×24×6bpp, 109 tiles) via LAB_010F — ALREADY EXTRACTED. Item record stores tile index at +36.
+- **Item sprites (dungeon floor)**: In bcdft S_5 LZ77-compressed data (Block 1: item sprites + text tables). Not yet extractable.
 - **bcdfv** (sound + sprite container): RLE block extraction + sequential 6bpp gives ~69% shape match with PC demo Two Head (64×96, 17 frames). Best result: seq_64x96 F14 at 68.9% with plane order reversed, MSB-first, shift=6. Word-interleaved decode produces same shape match (~65%). Not close enough to identify correctly.
-- **bcdft** (LZ77 compressed data): Custom backwards-reading LZ77 with 8-byte FIFO and embedded tables. Multiple implementation attempts failed.
+- **bcdft** (LZ77 compressed data): Custom backwards-reading LZ77 with 8-byte FIFO and embedded tables. **DECOMPRESSED** via musashi 68k emulator (see `tools/bcdft_decompress/`).
 
 ### Extraction Paths Tried
 
 | Format | Approach | Result | Notes |
 |--------|----------|--------|-------|
-| bcdfb | 7-plane seq planar at directory offsets | Noise | 25-56% opaque pixels, structure wrong |
-| bcdfb | RLE streams as 6bpp at var sizes | Noise | Stream sizes don't divide cleanly |
+| bcdfb | RLE decompress all streams, use dir offsets into concatenated output | **204 sprites correct** | Root cause: offsets into decompressed data, not raw file |
+| bcdfb | 7-plane seq planar at directory offsets (raw file) | Noise | Was reading raw compressed data as if uncompressed |
+| bcdfb | 42-entry dir + RLE decompress + 7-plane sequential | 204 sprites, bitplane misaligned | Opacity/colors correct but planes vertically scrambled |
+| bcdfb | 42-entry dir + RLE decompress + 7-plane seq + **frame splitting by entry count** | **495 animation frames** | Correct! Entry groups sharing data_off = frames of same sprite |
 | bcdfa | 64×24 tiles, 6bpp, RLE streams | 280 tiles, unrecognizable | |
 | bcdfa | 32×24 tiles, 6bpp, RLE streams | 599 tiles, unrecognizable | |
+| bcdfa | Archive/stream analysis | 887 streams, BCSPEED markers | Container format, not sequential tiles |
+| bcdfa | 32×14 @4bpp, BCSPEED.GFK 16 entries | **16 multi-frame sprites** | GFK sprites (cursors, targeting reticles, UI indicators) |
+| bcdfa | PRG analysis, streams 708-739 | **283 keyframe entries, 7 action types** | 0x0b=walkNSEW, 0x10=walkDiag, 0x09=attack, 0x13=spell, 0x0d=damage, 0x15=die, 0x1f=idle |
 | bcdfv | RLE block + raw, 6bpp seq planar | 69% shape match | seq_64x96 F14 best = 68.9% |
 | bcdfv | RLE block + raw, 6bpp word-interleaved | 65% shape match | wintl_64x96 F14 = 65.2% |
 | bcdfv | RLE block + raw, 7-plane (mask) word-intl | Mask runs avg 2.4px | Fragmented, not coherent |
@@ -45,6 +52,14 @@ All planar bitplane decode is wrong despite matching documented format. Possible
 - Amiga word-alignment issues (row_pitch rounding affecting non-power-of-2 widths)
 - **bcdfv blocks may not be concatenated** — they may be stored in separate areas of the buffer at 12(A5), leaving gaps between them that corrupt frame alignment
 - Code comment says "64×96 interleaved" but inline sprite copy code uses stride=12 ($0C) between plane words, and 10-byte/12-byte header skips — the exact layout within each sprite entry remains unclear
+
+## Agent: amiga-re (Amiga 68k Reverse Engineering Specialist)
+
+Available via the `task` tool with `subagent_type="amiga-re"`. Loads the profile from
+`.opencode/skills/amiga-re.md` and has access to radare2 MCP + openground (amigadocs).
+
+Use for: analyzing 68k disassembly, custom chipset usage, AmigaOS LVO resolution,
+custom compression formats, bootblock analysis.
 
 ## Reverse Engineering
 
@@ -72,6 +87,15 @@ LAB_010C:
 - `data/blackcrypt/amiga/bcdft.asm` — data carrier overlay (7 hunks, no file I/O)
 - `data/blackcrypt/amiga/bcdfu.asm` — RLE decompressor, sound, 4 palette variants
 
+### bcdfa — BCSPEED Animation Archive
+- 197,894 bytes, 887 RLE streams → 408,030 bytes decompressed
+- **Stream 0** (18,932 bytes): Viewport mask — repeating `1FFFFFF8` pattern (32px bitmask shape for 3D dungeon viewport)
+- **Stream 1** (18,184 bytes): Viewport mask — repeating `FFFFF000` pattern (alternate mask)
+- **Stream 407** (17,190 bytes): **BCSPEED.GFK** — 16 sprite bitmap entries. Preamble (333 bytes) at stream start, then 16 × `BCSPEED\0GFK\0` (12 bytes) + type (2 bytes BE) + type×224 bytes of sprite data (32×14×4bpp sequential planar). Type = frame count (0x02–0x06). Entry 0 has 281 extra bytes after its data (possible4th frame or unrelated). 74 total frames. Extracted to `data/blackcrypt/extracted/bcspeed_gfk/`.
+- **Streams 708-739**: **BCSPEED.PRG** — 283 animation keyframe entries across 30 streams. 7 distinct action types: 0x000b (walk N/S/E/W), 0x0010 (walk diag), 0x0009 (attack), 0x0013 (spell), 0x000d (damage), 0x0015 (die), 0x001f (idle). Each stream = one "actor" (monster). Streams 708-718 have 16-18 entries (full set), streams 719-724 have 14 entries, streams 725-737 taper to 1 entry (type 0x0015 = death). Entries contain 3-byte records: direction (0x40/0xFF), displacement (-3/+3), flags.
+- "BCSPEED" is the game's **combat/movement animation system** for sprites, spells, and cursors. The name refers to animation speed/timing. **NOT an executable program** — GFK and PRG are data formats parsed by the game engine.
+- **NEVER loaded by Open()** in any overlays — data accessed differently, possibly via bcdfv block loading or direct file read by bcdfu.
+
 ### Known conventions
 - IRA disassembly: BCLR instructions at label data are raw bytes, not code
 - DOS LVO offsets: Open=-30, Close=-36, Read=-42, Write=-48, Lock=-84, etc.
@@ -97,16 +121,32 @@ LAB_010C:
 - **LAB_0124**: Alternate sprite blitter with screen-edge clipping
 
 ### bcdft — Data Carrier Overlay
-- **7 hunks**: S_0 CODE (entry stub), S_1 BSS (166KB target), S_2 BSS (40KB target), S_3 BSS (1L), S_4 CODE (LZ77 engine), S_5 DATA (85KB compressed), S_6 BSS (18KB read buffer)
+- **7 hunks**: S_0 CODE (entry stub), S_1 BSS (166KB target), S_2 BSS (40KB target), S_3 BSS (1L), S_4 CODE (LZ77+relocation engine), S_5 DATA (85KB compressed), S_6 BSS (18KB read buffer)
 - **S_0 entry**: chain resolver frees S_3/S_5/S_6, returns modified A1
 - **S_4 engine**: LZ77 decompresses S_5 into S_1/S_2, then applies pointer relocation fixups
-- **S_5 DATA**: 84,976 bytes LZ77-compressed dungeon data (walls, floors, monster sprites)
+- **S_5 DATA**: 84,976 bytes custom LZ77-compressed game data (item names, game strings, quest text, data tables). **NOT** wall/floor textures — those come from bcdfx/y/z.
+- **Decompression**: Achieved via **musashi 68k emulator** (see `tools/bcdft_decompress/`). The S_4 engine is run directly by emulating the 496 bytes of 68k code, avoiding hand-translation bugs.
+  - Build: `cd tools/bcdft_decompress && bash build.sh run`
+  - Output: 166,676 bytes, ~113KB non-zero, containing all item names, game strings, and data structures
+  - Key finding: `POTION OF WATER BREATHING` at offset 118185, `CANNOT PLACE ITEM IN INVENTORY` at 120287
 - **WHDLoad slave**: matches by hunk size $4c1ac, patches at $496ba/$496c2 (trainer)
-- **bcdfb-bcdfn (~750KB on floppy)**: NEVER referenced by name in any code. They are the UNCOMPRESSED originals — the runtime uses bcdft's compressed data only. The WHDLoad/cracked version we analyze uses bcdft exclusively.
+- **bcdfb-bcdfn**: 13 dungeon level graphic stores (one per map, b=map1 through n=map13). Loaded via bcdfv as part of each level's data. Each file contains RLE-compressed sprite data for that map's monsters. Format: 12-byte header + 42 × 28-byte entries. Entries sharing data_off are **animation frames** of the same sprite. Frame heights distributed evenly across total height. 7-plane sequential bitplane (mask + 6bpp EHB). RLE decompression + frame splitting produces **495 animation frames** across all 13 files.
+
+### bcdfx/bcdfy/bcdfz — Wall/Floor Texture Data
+- 144KB / 118KB / 161KB. RLE-compressed (bcdfu LAB_0043 exact algorithm, 0x00 = end marker).
+- **bcdfx**: 144,169 raw → 14,448 decompressed. bcdfz decompresses to same size but NOT identical bytes.
+- **bcdfy**: 117,937 raw → ONLY 632 decompressed (probably a different format or palette data).
+- Rendering at 32×516 @ 7bpp (mask + 6 color planes) gives 50 unique colors with strong vertical repetition (27/32 similar columns) — consistent with 3D wall texture strips.
+- PALETTE: dungeon palette at bcdfq CODE+0x2C6 (= file offset 0x2EA): 32 brown/blue/grey base colors + 32 EHB half-bright = 64 colors total.
+- **NOT loaded by Open() in WHDLoad** (unlike bcdfp/q/t/u). Possibly embedded in bcdfv Block 3 (RAW, 26KB at offset 0xB604) or accessed by raw offset.
+- Tile candidates: 32×516 (vertical strips), 64×301, 64×258, 128×129 @ 6/7bpp — try viewing PNGs at `/tmp/bcdfx_*.png`.
 
 ### bcdfq — Intro + Music Only
 - Contains intro/title screens (loaded from bcdfr) and OctaMED music engine
 - **ZERO dungeon rendering code** — all 3D rendering is in bcdfp
+- Contains TWO palettes at different file offsets:
+  - **Monster palette** at file offset 0x2C6: red/orange/tan (ogre colors)
+  - **Dungeon palette** at CODE+0x2C6 = file offset 0x2EA: brown/blue/grey (wall/floor colors)
 
 ### File Loading Summary
 Only these files are ever loaded by name in the WHDLoad version:
@@ -114,7 +154,7 @@ Only these files are ever loaded by name in the WHDLoad version:
 |------|-----------|----------|
 | bcdfp | BlackCrypt (LoadSeg) | Game logic, blitters, save/load |
 | bcdfq | BlackCrypt (LoadSeg) | Intro screens, music engine |
-| bcdft | BlackCrypt (LoadSeg) | LZ77-compressed wall/floor textures + text tables (85KB) |
+| bcdft | BlackCrypt (LoadSeg) | LZ77-compressed text tables + item names (85KB) |
 | bcdfu | BlackCrypt (LoadSeg) | RLE decompressor, sound engine |
 | bcdfo | bcdfp (LAB_00AE) | 109 portraits + UI graphics (63KB) |
 | bcdfs | bcdfp (LAB_0047) | Map data (all 13 maps, NOT a save file) |
@@ -123,7 +163,7 @@ Only these files are ever loaded by name in the WHDLoad version:
 
 bcdfb-bcdfn (b through n, 13 files) are **per-map monster sprite files** on floppy.
 In the WHDLoad version, bcdfb-bcdfn filenames are NOT referenced — data comes from bcdfv.
-bcdfx/bcdfy/bcdfz — purpose unknown, never loaded.
+bcdfx/bcdfy/bcdfz — wall/floor texture data, not loaded by Open() in WHDLoad.
 
 ### Monster Sprite Rendering Pipeline (bcdfp.asm)
 
@@ -186,71 +226,87 @@ A separate blitter for rendering text characters:
 
 ### bcdfv — Block Loading Structure
 
-Confirmed by reading LAB_0033-LAB_003A in bcdfu.asm:
+Confirmed by reading LAB_0033-LAB_003A in bcdfu.asm. File size = 191,917 bytes (0x2EDAD).
+All bytes accounted for across Phase 1 (intro, overwritten) and Phase 2 (game data).
 
-| Block | File Offset | Read Size | Type | Output | Buffer Target |
-|-------|-------------|-----------|------|--------|---------------|
-| 1 | $00000 | $4EB0 (20144) | RLE | 32000 bytes | 12(A5)+0 |
-| 2 | $04EB0 | $6754 (26452) | RLE | 48000 bytes | 12(A5)+32000 |
-| 3 | $0B604 | $678C (26508) | RAW | 26508 bytes | 12(A5)+$BB80 |
-| 4 | $11D90 | ??? | RLE | ??? | 12(A5)+$17700 |
-| 5 | ??? | $5067 | RLE | ??? | APPEND to sprite |
-| 6 | ??? | $0B10 | RAW | ??? | buffer |
+**Phase 1 (intro screens)** — data overwritten by Phase 2:
+| Line | Block | Read Size | Type | Destination |
+|------|-------|-----------|------|-------------|
+| 61 | 1 | $4EB0 (20144) | RLE | buffer+0 → 32000B output |
+| 68 | 5 | $5067 (20583) | RLE | $17700 → $BB80 → 48000B |
+| 74 | 6 | $0B10 (2832) | RAW | $1A5E0 |
+| 76 | 4 | $2500 (9472) | RLE | $EA60 → $BB80 |
+| 72 | — | — | COPY | LAB_003D: $BB80 → buffer+0, 48000 bytes |
 
-Blocks 1+2 combine to 80000 bytes of decompressed sprite data at 12(A5)+0.
-Block 1 RLE stream exactly fills $4EB0 bytes and decompresses to exactly 32000 bytes (end marker at last byte).
-Block 3 reads raw data (not RLE) into a separate buffer area at 12(A5)+$BB80.
+**9× LAB_0022 calls** (intro screens): total $14525 (83237) bytes
 
-### bcdfb-bcdfn — Monster Sprite Format
-13 files, one per map (b=map1, c=map2, ..., n=map13). Contains raw (NOT RLE)
-7-plane sequential bitplane sprite data (mask + 6bpp EHB color), prefixed by
-metadata/copper data.
+**Phase 2 (game data — final buffer state)**:
+| Line | Block | Read Size | Type | Destination |
+|------|-------|-----------|------|-------------|
+| 131 | 2 | $6754 (26452) | RLE | $BB80 → buffer+0 (**40,000B output**) |
+| 132 | 3 | $678C (26508) | RAW | $BB80 |
+| 148 | 7 | $0A81 (2689) | RLE | $EA60 → $BB80 (**4,590B output**, overwrites Block 3 start) |
+
+### bcdfb-bcdfn — Monster Sprite Format (CORRECT EXTRACTION)
+13 files (b=map1, c=map2, ..., n=map13). RLE-compressed (bcdfu LAB_0043).
+Each file has exactly **42 directory entries** with 12-byte header + 28-byte entries.
+Entries sharing `data_off` are **animation frames** of the same sprite.
+7-plane sequential planar decode (mask=plane0, color=plane1-6, EHB).
+⚠ **Bit order: standard.** Plane 1 → bit 0 (LSB), plane 6 → bit 5 (EHB half-bright MSB).
+The half-bright problem was the palette loading (`range(64)` vs `range(32)`), not the bit order.
+546 animation frames extracted across all 13 files.
+
+**⚠ CRITICAL: TWO different palettes in bcdfq — monsters vs dungeon!**
+- **Monster sprites**: palette at FILE offset `0x2C6` (NOT CODE+0x2C6).
+  Has RED, ORANGE, TAN — correct for ogres. Loading from `36+0x2C6` gives blue ogres.
+- **Dungeon walls/floors**: palette at CODE+0x2C6 = file offset `36 + 0x2C6 = 0x2EA`.
+  Has BROWN, BLUE, GREY — for the 3D dungeon view, not monsters.
+
+Both palettes store only **32 base colors** (64 bytes). EHB half-bright entries 32-63
+must be COMPUTED as `(r//2, g//2, b//2)` of colors 0-31.
+Using `range(64)` reads past palette data → garbage half-bright colors.
 
 **File structure:**
-- **12-byte header**: 2 pad + 2 type ID + 2 col/row + 6 pad
-- **28-byte directory entries** (starting at byte 12): data_offset, bpr, reserved,
-  bltsize, modulo, reserved, type, width, height, reserved
-- **Sprite data blocks** at file offsets listed in directory entries
-- Data blocks are **7 sequential planes**: plane 0 = transparency mask, planes 1-6 = 6bpp EHB color
+- **12-byte header**: 2 pad + 2 map_id + 2 extra_id + 2 extra_id2 + 4 pad
+- **42 × 28-byte directory entries** (starting at byte 12)
+- **RLE-compressed data** after the directory (bcdfu LAB_0043 algorithm)
+- Directory data offsets index into **concatenated decompressed stream**
 
-**Directory entry fields:**
-| Offset | Size | Field |
-|--------|------|-------|
-| +0 | 4 | data offset (file or decompressed buffer) |
-| +4 | 4 | bpr = bytes per row = width/8 × height |
-| +8 | 4 | reserved (0) |
-| +12 | 2 | BLTSIZE = (h<<6) \| (width/16 + 1) |
-| +14 | 2 | screen modulo |
-| +16 | 4 | reserved (0) |
-| +20 | 2 | type: 0x0100 = normal, 0x0500 = alternate |
-| +22 | 2 | width (pixels) |
-| +24 | 2 | height (rows) |
-| +26 | 2 | reserved (0) |
+**Directory entry (28 bytes):**
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| +0 | 4 | data_off | offset into concatenated decompressed data |
+| +4 | 4 | bpr | bytes per plane = (width/8) × total_height |
+| +8 | 4 | reserved | 0 |
+| +12 | 2 | BLTSIZE | (height<<6) \| (width/16 + 1) |
+| +14 | 2 | modulo | screen modulo |
+| +16 | 4 | reserved | 0 |
+| +20 | 2 | type | 0x0100/0x0500 (frame variant) |
+| +22 | 2 | width | pixels |
+| +24 | 2 | height | total rows (sum of all frame heights) |
+| +26 | 2 | reserved | 0 |
 
-**Data block layout:**
+**Animation frames:** Entries sharing data_off are frames of the same sprite.
+Frame heights = base_h or base_h+1, where base_h = height // n_frames.
+Frames are concatenated within each plane: frame0 rows, frame1 rows, etc.
+
+**Data block layout (per sprite, 7-plane sequential):**
 ```
 plane_0 = raw_data[0 : bpr]               ; mask (1-bit, 1=opaque)
-plane_1 = raw_data[bpr : bpr*2]           ; color bit 0
+plane_1 = raw_data[bpr : bpr*2]           ; color bit 0 (LSB)
 plane_2 = raw_data[bpr*2 : bpr*3]         ; color bit 1
 ...
-plane_6 = raw_data[bpr*6 : bpr*7]         ; color bit 5
+plane_6 = raw_data[bpr*6 : bpr*7]         ; color bit 5 (MSB/half-bright)
 ```
 
-**Verified sprite dimensions (from bcdfb):**
-| Entry | Width | Height | Data Offset | Type | Opaque % |
-|-------|-------|--------|-------------|------|----------|
-| 0-1 | 96 | 124 | 10836 | 0x0100 | 24.8% |
-| 2 | 96 | 126 | 21252 | 0x0100 | 30.0% |
-| 3 | 96 | 124 | 10836 | 0x0500 | 24.8% |
-| 4-5 | 64 | 79 | 31836 | 0x0100 | 43.9% |
-| 6 | 64 | 81 | 36260 | 0x0100 | 49.7% |
-| 7 | 64 | 79 | 31836 | 0x0500 | 43.9% |
-| 8-9 | 48 | 52 | 40796 | 0x0100 | 56.5% |
-| 10 | 48 | 53 | 42980 | 0x0100 | 39.3% |
-| 11 | 48 | 52 | 40796 | 0x0500 | 56.5% |
-| 12+ | 64 | 55 | 56154 | 0x0100 | 47.5% |
-
-Entries beyond the file size reference data in the decompressed copper list buffer.
+**Example frame splits (from bcdfb):**
+| data_off | Width | Total H | Frames | Frame Heights | Description |
+|----------|-------|---------|--------|---------------|-------------|
+| 0 | 96 | 129 | 2 | 65, 64 | Two-frame monster animation |
+| 10836 | 96 | 124 | 3 | 42, 41, 41 | Three-frame animation |
+| 31836 | 64 | 79 | 3 | 27, 26, 26 | Three-frame small monster |
+| 65394 | 32 | 32 | 8 | 4,4,4,4,4,4,4,4 | 8-frame tiny sprite |
+| 66290 | 16 | 17 | 8 | 3,2,2,2,2,2,2,2 | 8-frame very small sprite |
 
 
 ### Character Record Layout (from WHDLoad trainer)
@@ -274,18 +330,19 @@ Base: $1758(A5), offsets: +0, +$A8, +$150, +$1F8
 **NOT a save file** despite being read by LAB_0047. Contains ALL map layouts.
 
 Each of 13 maps has:
-1. **52-byte offset table** — 13 longwords (offsets to each map), but only first map's table is filled; maps 2-13 = 52 bytes of 0x00
-2. **Variable-length map data** — up to 64×64 squares. Format per line:
-   - 2 bytes: vertical bounds (first_line, last_line), once at start
-   - Per line: 2 bytes (left_square, right_square), followed by N square records
-3. **Square (4 bytes)**: `0F F1 00 00`
-   - nibble0: floor(+0)/wall(+1)/dark(+2)/spell_fail(+4)/water(+8) flags
-   - nibble2-3: always `0F`
-   - nibble3 nybble: 4 bits = level number (1-N per 64×64 map)
-   - nibble4: 4 bits = wall flags (+1 N / +2 E / +4 S / +8 W)
-   - nibble5-6: 12 bits = unique number (0=empty, 1-FFF=item/monster/structure data follows)
-4. **3950 bytes 0x00** — per-map scratch space for items dropped on floor
-5. **Items/monsters/structures** — inserted between squares using unique numbers; stacking uses chained unique numbers
+1. **52-byte global offset table** at file offset 0 (13 longwords, buffer-relative offsets). Maps 2-13 have 52 zero bytes (their tables are at the start of each map's section).
+2. **Per-map header** (7 bytes): starts at file offset 52 for map 1; subsequent maps at absolute position `52 + offset_table[N]`. Header = `height 00 00 00 00 00 00`. For map 1, height = 30 lines.
+3. **Variable-length line data** — grid is **256 columns wide** (not 64). Format per line:
+   - **Per-line header (2 bytes)**: `col_start col_end` (each 0-255, e.g. `1F F2` = cols 31-242). Lines with `00 00` encode a **single transition cell** (col 0).
+   - **Square records (4 bytes each)**: `0F F1 00 00`
+     - nibble0: terrain flags (+1 wall, +2 dark, +4 spell_fail, +8 water; 0=floor/open)
+     - nibble2-3: always `0F`
+     - nibble3 nybble: 4 bits = level number (1-N per 256×N map)
+     - nibble4: 4 bits = wall flags (+1 N / +2 E / +4 S / +8 W)
+     - nibble5-6: 12 bits = unique number (0=empty, 1-FFF=item/monster/structure data follows)
+4. **Line count per map**: maps 1-5 have 30 lines (rows 0-29), maps 6-7 have 24 lines, maps 8-13 have 22 lines, except map 13 which has only 1 line with cols 64-255 (a special transition row).
+5. **3950+ bytes 0x00** — per-map scratch space for items dropped on floor
+6. **Items/monsters/structures** — inserted between squares using unique numbers; stacking uses chained unique numbers
 
 ### Monster Entry (~40 bytes, referenced from bcdfs square unique number)
 ```
