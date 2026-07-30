@@ -51,10 +51,37 @@ def load_monster_palette():
         pal.extend([pal[i*3]//2, pal[i*3+1]//2, pal[i*3+2]//2])
     return pal
 
+# ... (imports and constants remain the same)
+AMIGA_DIR = BASE / 'data' / 'blackcrypt' / 'amiga'
+OUT_DIR = BASE / 'data' / 'blackcrypt' / 'extracted' / 'monsters'
+
+# --- START MODIFICATION FOR OFFSET EXPERIMENTATION ---
+# Set this value to test initial header sizes for m2 through m13. 0 is the current, working assumption (m1).
+INITIAL_HEADER_SIZE = 0  # Adjust this value to account for undocumented leading data blocks in bcdfcf-n files.
+# --- END MODIFICATION ---
+
+def rle_decode_all(data):
+    out = bytearray(); pos = 0
+    while pos < len(data):
+        if data[pos] == 0x00: pos += 1; continue
+        while pos < len(data):
+            ctrl = data[pos]; pos += 1
+            if ctrl == 0: break
+            cnt = ctrl >> 1
+            if ctrl & 1:
+                avail = min(cnt, len(data) - pos)
+                out.extend(data[pos:pos+avail]); pos += avail
+            else:
+                if pos >= len(data): break
+                b = data[pos]; pos += 1
+                out.extend([b] * cnt)
+    return bytes(out)
+
 def parse_bcdfn(path):
     """Parse a bcdfb-n file, return (decompressed_data, entries_list)."""
     raw = path.read_bytes()
     entries = []
+    # ... (rest of entry parsing logic remains the same)
     for i in range(42):
         ent = raw[12 + i*28 : 12 + i*28 + 28]
         entries.append({
@@ -66,8 +93,16 @@ def parse_bcdfn(path):
             'width': int.from_bytes(ent[22:24], 'big'),
             'height': int.from_bytes(ent[24:26], 'big'),
         })
-    dec = rle_decode_all(raw[1188:])
+
+    # Adjust the start point of RLE decoding based on initial header size
+    stream_start_pos = HEADER_SIZE + N_DIR_ENTRIES * ENTRY_SIZE + INITIAL_HEADER_SIZE 
+    if stream_start_pos >= len(raw):
+         raise ValueError("Raw file is too short for current header and offset settings.")
+
+    # Decode the entire remainder of the raw data from the adjusted start point
+    dec = rle_decode_all(raw[stream_start_pos:]) 
     return dec, entries
+# ... (rest of the script remains the same)
 
 def frame_heights(h_total, n_frames):
     base = h_total // n_frames
