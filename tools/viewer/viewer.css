@@ -43,6 +43,15 @@ button:focus-visible, select:focus-visible, input:focus-visible, .item:focus-vis
 }
 #sidebar-header { padding: 10px; border-bottom: 1px solid var(--border); }
 #sidebar-header h1 { font-size: 14px; margin-bottom: 6px; color: var(--text-primary); }
+#game-selector {
+  display: flex; gap: 6px; margin-bottom: 6px;
+}
+#game-selector select {
+  flex: 1; min-width: 0; padding: 4px 6px;
+  background: var(--bg-input); color: var(--text-primary);
+  border: 1px solid var(--border-control); border-radius: var(--radius);
+}
+#game-selector select:hover { border-color: var(--border-control-hover); }
 #search {
   width: 100%; padding: 5px 7px; background: var(--bg-input); color: var(--text-primary);
   border: 1px solid var(--border-control); border-radius: var(--radius);

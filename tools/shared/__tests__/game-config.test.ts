@@ -1,10 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { getGameConfig } from '../game-config.ts';
+import { getGameConfig, getSupportedPlatforms } from '../game-config.ts';
 
 describe('getGameConfig', () => {
-  it('finds the placeholder config', () => {
-    const config = getGameConfig('blackcrpyt', 'amiga');
+  it('resolves the Black Crypt Amiga config', () => {
+    const config = getGameConfig('blackcrypt', 'amiga');
     expect(config).toBeDefined();
-    expect(config?.assetDir).toBe('blackcrpyt');
+    expect(config?.assetDir).toBe('blackcrypt');
+    expect(config?.platform).toBe('amiga');
+  });
+
+  it('reports amiga as a supported platform', () => {
+    expect(getSupportedPlatforms('blackcrypt')).toContain('amiga');
   });
 });

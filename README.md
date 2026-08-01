@@ -1,6 +1,6 @@
 # Black Crypt
 A [Seer](https://github.com/Shaid/seer) project for reverse-engineering
-Black Crypt (blackcrpyt) data files into a browser-playable implementation.
+Black Crypt (blackcrypt) data files into a browser-playable implementation.
 
 ## Getting started
 
@@ -8,7 +8,7 @@ Black Crypt (blackcrpyt) data files into a browser-playable implementation.
 npm install
 ```
 
-Place your original game files under `data/blackcrpyt/amiga/`
+Place your original game files under `data/blackcrypt/amiga/`
 (this directory is gitignored — never commit original game data). Then:
 
 ```bash
@@ -37,7 +37,7 @@ src/                 Browser-side code
   data/              Asset types and loader
 tools/               Offline pipeline scripts
   shared/            Shared pipeline config
-  blackcrpyt/              Per-game export and build scripts
+  blackcrypt/        Per-game export and build scripts
 data/                Original game data (gitignored)
 public/assets/       Built web assets (gitignored)
 seer.config.ts       Pipeline configuration

@@ -9,6 +9,8 @@ data/blackcrypt/dos/
 # Extracted/output
 data/blackcrypt/extracted/
 data/blackcrypt/.raw
+public/assets/
+build/
 
 # Node/web (unrelated to RE)
 node_modules/

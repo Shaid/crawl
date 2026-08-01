@@ -3,14 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Black Crypt — Asset Viewer</title>
+  <title>Asset Viewer</title>
   <link rel="stylesheet" href="viewer.css" />
 </head>
 <body>
   <div id="app">
     <div id="sidebar">
       <div id="sidebar-header">
-        <h1>Black Crypt — Asset Viewer</h1>
+        <h1>Asset Viewer</h1>
+        <div id="game-selector">
+          <select id="game-select" aria-label="Game"></select>
+          <select id="platform-select" aria-label="Platform"></select>
+        </div>
         <input id="search" type="text" placeholder="Search assets…" />
       </div>
       <div id="list-meta"></div>

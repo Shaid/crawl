@@ -1,5 +1,5 @@
 {
-  "name": "blackcrpyt",
+  "name": "blackcrypt",
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -11,7 +11,8 @@
     "lint": "eslint src/ tools/",
     "format": "prettier --write 'src/**/*.ts' 'tools/**/*.ts'",
     "extract-data": "npx tsx tools/extract-game-data.ts",
-    "build-assets": "npx tsx tools/extract-game-data.ts --assets-only"
+    "build-assets": "npx tsx tools/extract-game-data.ts --assets-only",
+    "extract-all": "npm run extract-data && python3 scripts/render_all.py && python3 scripts/extract_monsters.py && python3 scripts/extract_clipper.py"
   },
   "dependencies": {
     "@seer/core": "file:../seer/packages/core",

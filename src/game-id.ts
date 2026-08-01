@@ -2,10 +2,10 @@
  * Browser-safe canonical game and platform identifiers.
  */
 
-export const GAME_IDS = ['blackcrypt'] as const;
+export const GAME_IDS = ['blackcrypt', 'eotb'] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
-export const PLATFORM_IDS = ['amiga'] as const;
+export const PLATFORM_IDS = ['amiga', 'dosvga'] as const;
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 
 export const DEFAULT_GAME: GameId = 'blackcrypt';
@@ -21,4 +21,10 @@ export function isPlatformId(v: string | null): v is PlatformId {
 
 export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   blackcrypt: 'Black Crypt',
+  eotb: 'Eye of the Beholder',
+};
+
+export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
+  amiga: 'Amiga',
+  dosvga: 'DOS/VGA',
 };
