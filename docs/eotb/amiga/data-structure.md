@@ -10,6 +10,12 @@ System) images and LCW compression.
 **EOB1:** 158 files in `data/eotb/amiga/`
 **EOB2:** 261 files in `data/eotb2/amiga/data/` (WHDLoad installation)
 
+**Note on DOS versions as format oracle:** Both EOB1 and EOB2 DOS versions are fully
+supported by [ScummVM's KYRA engine](https://www.scummvm.org/compatibility/2.7.0/kyra:eob/).
+The ScummVM source code (`engines/kyra/`) provides a byte-accurate reference implementation
+for format parsing and can be used to cross-validate Amiga format structures. See
+`docs/eotb2/eotb2-formats-research.md` for links to ScummVM source files.
+
 ---
 
 ## File Types
