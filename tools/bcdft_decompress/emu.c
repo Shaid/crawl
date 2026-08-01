@@ -177,8 +177,30 @@ int main(int argc, char **argv) {
 
     if (verbose) printf("Emulating S_4…\n");
 
-    /* Run up to 20M cycles — S_4 should finish far earlier */
-    int cycles = m68k_execute(20000000);
+    /* Run until the engine leaves S_4 (it RTSes back into the S_0 stub).
+     *
+     * A fixed 20M-cycle budget is NOT enough: the engine needs ~25-30M cycles
+     * to finish, and cutting it short silently truncates the output at
+     * S_1+0x1FEE0 *and* skips the relocation-fixup pass, leaving every
+     * absolute address in the decompressed code unrelocated.  That truncated
+     * blob was the committed artifact for a long time — see the "bcdft
+     * decompression was truncated" correction in
+     * docs/blackcrypt/amiga/data-structure.md. */
+    int cycles = 0;
+    {
+        int chunk;
+        unsigned int pcv = D4;
+        for (chunk = 0; chunk < 200; chunk++) {
+            cycles += m68k_execute(10000000);
+            pcv = m68k_get_reg(NULL, M68K_REG_PC);
+            if (pcv < D4 || pcv > D4 + 600) break;   /* left the S_4 engine */
+        }
+        if (pcv >= D4 && pcv <= D4 + 600) {
+            fprintf(stderr, "Error: S_4 still running after %d cycles — "
+                            "output would be truncated.\n", cycles);
+            return 1;
+        }
+    }
 
     if (verbose) printf("Executed %d cycles, final PC = 0x%x\n",
                         cycles, m68k_get_reg(NULL, M68K_REG_PC));
@@ -203,6 +225,26 @@ int main(int argc, char **argv) {
     fclose(f);
 
     if (verbose) printf("Wrote %d bytes to %s\n", 166676, path_out);
+
+    /* ── Write S_2 as well ────────────────────────────────────────────────
+     * S_2 is the game module's *small-data* segment: A4 = S_2 + 0x7FFE, so
+     * every `x(A4)` global and every per-level table (including the 13-entry
+     * dungeon-palette-index table at S_2+0x39E) lives here.  Without it the
+     * S_1 disassembly has no readable globals at all. */
+    {
+        const char *path_out2 = (argc > 6) ? argv[6] : "/tmp/s2_output.bin";
+        int nz2 = 0;
+        for (i = 0; i < 40808; i++) if (mem[D2 + i]) nz2++;
+        if (verbose) printf("S_2 non-zero: %d / %d\n", nz2, 40808);
+        f = fopen(path_out2, "wb");
+        if (f) {
+            fwrite(mem + D2, 1, 40808, f);
+            fclose(f);
+            if (verbose) printf("Wrote %d bytes to %s\n", 40808, path_out2);
+        } else {
+            perror("fopen S_2 output");
+        }
+    }
 
     free(mem);
     return 0;

@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
 """
 bcdft S_4/S_5 LZ77 decompressor — fixes: fixup phase exits bit loop.
+
+SUPERSEDED — do not use this to produce the project's bcdft artifacts.
+
+The authoritative decompression is `tools/bcdft_decompress` (musashi running
+the game's own S_4 engine); this hand-port is kept only as a reference for the
+algorithm. Notably it emits **one** output, whereas the game produces two
+segments and both are needed: S_1 (code + graphics/string data) and S_2 (the
+`A4` small-data segment, where every global and per-level table lives). Running
+this script overwrites `build/cache/blackcrypt/bcdft_decompressed.bin` with a
+single-segment result; regenerate with
+`cd tools/bcdft_decompress && bash build.sh run`.
 """
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bclib
 
 def extract_s5(path='data/blackcrypt/amiga/bcdft'):
     with open(path, 'rb') as f:
@@ -242,15 +257,13 @@ def decompress_s5(s5):
 
 
 if __name__ == '__main__':
-    base = Path(__file__).parent.parent
-    s5 = extract_s5(str(base / 'data/blackcrypt/amiga/bcdft'))
+    s5 = extract_s5(str(bclib.data_dir('blackcrypt', 'amiga') / 'bcdft'))
     print(f"S_5: {len(s5)}B")
-    
+
     s1, s2, raw = decompress_s5(s5)
     print(f"Output: {len(raw)}B, non-zero: {sum(1 for b in raw if b)}/{len(raw)}")
     print(f"First 32: {raw[:32].hex()}")
-    
-    out_dir = base / 'data/blackcrypt/extracted'
-    out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir = bclib.cache_dir('blackcrypt')  # decompressed blob, not a web asset
     (out_dir / 'bcdft_decompressed.bin').write_bytes(raw)
     print(f"Saved {len(raw)}B")

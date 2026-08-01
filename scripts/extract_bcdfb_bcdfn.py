@@ -1,5 +1,15 @@
 """Extract monster sprites from bcdfb-bcdfn files.
 
+SUPERSEDED: the "frames concatenated within each plane, split by dividing
+height evenly" premise below is wrong — see
+docs/blackcrypt/amiga/data-structure.md ("Animation frames" section). Entries
+sharing data_off are the *same* image (a normal/mirrored pair), not sub-frames
+of one taller image; each data_off block holds exactly one full-height sprite.
+scripts/extract_monsters.py is the canonical extractor (204 sprites,
+byte-exact, feeds public/assets/blackcrypt/amiga/sprites/monsters). This
+script is kept only for reference on the even-split hypothesis and writes to
+the gitignored cache, not public/assets.
+
 File structure:
 - 12-byte header: 2 pad + 2 map_id + 2 extra_id + 2 extra_id2 + 4 pad
 - 42 × 28-byte directory entries — entries SHARING data_off = frames of same sprite
@@ -31,10 +41,14 @@ Files:
 - In WHDLoad version, loaded via bcdfv as part of each level's data
 """
 import struct, sys, os
+from pathlib import Path
 from PIL import Image
 
-DATA = os.path.join(os.path.dirname(__file__), '..', 'data', 'blackcrypt', 'amiga')
-OUT = os.path.join(os.path.dirname(__file__), '..', 'data', 'blackcrypt', 'extracted', 'monsters_corrected')
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bclib
+
+DATA = str(bclib.data_dir('blackcrypt', 'amiga'))
+OUT = str(bclib.cache_dir('blackcrypt') / 'bcdfb_even_split_debug')
 ENTRY_FMT = '>IIIHHIHHHH'
 ENTRY_SIZE = struct.calcsize(ENTRY_FMT)  # 28
 N_DIR_ENTRIES = 42

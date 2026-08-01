@@ -20,8 +20,8 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # Paths to input data
 BCDFT="${PROJECT_ROOT}/data/blackcrypt/amiga/bcdft"
 
-# Directories
-EXTRACTED="${PROJECT_ROOT}/data/blackcrypt/extracted"
+# Directories — decompressed output is a raw blob, not a web asset.
+EXTRACTED="${PROJECT_ROOT}/build/cache/blackcrypt"
 
 build_musashi() {
     if [ ! -f "${MUSASHI_DIR}/m68kcpu.c" ]; then
@@ -93,12 +93,18 @@ run() {
     python3 extract_sections.py "${BCDFT}" /tmp/s0_code.bin /tmp/s4_code.bin /tmp/s5_data.bin
 
     echo "==> Running emulator"
-    ./"${OUTPUT_BIN}"
+    ./"${OUTPUT_BIN}" /tmp/s0_code.bin /tmp/s4_code.bin /tmp/s5_data.bin \
+        /tmp/s1_output.bin 1 /tmp/s2_output.bin
 
     echo "==> Copying results"
-    mkdir -p "${EXTRACTED}"
-    cp /tmp/s1_output.bin "${EXTRACTED}/bcdft_decompressed.bin"
-    ls -la "${EXTRACTED}/bcdft_decompressed.bin"
+    mkdir -p "${EXTRACTED}" "${PROJECT_ROOT}/data/blackcrypt/extracted"
+    # S_1 = code + graphics/string data; S_2 = small-data segment (A4 globals,
+    # per-level tables).  Both are needed to read the game module statically.
+    for dest in "${EXTRACTED}" "${PROJECT_ROOT}/data/blackcrypt/extracted"; do
+        cp /tmp/s1_output.bin "${dest}/bcdft_decompressed.bin"
+        cp /tmp/s2_output.bin "${dest}/bcdft_s2_data.bin"
+    done
+    ls -la "${EXTRACTED}/bcdft_decompressed.bin" "${EXTRACTED}/bcdft_s2_data.bin"
     echo "==> Done"
 }
 

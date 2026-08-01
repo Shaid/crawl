@@ -1,7 +1,24 @@
 #!/usr/bin/env python3
-"""Extract all RLE streams from bcdfa and render at 64×24×6bpp with EHB palette."""
+"""Extract all RLE streams from bcdfa and render at 64×24×6bpp with EHB palette.
+
+SUPERSEDED PREMISE — TWICE OVER. bcdfa is not a flat 64×24 tile sheet, and it
+is also not a flat run of RLE streams: it is a *mixed* container whose BCSPEED
+blocks must be located by marker string, some compressed and some raw (see
+bclib/bcdfa.py and docs/blackcrypt/amiga/data-structure.md). Splitting the whole
+file into streams, as this script does, is exactly the mistake that produced a
+phantom preamble and a wrong sprite format. The real GFK sprites are extracted
+by scripts/render_all.py via bclib.gfk_frames.
+
+This script survives only as a crude visualiser for the parts of bcdfa that are
+still unclassified, and its stream numbering means nothing — output goes to the
+gitignored cache, never to public/assets.
+"""
 import os, sys
+from pathlib import Path
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bclib
 
 PAL_12BIT = [0x000,0xC86,0xF00,0xB00,0xD80,0xFE0,0x0F0,0x0B0,0x040,0x0DD,0x00F,0x07C,0xFD9,0xEB8,0xF0F,0xE09,0x720,0x952,0xA53,0x33B,0x222,0x444,0x666,0x999,0xCCC,0xFFF,0xB60,0xC70,0xC80,0xD90,0xEB0,0xFC0]
 PALETTE = []
@@ -78,7 +95,8 @@ for i, s in enumerate(streams):
     print(f'  Stream {i:3d}: {len(s):>6d} bytes = {n} tiles + {r} rem')
 
 # Render each stream as a tile strip
-out_dir = 'data/blackcrypt/extracted'
+out_dir = str(bclib.cache_dir('blackcrypt') / 'bcdfa_debug')
+os.makedirs(out_dir, exist_ok=True)
 all_tiles = []
 for si, sdata in enumerate(streams):
     n = len(sdata) // TS
