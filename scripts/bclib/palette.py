@@ -41,6 +41,17 @@ BCDFQ_PALETTES = {
 # the palette buffer and into the live copper list at COLOR26..COLOR31.
 # bcdfu's five 64-byte records are the *epilogue overlay's* copies of ramps 0-4.
 # See docs/blackcrypt/amiga/data-structure.md, "Dungeon accent-ramp selection".
+# The automap runs on its own 32-word palette, built into a copper list by
+# bcdft S_1 `+0x1E792`-`+0x1E884` and read straight off the table that follows
+# that routine's RTS. The automap screen is *dual playfield*: BPLCON0 = 0x5400
+# (BPU = 5, DBLPF), playfield 1 = the 3-plane 8x8 tilemap (colours 0-7),
+# playfield 2 = the 2-plane 16x20 cell grid (pixel v -> COLOR 8+v). Entries
+# 0-11 reproduce DOS `clipper.clp`'s "Automap Palette" indices 64-75
+# colour-for-colour (max channel error 10/255, i.e. pure 12-bit quantisation);
+# 12-31 are Amiga-only (16-31 are the hardware-sprite registers).
+BCDFT_AUTOMAP_PALETTE = 0x1E886     # S_1: 32 big-endian 12-bit words
+AUTOMAP_PLAYFIELD2_COLOR_BASE = 8
+
 BCDFT_DUNGEON_PALETTE = 0x27AC0     # S_1: 32 words, shipped = ramp 0 in the tail
 BCDFT_ACCENT_RAMPS = 0x27B00        # S_1: 12 ramps x 6 words (COLOR26..31)
 BCDFT_ACCENT_RAMP_COUNT = 12
@@ -65,6 +76,15 @@ TILESET_FILES = ('bcdfx', 'bcdfy', 'bcdfz')
 #: set (bcdft S_1+0x02D46). Levels other than 3 only.
 SQUARE_FLAG_RAMP = 4
 
+#: bcdfp's single 32-word palette record (`LAB_0148`, bcdfp file 0x4194) — the
+#: loader / character-generation palette, byte-identical to `BlackCrypt`+0x2848
+#: and to the DOS port's `Character_Gen_Palette`. This is the palette every
+#: `bcdfo` element is authored against (bcdfp's own fade routines `LAB_0131` /
+#: `LAB_0137` install it and nothing else touches bcdfp's copper COLOR block);
+#: it differs from bcdfq's `game` palette at index 19 and 26-31, which is
+#: exactly the accent range the sigils and numerals use.
+BCDFP_CHARGEN_PALETTE = 0x4194
+
 BCDFU_DUNGEON_PALETTES = [0x03EC, 0x042C, 0x046C, 0x04AC, 0x04EC]
 
 #: Ramp used by dungeon levels 1-4 (tan sandstone) — also the shipped content of
@@ -80,6 +100,11 @@ def read_dungeon_palette(bcdfu, variant=BCDFU_TAN_SANDSTONE):
     prefer `read_dungeon_palette_for_level`.
     """
     return read_palette_words(bcdfu, BCDFU_DUNGEON_PALETTES[variant], 32)
+
+
+def read_chargen_palette(bcdfp):
+    """Read bcdfp's 32-word loader / character-generation palette."""
+    return read_palette_words(bcdfp, BCDFP_CHARGEN_PALETTE, 32)
 
 
 def read_accent_ramp(bcdft_s1, index):

@@ -2,8 +2,8 @@
 """Extract Black Crypt's Amiga key icons from bcdfa's SLOT_TEXT_RESOURCE tail.
 
 bcdfa's container-directory entry 5 (`SLOT_TEXT_RESOURCE`, file offset
-0x111E1, 34,340 B decoded) is still largely unclassified — see
-`bclib.bcdfa`'s module docstring — but its last 2,436 bytes (`0x7CA0`-end)
+0x111E1, 34,340 B decoded) is now fully classified into 13 records — see
+`bclib.TEXT_RESOURCE_LAYOUT` — of which its last 2,436 bytes (`0x7CA0`-end)
 are fully solved: **29 key icons**, 8x14, 6 sequential bitplanes, no mask
 (the same backdrop-index-53 convention as the 24x24 item icons). Confirmed
 via two independent consumer call sites (S_1 `+0x1FB40`/`+0x206D4`, both

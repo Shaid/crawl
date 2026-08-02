@@ -242,6 +242,160 @@ shared asset.
 > `docs/blackcrypt/amiga/data-structure.md`'s "`0x300C2`-EOF tail" §
 > "Verification" for the corrected accounting.
 
+#### The marker brackets classify the archive completely — `misc` is now empty
+
+> **Correction — supersedes every "not confidently classified", "stays in
+> `misc`", "confirmed by eye, not from any clipper.clp metadata" and
+> "dimension-based classification" statement above.** The dimension
+> clustering was never needed. `clipper.clp`'s 34 type-`0x01` marker entries
+> form 17 `Start X` / `End X` brackets, and `crypt.exe` looks those bracket
+> names up **by string** at runtime (`strings crypt.exe` → `Start Items`,
+> `Start Chest`, `Start Throwing Items`, `Start CG Numbers`, …), so they are
+> the game's own resource taxonomy, not incidental separators.
+>
+> Full bracket census (`index` columns are directory entry indices; the
+> markers themselves are the bounds and are not counted):
+>
+> | Bracket | Range | Entries | Type | Geometry | Named |
+> |---------|-------|---------|------|----------|-------|
+> | Level Specifics | 77–78 | 0 | — | — | — |
+> | Hi Spell Levels | 136–142 | 5 | image | all 16×11 | 5 |
+> | Spell Book Numbers | 148–154 | 5 | image | all 16×8 | 5 |
+> | Attack Sounds | 168–171 | 2 | sound | — | 0 |
+> | Movement Sounds | 172–179 | 6 | sound | — | 0 |
+> | System Sounds | 180–195 | 14 | sound | — | 0 |
+> | **CG Numbers** | 208–220 | **11** | image | all 8×7 | 0 |
+> | Speed Graphics | 227–301 | 73 | image | all 16×16 | 0 |
+> | Faces | 302–311 | 8 | image | 4 × 111×90, 4 × 31×24 | 8 |
+> | Keys | 312–342 | 29 | image | all 8×14 | 0 |
+> | Key Holes | 343–431 | 87 | image | 29 each of 16×20 / 16×15 / 16×11 | 0 |
+> | **Throwing Items** | 432–445 | **12** | image | 4 weapons × 3 depths | 4 |
+> | Items | 446–622 | 175 | image | all 24×24 | 0 |
+> | Misc | 623–629 | 5 | image | all 24×24 | 0 |
+> | Chest | 630–650 | 19 | image | all 32×29 | 0 |
+> | Floor Items | 651–799 | 147 | image | 49 groups × 3 depths | 49 |
+> | Monsters | 800–815 | 14 | image | mixed | 14 |
+>
+> **Zero-deviation invariant:** every one of the **505/505** image entries
+> `clipper.clp` gives no name to falls inside one of these brackets. There is
+> no unnamed residue anywhere in the archive, so `group_for()`'s
+> dimension fallback is now unreachable and `sprites/misc.*` no longer
+> exists — the `misc` bucket went 505 → 233 → 19 → **0**.
+>
+> Three brackets independently confirm reclassifications this doc had
+> previously made **by eye only**, each matching its size cluster exactly and
+> containing nothing else:
+>
+> | Earlier visual call | Bracket that confirms it |
+> |---------------------|--------------------------|
+> | "24×24 (180) = item icons" → `items` | `Start Items` (175) + `Start Misc` (5) = **180**, all 24×24 |
+> | "16×16 (73) = spell-effect orbs" → `spell-effects` | `Start Speed Graphics` = **73**, all 16×16 (the DOS name for the same SPEED effects engine whose script data is `bcdfa` entry 6 / `"Speed Effects"`) |
+> | "32×29 (19) = chest armor, **not** heraldry" → `items` | `Start Chest` = **19**, all 32×29. `Chest` is the equipment slot — the heraldry→armor correction was right |
+>
+> The only 24×24 / 16×16 / 32×29 entries outside those brackets are seven
+> explicitly-**named** ones the keyword classifier already handles
+> (`Ghost`, `Weapon Hit`, `Mouse Arrow`, `Normal Button 1 In`/`Out`,
+> `Down Arrow Left`/`Right`).
+
+##### Residue 1 — `Start CG Numbers` (11 × 8×7) = the chargen numeral font, **confirmed byte-exact**
+
+The 11 unnamed 8×7 entries at indices **209–219** are the
+character-generation numeral font, and they are **byte-identical to the
+Amiga's**. The Amiga bank is `bcdfo` `0xF286`–`0xF622` (11 glyphs × 16×7 ×
+7 planes, 84 B each) with a *shared* 1-bit mask at `0xF278`; that mask is
+`11111111 00000000` on all 7 rows, so the Amiga glyph only ever occupies its
+**left 8 columns**. Cropping there reproduces the DOS entry's palette
+indices exactly.
+
+| Check | Result | Oracle |
+|-------|--------|--------|
+| Palette-index equality, DOS 8×7 vs Amiga 16×7 cropped to `x < 8` | **616/616 px (100.000%)**, 11/11 glyphs individually perfect | Amiga `bcdfo` numeral bank |
+| Ink registers | identical on both platforms — 27 / 28 (+ a single 29 px in glyph `3`) on background 30 | — |
+| Slot roster | slot 0 = **blank** glyph (all 56 px = index 30), slots 1–10 = digits `0`–`9` | matches the Amiga bank's documented "one blank slot + digits `0`–`9`" |
+
+Routed to the `ui` atlas, next to `CG Font` / `CG Options` / `CG Guild N`.
+
+> **Palette bug fixed while confirming this.** These entries are unnamed, so
+> `pick_palette()` fell through to the default `Palette`, where registers
+> 27–30 are a muddy brown ramp (83,67,35 → 131,115,83); the glyphs are
+> authored against `Character Gen Palette`, where the same ramp is orange
+> (192,64,0 → 240,112,48). `extract_clipper.py` now carries a
+> `MARKER_PALETTES` table (bracket → palette) resolved before the name hints,
+> and `pick_palette()` matches a `cg ` prefix ahead of its `options` rule so
+> `CG Options` stops taking the standalone options-screen palette.
+>
+> Corroboration found in passing: **DOS `Character Gen Palette` *is* the
+> Amiga chargen palette**, re-scaled. Both store the same 4-bit component
+> `n`; Amiga renders it `n × 17`, DOS `n × 16` — **94/96 components of base
+> registers 0–31 (97.9%)**, the sole content difference being register 19
+> (Amiga dark green `(0,34,0)` vs DOS yellow `(240,208,0)`). Registers 32–63
+> diverge only by EHB half-bright rounding (Amiga `7×17 = 119` vs DOS
+> `15×16/2 = 120`).
+
+##### Residue 2 — `Start Throwing Items` (12 entries) = four in-flight projectiles × 3 depths
+
+> **Premise correction:** the 8 unnamed entries here are **not** "depth-2/3
+> variants of `Sword`/`Hammer`". They are the depth-2 and depth-3 entries of
+> **all four** weapons in the bracket — the named entry of each triple is
+> only its near depth, the archive's usual "name the first of N" convention.
+> The four *named* siblings were never in `misc` at all: `Arrow` was landing
+> in `ui` (keyword `arrow`) and `Dagger`/`Sword`/`Hammer` in `items`, so the
+> bracket was scattered across three buckets.
+
+| # | Index | Name | Near | Mid | Far |
+|---|-------|------|------|-----|-----|
+| 0 | 433–435 | `Arrow` | 16×11 | 16×8 | 16×5 |
+| 1 | 436–438 | `Dagger` | 16×7 | 16×5 | 16×3 |
+| 2 | 439–441 | `Sword` | 32×15 | 16×10 | 15×7 |
+| 3 | 442–444 | `Hammer` | 16×13 | 16×11 | 16×8 |
+
+All twelve are compact, edge-on, right-pointing **projectile** sprites
+(arrowhead + fletching; blade + crossguard; hammer head + haft), shrinking
+monotonically in both axes near → far. They are **not** extra depths of the
+same weapons' `floor-items` sprites, which are a different, much wider art
+set drawn lying on the ground (floor `Sword` is 80×9 vs thrown 32×15; floor
+`Hammer` 48×10 vs thrown 16×13; floor `Arrow` 32×6 vs thrown 16×11), and not
+combat/animation frames — there is exactly one frame per depth.
+
+**Verification.** The first six shapes are the DOS counterpart of the Amiga
+`bcdfa` container entry 12 bank (`SLOT_THROWING_ITEMS`, `0x300C2`):
+silhouette (DOS `!= 33` vs the Amiga record's 1-bit mask plane) agrees on
+**624/624 px (100.000%)** across all 6 shapes — `arrow_near` 176/176,
+`arrow_mid` 128/128, `arrow_far` 80/80, `dagger_near` 112/112, `dagger_mid`
+80/80, `dagger_far` 48/48, and the opaque-pixel counts match exactly
+(63/35/18 and 56/15/11). This independently confirms the depth ordering and
+that 434/435/437/438 really are the mid/far depths of their named
+predecessors — extending the earlier check, which had only covered the two
+**named** near-depth entries.
+
+**`Sword` and `Hammer` are DOS-exclusive projectiles — a real content
+difference, not a decode error.** The Amiga bank is closed at two weapons on
+three independent counts: its 12 descriptors tile the 1,092-byte chunk with
+zero gap and zero overlap; the flight animator (S_1 `+0x21A78`) tests weapon
+type with a **two-way** `TST.W D0` / `BNE`; and its hot-spot table
+(S_1 `+0x21C6C`) is 12 B per weapon with exactly **two** rows. Four weapons
+would need 48 B there and a 4-way dispatch. So the Windows port added
+throwable Sword and Hammer art that the Amiga original never had. (The Amiga
+also stores each shape twice — facing 0 and its exact horizontal mirror —
+where DOS stores one facing and presumably mirrors at blit time: 2 × 3 × 2 =
+12 Amiga records vs 4 × 3 × 1 = 12 DOS entries, the same count for different
+reasons. Reading "12 = 12" as "same bank" is the trap this bracket sets.)
+
+Routed to a `throwing-items` bucket, mirroring the Amiga side's own
+`sprites/throwing-items.*`.
+
+##### Derived frame labels
+
+Both brackets' unnamed entries would otherwise land in the atlases as
+`434_entry_0434`, discarding everything above. `extract_clipper.py`'s
+`derived_labels()` now names them from the confirmed findings:
+`433_Arrow_near` … `444_Hammer_far` (the near name propagating forward with a
+`near`/`mid`/`far` suffix, which is exactly the archive's "name the first of
+N" convention read in reverse) and `209_CG Number blank`, `210_CG Number 0` …
+`219_CG Number 9`. The `Start Floor Items` bracket follows the same
+convention for its 98 unnamed depth entries and could be labelled the same
+way; it was left alone here to avoid churning an already-confirmed atlas.
+
 ---
 
 ## maindung.gam — Dungeon Data
@@ -336,24 +490,27 @@ with `python3 scripts/extract_clipper.py`), by category per `group_for()`:
 ```
 public/assets/blackcrypt/dosvga/
   sprites/dungeon.{png,json}         76 frames — wall/floor/door/structure textures
-  sprites/monsters.{png,json}        14 frames — Rock Eye, Two Head
-  sprites/ui.{png,json}              97 frames — fonts, bars, HUD chrome
-  sprites/items.{png,json}           205 frames — 48 named + 180 reclassified 24x24 + 19 reclassified 32x29 armor icons, minus the 49 floor-item names now in floor-items
-  sprites/spell-effects.{png,json}   73 frames — reclassified 16x16 spell icons
+  sprites/monsters.{png,json}        14 frames — Start/End Monsters bracket (Rock Eye, Two Head)
+  sprites/ui.{png,json}              107 frames — fonts, bars, HUD chrome, + the 11 CG numerals
+  sprites/items.{png,json}           202 frames — Start/End Items (175) + Misc (5) + Chest (19) brackets, plus named item entries
+  sprites/spell-effects.{png,json}   73 frames — Start/End Speed Graphics bracket (all 16x16)
   sprites/keys.{png,json}            29 frames — Start/End Keys marker bracket; confirmed = Amiga bcdfa key-icon bank
   sprites/key-holes.{png,json}       87 frames — Start/End Key Holes bracket (29 x 3 depths); confirmed = Amiga bcdfb-bcdfn wall-decoration bank
+  sprites/throwing-items.{png,json}  12 frames — Start/End Throwing Items bracket (4 weapons x 3 depths); Arrow+Dagger confirmed = Amiga bcdfa entry 12, Sword+Hammer DOS-exclusive
   sprites/floor-items.{png,json}     147 frames — Start/End Floor Items bracket (49 x 3 depths); confirmed = Amiga bcdfa floor-item bank
-  sprites/misc.{png,json}            19 frames — unnamed, not confidently classified (CG Numbers + unnamed Sword/Hammer depths)
   screens/title.{png,json}           4 frames — the "Title N" full-screen entries
   palettes/*.json                    7 palettes
   audio/*.{wav,iff,raw}              22 sounds
 ```
 
-See the "Item icons and other unnamed entries" section above for how
-`items`/`spell-effects` were split out of what used to be one 505-entry
-`misc` bucket. (An earlier pass also split out a `heraldry` bucket for the
-32×29 entries — retracted, they're chest armor and now part of `items`;
-there is no `heraldry` category in the current output.)
+76 + 14 + 107 + 202 + 73 + 29 + 87 + 12 + 147 + 4 = **751**, the archive's
+full image count. **There is no `sprites/misc.*` any more** — see "The marker
+brackets classify the archive completely" above; every entry now reaches its
+atlas through one of `clipper.clp`'s own `Start X`/`End X` brackets or an
+explicit name, and the old dimension-guessing fallback is unreachable. (An
+even earlier pass also split out a `heraldry` bucket for the 32×29 entries —
+retracted, they are the `Start Chest` bracket, i.e. chest armor, and are part
+of `items`; there is no `heraldry` category in the current output.)
 
 Older ad-hoc extraction output (individual PNGs from earlier probe scripts,
 not the current pipeline) may still exist at `data/blackcrypt/bcdf_images/`

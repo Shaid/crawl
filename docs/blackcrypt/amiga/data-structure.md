@@ -68,7 +68,7 @@ Two traps this document paid for:
 | `BlackCrypt`     | 12,700 B  | HUNK executable             | AmigaDOS    | Opens overlays + config            |
 | `bcdfa`          | 197,894 B | BCSPEED effects + **item icons** | **bcdfq**   | **Mixed** container, at least four blocks: `.GFK` = one RLE stream at `+0x0DFFB` → 73 sprites, 16×16 mask+6bpp EHB (**solved**); `.PRG` = 34 **uncompressed** script records; **item icon bank** = RLE streams at `+0x1B5B3` (175 icons) and `+0x2FE5C` (5 icons), 24×24 @ 6bpp, no mask (**solved**); **chest-armour paperdoll bank** = RLE stream at `+0x2D05E`, 19 × 32×29 @ 6bpp, no mask (**solved**); **dungeon-floor item sprites** = RLE stream at `+0x270C4` → 31,388 B, 147 masked variable-size sprites = 49 items × 3 view depths, geometry from a 10-byte descriptor table in `bcdft` S_1 `+0x271B6` (**solved**); **large equipment-panel art** = 7 records inside the RLE stream at `+0x036FD`, 48-px rows, 6bpp, no mask (**solved**; the rest of that stream is other UI art at 32/16/80-px widths, unclassified). Not a flat run of RLE streams. |
 | `bcdfb`–`bcdfn`  | 48–72 KB  | RLE monster sprites (per dungeon level) | **`bcdft` S_1 `+0x21E7E`** | 12-byte header + 42 × 28-byte directory + 214-byte raw table + one RLE stream from offset **1402**. 7 sequential planes (mask + 6bpp EHB) per sprite. **204 sprites extracted, verified.** |
-| `bcdfo`          | 63,010 B  | Character portraits + UI elements | bcdfp        | **36** portraits × 32×24×6bpp at offset $60 (corrected from an earlier miscount of 109 — see the bcdfo section), plus UI tiles at assembly-specified offsets (see bcdfp LAB_010D) |
+| `bcdfo`          | 63,010 B  | Character portraits + UI elements | bcdfp        | **Fully accounted (0 remainder).** **36** portraits × 32×24×6bpp at offset $60 (corrected from an earlier miscount of 109), 23 **7-plane masked** UI elements at bcdfp `LAB_010D` descriptor offsets, three 8×8 fonts (`0x9E28`/`0xA148`/`0xA320`) and the mouse-pointer sprite bank (`0xA028`) — see the bcdfo section |
 | `bcdfp`          | 23,960 B  | HUNK overlay (CODE+DATA)    | BlackCrypt   | All 3D rendering, blitter routines, BCSub, item/class tables, save/load |
 | `bcdfq`          | 87,220 B  | HUNK overlay + appended data | BlackCrypt  | Intro screens + music engine. Holds 3 palettes at file `0x0266` / `0x0286` / `0x02C6` (gold accent variant) |
 | `bcdfr`          | 138,560 B | Full-screen images (4 screens, per-screen BPP) | bcdfq | 32KB Raven (4bpp, 320×200) + 48KB Title (6bpp, 320×200) + 10,560B Logo (6bpp, 320×44) + 48KB Plot (6bpp, 320×200) — chunk sizes from bcdfq LAB_0022/27/2B/2F |
@@ -77,9 +77,9 @@ Two traps this document paid for:
 | `bcdfu`          | 141,388 B | HUNK overlay (GAMEDISK2:)   | BlackCrypt   | **Endgame/epilogue sequence player** (CODE hunk 0 is a complete standalone program: 10 narrative screens + credits, then `RTS`). Also carries the shared RLE decompressor (`LAB_0043`), music/sound and text. Its **5 palettes** at file `0x03EC`–`0x04EC` are the *epilogue screen* palettes — copies of entries 0–4 of the real 12-entry dungeon ramp table in `bcdft` |
 | `bcdfv`          | 191,917 B | **Endgame/epilogue sequence data** | bcdfu        | 16 sequentially-read blocks, all sizes byte-exact: congratulations screen, picture frame, 8×8 font (59 glyphs), 10 × 160×99×6bpp narrated panels, Black Crypt facade intact + destroyed, 240×153 1bpp credits. **Solved** — contains no monster sprites and no sound (see bcdfv section) |
 | `bcdfw`          | 457 B     | Workbench drawer icon       | —            | `0xE3100001`                       |
-| `bcdfx`          | 144,169 B | RLE multi-payload (GAMEDISK2) | **`bcdft` S_1 `+0x1DD16`** | Dungeon tileset — **levels 1–4 (accent ramp 0, tan) and 12–13 (ramp 3, grey)**. Directory = 12 chunks at S_1 `+0x1DE10`, Σ = 144,169 exactly. **All 12 chunks decoded — 83 named sub-images, 100 % byte coverage.** See the bcdfx/y/z section |
-| `bcdfy`          | 117,937 B | RLE multi-payload (GAMEDISK3) | **`bcdft` S_1 `+0x1DD16`** | Dungeon tileset — **level 5 only (accent ramp 1, violet/plum)**. Genuinely partial: directory = **7** chunks at S_1 `+0x1DE5A`, Σ = 117,937 exactly — **46 of the 83 sub-images**, all decoded; it lacks the pit, alcove, plaque, panel/fountain and button chunks only |
-| `bcdfz`          | 160,806 B | RLE multi-payload (GAMEDISK3) | **`bcdft` S_1 `+0x1DD16`** | Dungeon tileset — **levels 6–11 (accent ramp 2, bone/cream)**. Directory = 12 chunks at S_1 `+0x1DE86`, Σ = 160,806 exactly. Same 12-chunk structure as bcdfx, all 83 sub-images decoded |
+| `bcdfx`          | 144,169 B | RLE multi-payload (GAMEDISK2) | **`bcdft` S_1 `+0x1DD16`** | Dungeon tileset — **levels 1–4 (accent ramp 0, tan) and 12–13 (ramp 3, grey)**. Directory = 12 chunks at S_1 `+0x1DE10`, Σ = 144,169 exactly. **All 12 chunks decoded — 84 named sub-images (83 pixel images + the door-clip stencil), 100 % byte coverage.** See the bcdfx/y/z section |
+| `bcdfy`          | 117,937 B | RLE multi-payload (GAMEDISK3) | **`bcdft` S_1 `+0x1DD16`** | Dungeon tileset — **level 5 only (accent ramp 1, violet/plum)**. Genuinely partial: directory = **7** chunks at S_1 `+0x1DE5A`, Σ = 117,937 exactly — **47 of the 84 sub-images**, all decoded; it lacks the pit, alcove, plaque, panel/fountain and button chunks only |
+| `bcdfz`          | 160,806 B | RLE multi-payload (GAMEDISK3) | **`bcdft` S_1 `+0x1DD16`** | Dungeon tileset — **levels 6–11 (accent ramp 2, bone/cream)**. Directory = 12 chunks at S_1 `+0x1DE86`, Σ = 160,806 exactly. Same 12-chunk structure as bcdfx, all 84 sub-images decoded |
 | `configuration.dat` | 8 B    | Config store                | BlackCrypt   | `"MLONF_"` + `0x0100`             |
 
 ---
@@ -1420,7 +1420,7 @@ entries is now accounted for somewhere in the Amiga corpus.
 | Range | Container-directory entry | Size | Status |
 |-------|---------------------------|------|--------|
 | `0x10779`–`0x111E1` | 4 (`comp=1`, slot `0xE0`) | 4,288 B decoded | **Solved** — **four** fonts (8×8 1bpp ×64 glyphs, 4×5 ×59, 8×8 mask ×59, 8×8 6bpp colour ×59), all with consumer code, summing to 4,288 exactly. See "bcdfa — Mono Font Bank" below. |
-| `0x111E1`–`0x15F8D` | 5 (`comp=1`, slot `0xB4`) | 34,340 B decoded | **Partly solved** — sub-record map from 15 consumer sites; tail `0x7CA0`–end confirmed as the **29 key icons** (100.000% DOS match). See "bcdfa — Text/UI Resource Bank" below. |
+| `0x111E1`–`0x15F8D` | 5 (`comp=1`, slot `0xB4`) | 34,340 B decoded | **Solved** — **13 records** (Spell Book bg, the "Stone" side panel, a blank-stone erase strip, Scroll Top + Scroll Piece, the 15-frame Fire Animation, the mouse-pointer and bubble hardware sprites, Auto Map Block + Auto Map Tiles, two Treasure Chest states, 29 key icons) tiling the chunk with **0 remainder**; 11 of the 13 confirmed against named DOS `clipper.clp` entries at 100.000% (Stone at 99.986%). See "bcdfa — UI / Automap Resource Bank" below. |
 | `0x15F8D`–`0x1AE70` | 6 (`comp=0`, **raw**) | 20,195 B | **Solved** — BCSPEED.EFF, 95 effect particle-emitter scripts; consumer traced at S_1 `+0x25624`. See "bcdfa — BCSPEED.EFF" below. Directory-confirmed raw, which is *why* the RLE walk desynced into fragments; it was never a decode bug. |
 | `0x300C2`–EOF | 12 (`comp=0`, **raw**) | 1,092 B | **Solved** — the Throwing-Items projectile sprite bank (Arrow + Dagger, 3 depths × 2 facings, 16 px, 7 planes). Raw *and* pixel data — the one bank where `comp=0` does not imply "table data". See "`0x300C2`–EOF tail" below. |
 
@@ -1549,53 +1549,237 @@ and the `font-mono2` asset are retired. Re-run via
 invariant re-verified byte-exact against the committed decoder
 (472/472, 0 deviation) as part of promoting these functions.
 
-##### `0x111E1`–`0x15F8D` — Text/UI Resource Bank — **partly solved**
+##### `0x111E1`–`0x15F8D` — UI / Automap Resource Bank — **SOLVED (13 records, all identified)**
 
 Container-directory entry 5 (slot `0xB4`) decodes to 34,340 bytes. A
-whole-image byte-pattern census for `MOVEA.L $B4(A5),An` (all 8 register
-forms) found **14 hits**, spread across at least 10 visibly distinct
-subroutines from S_1 `+0x1E8CE` to `+0x23D6C` — far more call sites than any
-other bcdfa bank, and each one adds a *different* fixed byte offset
-(`0x7110`, `0x7230`, `0x6E40`, `0x7350`, `0x73A0`, `0x7CA0` ×2, `0x62C4`,
-`0x3480` ×2, all within `[0, 34340)`) before reading small, differently-shaped
-structures — some copy a fixed count of longwords (18, then 5) into another
-buffer, one does a per-character copy loop with a `MULU.W #$30` stride and a
-screen-modulo-sized (`$28`=40) row advance reminiscent of the font blitter
-above. This is strong evidence the bank is **heterogeneous** — many small,
-independently-addressed sub-tables/sub-images sharing one buffer, the same
-shape as the UI panel bank but larger — which also explains why every earlier
-fixed-width render sweep and padding-column scan (recorded below) found
-nothing: there is no single image or record size to find. That reading is
-confirmed, and the sub-records are now broken out below.
+whole-image byte-pattern census for every `(d16,A5)` effective-address form
+of `$B4(A5)` finds **15 sites**, spread across **13** distinct subroutines from
+S_1 `+0x1E8CE` to `+0x25C7E`. Each site's literal `ADDA.L`/`LEA`
+displacement is a sub-record's exact offset inside the chunk, and the copy
+loop around it fixes that record's geometry. The bank is **heterogeneous** —
+many independently-addressed sub-images sharing one buffer — which is why
+every earlier fixed-width render sweep and padding-column scan found
+nothing: there is no single image or record size to find.
 
-###### Sub-record map from the consumers (**confirmed offsets**, mixed content confidence)
+> **Correction — supersedes the old "partly solved" table and every "open"
+> row in it.** All thirteen records are now identified, and eleven of them
+> are confirmed pixel-for-pixel against a *named* DOS `clipper.clp` entry.
+> Four specific claims in the superseded table were wrong and are corrected
+> in the new table below:
+>
+> - **`0x62C4` was listed as 2,940 B.** Its real extent is **1,932 B**; the
+>   remaining 1,008 B are two further records (`0x6A50` Scroll Top, 924 B,
+>   and `0x6DEC` Scroll Piece, 84 B) whose own 100.000% DOS matches pin
+>   those boundaries exactly.
+> - **`0x3480` was read as "6 sequential planes copied into the screen
+>   bitplane pointers", implying row-interleaved planes.** It is
+>   **plane-major with a 1,974-byte plane stride** — the `LEA $444(A0),A0`
+>   in `+0x236FA` and the `LEA $46E(A0),A0` in `+0x23D6C` both sit *inside*
+>   the 6-iteration plane loop, not before it, so each is a per-plane skip,
+>   not a one-off offset. `1,092 + 882 = 1,134 + 840 = 1,974`, and
+>   `1,974 × 6 = 11,844` = the whole span.
+> - **`+0x236FA`'s sub-image was called "28 rows".** `MOVEQ #$3E,D1` is 62,
+>   so the `DBRA` runs **63** rows.
+> - **`0x7350` was called "two 16×20 1-bitplane images".** `LEA $28(A3),A3`
+>   is a *plane* offset, not a second image: it is **one** 16×20 image with
+>   **2** bitplanes (40 B per plane).
+>
+> The old table's three rejected DOS candidates ("Ram Block", two unnamed
+> 32×14s) were rejected correctly — they were simply the wrong candidates.
+> The right ones were found by reading the DOS catalogue's *names* for
+> automap/scroll/fire resources instead of scanning it by size.
 
-The census above was re-run over *every* `(d16,A5)` effective-address form
-(not just `MOVEA.L`) and finds **15** sites, not 14 — the extra one is
-`MOVE.L $B4(A5),D3` at S_1 `+0x24430`. Each site's literal `ADDA.L`/`LEA`
-displacement is the sub-record's exact offset inside the 34,340-byte chunk,
-and the copy loop around it fixes its record size:
+###### Complete record table — **all offsets and geometry confirmed**
 
-| Chunk offset | Extent | Consumer (S_1) | Shape read by the code | Status |
-|--------------|--------|----------------|------------------------|--------|
-| `0x0000` | 13,440 B | — (no consumer found) | Single opaque **320×56, 6 sequential planes, no mask** | **CONFIRMED — the Spell Book background, see below** |
-| `0x3480` | 11,844 B | `+0x236FA` (`+0x444`), `+0x23D6C` (`+0x46E`) | 6 sequential planes copied into the 6 screen-bitplane pointers at `(A1)+`; `+0x23D6C` copies 6 × 420 words (840 B) per plane after first skipping 1,134 B of that plane's own span (`LEA $46E(A0),A0` *before* the 420-word loop, so the true per-plane stride is 1,134+840=1,974 B and only the *tail* 840 B of each plane is read here); `+0x236FA`/`+0x236C2` reads a *different* 14 B/row × 28-row × 6-plane sub-image starting at `0x3480+0x444` (`0x38C4`) — i.e. this span holds **multiple sub-images**, not one | **open** — geometry of at least 2 distinct sub-images now pinned by disassembly, content still unidentified |
-| `0x62C4` | 2,940 B | `+0x236C2` | 6 planes, 23-longword (92 B) runs, destination `row × 40 + 26` | **open** |
-| `0x6E40` | 720 B = **15 × 48** | `+0x1EC78` | 6 planes × 8 stored rows/plane, but only the first **7** rows are blitted per plane (`move.b (a2)+,(a1)` × 7, then `addq.l #1,a2` skips the 8th byte unread) — **confirmed** 8×8-stored/7-row-drawn, 6bpp, no mask. Renders as **15 small icons, one blank**, showing a triangular/pyramid "spark" motif with progressively increasing dispersion across the sequence (frame 15 blank) — plausibly a hit/impact spark animation, but no DOS `clipper.clp` entry is 8×8 (DOS's smallest catalogued raster is bigger), so there is no cross-platform name for it | **rendered, geometry confirmed by disassembly; purpose unidentified** |
-| `0x7110` | 288 B = **3 × 96** | `+0x1E8CE` | two 18-longword (72 B) blocks per 96 B record | **open** — tested against 2 same-size (384 B, 32×14 8bpp) unnamed DOS `clipper.clp` entries (761, 773); silhouette agreement 51.3%/33.9%, chance level — **rejected**, see paths tried |
-| `0x7230` | 288 B = **3 × 96** | `+0x1E8FE` | two 5-longword (20 B) blocks per 96 B record | **open** — same two DOS candidates tested (entries 773, 761): 21.6%/58.3% — **rejected**, see paths tried |
-| `0x7350` | 80 B = **2 × 40** | `+0x1F9D2` | 20 words each, written at the message-log screen stride `$2A` = 42 — two 16×20 **1-bitplane** images | **open** — tested as DOS `"Ram Block"` (32×20, exact size match after concatenating the two 16-wide halves): silhouette agreement 43.1%/47.5% either concatenation order, chance level — **rejected**, see paths tried. `tileset-missing-dos-items`'s "Ram Block" is still unlocated |
-| `0x73A0` | 2,304 B | `+0x1FA14` | single bytes down a column at an 82 B destination stride | **open** |
-| `0x7CA0` | 2,436 B = **29 × 84** | `+0x1FB40`, `+0x206D4` | `MULU.W #$54` → 84 B/record = **6 planes × 14 rows = 8×14 px**, indexed by `gfxNumber − 200` | **CONFIRMED — the key icons, see below** |
+Every 6-plane record here is **plane-major** and 14 bytes (112 px) wide
+unless stated otherwise — the width of the game's right-hand side panel,
+which the blitters place at screen byte column 26 (x = 208).
+
+| Chunk offset | Extent | Consumer (S_1) | Geometry | Identification |
+|--------------|--------|----------------|----------|----------------|
+| `0x0000` | 13,440 B | `+0x246E6`, `+0x24734` | 320×56, 6 planes, opaque; drawn at screen offset `$1680` = **(0, 144)** | **Spell Book background** = DOS `clipper.clp` 147 `"Spell Book"` — 100.000% (17,920/17,920 px) |
+| `0x3480` | 11,844 B | `+0x25C7E` (all 141 rows), `+0x236FA` (rows 78-140), `+0x23D6C` (rows 81-140) | 112×**141**, 6 planes, plane stride **1,974 B**; drawn at (208, 0) | **Right-hand side panel** = DOS 90 `"Stone"` (103×139, at panel row 2 / col 6) — **14,315/14,317 px (99.986%)**, the only residue being a 2-px speck and the 36×11 DOS 107 `"Castor 0"` glyph strip the Amiga **bakes in** at (63, 11), itself 396/396 = 100.000% |
+| `0x62C4` | 1,932 B | `+0x236C2` | 112×**23**, 6 planes | **Blank-stone erase strip, Amiga-only.** Drawn immediately above `0x3480`'s rows 78-140 (`ADDI.W #$398,D4` = +23 rows) by the same function — together they clear a 112×86 area of the panel to plain stone. No DOS counterpart: DOS just re-blits `"Stone"` |
+| `0x6A50` | 924 B | — | 112×11, 6 planes | **Scroll roller** = DOS 165 `"Scroll Top"` (110×11, 2 px in from the Amiga record's left edge) — 1,210/1,210 = **100.000%**. DOS 166 `"Scroll Bottom"` scores 64.1% here and is **not** in this bank |
+| `0x6DEC` | 84 B | `+0x24430` | 112×**1**, 6 planes | **Parchment body row** = DOS 167 `"Scroll Piece"` (110×1) — 110/110 = **100.000%**. `+0x24430` re-reads the same 84 bytes for each of 84 output rows (`MOVEA.L D3,A0` sits *inside* the row loop), tiling it from screen offset `$4A2` = row 29 |
+| `0x6E40` | 720 B = 15 × 48 | `+0x1EC78` | 8×8 stored, **8×7 drawn**, 6 planes, 48 B/frame | **Fire Animation** = DOS 157 `"Fire Animation"` (8×105 = 15 × 8×7) — 840/840 = **100.000%**. The DOS raster's height *is* 15 × 7, which is exactly why the Amiga blitter draws 7 of its 8 stored rows |
+| `0x7110` | 288 B = 3 × 96 | `+0x1E8CE` | Amiga **hardware sprite**: 24 lines × 4 B/record; records 0+1 are an attached SPR0/SPR1 pair (4 planes), record 2 is all zeros. 18 lines copied | **Mouse pointer** = DOS 163 `"Mouse Arrow"` — identical 11×11 content bounding box, 121/121 = **100.000%** |
+| `0x7230` | 288 B = 3 × 96 | `+0x1E8FE` | Same sprite layout, **5** lines copied | **Bubble** = DOS 164 `"Bubble"` (5×5) — 25/25 = **100.000%** |
+| `0x7350` | 80 B | `+0x1F9D2` | 16×20, **2** planes (40 B/plane) | **Auto Map Block** = DOS 132 `"Auto Map Block"` (16×20) — 320/320 = **100.000%** |
+| `0x73A0` | **576 B** = 24 × 24 | `+0x1FA14` | 8×8, **3** planes, 24 B/tile | **Auto Map Tiles** = DOS 131 `"Auto Map Tiles"` (8×192 = 24 tiles) — 1,536/1,536 = **100.000%** |
+| `0x75E0` | 864 B | `+0x23F14` | 48×24, 6 planes; drawn at screen offset `$1B32` = **(16, 174)** | **Treasure Chest 0** (closed) = DOS 158 — 1,152/1,152 = **100.000%** (Amiga's 48 px are DOS columns 3-50 of its 54-wide raster) |
+| `0x7940` | 864 B | `+0x23F14` (`+$360` when `D2 ≠ 0`) | as above | **Treasure Chest 1** (open) = DOS 159 — 1,152/1,152 = **100.000%**. DOS 160 `"Treasure Chest 2"` scores 35.7% and is **not** in this bank |
+| `0x7CA0` | 2,436 B = 29 × 84 | `+0x1FB40`, `+0x206D4` | 8×14, 6 planes, indexed by `gfxNumber − 200` | **29 key icons** — DOS `clipper.clp` 313-341 — 3,248/3,248 = **100.000%** |
+
+**The thirteen records tile the chunk exactly:** `13,440 + 11,844 + 1,932 +
+924 + 84 + 720 + 288 + 288 + 80 + 576 + 864 + 864 + 2,436 = 34,340` —
+**zero remainder, zero gaps, zero overlap.** From `0x62C4` onward each
+record's *end* is independently pinned by the 100.000% DOS match of the
+record that begins at the next offset, so the tiling is not an assumption
+that happens to add up; it is a chain of eleven separately-verified
+boundaries. `bclib.check_text_resource_layout()` asserts it, and
+`scripts/verify_bcdfa_entry5_dos.py` re-runs every comparison above.
+
+###### The automap screen — a dual-playfield display (confirmed)
+
+`0x7350` and `0x73A0` belong to a screen that is not the 320×200 6-plane
+EHB display the rest of the game uses. Its copper list is built by S_1
+`+0x1E792`-`+0x1E884`:
+
+```asm
+1E792  MOVE.L  #$00968020,(A2)+   ; DMACON
+1E79C  MOVE.L  $68(A5),D1         ; SPR0PT/SPR1PT <- the mouse-pointer pair,
+1E7A2  ...                        ;   two 80-byte structures ($50 apart)
+1E7C0  MOVE.L  $74(A5),D1         ; SPR2PT..SPR7PT all point at one null sprite
+1E7FA  MOVE.L  #$01005400,(A2)+   ; BPLCON0: BPU = 5, DBLPF set
+1E7EE  MOVE.L  #$01080028,(A2)+   ; BPL1MOD = 40  -> playfield 1 row = 42+40 = 82 B
+1E7F4  MOVE.L  #$010A0000,(A2)+   ; BPL2MOD = 0   -> playfield 2 row = 42 B
+1E806  MOVE.L  #$008E2C81,(A2)+   ; DIWSTRT / DIWSTOP / DDFSTRT $30 / DDFSTOP $D0
+1E80C  MOVE.L  #$0090F4C1,(A2)+   ;   -> 21 word fetches = 42 B = 336 px displayed
+1E824  MOVE.L  A2,$4EE(A5)        ; live pointer to the BPLCON1 scroll byte
+1E830  MOVE.L  $78(A5),D0         ; BPL1PT/BPL3PT/BPL5PT, +$8020 apart  (playfield 1)
+1E854  ADDI.L  #$18060,D0         ; BPL2PT/BPL4PT,        +$20D0 apart  (playfield 2)
+```
+
+| Property | Value | Confidence |
+|----------|-------|------------|
+| Mode | Dual playfield, 5 bitplanes total (`BPLCON0 = $5400`) | **confirmed** |
+| Playfield 1 | 3 planes; 82 B/row, plane stride `$8020` = 32,800 = 82 × 400 → a 656×400 surface scrolled inside a 336×200 window | **confirmed** |
+| Playfield 2 | 2 planes; 42 B/row, plane stride `$20D0` = 8,400 = 42 × 200 → 336×200, no scroll | **confirmed** |
+| PF1 content | an 82 × 50 grid of 8×8 tiles from `0x73A0` (`MULU.W #$290,D1` = 656 = 8 rows × 82; `ADDA.L #$7D90,A0` = `$8020 − 656` steps to the next plane) | **confirmed** |
+| PF2 content | a 21 × 10 grid of 16×20 cells (`DIVU.W #$15,D0` = 21 columns; `MULU.W #$348,D1` = 840 = 20 rows × 42) stamped with `0x7350` | **confirmed** |
+| Palette | 32 words at S_1 `+0x1E886` (immediately after the copper builder's `RTS`) | **confirmed** |
+
+The palette is the independent cross-platform check on the whole reading.
+PF1 pixel value *v* lights `COLORv`; PF2 pixel value *v* lights `COLOR(8+v)`.
+Under that mapping, entries 0-7 and 9-11 reproduce DOS `clipper.clp` entry 1,
+`"Automap Palette"`, indices 64-71 and 72-74 **colour for colour**, with a
+**maximum channel error of 10/255** — pure 12-bit → 8-bit quantisation, over
+11 entries. (DOS index 75 onward is the archive's unused cyan sentinel, so
+the comparison stops there; Amiga `COLOR8` is playfield-2 transparent and has
+no DOS counterpart.) This also re-confirms, on a third independent record,
+the **Amiga index → DOS index + 64** relationship the Spell Book decode first
+showed.
+
+###### `0x6E40` — the Fire Animation and its four braziers (confirmed)
+
+The blitter and its caller are a complete, self-contained animation driver:
+
+```asm
+1EB88  CMPI.W  #$1,$490(A5)       ; only on screen mode 1
+1EB92  LEA     $1EC28(PC),A2      ; four per-corner tick counters, seeded 0/10/20/30
+1EB96  SUBQ.B  #$1,(A2)+          ;   each decremented once per frame ...
+1EB9A  MOVE.B  #$3B,-$1(A2)       ;   ... and reloaded with 59 on underflow
+1EBBC  LEA     $49A(A5),A2        ; four per-corner enable flags
+1EBC0  LEA     $1EC2C(PC),A3      ; 60-byte ramp: frame = tick / 4  (0..14, x4 each)
+1EBD4  MOVE.B  (A3,D3.W),D1       ; D1 = frame index
+1EBDA  MOVE.W  D2,D0              ; D0 = corner 0..3
+1EBDC  BSR.W   $1EC68
+
+1EC6C  LEA     $1ECBA(PC),A0      ; four screen word-offsets, one per corner
+1EC72  MOVE.W  (A0,D0.W),D5
+1EC76  MOVEQ   #$28,D4            ; 40 = screen row stride
+1EC78  MOVEA.L $B4(A5),A2
+1EC7C  ADDA.L  #$6E40,A2
+1EC82  MULU.W  #$30,D1            ; x48 -- one frame
+1EC88  MOVEA.L $468(A5),A0        ; the 6 screen bitplane pointers
+1EC92  MOVE.B  (A2)+,(A1) x7      ; 7 rows drawn ...
+1ECAE  ADDQ.L  #$1,A2             ; ... 8th stored row skipped
+```
+
+`$1ECBA` holds `6042, 6077, 7157, 7122` — i.e. **(16,151), (296,151),
+(296,178), (16,178)**, the four corners of a rectangle, walked clockwise
+from the top left. So the record is not "a spark effect": it is a **15-frame
+looping flame**, drawn at four fixed brazier positions, each corner running
+the same 60-tick cycle **10 ticks out of phase** with its neighbour, each
+individually gated by a byte in `$49A(A5)` (latched once per frame from
+`$49E(A5)` at S_1 `+0x1E9E4`).
+
+> **Correction — supersedes "15 small icons, one blank … a triangular/pyramid
+> spark motif … no DOS `clipper.clp` entry is 8×8, so there is no
+> cross-platform name for it".** All three parts are wrong. There are exactly
+> **15** frames and **none** is blank (720 / 48 = 15). The motif is a flame,
+> not a spark. And DOS *does* carry it — as a **vertical strip**, entry 157
+> `"Fire Animation"`, 8×105, which is 15 frames of 8×7 stacked. The old
+> search missed it because it filtered the DOS catalogue on `w == 8 && h == 8`;
+> DOS stores multi-frame small art as one tall raster, exactly as it does for
+> its fonts (`8×472`) and `"Auto Map Tiles"` (`8×192`). **Lesson: when
+> matching a small Amiga frame bank against `clipper.clp`, look for
+> `w == frameWidth && h == frames × frameHeight`, not for a single frame's
+> dimensions.**
+
+###### `0x7110` / `0x7230` — hardware sprites, not bitplane art (confirmed)
+
+Both banks are Amiga **hardware sprite** data, which is why no bitplane
+geometry ever fit them. Each 96-byte record is 24 scanlines × 4 bytes
+(`SPRxDATA`, `SPRxDATB` = 2 bitplanes); records 0 and 1 form an *attached*
+SPR0/SPR1 pair (4 planes, 15 colours, register base `COLOR16`); record 2 is
+all zeros in both banks. The consumers copy only the leading lines into the
+live sprite structures at `$68(A5)` (18 lines → an 80-byte structure) and
+`$70(A5)` (5 lines → a 28-byte structure), each after the 4-byte
+`SPRxPOS`/`SPRxCTL` header:
+
+```asm
+1E8C6  MOVEA.L $68(A5),A1
+1E8CA  LEA     $4(A1),A1          ; skip SPRxPOS/SPRxCTL
+1E8CE  MOVEA.L $B4(A5),A0
+1E8D2  ADDA.L  #$7110,A0
+1E8DA  MOVEQ   #$11,D1            ; 18 longwords = 18 scanlines
+1E8DC  MOVE.L  (A0)+,(A1)+
+1E8E2  ADDI.L  #$50,D0            ; second structure, 80 B on
+1E8EC  LEA     $18(A0),A0         ; source record stride = 72 + 24 = 96
+```
+
+The `0x7230` bubble is placed by S_1 `+0x1EA4E`: `MOVE.W #$84,$51E(A5)`
+fixes y = 132, and `MOVE.W #$90,-(A7) / BSR $268BA / ADDI.W #$20,D0` gives
+a **random** x in `[32, 176)` — `$268BA` is `Random(n)` (`BSR $26854` for a
+raw value, `DIVU.W` by the argument, `SWAP` to take the remainder). It runs
+for a 60-frame countdown at `$500(A5)`.
+
+###### `0x0000` — the Spell Book background's consumers, and its mirrored twin
+
+> **Correction — supersedes "no consumer found" / "it has zero hits in the
+> `(d16,A5)` census that found every other sub-record's offset".** Two
+> consumers exist; the earlier census missed them because both write the
+> displacement as `LEA $0(A0),A0` — a *zero* displacement, which the census
+> was implicitly filtering out as "no offset added".
+
+```asm
+0246E6  MOVEA.L $B4(A5),A0
+0246EA  LEA     $0(A0),A0
+0246EE  MOVEA.L $464(A5),A1
+0246F6  LEA     $1680(A2),A2       ; 5,760 = row 144, col 0  -> (0, 144)
+0246FA  MOVEQ   #$37,D1            ; 56 rows
+0246FC  MOVE.L  (A0)+,(A2)+ x10    ; 40 bytes = 320 px per row
+
+024734  MOVEA.L $B4(A5),A0         ; the mirrored variant
+024738  LEA     $0(A0),A0
+02473C  LEA     $279C0(PC),A3      ; 256-byte bit-reversal LUT
+024750  LEA     $28(A2),A2         ; walk the destination row backwards ...
+024758  MOVE.B  (A3,D3.W),-(A2)    ; ... reversing the bits inside each byte too
+```
+
+S_1 `+0x279C0` is verified a bit-reversal table: `table[i] == reverse_bits(i)`
+for **256/256 entries**. Combined with the descending `-(A2)` destination
+walk, `+0x24734` draws the same 320×56 image **horizontally mirrored** — the
+spell book's facing page. Screen placement is confirmed as **(0, 144)**, i.e.
+the bottom 56 rows of the display.
+
 
 ###### `0x0000`–`0x3480` — the Spell Book background — **SOLVED**
 
 The chunk's first 13,440 bytes decode as a single opaque image: **320×56,
-6 sequential bitplanes, no mask**. No consumer references this range at all
-— it has zero hits in the `(d16,A5)` census that found every other
-sub-record's offset — consistent with it being read as one whole-buffer
-`Read()` destination (like the UI panel bank's own offset-0 stream) rather
-than indexed by a per-element displacement.
+6 sequential bitplanes, no mask**.
+
+> **Correction — supersedes "No consumer references this range at all — it
+> has zero hits in the `(d16,A5)` census … consistent with it being read as
+> one whole-buffer `Read()` destination rather than indexed by a per-element
+> displacement."** Two consumers do exist (S_1 `+0x246E6` and `+0x24734`);
+> both address the record with `LEA $0(A0),A0`, and a census that treats
+> "adds a displacement" as the signal for a sub-record cannot see a
+> *zero* displacement. See "the Spell Book background's consumers, and its
+> mirrored twin" above for the disassembly, the confirmed screen placement
+> (0, 144), and the bit-reversal table that produces the mirrored variant.
 
 Identified via the DOS `clipper.clp` archive: entry **147, `"Spell Book"`,
 320×56** — the *exact* pixel count this decoded region needs
@@ -1658,6 +1842,38 @@ the chunk's **end**: everything from `0x7CA0` to the last byte is keys.
 `data/key-icon-gfx-table.json`. Re-verified against the DOS oracle as part
 of promoting the extractor: 3,248/3,248 opaque px (100.000%), 29/29 frames
 individually perfect — same figures as above, now backed by committed code.
+
+###### Extraction
+
+| Records | Decoder | Script | Output |
+|---------|---------|--------|--------|
+| `0x0000` | `bclib.spell_book_background` | `extract_bcdfa_spellbook.py` | `screens/spell-book-bg.png` |
+| `0x3480`, `0x62C4`, `0x6A50`, `0x6DEC`, `0x75E0`, `0x7940` | `bclib.stone_panel`, `panel_clear_strip`, `scroll_top`, `scroll_piece`, `scroll_panel`, `treasure_chest_sprites` | `extract_bcdfa_ui_bank.py` | `sprites/ui-side-panel.{png,json}` (7 records) |
+| `0x6E40` | `bclib.fire_animation_frames` | `extract_bcdfa_ui_bank.py` | `sprites/fire-animation.{png,json}` + `data/fire-animation.json` (positions + phases) |
+| `0x7110`, `0x7230`, `0x7350`, `0x73A0` | `bclib.mouse_pointer_sprite`, `bubble_sprite`, `automap_block`, `automap_tiles` (+ `bclib.decode_sprite_pair`) | `extract_bcdfa_ui_bank.py` | `sprites/automap.{png,json}` (24 tiles + block + 2 sprites), `palettes/automap.json` |
+| `0x7CA0` | `bclib.key_icon_sprites` | `extract_bcdfa_keys.py` | `sprites/keys.{png,json}` + `data/key-icon-gfx-table.json` |
+
+`scripts/verify_bcdfa_entry5_dos.py` re-runs the whole DOS cross-check
+(**12/12 comparisons at ≥99.9%**, all but two with an injective index map;
+the two non-injective ones are `"Stone"`, where two DOS indices collapse
+onto one Amiga index, and `"Fire Animation"`, where DOS's two backdrop
+shades 131/132 both map to Amiga index 26). Every committed decoder was
+regression-checked against the verified probe: **0 differing pixels** across
+all eleven records.
+
+###### Paths tried (entry 5)
+
+| Approach | Result | Why it failed |
+|----------|--------|---------------|
+| Fixed-width render sweeps + padding-column scans over the whole 34,340-byte chunk | Nothing coherent | The bank is heterogeneous — 13 records of 8 different geometries. There is no single width or record size to find |
+| DOS `clipper.clp` size-collision search: `"Ram Block"` (32×20) for `0x7350`, two unnamed 32×14s for `0x7110`/`0x7230` | 21.6%–58.3% silhouette, chance level — **rejected** | Right method, wrong candidates. `0x7350` is `"Auto Map Block"` (16×20, 100.000%); `0x7110`/`0x7230` are not bitplane art at all but hardware sprites, so no bitplane-shaped DOS entry could ever match them |
+| DOS catalogue filtered on `w == 8 && h == 8` for the `0x6E40` icons | "No DOS entry is 8×8, so there is no cross-platform name" | DOS stores multi-frame small art as **one tall raster**: entry 157 `"Fire Animation"` is 8×**105** = 15 × 8×7, a 100.000% match. Filter on `h == frames × frameHeight` |
+| `MOVEA.L $B4(A5),An`-only byte-pattern census | 14 sites; missed `MOVE.L $B4(A5),D3` at `+0x24430` | The same narrow-opcode-form trap already documented for the font bank — census every `(d16,A5)` EA form |
+| Treating a nonzero `LEA <disp>` as the signal that a sub-record exists | `0x0000` reported as "no consumer found" | Its two consumers use `LEA $0(A0),A0` — a *zero* displacement is still a consumer |
+| Reading `+0x236FA`/`+0x23D6C`'s `LEA` skips as one-off offsets before a row loop | Implied row-interleaved planes and a 28-row sub-image | Both `LEA`s sit **inside** the 6-iteration plane loop, making them per-plane skips: the record is plane-major, stride 1,974 B, and the sub-image is 63 rows |
+| Matching `0x62C4`'s 112×23 strip against every row window of DOS `"Stone"`/`"Stone 2"` | best 69.4% / 64.5% — **rejected** | It is a genuinely separate authored asset (a blank-stone erase strip). DOS has no counterpart because DOS re-blits the whole `"Stone"` panel instead |
+| Matching DOS `"Scroll Bottom"` (166) and `"Treasure Chest 2"` (160) anywhere in the bank | 64.1% / 35.7% — **rejected** | Neither is present. The Amiga bank ships only the scroll's top roller and two of DOS's three chest states |
+| Rendering `0x73A0` as 96 × 24-byte tiles (2,304 / 24) | Tiles 24-95 are visual noise | The tile bank is exactly **24** tiles (576 B); the following 1,728 B are the two 864-byte treasure chests, whose own 100.000% matches pin that boundary |
 
 #### bcdfa — BCSPEED.EFF — Effect Particle Scripts — **SOLVED**
 
@@ -1941,7 +2157,177 @@ With these handlers the particle simulation is fully specified: per tick,
 `x += (int8)script[1]`, `y += (int8)script[2]` and kill the particle if it
 leaves `x ∈ [0,192]` / `y ∈ [0,124]`.
 
-##### Which effect belongs to which spell — **advanced, still open**
+##### Which effect belongs to which spell — **SOLVED (92 of 95 effects attributed)**
+
+> **Correction — supersedes "advanced, still open", "the actual static table
+> is in the on-disk `bcdfs` structure record layout" (half right — it is, but
+> only for effects 1-8), and "15 constant effect indices recovered" as the
+> ceiling.** Two things were missing, and each unlocked a different half of
+> the map:
+>
+> 1. The on-disk-table hypothesis was **correct** — `bcdfs` structure type
+>    `0x10`'s word `+0x10` really is the static effect-index table the
+>    instruction-level write-site census could not find, because the loader
+>    copies the record **verbatim** (`pea $14.w` at S_1 `+0x18A56`) and never
+>    writes that word for a non-monster record. It accounts for effects
+>    **1-8** only, though: 13 glyph records × 2 uses each.
+> 2. The other 80 effects were never in a *table* at all. They are constant
+>    arguments to a **shared projectile-spell routine**, `CastSpellRay` at
+>    S_1 `+0x06D9A`, whose third stack word is the base effect index. The
+>    earlier passes stopped at "the site computes the index" without tracing
+>    the *callee's* argument frame, so 27 call sites carrying a compile-time
+>    constant effect index looked like "computed, unknown".
+
+Three independent mechanisms select an effect. All three are now traced.
+
+###### 1. Glyphs — the on-disk `bcdfs` table (effects 1-8) — **confirmed**
+
+`bcdfs` structure type `0x10` covers three different objects, discriminated by
+the record's own **word `+0x0C`** (see the new field map in the `bcdfs`
+"Structure bytecode" section). Only sub-kind 3 — the *glyph* — touches
+BCSPEED, and it does so twice, through two unrelated code paths that read the
+**same** on-disk word `+0x10`:
+
+| Path | Code | Effect index |
+|---|---|---|
+| **Viewport rune** (the glyph drawn on the floor ahead) | the **kind-4/12 handler `+0x0224C`**'s type-`0x10` case, S_1 `+0x0231C` → `+0x02388` (*corrected — this address is inside `+0x0224C`, not `DispatchSquareObject`, whose entry is `+0x025B0`*): `D0 = objRec.word(+0x10)`, `D1 = objRec.byte(+0x07)`, origin (0,0), via the **static-tick** entry `+0x2558C` | `word(+0x10)` — raw |
+| **Trigger animation** (party steps onto the glyph) | `ResolveTargetSquare` returns **5** for a sub-kind-3 record (S_1 `+0x27CC8`: `CMPI.W #3,$C(A5,D4.W)` → `MOVEQ #5,D3`); `MoveParty` dispatches code 5 to S_1 `+0x04662` (`+0x016FA6`), which does `MOVE.W $10(A0,D0.L),D0 / ADDQ.W #4,D0` and calls the full animator `+0x255DA` at `+0x046C8` | `word(+0x10) + 4` |
+
+```asm
+; S_1 +0x027CBA  — ResolveTargetSquare, structure type 0x10
+027CBA  CMPI.B  #$10,D5
+027CC0  CMPI.W  #$0,$A(A5,D4.W)   ; record word +0x0A != 0 -> passable, no effect
+027CC8  CMPI.W  #$3,$C(A5,D4.W)   ; sub-kind 3  = GLYPH
+027CD0  MOVEQ   #$5,D3            ;   -> result 5 -> +0x4662 plays word(+0x10)+4
+027CD4  CMPI.W  #$2,$C(A5,D4.W)   ; sub-kind 2  = MAGIC FIELD
+027CDC  MOVEQ   #$7,D3            ;   -> result 7 = blocked + screen shake, no effect
+027CE0  CMPI.W  #$1,$C(A5,D4.W)   ; sub-kind 1  = ILLUSIONARY WALL
+027CE6  BNE.B   $27D18            ;   -> falls through, passable, no effect
+```
+
+`+0x04662` immediately re-reads the same record's word `+0x10` into A3 and
+uses it a **second** time as a 5-entry jump-table index (table at S_1
+`+0x04822`, JMP base `+0x0483A`), so the same byte picks both the visual and
+the mechanical payload:
+
+| `word +0x10` | Rune effect | Trigger effect | Handler | Payload |
+|---|---|---|---|---|
+| 1 | 1 | **5** | `+0x04702` | if word `+0x0E` == 0: `DamageCharacter(ch, ch.hp−1, kind 4)` on every living member — i.e. reduces the whole party to 1 HP |
+| 2 | 2 | **6** | `+0x0476A` | `+0x04600(5, 5×word(+0x0E), 4)` → each member takes `5 + rand(5×w0E)` of damage kind 4 |
+| 3 | 3 | **7** | `+0x04780` | byte-identical body to handler 2 (separate `case` the compiler did not merge) |
+| 4 | 4 | **8** | `+0x04796` | `DamageCharacter(ch, 1+rand(10), kind 5)` for members whose byte `+0x8B` is clear, and `ch[+0x9A]++` |
+| 0 | — | — | `+0x0483C` | the shared no-op tail. **Unused by the shipped data** |
+
+###### 2. Projectile spells — `CastSpellRay` (effects 9-88) — **confirmed**
+
+`CastSpellRay` at S_1 **`+0x06D9A`** is a 5-word-stack-arg routine shared by
+every directed attack spell:
+
+| Frame | Field | Notes |
+|---|---|---|
+| `8(A5)` | magnitude | computed per cast from the caster's level (`D3`/`D5`) |
+| `A(A5)` | damage | 0…100 |
+| `C(A5)` | **base effect index** | the value this section is about |
+| `E(A5)` | pre-effect selector | `1` = none, `0x66` = screen-shake first (`JSR $A39B0`), `0x67` = its own variant |
+| `10(A5)` | **range** | max squares the ray walks — `3` or `1`; passed straight to the ray-march at `+0x0435C` |
+
+```asm
+006E5C  MOVE.W  $C(A5),D0        ; base effect index
+006E60  ADD.W   D6,D0            ; D6 = squares the ray travelled (from +0x435C)
+006E62  TST.W   D6
+006E66  MOVEQ   #$1,D1           ;   D6 == 0 -> +1
+006E6A  MOVEQ   #$0,D1
+006E6C  ADD.W   D1,D0
+006E6E  ADDI.W  #$FFFF,D0        ; -1
+006E72  MOVE.W  D0,-(A7)
+006E74  JSR     $A5632.L         ; = PlayEffect (+0x255DA)
+```
+
+i.e. **`effect = base + max(distance, 1) − 1`**, so a range-3 spell owns three
+consecutive indices (one per view depth) and a range-1 spell owns one. This is
+why the recovered bases form an exact stride-3 lattice.
+
+Caller: `CastSpell(slot)` at S_1 **`+0x07044`**, which reads the memorised
+spell id from `char[+0x49+slot]` and dispatches through a **60-entry word jump
+table at S_1 `+0x07822`** (JMP base `+0x078AC`, bound `CMPI.W #$3C,D0`). The
+spell id indexes the **60-record, 8-byte spell table at `bcdft` S_2
+`+0x000E`**, whose word `+0x04` is a `char *` to the spell's display name
+(name block at S_1 `+0x1A7FA`). Three cases print their own name with a
+PC-relative `PEA` and those strings match the S_2 table at the same index
+(`SHIELD` id 15, `PROTECT` id 27, `CURE` id 53) — that is what pins the id
+space.
+
+| Spell (id) | Base | Effects | Damage | Range | Case |
+|---|---|---|---|---|---|
+| CHANT OF DOOM (55) | 9 | 9–11 | 0 | 3 | `+0x075F4` |
+| LIGHTNING FIELD (47) | 12 | 12–14 | 45 | 3 | `+0x072F8` |
+| FIREBALL (14) | 15 | 15–17 | 6 | 3 | `+0x0728C` |
+| FREEZE (23) | 18 | 18–20 | 8 | 3 | `+0x072B0` |
+| CHANT OF ORLIN (8) | 21 | 21–23 | 6 | 3 | `+0x07268` |
+| STONE FIRE (28) | 24 | 24–26 | 6 | 3 | `+0x072D4` |
+| SWARM (33) | 27 | **27** | 6 | **1** | `+0x0731C` |
+| PESTILENCE (52) | 28 | **28** | 8 | **1** | `+0x07340` |
+| BLAST OF COLD (58) | 38 | 38–40 | 30 | 3 | `+0x0763C` |
+| QUAKE (59) | 38 | **38** | 100 | **1** | `+0x077E8` (shares BLAST OF COLD's visual; pre-effect `0x66` = quake shake) |
+| DEATH (50) | 41 | 41–43 | 20 | 3 | `+0x075CE` |
+| DEATH STORM (16) | 44 | 44–46 | 90 | 3 | `+0x0742E` |
+| DIETY STRIKE (39) | 47 | 47–49 | 40 | 3 | `+0x07584` |
+| DISRUPT (35) | 50 | 50–52 | 50 | 3 | `+0x074E6` |
+| FIRE MAELSTROM (31) | 53 | 53–55 | 100 | 3 | `+0x074C0` |
+| FIRE VORTEX (30) | 56 | 56–58 | 45 | 3 | `+0x0749C` |
+| FIRE WIND (29) | 59 | 59–61 | 10 | 3 | `+0x07478` |
+| ICE STRIKE (57) | 62 | 62–64 | 70 | 3 | `+0x07618` |
+| LIFESTEALER (17) | 65 | 65–67 | 24 | 3 | `+0x076C4` |
+| MIND STRIKE (49) | 68 | 68–70 | 18 | 3 | `+0x075AA` |
+| POISON CLOUD (0) | 71 | 71–73 | 8 | 3 | `+0x073E4` |
+| RUNE OF DEATH (37) | 74 | 74–76 | 80 | 3 | `+0x07538` |
+| RUNE OF PAIN (36) | 77 | 77–79 | 8 | 3 | `+0x07514` |
+| VORPAL AIR (38) | 80 | 80–82 | 15 | 3 | `+0x0755E` |
+| CHAOS (25) | 83 | 83–85 | 6 | 3 | `+0x07454` |
+| GODS FURY (11) | 86 | 86–88 | 60 | 3 | `+0x07408` |
+
+A second dispatcher at S_1 `+0x130xx` (scroll/wand/monster casts) reuses the
+same routine with the same bases — `+0x130DE` 28 (PESTILENCE), `+0x13102` 15
+(FIREBALL), `+0x1313E` 24 (STONE FIRE), `+0x1317A` 21 (CHANT OF ORLIN),
+`+0x1319E` 18 (FREEZE), `+0x131C2`/`+0x10FE6` 38 (QUAKE) — an independent
+re-derivation of six of the rows above.
+
+###### 3. Constants in named spell / trap routines (effects 0, 29-37, 89-94)
+
+Attributed by locating each call site's enclosing `LINK` and matching it
+against the routine the spell jump table calls for that spell id:
+
+| Effect | Consumer | Evidence |
+|---|---|---|
+| **0** | the generic party buff/heal sparkle | 9 call sites, each inside a named spell routine: HEALING I/II + CURE WOUNDS (`+0x05070`), RESTORE (`+0x051DE`), CURE POISON (`+0x052D6`), CURE DISEASE (`+0x0540E`), SHIELD + PROTECTION (`+0x054E2`), STRENGTH (`+0x05710`), RAISE DEAD (`+0x05CFA`), plus `+0x061B0` and `+0x0F3A0` |
+| **6** | **action opcode `0x1C` — "trap damage (fire)"** | handler `+0x0CCCC` (jump table `+0x0CE54`, JMP base `+0x0CEAA`) calls `+0x0C236` at `+0x0CCD0`, which plays effect 6 |
+| **7** | **action opcode `0x1D` — "trap damage (ice)"** | handler `+0x0CCDA` calls `+0x0C288` at `+0x0CCDC`, which plays effect 7 |
+| **29** | REMOVE TRAP (`+0x060BE`) | site `+0x06182` |
+| **30** | REMOVE GLYPH (`+0x04E0A`) | site `+0x04EEA` |
+| **33** | BINDING (`+0x04A4E`) | site `+0x04A70`; also `+0x079EE`/`+0x07B5A` in two helpers |
+| **35** | `+0x09D28` — a monster/attack routine (4 callers) | site `+0x0A370`, guarded on `objRec.byte(+0x0C) == (facing+2)&3` (target faces the party) |
+| **36** | DISPEL MAGIC (`+0x04C46`) | site `+0x04D0E` |
+| **37** | `+0x062D0`, called from the item-use dispatcher `+0x10FFE` | site `+0x063DC`; also base 37 at `+0x13264` |
+| **89** | **trap-detection marker** on a type-`0x1E` floor plate/trap | `+0x02548` (`MOVEQ #$59,D0`), gated on depth 1, `objRec.word(+0x0E) == 1` (41 of 182 records), `word(+0x0C) != 0`, and the party-wide counter `$1E2C(A4) != 0` |
+| **90** | **fountain water** on a type-`0x1F` fountain | `+0x02460` (`MOVEQ #$5A,D0`), on the `word(+0x0E) == 0` branch, gated on `byte(+0x07) != 0` — that byte is the fountain's remaining water units (values 0/2/3/5/10/25/255 across the 41 shipped records) |
+| **91** | `+0x12FEA` (strings HEAL / SPELL FAILED) | site `+0x1309A` |
+| **92** | `+0x16502` (string THE KEY DOES NOT FIT) | site `+0x16A62` |
+| **93** | the single monster with gfx word `0x80C5` (map 13, row 12, col 12, `bcdfs+0x02893D`, 350 HP — the final boss) | `+0x02752` inside `DispatchSquareObject`, gated on `CMPI.L #$80C5` and `$1A1E(A4)==4`, group index `$1A20(A4)` cycling 0–3; second site `+0x07DA2` in `+0x07C40` steps the same counter |
+| **94** | `+0x07C40`, called from `+0x13298` | site `+0x07C6C`, immediately before the effect-93 loop |
+
+###### Coverage and verification
+
+| Check | Result |
+|---|---|
+| **Glyph field invariant** | all **13/13** `bcdfs` type-`0x10` sub-kind-3 records have `word(+0x10) ∈ {1,2,3,4}` — never 0, never ≥ 5, i.e. **zero** dispatches outside the 5-entry jump table at `+0x04822`, and the resulting effect indices land exactly on 1–4 (runes) and 5–8 (triggers) with no gap and no overflow past the bank's 95 effects |
+| **Sub-kind partition** | the 97 type-`0x10` records split **59 / 25 / 13** on `word(+0x0C)` = 1/2/3, and each sub-kind has exactly one `gfxNumber` (`0x00C1` / `0x0048` / `0x003C`) — **97/97**, zero mixing. Only sub-kind 3 reaches an effect call in either code path |
+| **Element cross-check (independent chains)** | glyph type 2 → trigger effect 6, which is *separately* proven to be action opcode `0x1C` **"trap damage (fire)"**; glyph type 3 → effect 7 = opcode `0x1D` **"trap damage (ice)"**. The already-published render of the *runes* (drawn before any of this was known) describes effect 2 as a **red** bolt pyramid and effect 3 as a **blue** star funnel. Colour matches element on both, derived from three chains that share no evidence |
+| **Name cross-check** | effect **27** is `SWARM`'s only effect under the range-1 rule; the earlier independent render describes effect 27 as "an insect swarm using the GFK bee sprite" |
+| **Lattice closure** | the 26 recovered bases are `9,12,…,27` and `38,41,…,86` — an exact stride-3 lattice with **no collisions** except QUAKE/BLAST OF COLD (both 38, and QUAKE is range-1 so it only uses index 38 itself). Range-3 spells own `[base, base+2]`; the union of those intervals plus the two range-1 singletons covers **9–28 and 38–88 with zero holes and zero overlaps** |
+| **Spell-id space** | 60 jump-table entries (`CMPI.W #$3C`) = 60 records in the S_2 spell table = the exact count; three cases push their own name string PC-relative and it equals the S_2 table's name at the same id (`SHIELD` 15, `PROTECT` 27, `CURE` 53) |
+| **Total coverage** | **92 of 95** effects now have an identified consumer. Only **31, 32, 34** remain unattributed — no call site, no table entry, and no `bcdfs` field value reaches them |
+
+Probe: `scratchpad/probes/{probe_t10b,spellmap2,verify}.py` (throwaway).
 
 > **Correction — a wrong relocation base made the call sites look
 > nonexistent.** A first pass concluded that `+0x2558C` and `+0x255DA` have
@@ -2055,12 +2441,23 @@ The remaining sites compute the index:
 > subsection) and identify which on-disk byte the map loader copies into
 > runtime offset `+0x10` — that on-disk byte is the actual static
 > spell/trap-effect table entry, not anything in S_1's executable code.
+>
+> > **Resolved — this next step was taken and the hypothesis held.** The
+> > on-disk word is `+0x10` itself (the loader's `pea $14.w` copy is verbatim,
+> > so runtime `+0x10` *is* on-disk `+0x10` for every non-monster record).
+> > It supplies effects **1-8** only — the glyph runes and their triggers.
+> > See "Which effect belongs to which spell — **SOLVED**" at the top of this
+> > subsection for the full result, including the second, larger mechanism
+> > (`CastSpellRay` `+0x06D9A`) that the "no static table in code" conclusion
+> > had ruled out prematurely: the constants were in *caller argument frames*,
+> > not in a table, and were invisible to every table- and write-site-shaped
+> > search tried so far.
 
 ##### Still open
 
 | Question | Status |
 |----------|--------|
-| Which of the 95 effects belongs to which spell/attack | **Advanced** — all 31 call sites enumerated, 15 constant effect indices recovered (see the table above). The remainder read a runtime object-pool field (`+0x10`) that a full write-site census now shows is **not set by any S_1 instruction** for the relevant object kind — it traces back to a dungeon-square structure/trap object (type `0x10`) resident from map load, so the actual static table is in the on-disk `bcdfs` structure record layout, not in executable code; see the note above for the next step |
+| Which of the 95 effects belongs to which spell/attack | **SOLVED for 92 of 95.** Three mechanisms, all traced: (1) `bcdfs` structure type `0x10` sub-kind 3 (glyph) word `+0x10` → effects **1–4** (viewport rune, raw) and **5–8** (trigger, `+4`), 13/13 records in range with zero exceptions; (2) `CastSpellRay` S_1 `+0x06D9A`'s third stack word → effects **9–88**, 26 named spells via the 60-entry spell jump table at `+0x07822` and the S_2 spell-name table at `+0x000E`, an exact stride-3 lattice with no holes; (3) constants in named spell/trap/render routines → effects **0, 29–37, 89–94**. Only **31, 32, 34** have no identified consumer. See "Which effect belongs to which spell — **SOLVED**" above |
 | PRG tag bytes `0x3C`/`0x40`/`0x44` | **SOLVED** — all 18 jump-table handlers traced; see "The PRG tag-byte jump table" above |
 | Simulating PRG particle motion for a full render | **SOLVED.** `bclib.bcdfa.simulate_effect` implements the full per-tick loop (20-slot ring, top-down spawn-overwrite, `scriptPtr += 1 record` / blit / tag-dispatch / dx-dy / viewport-kill, trailing ticks after the last group until every particle dies). Driven by `scripts/render_bcspeed_eff.py` → `data/bcspeed-effects-simulated.json` (web asset — per-tick particle lists for a browser engine to play back) + `build/cache/blackcrypt/bcspeed_eff_render/effect*.png` (verification contact sheets, not a web asset). Verified: runs error-free across all 95 effects (1,833 total simulated ticks); every particle stays within the confirmed viewport/frame bounds on every tick; tick 0 of every effect reproduces its raw group-0 spawn records **exactly** (95/95, the strongest available regression check against the already-verified static reading); GFK frame counts derived from the GFK bank itself match the engine's own `+0x258B2` table on 15/16 records, with the one documented exception (record 15) behaving exactly as predicted (kill-by-`0x3C` before the bound would matter). Visual check: the "imploding fireball ring" (effect 9) now visibly converges tick-by-tick instead of repeating a static ring |
 
@@ -2145,7 +2542,7 @@ Two independent tables corroborate the geometry:
 | Check | Result |
 |-------|--------|
 | **Cross-platform name oracle** | `clipper.clp` brackets exactly these six sprite *shapes* between the type-1 markers **432 `"Start Throwing Items"`** and **445 `"End Throwing Items"`** (entries 433–444, 12 total): `Arrow` 16×11 and `Dagger` 16×7 (only the near-depth entry of each carries a name string — the same "name the first of 3 depths only" convention as `Start Keys`/`Start Floor Items`), plus their unnamed 16×8/16×5 and 16×5/16×3 mid/far siblings. The DOS port additionally carries `Sword` (32×15, named) and `Hammer` (16×13, named) there, each with 2 further unnamed depth siblings; the Amiga bank has only the two weapons, and its 12 descriptors and byte-exact accounting say so independently |
-| **DOS silhouette match** | the 1-bit mask planes of the six facing-0 records are **byte-identical** to the DOS entries' non-background silhouettes — a verbatim `bytes.find()` hit for 5 of 6 (the 6th, 16×3, was only excluded by a height filter) |
+| **DOS silhouette match** | the 1-bit mask planes of the six facing-0 records are **byte-identical** to the DOS entries' non-background silhouettes — a verbatim `bytes.find()` hit for 5 of 6 (the 6th, 16×3, was only excluded by a height filter). Later re-run per pixel against the DOS bracket's *depth-ordered* entries 433–438 (`data != 33` vs the mask plane): **624/624 px, 100.000%**, all six shapes, opaque counts 63/35/18 (arrow) and 56/15/11 (dagger) matching exactly — so the DOS mid/far entries, which carry no name, are confirmed as this bank's depths 2 and 3 and not merely as "six shapes that happen to be present". See `docs/blackcrypt/dos/data-structure.md` § "Residue 2 — `Start Throwing Items`" |
 | **Mask invariant** | `plane0 == OR(planes 1..6)` for **156/156 bytes**, zero deviation — the record boundaries and the 7-plane reading are self-consistent |
 | **Mirror invariant** | rows `273…545` are the **exact horizontal bit-reverse** of rows `0…272`: **273/273 rows, zero deviation** |
 | Byte accounting | the 12 descriptors tile the chunk **1,092/1,092 bytes, 0 gaps, 0 overlaps** |
@@ -3216,26 +3613,51 @@ sprite file to the monsters placed on its map.
 
 **This confirms the letter→map mapping** (`bcdfb`=map 1 … `bcdfn`=map 13):
 cross-referencing every header ID against monster records in the corresponding
-`bcdfs` map region gives **11/13 exact containment**. The two misses (map 6
-missing `0xb7`, map 11 missing `0xbd`) are monsters that are almost certainly
-spawned by monster generators (structure type `0x2E`) rather than statically
-placed.
+`bcdfs` map region gives **11/13 exact containment**.
 
-| Map | File | Graphics IDs | Notes |
-|-----|------|--------------|-------|
-| 1  | bcdfb | `b2`, `b3`           | `b2` = Two Head, `b3` = Rock Eye |
-| 2  | bcdfc | `4f`, `b0`, `b1`     | |
-| 3  | bcdfd | `4d`, `4e`, `c7`     | |
-| 4  | bcdfe | `4b`, `4c`, `50`     | |
-| 5  | bcdff | `ba`, `c3`           | |
-| 6  | bcdfg | `b7`, `b8`           | `b7` not statically placed |
-| 7  | bcdfh | `b5`, `b9`           | |
-| 8  | bcdfi | `b6`                 | |
-| 9  | bcdfj | `bf`, `c4`           | |
-| 10 | bcdfk | `bc`                 | |
-| 11 | bcdfl | `bd`, `be`, `c6`     | `bd` not statically placed |
-| 12 | bcdfm | `b4`                 | |
-| 13 | bcdfn | `c5`                 | |
+> **Correction (2026-08-02) — two things in this table were wrong.**
+>
+> 1. **The IDs are stored in sprite-store order, not sorted.** The table below
+>    previously listed map 9 as `bf, c4` and map 11 as `bd, be, c6`; the bytes
+>    at `+4/+6/+8` actually read `c4, bf` and `be, c6, bd`. The order is
+>    load-bearing — **header ID *i* is cluster *i*** of the sprite store (see
+>    "Cluster → graphics-ID binding" below), so a sorted table destroys the one
+>    thing the field is good for.
+> 2. **"The two misses are generator-spawned" was a guess, and is wrong for
+>    both.** `bcdfl`'s `0xbd` is not a monster at all — `0x00BD` is the
+>    **Statue** structure's `gfxNumber`, and map 11 is the only map in the game
+>    carrying type-`0x2F` statue records (9 of them). `bcdfe`'s `0x50`
+>    (Dragonlich) and every other "unplaced" ID is a **row-0 prototype**, a
+>    separate mechanism described under "Row 0 is a prototype row" below.
+
+| Map | File | Graphics IDs (file order) | Dungeon levels | Cluster names |
+|-----|------|---------------------------|----------------|----------------|
+| 1  | bcdfb | `b2`, `b3`           | 1, 2         | Two Head (the Ogre), Rock Eye |
+| 2  | bcdfc | `4f`, `b0`, `b1`     | 3, 4, 5      | — (`4f` is the only movement-type-3 "thief" in the game) |
+| 3  | bcdfd | `4d`, `4e`, `c7`     | 6, 7, 8, 9   | — |
+| 4  | bcdfe | `4b`, `4c`, `50`     | 10, 11, 12   | `50` = **Dragonlich** |
+| 5  | bcdff | `ba`, `c3`           | 13           | — |
+| 6  | bcdfg | `b7`, `b8`           | 14, 15       | `b8` = **Possessor Demon**; `b7` = variant, unplaced |
+| 7  | bcdfh | `b5`, `b9`           | 16, 17, 18, 19 | `b5` = **Ram Demon**; `b9` = stationary, 1 sprite |
+| 8  | bcdfi | `b6`                 | 20           | **Ram Lord** |
+| 9  | bcdfj | `c4`, `bf`           | 21, 22       | — |
+| 10 | bcdfk | `bc`                 | 23           | **The Great Waterlord** |
+| 11 | bcdfl | `be`, `c6`, `bd`     | 24, 25, 26   | `be` = **Medusa**; `bd` = **Statue** (not a creature) |
+| 12 | bcdfm | `b4`                 | 27           | — |
+| 13 | bcdfn | `c5`                 | 28           | **Estoroth Paingiver** |
+
+##### Row 0 is a prototype row, not a placement — **confirmed**
+
+Thirteen monster records across eleven maps sit on a square whose level nibble
+is **0**. Every single one of them is on **row 0**, and no level-nibble-0
+monster exists on any other row (13/13, zero deviation). Row 0 is therefore a
+**prototype/template row** the level's real placements and its summon/generator
+scripts copy from, not somewhere the party can meet a monster.
+
+This matters because a prototype record looks exactly like a "unique boss with
+a single placement" if you only count records — which is precisely how the
+Dragonlich was nearly mis-attributed (see the corrections table at the end of
+this section).
 
 #### 214-byte Secondary Table (`0x04A4`–`0x0579`)
 
@@ -3535,7 +3957,163 @@ version was tried first; see Paths tried below).
 creature on visual inspection) — treat as *rendered*, not *confirmed*, since
 there's no byte-exact oracle (unlike the DOS cross-reference used for map 1).
 
-**Naming.** Only one new name was resolved beyond geometry: **Possessor
+> **Correction (2026-08-02) — map 1 was over-split into four clusters; it has
+> two.** The segmenter's map-1 output ("Two Head 7 / unidentified 64×71
+> singleton / Rock Eye 4 / projectile 2") is now settled byte-for-byte by DOS
+> `clipper.clp`'s own **developer-authored entry names**, which nobody had read
+> before: its `Start Monsters` … `End Monsters` bracket holds exactly 14
+> entries, **7 per creature**, named `<creature> <tier> <facing>` plus `A n`
+> attack poses:
+>
+> ```
+> Rock Eye 1 N   Rock Eye 1 E   Rock Eye 1 S   Rock Eye 2 S
+> Rock Eye 3 S   Rock Eye A 0   Rock Eye A 1                 (7)
+> Two Head 1 S   Two Head 1 E   Two Head 2 S   Two Head 2 E
+> Two Head 3 S   Two Head 3 E   Two Head A 0                 (7)
+> ```
+>
+> The Amiga store likewise holds 7 + 7, so the trailing three "clusters" are
+> **all Rock Eye**: the 64×71 singleton is the mid-size open star-eye and the
+> 32×32 / 16×17 "projectiles" are the closed stone ball at far range — visible
+> on the render. `MAP1_GROUPS` in `scripts/cluster_monster_names.py` is
+> corrected accordingly. **Consequence:** cluster count now equals the header's
+> graphics-ID count for **13/13** maps, not 12/13-plus-map-1-at-4-vs-2. That
+> upgrade is what makes the positional ID binding below safe to assert.
+>
+> The `A n` convention also explains the one frame per creature that sits
+> *outside* the near/mid/far width ladder (Rock Eye's 96×83, Medusa's 112×112,
+> Estoroth's 144×128): those are attack poses.
+
+##### Map ↔ dungeon-level mapping — **confirmed**
+
+A `bcdfs` "map" is a **load unit**, not a dungeon level: the game has **28**
+levels (per the official Manual & Clue Book) across 13 maps, and each square's
+own **4-bit level nibble** says which level it belongs to. Nibble *k* is that
+map's *k*-th level, counting up in file order; nibble **0** means "belongs to
+no level" (sealed chambers, the prototype row, inter-level filler).
+
+| Map | File | Levels | | Map | File | Levels |
+|-----|------|--------|-|-----|------|--------|
+| 1 | bcdfb | 1, 2 | | 8 | bcdfi | 20 |
+| 2 | bcdfc | 3, 4, 5 | | 9 | bcdfj | 21, 22 |
+| 3 | bcdfd | 6, 7, 8, 9 | | 10 | bcdfk | 23 |
+| 4 | bcdfe | 10, 11, 12 | | 11 | bcdfl | 24, 25, 26 |
+| 5 | bcdff | 13 | | 12 | bcdfm | 27 |
+| 6 | bcdfg | 14, 15 | | 13 | bcdfn | 28 |
+| 7 | bcdfh | 16, 17, 18, 19 | | | | |
+
+**How it was established** (`scripts/` probes, clue book as oracle). The clue
+book annotates each level with numbered notes carrying explicit
+`(x, y, LEVEL)` coordinates. Two independent checks:
+
+1. **Structure-at-coordinate match.** For every clue-book note of the form
+   "*DOOR / PILLAR / ALCOVE / TELEPORT / PLATE / SWITCH / PIT / FOUNTAIN /
+   PLAQUE / GLYPH / STAIRS / STATUE* … `(x, y, L)`", test whether the candidate
+   `bcdfs` region holds a structure record of the matching type at
+   `col = x + region_min_col`, `row = y + region_min_row`. Scanning every
+   region × every offset, the winning region for each level is unambiguous and
+   always lands at exactly the region's own origin: **level 4 → map 2 nibble 2
+   at 46/54 notes**, level 14 → map 6 nibble 1 at 21/28, level 7 → map 3
+   nibble 2 at 15/31, level 10 → map 4 nibble 1 at 14/23, level 13 → map 5
+   nibble 1 at 13/42, level 24 → map 11 nibble 1 at 10/24, level 16 → map 7
+   nibble 1 at 10/16, level 5 → map 2 nibble 3 at 6/7, level 1 → map 1
+   nibble 1 at 4/5. (The residue is OCR noise and notes whose coordinate names
+   a *destination*, not the annotated object.)
+2. **Cross-reference containment.** Under this mapping, of the **338**
+   coordinate references a level's legend makes to some level, **336 (99.4%)
+   target a level on the *same* map**. The only two exceptions are the two
+   places the clue book itself describes a map transition: level 12's
+   "STAIRS TO (17,21,13)" and level 22/23's Waterlord key. A dungeon-level
+   grouping *is* a load unit, so this is the invariant that pins it.
+
+The per-map level counts fall out at exactly **2+3+4+3+1+2+4+1+2+1+3+1+1 = 28**,
+and the clue book's own page layout corroborates the two biggest groups (one
+page headed "LEVELS 16—17—18—19" for map 7's four nibbles, one headed
+"LEVEL 22, 23" for map 9's two).
+
+##### Cluster → graphics-ID binding — **confirmed**
+
+**Cluster *i* (by `data_off` order) is header graphics ID *i*** (`+4/+6/+8`,
+in file order — see the correction above). Evidence:
+
+- **Ground truth**: map 1's `+4` is `0xb2`, and cluster 0 is Two Head, whose
+  identity comes from the DOS labels. ✓
+- **The 214-byte secondary table.** Its **trailing 72 words** are `3 × 12`
+  pairs = **3 creature slots × (3 distance tiers × 4 facings)**, each pair
+  roughly `(sprite width, 0.85 × sprite height)`. Reading slot *i* against
+  cluster *i* matches on every map where the clusters differ in size, and the
+  degenerate slots land exactly where they should:
+
+  | Map | Slot | Value | Cluster it lands on | Why it is decisive |
+  |-----|------|-------|---------------------|--------------------|
+  | 4 | 2 | `(136, 88)` constant, all 12 | C — 2 frames, `160×90` + `112×104` | The only map-4 cluster with no distance ladder; 136 = mean of 160 and 112 |
+  | 7 | 1 | `(190, 83)` constant, all 12 | B — 1 frame, `192×103` | 190 vs 192 |
+  | 11 | 2 | **all zero** | C — the 3 `64×100` statue figures | `0xbd` owns **zero** monster records anywhere; a creature with no placement gets no hitbox ladder |
+  | 11 | 0 | `(80, 83)` / `(110, 83)` | A — `80×84`, `112×84` | exact width match |
+  | 2 | 2 | `(72,57)/(80,51)/(96,53)` | C — `96×69`, `80×70`, `80×67` | exact width match |
+  | 1 | 0 | `(88,104)…(100,105)` | Two Head — `96×129/126/124` | ✓ against DOS ground truth |
+
+- **Behavioural cross-check.** Map 7's cluster B is the single `192×103`
+  stone-face sprite; the binding assigns it `0xb9`, and **9 of `0xb9`'s 10
+  `bcdfs` records carry movement type 1 = "stationary"** while **0 of `0xb5`'s
+  9 records do**. A one-pose, never-moving monster is exactly what a stationary
+  movement type predicts. Likewise map 11's `0xc6` (cluster B, the hooded
+  wraith) is movement type **2 = teleport** on 16 of its 17 records, while
+  `0xbe` (cluster A, Medusa) is not.
+
+##### Creature names from the Manual & Clue Book — **confirmed**
+
+The official *Black Crypt Manual & Clue Book* (64-page scan; no text layer,
+OCR'd per page with `tesseract`) is the oracle the earlier passes lacked. It
+names creatures **per dungeon level**, which the mapping above turns into a
+per-`bcdfb`-n-file, per-cluster name. Eleven clusters (90 of the 204 sprites)
+now carry a real name, up from four clusters / 31 sprites.
+
+| Cluster | gfx | Level | Name | Evidence |
+|---------|-----|-------|------|----------|
+| map 1 A | `b2` | 2 | **Two Head — "the Ogre"** | DOS entry label `Two Head …`; the record carries the game's **only** `EMERALD KEY` (1/1 corpus-wide), and epilogue panel 1 reads *"THROUGH INCREDIBLE BRAVERY AND THE USE OF THE POWERFUL OGREBLADE, YOU DEFEATED **THE OGRE** AND RETRIEVED **THE EMERALD KEY**"*. `OGREBLADE` is the level-1 alcove sword (clue book L1 note 21). The journal at S_1 `+0x1A87F`… independently calls it *"THE TWO HEADED BEAST"* |
+| map 1 B | `b3` | 1, 2 | **Rock Eye** | DOS entry labels `Rock Eye 1 N … A 1` (7 = 7) |
+| map 4 C | `50` | 10 | **Dragonlich** | Clue book L10 note 10: *"THREE ALCOVES: PLACE IDOLS OF TEMIN HERE TO OPEN THE WAY TO THE **DRAGON LICH** (WALL 12,26,10)"*; note 43 *"DRAGON LICH; PRESSURE PLATE TO OPEN WALL"*. Epilogue panel 3: *"USING **3 EVIL IDOLS**, YOU SUMMONED AND DEFEATED THE DREADED **DRAGONLICH**"*. In-game plaque: *"THREE EVIL IDOLS / ALL IN ONE ROOM / ENTER THE **DRAGONKING** / BRINGER OF DOOM"*. `0x50` has **no static placement** — its only record is the row-0 prototype — which is exactly what "summoned" predicts. Sprite: a winged skeleton |
+| map 6 B | `b8` | 14 | **Possessor Demon** | (previously established via the unique movement-type-5 record) **plus** a new independent confirmation: it carries the game's **only** `SOUL KEY`, and clue book L15 note 2 reads *"LOCKED DOOR: **POSSESSOR HAS THE KEY** AND MUST BE KILLED FOR IT (WILL THEN DROP DEATH GEMS OF DEAD PARTY MEMBERS)"* |
+| map 7 A | `b5` | 17 | **Ram Demon** | Clue book L17 note 2: *"**RAM MINOR DEMON** - HOLDS KEY TO DOOR AT (10,4,17)"*. `0xb5` at level-17 local (19,8) is the **only** key-carrying monster on level 17 (an `IRON KEY`). Sprite: ram-horned minotaur. Plaque: *"THE **RAM DEMONS** FEED OFF THE ENERGY OF THE SPELLS YOU CAST"* |
+| map 8 A | `b6` | 20 | **Ram Lord** | Clue book L20 note 2: *"**RAM LORD** - HOLDS **KEYS TO TWO LOCKED DOORS** AS WELL AS **AMULET OF POWER** (+2 AC, +4 STRENGTH), AND **BELT OF SUSTENANCE**"*. The 550-HP record's carried sub-chain is, byte for byte, `BELT OF SUSTENANCE` (type `0x19`) + `AMULET OF POWER` (`0x1A`) + `PIN KEY` + `PIN KEY` (`0x06`×2). The belt and the amulet are each **1/1 corpus-wide**. This is the epilogue's *"THE MIGHTY RAM DEMON"* and the taunt text's *"MY RAM GENERAL"* |
+| map 10 A | `bc` | 23 | **The Great Waterlord** | Clue book L23 note 3: *"**WATERLORD**, HOLDS KEY TO DOOR AT (4,5,23), AND **RING OF LOCATION**"*. The 375-HP record — the only monster on the whole map — carries `RING OF LOCATION` + `GOLD OCTA KEY`. Manual p. 27 describes the first lieutenant as *"a silent, man-sized beast from the sea. His blue-green skin flashed like abalone"*; sprite: a green amphibian with a trident |
+| map 11 A | `be` | 24 | **Medusa** | Level 24 is the Medusa level throughout: note 16 *"SPECIAL PANELS (3) - **MEDUSA SKULL AND SNAKES**"*, note 31 *"**MIRROR SHIELD** (USED TO KILL MEDUSA)"* (1/1 corpus-wide), note 18 *"PREVIOUS ADVENTURERS WERE PLACED HERE WHEN TURNED TO STONE"*. `0xbe` is the **only** unique monster on level 24 (1 record, 150 HP, vs `0xc6`'s 17). Sprite: a skull with snakes for hair — matching manual p. 27 *"A skinless creature with hair of snakes"* — and the plaque *"THE **SKULL OF STONE** / LIKE ALL EVIL / CAN NOT LIVE IN / TRUE REFLECTION"* |
+| map 11 C | `bd` | 24 | **Statue (petrified adventurer)** — *not a creature* | `0x00BD` is the **Statue** structure's `gfxNumber` (structure type table above). Map 11 is the **only** map in the game with type-`0x2F` records — **9** of them, all on level 24, the "turned to stone" room. `0xbd` owns zero monster records and its 214-byte slot is all zeros |
+| map 13 A | `c5` | 28 | **Estoroth Paingiver** | The only monster on the final level; epilogue panel 10 *"A FINAL, LIFE AND DEATH BATTLE WITH ESTOROTH HIMSELF"*; already special-cased in code as gfx word `0x80C5` (see the BCSPEED effect-93 entry). Level 28's alcoves hold the `WAND OF ESTOROTH` |
+
+**All six of `bcdfu`'s epilogue bosses are now placed**: Ogre (map 1),
+Dragonlich (map 4), Possessor Demon (map 6), Ram Demon/Ram Lord (maps 7 & 8),
+Great Waterlord (map 10), Medusa (map 11).
+
+###### Corrections to the previous unconfirmed-lead table
+
+| Old lead | Verdict | Why |
+|---|---|---|
+| Medusa = **map 11** cluster A | ✅ **right, now confirmed** | Level 24 is on map 11 and `0xbe` is its only unique monster |
+| Great Waterlord = **map 9** cluster A | ❌ **refuted** | The Waterlord is on **level 23 = map 10**, not levels 21/22 = map 9. Map 9's blue-green mermen are the *regular* guards of the water/brig levels; the clue-book note that names the Waterlord sits in the **right-hand column** of the two-column page 54, i.e. under `LEVEL 23`, not `LEVEL 22` |
+| Ram Demon = **map 7** cluster A | ✅ **right for the lesser demon**, and extended | Map 7 = levels 16-19 holds the "Ram Minor Demons"; the unique **Ram Lord** ("THE MIGHTY RAM DEMON") is a *different* file, **map 8** = level 20 |
+| Dragonlich = **map 4** cluster C, on the strength of "the only single-record, highest-HP monster on map 4 — a genuine unique-boss signature" | ✅ **right cluster, wrong reason** | `0x50`'s single record is a **row-0 prototype**, not a placement — the "unique boss signature" was an artefact. The real reason it has no placement is that the Dragonlich is *summoned* by the three Idols of Temin, which the clue book and the epilogue both state |
+| Ogre = "no candidate identified" | ❌ **refuted** | It is **Two Head**, map 1 — the only carrier of the game's only `EMERALD KEY`, which the epilogue explicitly says is taken from the Ogre |
+
+##### Still open (naming)
+
+Fifteen clusters / 114 sprites remain placeholder-named. There is **no**
+creature-name table in the game data, and the clue book names creatures only
+where a note needed to (a key-holder, a boss). The remaining clusters are
+monsters the clue book never names. Each now carries its **confirmed graphics
+ID and dungeon levels** in `monster-names.json`, which is as far as the
+available oracles go. Two weak, deliberately-unapplied leads:
+
+- map 2 cluster A (`0x4f`) is the **only** movement-type-3 ("thief") creature
+  in the 265-record corpus (4 of its 5 records), and the in-game journal says
+  *"THE THIEF TOOK MY SWORD AS HE VANISHED INTO THIN AIR"* — suggestive, but
+  "thief" is a behaviour label from the field table, not a name.
+- DOS `clipper.clp` has a floor-item entry named `Clawpiller Mask`, and map 2
+  cluster C renders as a horned caterpillar — but the Amiga item list has no
+  such string, and an item named after a creature is not a creature name.
+
+**Naming (superseded).** Only one new name was resolved beyond geometry: **Possessor
 Demon**, map 6, both of its clusters (10+10, identical dimensions —
 recolours of one base sprite). `bcdfs`'s monster stat records hold exactly
 **one** entry, in the entire 265-record corpus, with movement-type byte
@@ -3552,9 +4130,13 @@ census) + double-independent-text match, not a literal name-pointer, so it
 is **not** given the same confidence as the DOS-cross-reference names — call
 it high-confidence but short of "confirmed".
 
-Everything else beyond map 1 and map 6 is a **geometry-only placeholder**
-(`"Map N Creature A/B/C..."`) — see "Bestiary name table search" below for
-why no further names could be resolved.
+> **Superseded (2026-08-02):** the sentence that used to follow — "everything
+> else beyond map 1 and map 6 is a geometry-only placeholder" — held only
+> because no oracle outside the game files had been tried. Nine further
+> clusters are now named from the official Manual & Clue Book; see
+> "Creature names from the Manual & Clue Book" above. The map-6 reasoning in
+> this subsection is still correct and is now independently corroborated by the
+> Possessor's `SOUL KEY`.
 
 ##### Paths tried (sprite clustering)
 
@@ -3564,6 +4146,18 @@ why no further names could be resolved.
 | Width-only ratio boundary (`width[i] > 1.3 * running-block-min-width`) | Mostly right, two failure modes | (a) `48→64` width steps *within* one creature's own near-tier (e.g. map4's `128,112,128,64,80,...`) sat right at the threshold and were sensitive to its exact value; (b) a **global running minimum** lets one very small "far" outlier lock in a floor that makes a later, still-legitimate same-creature value look like a big jump (false split, e.g. map 10's `...,32,48,32` far-tier zigzag) |
 | bpr (byte-per-plane, ~ rendered area) with a **global running-minimum** floor, factor swept 1.3-1.6 | Same false-split failure mode as width-global-min | Confirmed on map 9 (5 blocks vs. 2 known) and map 11 (5-6 vs. 3 known) at every factor tried; switching to a **local** 2-entry-window rebound test (not a global floor) fixed both while keeping map 1/3/4's correct splits |
 | Trusting the header's per-file known-ID count as an exact target and forcing that many clusters | Not used as-is | It's the right *validation* signal (matched 12/13 maps) but not a splitting rule on its own — it doesn't say *where* to cut, and one map (9) needed the geometric segmenter's own output plus a visual check to reconcile a genuine off-by-one |
+
+##### Paths tried (naming)
+
+| Approach | Result | Why it failed / was superseded |
+|----------|--------|--------------------------------|
+| Exhaustive string/table search of decompressed `bcdft` S_1 + S_2 and `bcdfs` for an indexed bestiary | **Confirmed negative — do not repeat** | No array-of-pointers or fixed-stride name table keyed by the graphics ID exists; every creature-adjacent string is prose. See "Bestiary name table search" above |
+| Matching epilogue boss names to clusters on visual/thematic grounds | 3 of 5 right, 2 wrong, none provable | Correct for Medusa and the Ram Demon, **wrong** for the Great Waterlord (map 9 vs. the real map 10) and silent on the Ogre. Visual plausibility alone cannot distinguish "the aquatic boss" from "the aquatic mooks on the level before it" |
+| "Unique boss = the map's single-record, highest-HP graphics ID" | Produced the right Dragonlich answer for the **wrong reason** | The single record was a **row-0 prototype**, not a placement. The signature is an artefact of not checking the record's square; see "Row 0 is a prototype row" |
+| Assuming the `bcdfb`-n header's three graphics IDs are stored sorted | Wrong, and it discarded the binding | They are in sprite-store order (`bcdfj` = `c4,bf`, `bcdfl` = `be,c6,bd`). The earlier doc table sorted them, which silently destroyed the cluster↔ID mapping the field exists to provide |
+| Assuming one `bcdfs` map == one dungeon level | Wrong — and it is what blocked naming for a whole pass | The game has **28** levels in **13** maps; each square's 4-bit level nibble picks the sub-level. Until that was worked out, per-level clue-book facts could not be attached to a sprite file at all |
+| Reading the 214-byte secondary table as a palette or an animation table | Neither | It is `17 head pairs + 3 × 12` per-creature hitbox pairs (`≈ width`, `≈0.85 × height`) over 3 distance tiers × 4 facings. Useful as a **cluster↔ID oracle**, which is how it is used above |
+| OCR of the clue book's *map images* (as opposed to its legend text) | Unusable | The maps are dense grid art; `tesseract` returns noise. All the mapping work was done from the legends' `(x,y,LEVEL)` coordinates, which OCR cleanly |
 
 ##### Bestiary name table search (bcdft / bcdft S_2 / bcdfs)
 
@@ -3607,6 +4201,16 @@ ending epilogue), not an array addressable by monster/graphics ID, and no
 code path indexing a string table by that ID field was found (none of the
 regions above have the array-of-pointers or fixed-stride-record shape the
 confirmed item-name tables have).
+
+> **Superseded (2026-08-02) — all five of these are now settled.** The
+> conclusion above (no in-file bestiary table) still stands and does not need
+> re-testing; what was missing was an oracle *outside* the game files. The
+> official **Manual & Clue Book** names creatures per dungeon level, and with
+> the map↔level mapping established (see "Map ↔ dungeon-level mapping" above)
+> that resolves every one of the six epilogue bosses. Three of the five leads
+> below were right, two were wrong; see "Corrections to the previous
+> unconfirmed-lead table" above for the per-row verdict. The table is kept as
+> the record of what the reasoning looked like before the oracle arrived.
 
 **Unconfirmed leads (deliberately not applied to `monster-names.json`).**
 `bcdfu`'s 6 epilogue boss names are plausible matches for some of the
@@ -4486,7 +5090,7 @@ that ignores this produces false positives.)
 | Slot | Chunk (x/z) | Bytes | Contents | Coverage |
 |------|-------------|-------|----------|----------|
 | `$08` (8) | 0 | 14,448 | Side walls, 4 depths × L/R, masked | 14,448 / 14,448 |
-| `$0C` (12) | 1 | 42,754 | Door leaves ×2 types ×3 depths + 7 door-way frames, masked | 42,434 / 42,754 |
+| `$0C` (12) | 1 | 42,754 | Door leaves ×2 types ×3 depths + 7 door-way frames, masked, **+ the 80×32 door-animation clip stencil** | 42,754 / 42,754 |
 | `$B0` (176) | 2 | 55,536 | Front walls ×3 depths (3 pieces each) + ceiling + floor | 55,536 / 55,536 |
 | `$10` (16) | 3 | 10,780 | Floor pits A–D + ceiling pits A–B, masked | 10,780 / 10,780 |
 | `$BC` (188) | 4 | 11,580 | Alcove A–E | 11,580 / 11,580 |
@@ -4498,10 +5102,16 @@ that ignores this produces false positives.)
 | `$C8` (200) | 10 | 6,060 | **Panel Top** + **Fountain**, 6 planes | 6,060 / 6,060 |
 | `$1C` (28) | 11 | 4,186 | **18 wall buttons**, masked | 4,186 / 4,186 |
 
-**205,602 of 205,922 decompressed bytes assigned, with zero overlap and one
-320-byte remainder** (end of slot `$0C`). All 83 sub-images decode at full
-length in `bcdfx` and `bcdfz` and all 46 present in `bcdfy`, with no
-short-data truncation and no out-of-palette index.
+**205,922 of 205,922 decompressed bytes assigned, with zero overlap and zero
+remainder.** All 83 pixel sub-images decode at full length in `bcdfx` and
+`bcdfz` and all 46 present in `bcdfy`, with no short-data truncation and no
+out-of-palette index; the 84th entry is the 1-plane clip stencil that closes
+slot `$0C` (see "Slot `$0C` tail" below).
+
+> **Correction — "one 320-byte remainder (end of slot `$0C`)" is superseded.**
+> Those 320 bytes are a real, code-consumed asset (an 80×32 clip stencil), not
+> slack. See "Slot `$0C` tail (42,434–42,754) — the door-animation clip
+> stencil" below for the trace and verification.
 
 ###### The 28-byte sprite descriptor (confirmed)
 
@@ -4574,7 +5184,7 @@ leaves). All 7 planes, mask first.
 | 34,930 | Door Way 2A | 32×69 |
 | 36,862 | Door Way 2C | 32×69 |
 | 38,794 | Door Way 3 | 80×52 |
-| 42,434 | *(320 B unaccounted — still open)* | |
+| 42,434 | **Door-animation clip stencil** (1 plane, mask only) | 80×32 |
 
 The two 80×92 leaves are the records whose flag has bit 9 set: their `src`
 points at the **colour** planes and `+0x0A` at the mask (`0` and `11,648`),
@@ -4587,6 +5197,161 @@ which is what makes the chain close — everything else has `src` at the mask.
 > table. "Door Type 0 − 2/3 and Door Way 1A/2A/3 also match but not at mutually
 > consistent offsets" is now resolved: all 13 pieces tile the payload
 > back-to-back with no gaps.
+
+###### Slot `$0C` tail (42,434–42,754) — the door-animation clip stencil (**confirmed**)
+
+> **Correction — supersedes "320 B unaccounted / exporter slack in a fixed
+> 42,754-byte authoring buffer".** The tail is a genuine asset with a single,
+> exactly-bounded consumer. The earlier negative ("0 code references to file
+> offset 42,434") was a *shape-based* search for the wrong constant: no code
+> ever references 42,434, because the one consumer references **42,524** — the
+> tail's own offset **plus 90 bytes**, for the arithmetic reason given below.
+> See the paths-tried table for how the wrong constant was arrived at.
+
+An 80-pixel-wide, 32-row, **1-plane** (mask-only) stencil, anchored at the
+depth-1 doorway frame's own screen origin `(64, 9)`. Rows 0–8 are solid; rows
+9–31 are a trapezoidal aperture that widens by exactly 1 px per side per row
+(24 → 2 px of set pixels per side).
+
+**The consumer — the door open/close animation.** Two entry points, differing
+only in which byte-script they walk:
+
+| Address | Script | Meaning | Caller |
+|---|---|---|---|
+| S_1 `+0x262C2` | `+0x26456` | **door closing** — leaf height 1 → 0x41, sound marker, 0x46 → 0x5C, then a 0x5C/0x5A/0x58/0x57/0x56/0x56/0x57/0x58/0x5A/0x5C slam-bounce | S_1 `+0x11444` (`JSR $A631A.l`) |
+| S_1 `+0x262CC` | `+0x26432` | **door opening** — leaf height 0x5C → 0 in 33 steps | S_1 `+0x1128A` (`JSR $A6324.l`) |
+
+Both callers reach the routine the same way: `LEA -$6E7A(A4),A0` (the 20-byte
+object-record array) → `D0 = record[+0x00]` (the door's own `gfxNumber`,
+`0x0035`/`0x0036`) → the `JSR`. Absolute targets resolve under the already-
+documented `+0x80058` load base.
+
+Each animation frame does three blits:
+
+1. `+0x26538` **restore** — copy the whole 80×92 saved rect from `$AC(A5)`
+   back to the screen (`BLTCON0 = $09F0`, LF `$F0` = plain copy).
+2. `+0x2630E` **draw the sliding leaf** — the descriptor at `+0x261D2` /
+   `+0x261EE` (80×92, dest `(64, 18)`); `BLTAPTH = leafMask + (92 − d5)×10`,
+   `BLTBPTH = leafColour + (92 − d5)×10`, `BLTSIZE = (d5 << 6) | 5`. The leaf
+   scrolls within its own art while the destination stays fixed, so the leaf's
+   own mask no longer lines up with the doorway.
+3. `+0x26380` **the stencil pass** — this is the tail's consumer:
+
+```asm
+026380  206d0464      movea.l $464(a5),a0        ; screen bitplane pointer list
+026384  226d00ac      movea.l $ac(a5),a1         ; saved 80x92x6 background
+026388  266d000c      movea.l $c(a5),a3          ; <-- slot $0C, the door chunk
+02638C  d7fc0000a61c  adda.l  #$a61c,a3          ; +42,524  == 42,434 + 90
+026392  426e0042      clr.w   $42(a6)            ; BLTCON1 = 0
+026396  3d7c0fca0040  move.w  #$fca,$40(a6)      ; BLTCON0: USEA|USEB|USEC|USED, LF=$CA
+0263A8  426e0064      clr.w   $64(a6)            ; BLTAMOD = 0   -> A stride 10 B/row
+0263AC  426e0062      clr.w   $62(a6)            ; BLTBMOD = 0
+0263B0  3d7c001e0060  move.w  #$1e,$60(a6)       ; BLTCMOD = 30  -> 40 B screen row
+0263B6  3d7c001e0066  move.w  #$1e,$66(a6)       ; BLTDMOD = 30
+0263BC  7005          moveq   #$5,d0             ; 6 bitplanes
+0263BE  2d4b0050      move.l  a3,$50(a6)         ; BLTAPTH = the stencil (same every plane)
+0263C2  2d49004c      move.l  a1,$4c(a6)         ; BLTBPTH = saved background
+0263C6  2458          movea.l (a0)+,a2
+0263C8  45ea02d8      lea     $2d8(a2),a2        ; 18*40 + 64/8  ->  dest (64, 18)
+0263CC  2d4a0054      move.l  a2,$54(a6)         ; BLTDPTH
+0263D0  2d4a0048      move.l  a2,$48(a6)         ; BLTCPTH
+0263D4  3d7c05c50058  move.w  #$5c5,$58(a6)      ; BLTSIZE = 23 rows x 5 words (80 px)
+0263E2  43e90398      lea     $398(a1),a1        ; next saved-bg plane (+920 = 10*92)
+0263E6  51c8ffd6      dbra    d0,$263be
+```
+
+Minterm `$CA` is `D = A ? B : C`: wherever the stencil is set, put back the
+pre-animation background; elsewhere leave the screen alone. So the pass
+**re-clips the scrolled leaf to the closed door's silhouette** every frame.
+
+| Fact | Value | Where it comes from |
+|---|---|---|
+| Stencil start | 42,524 | `ADDA.L #$A61C,A3` at S_1 `+0x2638C` |
+| Rows read | 23 | `BLTSIZE = $05C5` → `$5C5 >> 6` |
+| Bytes per row | 10 | `BLTSIZE & $3F = 5` words, `BLTAMOD = 0` |
+| Bytes read | 230 | 23 × 10 |
+| End of read | **42,754** | 42,524 + 230 = the chunk's exact length |
+| Skipped cap | 90 B = 9 rows | `(leafDestY 18) − (frameDestY 9) = 9` rows × 10 B |
+
+The 90-byte cap is therefore not slack either: the stencil is authored against
+the *doorway frame's* origin `(64, 9)` — Y=9 is `MOVEQ #$9,D1` at every one of
+`+0x25CAE`'s five depth-1 call sites (`+0x25CC4`, `+0x25CD2`, `+0x25CDE`,
+`+0x25CEC`, `+0x25CFC`), and X=64 is the `MOVEQ #$40,D0` at `+0x25CDC` that
+places the 80-px lintel — while the animation's destination is the *leaf's* origin
+`(64, 18)` (dest Y in descriptors `+0x261D2`/`+0x261EE`), so the code enters the
+image 9 rows down. Both constants are independently documented above. Rows 0–8
+are solid `$FF` in all three tilesets, which matches the doorway frame's own
+mask over dest rows 9–17 at **720/720 px** in `bcdfx` and `bcdfz`.
+
+**Verification (confirmed — three independent oracles, zero deviation).**
+
+1. **Byte-exact derivation from the art.** `bcdfz`'s stencil rows 9–31 are
+   *exactly* `NOT(Door Type 0 − 1's own mask plane, rows 0–22)` dilated 1 px
+   horizontally: **1840/1840 pixels, 100.000%**. Dilating 0 px or 2 px both give
+   97.500% (46 px off = exactly 2 px × 23 rows), so the 1-px dilation is the
+   unique fit, not a fitted parameter.
+2. **Functional simulation.** Replaying both scripts (33 opening frames, 34
+   closing frames) with the game's own `BLTAPTH = mask + (92 − d5)×10` rule and
+   counting leaf pixels drawn outside the closed door's row-wise outline:
+
+   | Tileset | Leaf | Spill without the stencil | With it |
+   |---|---|---|---|
+   | `bcdfz` | Door Type 0 | 12,150 px (open) / 11,784 px (close) | **0 / 0** |
+   | `bcdfz` | Door Type 1 | 12,403 / 11,351 | 1,772 / 1,509 |
+   | `bcdfx` | both | 1,536 / 1,304 and 0 / 0 | unchanged (stencil is blank) |
+   | `bcdfy` | both | 0 / 0 | unchanged (stencil is blank) |
+
+   The stencil removes **100.000%** of the Door Type 0 spill it was cut for,
+   across every frame of both animations. One stencil serves both leaf types,
+   so Door Type 1 (a different arch, with an interior grate) keeps a residue.
+3. **The `bcdfx`/`bcdfy` blank is content-correct, not a missing asset.** Those
+   two tilesets' depth-1 door leaves are square-topped — `bcdfx` Door Type 1 and
+   both of `bcdfy`'s masks are fully solid over rows 0–22, so there is nothing
+   to clip and an all-zero A channel makes the blit a no-op (`D = C`). The one
+   exception is `bcdfx`'s Door Type 0, whose leaf is inset 2 px per side from
+   row 14 down and which therefore does keep a small (1,536 px cumulative,
+   2 px wide) uncorrected overhang — a genuine, minor shipping artifact in that
+   tileset, not evidence against the stencil.
+
+A side-by-side render of `bcdfz`'s depth-1 door at five animation steps, with
+and without the pass, is at `build/cache/blackcrypt/slot0c_door_stencil.png`
+(verification artifact, not a web asset): without it the leaf's square top
+corners visibly punch through the arch's sloped shoulders.
+
+**Why the earlier "no code reads this" was wrong — root vs. shape.**
+
+The negative that kept this open was shape-based — a search for the literal
+constant 42,434. Redone **root-based**, the access set is finite and complete:
+
+- `A5` (the graphics kernel's globals frame) has exactly one producer, the
+  two-instruction helper at S_1 `+0x2030E`, which the animation routine calls at
+  `+0x262D4`.
+- Across the whole 166,676-byte S_1 image, exactly **two** instructions form an
+  `(0x000C, A5)` effective address inside the kernel range `0x1D000–0x28B14`:
+  `+0x26312` (`MOVEA.L $C(A5),A1`, the leaf blit — bounded by its descriptor)
+  and `+0x26388` (the stencil). The only other candidates in that range,
+  `+0x21178` and `+0x21194`, are the `slot` fields of two doorway descriptors
+  read as opcodes — data, not code.
+- The indexed root `(A5,Dn.W)` resolves in every case to
+  `Dn = descriptor.word(+0x00)` followed by `ADDA.L descriptor.long(+0x02)`
+  (`+0x22AAE`, `+0x22BEE`, `+0x22C20`, `+0x24C1C`, `+0x24C8C`, `+0x24D52`), plus
+  the chunk loader's own write path at `+0x1DC22`/`+0x1DD86`. A blind
+  whole-image scan finds **13** valid 28-byte descriptors with `slot == 0x0C`,
+  and the highest byte any of them reaches is **42,434** — exactly the start of
+  the tail, zero overlap.
+
+So the complete set of runtime reads of bytes 42,434–42,754 is the single
+`BLTAPTH` at `+0x26388`, covering 42,524–42,754. Nothing reads 42,434–42,524.
+
+**Paths tried (kept: these are the dead ends that cost two passes)**
+
+| Approach | Result | Why it failed |
+|---|---|---|
+| Blind 28-byte descriptor scan filtered on `slot == 0x0C` | 13 records, none reaching past 42,434 | Correct, but only covers the *descriptor-driven* root. The stencil is reached by a hard-coded `ADDA.L`, which no descriptor scan can see. |
+| Literal-constant census for the tail's offset 42,434 (16- and 32-bit) across S_1 | 0 hits — read as "nothing references the tail" | **The wrong constant.** The consumer adds 42,**524**, because the stencil is anchored 9 rows above the blit's destination. Searching a region's *first* byte only finds consumers that start there. |
+| Cross-platform check against DOS `clipper.clp` for an 80×32 dungeon entry | None found | Correct but not decisive — the DOS port composites its doors differently and has no equivalent runtime stencil. A missing counterpart is not evidence of slack. |
+| "All three tilesets decompress to exactly 42,754 while art ends at exactly 42,434" read as a fixed authoring-buffer signature | Plausible, and wrong | The constant length is just the constant *stencil* length. Two of the three tilesets store an all-zero stencil because their door leaves are square-topped, which looks like "padding" until you check the leaf masks. |
+| Matching the tail against `doorway-1b`'s (the lintel's) mask | 140/320 bytes identical, ramp continues 9 rows further | Right family, wrong sibling. The stencil is derived from the **door leaf's** silhouette (1-px dilated), not the lintel's; the two share a generated ramp, which is why a partial match appeared. |
 
 ###### Slot `$10` (10,780 B) — pits, masked (confirmed)
 
@@ -4665,8 +5430,11 @@ the door-way pieces below, stored `1B, 1A, 1C`).
 
 Independent corroboration from the map data: a `bcdfs` Stairs/Teleport/Spinner
 structure (type `0x12`) carries its sub-kind in word **`+0x10`** —
-`ResolveTargetSquare` returns stairs-code 3 for `2` and `3`, teleport-code 4
-for `4`, and code 9 otherwise (S_1 `+0x27C86`-`+0x27CA6`). Sub-kind correlates
+`ResolveTargetSquare` returns stairs-code 3 for `2` and `3`, **spinner**-code 4
+for `4`, and **teleport**-code 9 otherwise (S_1 `+0x27C86`-`+0x27CA6`).
+(The "teleport-code 4" label this sentence originally carried is corrected —
+see "Special-square sub-kinds" in the movement section, where 4 = Spinner and
+9 = Teleport are confirmed against the official clue book.) Sub-kind correlates
 1:1 with `gfxNumber`: `2 ↔ 0x0043` (38 records) and `3 ↔ 0x0044` (36). Each
 record's words `+0x0C`/`+0x0E` are the destination column/row (copied into the
 caller's X/Y at S_1 `+0x27C64`). Resolving those against the destination
@@ -4781,7 +5549,7 @@ against them yet).
 
 | Item | Size | Best current result |
 |------|------|---------------------|
-| Slot `$0C` tail | 320 B at 42,754 − 320 | **Advanced: content identified, still not confirmed as an asset — best explanation is now exporter slack, not an unwired stencil.** Geometry re-confirmed independently of the width argument: `bcdfz`'s copy is *mirror-symmetric about the 10-byte row* (row 10 reads `ff ff fe 00 00 00 00 7f ff ff` — byte 2 `0xFE` against byte 7 `0x7F`), which fixes the width at 80 px without appealing to neighbouring sub-images. **What the bytes are:** rows 0-8 solid, then an aperture that widens by exactly 2 px per row — set-pixel counts 48, 46, 44 … 4. That is the *same generated wedge* as `doorway-1b`'s (the depth-1 lintel's) mask plane, which runs 54, 52, 50 … 22 over its rows 10-26; tail rows 9-22 are **byte-identical to `doorway-1b` mask rows 13-26** (140 of the 320 bytes, found by searching the decoded chunk for the tail's own bytes), and the tail then carries the ramp 9 rows further than the lintel needs. **Why slack, not an asset:** (a) all three tilesets decompress slot `$0C` to *exactly* 42,754 B while their descriptor-covered art ends at *exactly* 42,434 B, even though `bcdfx` and `bcdfy` agree on only 16,076 of those 42,754 bytes — the signature of a fixed-size authoring buffer, not of shared content; (b) `bcdfx`/`bcdfy`'s tail is the degenerate case (solid cap, then all zeros — no wedge at all), so the three files do **not** share a silhouette, contradicting the earlier note; (c) the DOS port has no counterpart — `clipper.clp`'s dungeon set contains no 80×32 entry, and its only numbering gap (entries 77/78) is the zero-length `Start/End Level Specifics` markers, not images; (d) besides the earlier zero-hit descriptor scan, a literal-constant census finds **0** occurrences of the tail's chunk offset 42,434 anywhere in S_1 (16- and 32-bit forms), while the immediately preceding `doorway-3` offset 38,794 has exactly 1 (its own descriptor at S_1 `+0x21208`) — so the census can find real references and the negative is meaningful. Remaining doubt: nothing *proves* the exporter wrote it rather than the artist, so this is labelled hypothesis, not confirmed. |
+| ~~Slot `$0C` tail~~ | 320 B at 42,754 − 320 | **SOLVED — it is the door-animation clip stencil, read every frame by S_1 `+0x26388` as `BLTAPTH`.** The "exporter slack" verdict below is **refuted**; see "Slot `$0C` tail (42,434–42,754) — the door-animation clip stencil" above for the trace, the three zero-deviation oracles, and why the shape-based negative failed. The row's original text is kept below for the record. Geometry re-confirmed independently of the width argument: `bcdfz`'s copy is *mirror-symmetric about the 10-byte row* (row 10 reads `ff ff fe 00 00 00 00 7f ff ff` — byte 2 `0xFE` against byte 7 `0x7F`), which fixes the width at 80 px without appealing to neighbouring sub-images. **What the bytes are:** rows 0-8 solid, then an aperture that widens by exactly 2 px per row — set-pixel counts 48, 46, 44 … 4. That is the *same generated wedge* as `doorway-1b`'s (the depth-1 lintel's) mask plane, which runs 54, 52, 50 … 22 over its rows 10-26; tail rows 9-22 are **byte-identical to `doorway-1b` mask rows 13-26** (140 of the 320 bytes, found by searching the decoded chunk for the tail's own bytes), and the tail then carries the ramp 9 rows further than the lintel needs. **Why slack, not an asset:** (a) all three tilesets decompress slot `$0C` to *exactly* 42,754 B while their descriptor-covered art ends at *exactly* 42,434 B, even though `bcdfx` and `bcdfy` agree on only 16,076 of those 42,754 bytes — the signature of a fixed-size authoring buffer, not of shared content; (b) `bcdfx`/`bcdfy`'s tail is the degenerate case (solid cap, then all zeros — no wedge at all), so the three files do **not** share a silhouette, contradicting the earlier note; (c) the DOS port has no counterpart — `clipper.clp`'s dungeon set contains no 80×32 entry, and its only numbering gap (entries 77/78) is the zero-length `Start/End Level Specifics` markers, not images; (d) besides the earlier zero-hit descriptor scan, a literal-constant census finds **0** occurrences of the tail's chunk offset 42,434 anywhere in S_1 (16- and 32-bit forms), while the immediately preceding `doorway-3` offset 38,794 has exactly 1 (its own descriptor at S_1 `+0x21208`) — so the census can find real references and the negative is meaningful. Remaining doubt: nothing *proves* the exporter wrote it rather than the artist, so this is labelled hypothesis, not confirmed. |
 | ~~Which stairs flight is Up vs Down~~ | — | **SOLVED — flight A = `Stairs Up`, flight B = `Stairs Down`.** Confirmed against DOS `clipper.clp`'s own labelled entries 43-48 by palette-independent region agreement: **1.0000 / ~0.999** for the correct pairing at all three depths versus 0.63-0.80 for the wrong one, 38,240 px compared. The three failed code searches recorded here (`MOVEA.L $C4(A5)`, `MULU.W #$12`, `CMPI.B #$12` dispatch) stay on record as dead ends, and the DOS *catalog-order* heuristic is now positively **refuted**, not merely unsafe: the Amiga stores Up first, DOS lists Down first. The lesson is that the oracle was available all along — comparing the *pixels* against the DOS port's named entries, which is this project's standard move, rather than reasoning about the order they appear in. See the full table in the slot `$C4` section above. |
 
 Slot `$0C` tail, `bcdfz`'s copy, rendered at 10 bytes (80 px) per row, `#` = set
@@ -4874,7 +5642,7 @@ row 31:    ##...................................................................
 > > adjacent stream, not this one), `$B0` (walls/ceiling/floor), `$14`
 > > (pillars), `$B8` (door slot), `$C4` (stairs) and `$20` (pull chains). It
 > > genuinely lacks only slots `$10` (pits), `$BC` (alcove), `$C0` (plaque),
-> > `$C8` (panel/fountain) and `$1C` (buttons) — 46 of the 83 sub-images.
+> > `$C8` (panel/fountain) and `$1C` (buttons) — 47 of the 84 sub-images.
 > > All 46 decode at full length with no truncation and render as a coherent
 > > violet/plum tileset.
 >
@@ -4897,8 +5665,8 @@ row 31:    ##...................................................................
 > > directory (`read_chunk_directory`/`read_chunks`) and the confirmed
 > > `SUB_IMAGES` geometry table (`iter_sub_images`) directly, the same way
 > > `bcdfv.py` reads `bcdfv`'s block table. `scripts/render_all.py` calls it
-> > per tileset file. Output: **83 named sub-images for `bcdfx` and `bcdfz`,
-> > 46 for `bcdfy`** — exactly the documented counts, zero short-data
+> > per tileset file. Output: **84 named sub-images for `bcdfx` and `bcdfz`,
+> > 47 for `bcdfy`** — exactly the documented counts, zero short-data
 > > warnings, reproducing the escalation probe's own
 > > "22 of 654,736 opaque pixels have an out-of-palette index" result
 > > unchanged. Sub-image names changed from the old ad-hoc
@@ -5426,6 +6194,303 @@ already-confirmed 28-byte descriptor invariants and the already-confirmed
 door-chunk cumulative-offset table — no new hypothesis about the door chunk's
 own layout was needed, only about which code reads it.
 
+##### The Phase-1 object switch at S_1 `+0x033D2` — `objRec[+4]`'s high nibble is the square's **wall bitmask**, not an object class (**confirmed**)
+
+> **Correction — the long-standing name "the object-type switch on
+> `objRec[+4] & 0xF0`" describes the instruction but not the meaning.** The
+> nibble is the same **N/E/S/W wall bitmask** the map's square longword carries
+> in bits 12–15: `DrawViewport` builds `A3 = 1 << (partyFacing + 4)`
+> (`+0x02E44`, from the confirmed facing local `−0x10(A5)`) and three arms of
+> the switch gate on `A3 & objRec[+4]` — an operation that is only meaningful
+> if the two share a bit numbering. Bit 4 = N, 5 = E, 6 = S, 7 = W, exactly as
+> for `wall_flags`. So the switch does not select a *renderer by object class*;
+> it selects a renderer by **how the object is attached to the square**
+> (free-standing on the floor, on one wall, in a corner, or in a two-opposite-
+> wall corridor/doorway), and the object's actual `bcdfs` type byte
+> (`objRec[+5]`) is then tested *inside* the chosen arm.
+
+Subtractive ladder at `+0x033D2`, fully resolved (`D0 = objRec[+4] & 0xF0`):
+
+| Nibble | Walls | Arm | What it enqueues |
+|--------|-------|-----|------------------|
+| `0x00` | none — free-standing | `+0x030FE` | type `0x14`/`0x1E` → **kind 4** (prio `0x80`); type `0x10` with `+0x0C == 1` → **kinds 5/6/7** (prio `0x64`); anything else → **kind 12** (prio `0x3B`) |
+| `0x10`/`0x20`/`0x40`/`0x80` | exactly one wall | `+0x03310` | `objRec[+5] ∈ {0x16, 0x20}` → **kind 8** (prio `0x5A`), else → **kind 9** (prio `0x59`) |
+| `0x30`/`0x60`/`0xC0`/`0x90` | a corner (N+E / E+S / S+W / W+N) | `+0x03390` / `+0x033A6` / `+0x033BC` / `+0x0337A` | `+0x02B86(dir = 1 / 2 / 3 / 0)` → **kinds 0–3** |
+| `0x50`/`0xA0` | two **opposite** walls (N+S / E+W) — a corridor or doorway square | `+0x03244` | type `0x11` → **kind 11** (prio `0x3C`) when `A3 & objRec[+4] == 0` and `depth > 0`; **kind 10** (prio `0x47`) when `A3 & objRec[+4] != 0` and `depth == 0` and `lateral == 0`; types `0x22`/`0x0F` → one **kind 0–3** item per set bit of `objRec[+0x07]`, via `+0x02B86` |
+| `0xF0` | — | *(never reached)* | monsters are intercepted one instruction earlier by `BTST #7,(A2)` at `+0x030D8` → `+0x02C16` → kind 13 |
+| `0x70`/`0xB0`/`0xD0`/`0xE0` | three walls (dead end) | *(no arm)* | **zero occurrences in the shipped data** |
+
+**Verification — whole-corpus census, zero unexplained values.** Walking all 13
+maps with `scripts/bclib/bcdfs.py` (2,536 records, 14,168 squares) gives exactly
+**twelve** distinct values of `objRec[+4] & 0xF0`:
+
+```
+0x00:834  0x10:205  0x20:193  0x30: 97  0x40:132  0x50:178
+0x60: 90  0x80:151  0x90: 48  0xA0:270  0xC0: 52  0xF0:286
+```
+
+- **11/11 switch arms are exercised** (every handled value occurs), and the four
+  values the switch does *not* handle (`0x70`/`0xB0`/`0xD0`/`0xE0`) occur **0
+  times**.
+- `0xF0` is **265 monsters** (`objRec[+5]` bit 7 set) + **17 records nested
+  inside container/monster sub-chains** (never reachable from a square) + **4
+  type-`0x2E` monster generators**, which are unhandled in every ladder and
+  therefore invisible by design. So of 2,390 top-level records, 2,386 land on a
+  handled path.
+- The nibble is a **subset of the square's own wall bits in 2,169 of 2,536
+  records**; all 367 exceptions are `0xF0` records (monsters and inventory),
+  i.e. the invariant holds with zero deviation on every record the switch can
+  actually see.
+- **`0x50`/`0xA0` are occupied by exactly three `bcdfs` types and nothing else:
+  `0x11` (door frame, 291), `0x0F` (door switch, 96), `0x22` (door lock, 61) —
+  448/448 records, zero other types, zero items.** The arm at `+0x03244` tests
+  precisely those three type bytes and nothing else. Conversely `0x00` is
+  occupied only by the eight floor-standing structure types
+  (`0x10 0x12 0x14 0x17 0x1E 0x1F 0x2E 0x2F`, 834/834, zero items).
+- `objRec[+0x07]` on the `0x50`/`0xA0` decoration path is a 4-bit mask whose set
+  bits are **⊆ {1,3} on every N+S square and ⊆ {0,2} on every E+W square**
+  (157/157, zero deviation) — i.e. bit `d` corresponds to the wall in direction
+  `(d + 3) & 3`.
+
+##### Kinds 0–3 (S_1 `+0x03550` stub → `+0x02A0E`) — wall-mounted decorations, door locks and door switches (**confirmed**)
+
+The stub reads the display-list record's own `kind` byte back out
+(`rec[+0x00]`) and passes it as an argument, so the handler receives the
+**party-relative direction** the item was enqueued with:
+`+0x02A0E(objIndex = D4, dir = kind 0–3, depth = D2, lateral = D3)`.
+
+| `objRec[+5]` | Condition | Call |
+|---|---|---|
+| `0x22` (door lock / wall decoration) | `dir ≥ 2` | `+0x25DA0(gfx, depth, lateral, side = (dir == 2))` |
+| `0x0F` (door switch) | `dir ≥ 2`, `objRec[+0x02] == 0` | `+0x25F9E(depth, lateral, side)`; separately, at `depth == 1 && lateral == 0` with `objRec[+0x02] == 1`, `+0x26100(side)` |
+| anything else | — | `+0x21C84(gfx, dir, depth, lateral)` — the generic corner/floor-item renderer |
+
+At `depth == 1 && lateral == 0` both special cases also register a **clickable
+hotspot** (see below): code `0x6B` for the door lock, `0x64` for the door
+switch, both with rect `(0x1F or 0x9C, 0x28, 0x15, 0x25)` — left or right of
+the viewport depending on `dir`.
+
+##### Kinds 4 and 12 (S_1 `+0x034D4` stub → `+0x0224C`) — every free-standing structure (**confirmed**)
+
+`+0x0224C(objIndex = D4, depth = D2, lateral = D3)`. The body is one
+`SUBI.W`/`BEQ` ladder on `objRec[+5]` at `+0x0257C`, covering **7 of the 8**
+types that ever occur with wall-nibble `0x00`:
+
+| Type | Sub-selector | Renderer | Art |
+|------|--------------|----------|-----|
+| `0x10` Illusionary / field / glyph | `word +0x0C` | `1` → nothing; `2` → `+0x21504`; `3` → `+0x2558C` static effect tick | see below |
+| `0x12` Stairs / teleport / spinner | `word +0x10` | `1` → `+0x214F4`; `2` → `+0x251FE(flight 0)`; `3` → `+0x251FE(flight 1)`; `0` and `4` → **nothing** | slot `$C4` |
+| `0x14` Pit | `word +0x10` | `0` → `+0x215B0` (floor pit); `1` → `+0x216A2` (ceiling pit) | slot `$10` |
+| `0x17` Pillar | — | `+0x21842(depth, lateral)` | slot `$14` |
+| `0x1E` Floor plate / trap | `1 − word +0x08` | `+0x21732(depth, pressed)`, gated `lateral == 0` and `!BTST #1, +0x0B`; plus the already-documented effect-`0x59` trap marker at `+0x02548` | slot `$00` |
+| `0x1F` Fountain / special panel | `word +0x0E` | `+0x25340(0 or 1)`, gated `depth == 1 && lateral == 0`; `+0x0E != 0` also runs `+0x253A6` per set bit of `objRec[+0x07]`; `+0x0E == 0` plays effect `0x5A` | slot `$C8` |
+| `0x2F` Statue | — | `+0x227B4(word +0x0C)`, gated `depth == 1 && lateral == 0` | runtime `+0x22244` table |
+| `0x2E` Monster generator | — | **no case** — never drawn, on any path | — |
+
+> **Correction — the type-`0x10` render case is in `+0x0224C`, not
+> `DispatchSquareObject`.** Two places in this file cite "`DispatchSquareObject`'s
+> type-`0x10` case, S_1 `+0x0231C` → `+0x02388`" and "`+0x02548` inside
+> `DispatchSquareObject`". Both addresses are **below** `DispatchSquareObject`'s
+> entry (`+0x025B0`); they are inside the kind-4/12 handler `+0x0224C`, which
+> runs from `+0x0224C` to `+0x025AE`. The *findings* at those addresses are
+> unaffected (field reads, gates and effect numbers all re-verified this pass);
+> only the owning function was misattributed.
+
+**Sub-kind → art, checked against the shipped data (zero deviation).** Every
+type-`0x12` record's `word +0x10` is a perfect function of its `gfxNumber`,
+across all 13 maps:
+
+| `+0x10` | gfx | n | Rendered as |
+|---|---|---|---|
+| `0` | `0x0041` | 61 | **nothing** — this is the confirmed **"inviso" teleport** |
+| `1` | `0x0040` | 82 | dither field via `+0x214F4` — the **visible** teleport |
+| `2` | `0x0043` | 39 | **stairs flight A** (`$C4` src 0 / 9,156 / 12,468) |
+| `3` | `0x0044` | 36 | **stairs flight B** (`$C4` src 14,340 / 23,496 / 26,808) |
+| `4` | `0x001E` | 7 | **nothing** — the **spinner**, correctly invisible |
+
+This closes the open question "the render-side mechanism of *inviso* is
+untraced": there is no special skip, sub-kind `0` simply falls off the
+`SUBQ.W #1` ladder before any case matches. It also settles that stairs
+sub-kinds `2` and `3` are the **two flights** in slot `$C4`, not a stairs/
+non-stairs split — `gfx 0x43 ↔ flight A`, `gfx 0x44 ↔ flight B`.
+
+Type `0x14` partitions the same way: `+0x10 == 0` ⇒ gfx `0x3A` (18 records,
+floor pit), `+0x10 == 1` ⇒ gfx `0x3B` (15 records, ceiling pit), zero mixing —
+matching slot `$10`'s documented "floor pits A–D + ceiling pits A–B" split.
+Type `0x1F` likewise: `word +0x0E == 0` ⇒ gfx `0x45` (fountain, 27/27),
+`!= 0` ⇒ gfx `0x46` (special panel, 14/14).
+
+##### Kinds 8 and 9 (S_1 `+0x03542` stub → `+0x02806`) — objects on a single-wall square (**confirmed**)
+
+`+0x02806(objIndex = D4, depth = D2, lateral = D3)`. It first converts the wall
+nibble to a party-relative direction: `D1 = objRec[+4] & 0xF0` →
+`+0x1FFE4` (a generic "which bit is set" byte-table lookup at `+0x1FFE4`/
+`+0x20007`; the high-nibble table maps `1/2/4/8 → 5/6/7/8`) → `D3 = (D0 −
+partyFacing − 1) & 3`, i.e. **0 = the wall you are facing, 1 = right,
+2 = behind, 3 = left**. Then a ladder on `objRec[+5]`:
+
+| Type | Condition | Call | Hotspot at `depth 0, dir 0, lateral 0` |
+|---|---|---|---|
+| `0x16` Alcove | `depth < 3` | `+0x24F60(depth, lateral, dir)` — or `+0x2509E()` when `$1E5C(A4) == 5` | code `0x69`, rect (64, 54, 80, 24) |
+| `0x20`/`0x21` Plaque | `depth < 3` | `+0x250C0(depth, lateral, dir)` | code `0x6A` (`0x20`) / `0x6F` (`0x21`), rect (58, 20, 90, 68) |
+| `0x1D` Switch | `!BTST #1, +0x0B` | `+0x2040E(gfx, depth, lateral, dir, +0x08)` | code `0x6D`, rect (44, 22, 140, 70) |
+| default (all items and the remaining structure types) | `dir == 0` and `depth < 3` | `+0x218FA(gfx, depth, lateral)` — the floor-item bank | — |
+
+##### Kind 10 (S_1 `+0x034E4` stub → `+0x02627A`) — "standing in the doorway" (**confirmed byte-exact**)
+
+The only argument-less handler in the table, and the smallest: a 21-instruction
+routine that copies the **entire** slot `$B8` chunk to the screen, opaque, with
+no descriptor at all.
+
+```asm
+02627E  movea.l $2099E(pc),a5      ; graphics globals
+026282  movea.l $464(a5),a1        ; 6 screen bitplane bases
+026286  movea.l $b8(a5),a2         ; the "Door Slot" chunk
+02628E  move.w  #$87,d1            ; 136 rows − 1
+026292  moveq   #9,d4              ; dest byte 9  → x = 72 px
+026294  moveq   #$20,d5            ; +32 after each 8-byte row → 40 B stride
+026296  moveq   #5,d0              ; 6 planes
+0262A0  8 × move.b (a2)+,(a3)+     ; 8 bytes = 64 px per row
+```
+
+`6 planes × 136 rows × 8 B = 6,528 B` — **exactly** the documented size of slot
+`$B8` ("Door Slot — one 64×136, 6 planes, 6,528 / 6,528"). The chunk is
+consumed in one linear pass from byte 0 to its last byte, zero remainder, and
+lands at `(72, 0)` — perfectly centred in the 208-px viewport
+(`72 + 64/2 = 104`). Enqueued only when the party stands **on** a doorway
+square (`depth == 0`, `lateral == 0`) facing along the door's own wall plane
+(`A3 & objRec[+4] != 0`), which is exactly the "you are inside the door frame,
+looking sideways at the jamb" view.
+
+##### The two static blit-descriptor formats these handlers use (**confirmed**)
+
+Neither of the two generic copiers below was documented; both are needed to
+read the tables above.
+
+**18-byte opaque 6-plane copier — `+0x24F0A`.** Used by the alcove, plaque and
+stairs renderers.
+
+| Offset | Size | Field |
+|--------|------|-------|
+| `+0x00` | 2 | **slot** — the `d16(A5)` displacement the pixels live in (`MOVEA.L (A5,D0.W),A2`) |
+| `+0x02` | 4 | byte offset within that slot |
+| `+0x06` | 2 | bytes per row − 1 |
+| `+0x08` | 2 | rows − 1 |
+| `+0x0A` | 2 | source advance after each row (clipping) |
+| `+0x0C` | 2 | dest advance after each row |
+| `+0x0E` | 2 | extra source offset, added once |
+| `+0x10` | 2 | dest offset within each plane (`row × 40 + x/8`) |
+
+**10-byte compact record → the fixed template at `+0x24BDC`.** `+0x24BAE` copies
+six fields out of a 10-byte record into a static 28-byte descriptor and falls
+into the confirmed masked-blit tail `+0x24C6E`:
+
+| Compact | → 28-byte field |
+|---|---|
+| `+0x00` | `+0x04` (low word of `src`) |
+| `+0x02` | `+0x08` (low word of `bytesPerPlane`) |
+| `+0x04` | `+0x0E` (`BLTSIZE`) |
+| `+0x06` | `+0x10` (blitter modulo) |
+| `+0x08` | `+0x19` (width low byte) |
+| `+0x09` | `+0x1B` (height low byte) |
+
+> **Correction — the floor-item bank *is* reached through an `A5` slot.** The
+> "Location and layout" note above says "this bank is not addressed through an
+> `A5` slot at all, the descriptor's `src` is an offset into an RLE-decoded
+> buffer reached PC-relative". The template at `+0x24BDC` that `+0x24BAE` fills
+> in is 28 bytes long (`+0x24BDC … +0x24BF8`, ending exactly at the next
+> function) and hard-codes `slot = 0x0030` at `+0x00` and `flags = 0x0100`
+> ("`src` is the mask") at `+0x16`; `+0x24C6E` then does the usual
+> `MOVEA.L (A5,D0.W),An`. So the bank is **slot `$30`**, exactly as the other
+> passage in this file ("Slot `0x30` (the confirmed floor-item bank)") already
+> assumed — the two statements were in conflict and this settles it. The flag
+> value also corroborates the documented "plane 0 = 1-bit cookie-cut mask".
+
+##### Which routine draws which bank (**confirmed**)
+
+| Renderer | Reached from | Slot | Table(s) | Byte-exact evidence |
+|---|---|---|---|---|
+| `+0x24F60` alcove | kind 8/9, type `0x16` | `$BC` | 36-word index `+0x24F90`, descriptors in the pool at `+0x1D9E6` | 11/11 descriptors; `src ∈ {0, 6468, 8628, 9852, 11148}` = the documented Alcove A–E offsets, **plus 11,580 and 12,876 = the loader's two generated mirrors**, all 13 values exact |
+| `+0x250C0` plaque | kind 8/9, type `0x20`/`0x21` | `$C0` | index `+0x250F0` | 11/11; `src ∈ {0, 5760, 8256, 9696, 11136}` = Plaque A–E, plus mirrors 11,580 / 13,020 — the same three mirror destinations the loader trace found (`+0x2D3C`, `+0x324C`, `+0x32DC`) |
+| `+0x251FE` stairs | kind 4/12, type `0x12` sub 2/3 | `$C4` | index `+0x25232`, flight B = same table `+ 0x7E` (= 7 × 18 B) | 14/14; flight A `{0, 9156, 12468}`, flight B `{14340, 23496, 26808}` = flight A + 14,340, and **2 × 14,340 = 28,680 = the documented slot size exactly** |
+| `+0x21842` pillar | kind 4/12, type `0x17` | `$14` | 3 × 28-byte descriptors at `+0x218A6` | `src {0, 8120, 11144}`, geometry 80×116 / 48×72 / 32×47 — identical to the documented Pillar A–C |
+| `+0x215B0` floor pit / `+0x216A2` ceiling pit | kind 4/12, type `0x14` | `$10` | `+0x21616` (5 records) / `+0x216DE` (2) | all 7 pass the three 28-byte invariants; the two routines split exactly along the confirmed gfx `0x3A`/`0x3B` partition |
+| `+0x2040E` switch | kind 8/9, type `0x1D` | `$1C` | **18** × 28-byte descriptors at `+0x20D3E` | 18/18 — exactly the documented "18 wall buttons" |
+| `+0x25F9E`/`+0x26100` door switch | kinds 0–3, type `0x0F` | `$20` | 4 × 28-byte descriptors at `+0x26000`, positions `+0x26070`/`+0x260B8` | `src {532, 882, 1148, 0}` with sizes 16×25/19/13/38; `1148 + 2×13×7 = 1,330` = the documented slot size exactly. **The "door switch" is drawn as the Pull Chain.** |
+| `+0x25DA0` door lock | kinds 0–3, type `0x22` | `$18` | 9 × 28-byte descriptors at `+0x25EA2`, index `(gfx − 0x51) × 0x54 + (depth−1) × 0x1C`; positions `+0x25E12`/`+0x25E5A` | 9/9 invariants pass; per decoration `280 + 210 + 154 = 644` at 16×20 / 16×15 / 16×11, 7 planes, and `3 × 644 = 1,932` — **byte-for-byte the per-level wall-decoration block documented at `bcdfb`–`bcdfn` `+0`**. The three `gfxNumbers` in the data are exactly `0x51/0x52/0x53` (26/20/15 records) |
+| `+0x218FA` / `+0x21C84` generic | kind 8/9 default; kinds 0–3 default | `$30` | gfx→group byte table `+0x26FDE`; 10-byte records `+0x271B6`; positions `+0x27774` (`+0x218FA`) | see below |
+| `+0x21732` floor plate/trap | kind 4/12, type `0x1E` | `$00` | 4 × 28-byte descriptors `+0x217D2`/`+0x217EE`/`+0x2180A`/`+0x21826`, position byte-pairs `+0x21788`/`+0x217A2`/`+0x217BC` | 4/4 invariants pass; 13 tile positions near, 11 far; honours the `$48F(A5)` mirror flag (its already-listed read site `+0x21750`) |
+| `+0x227B4` statue | kind 4/12, type `0x2F` | runtime | `+0x2201C` / `+0x22042` | a **second** consumer of the still-unpopulated runtime `+0x22244` descriptor array (the first is `DrawSquareRecord`) |
+| `+0x214F4` / `+0x21504` | kind 4/12, type `0x12` sub 1 / type `0x10` sub 2 | *(none)* | 9-entry index `+0x21556`, byte streams from `+0x21568` | procedural — see below |
+
+**The magic field / visible teleport is procedural, not a sprite
+(`+0x21236`).** `+0x214F4` (sets `$4E0(A5) = 1`) and `+0x21504` (clears it)
+share one body: a 9-entry `(depth 1–3) × (lateral −1/0/+1)` index at `+0x21556`
+selects a byte stream at `+0x21568` of the form `[height×2] [colour]
+[y] [x]… 0xFF`, and each `x` is blitted through `+0x21236`, which programs
+`BLTCON0 = (x & 15) << 12 | 0x3CA` (USEC|USED, minterm `0xCA`) with
+`BLTADAT = 0xAAAA`/`0x5555` and per-plane `BLTBDAT = 0`/`0xFFFF` — a **50 %
+checkerboard stipple fill in a solid colour**, six planes deep, no source art.
+The nine entries are internally consistent and self-terminating (each entry's
+length lands exactly on the next entry's index, 9/9). Colour index is `0x13`
+(19) at depths 1–2 and `0x33` (51) at depth 3 — `51 = 19 + 32`, i.e. the
+**EHB half-bright of the same colour**, which is precisely how this renderer
+darkens the effect with distance.
+
+**The `+0x26FDE` gfx→group table partitions the whole corpus (**confirmed,
+zero exceptions on 624/624**).** `+0x218FA` and `+0x21C84` both start with
+`MOVE.B (A1, gfx.W), D1` at `A1 = +0x26FDE` and bail on a negative result.
+Testing every non-monster record in `bcdfs`:
+
+- **624 of 624** records whose type has *no* dedicated renderer map to a real
+  group index (never `0xFF`) — zero exceptions;
+- **1,636 of 1,647** records of the 15 types that *do* have a dedicated
+  renderer map to `0xFF`; the 11 exceptions are all type `0x2E`
+  (monster generator, gfx `0xE9`), a type with no case in any ladder and
+  therefore never drawn at all.
+
+The table's largest group index is `0x30` (48), i.e. **49 groups**, and
+`+0x271B6 + 49 × 30 B = +0x27774`, which is exactly where the position table
+begins — zero slack. That is a third independent agreement with the already-
+documented "147 frames = 49 floor graphics × 3 view depths".
+
+`+0x218FA` also applies a per-item scatter: at `depth == 0` it steps the
+global `$498(A5)` down 8 → 0 → 8 and adds the corresponding `(dx, dy)` from a
+9-entry table at `+0x220CC`, so several items dropped on the party's own
+square do not stack exactly.
+
+##### Clickable-hotspot globals (**confirmed**)
+
+Five handlers write the same two register blocks at `depth == 1` (or `0`) dead
+ahead. Both are `{x, y, w, h}` words plus a code byte:
+
+| Block | Rect words | Code byte | Written by |
+|---|---|---|---|
+| A | `−0x77B0` / `−0x77AE` / `−0x77AC` / `−0x77AA` | `−0x77A8` | kinds 0–3, type `0x22` (code `0x6B`) |
+| B | `−0x77A2` / `−0x77A0` / `−0x779E` / `−0x779C` | `−0x779A` | kinds 0–3 type `0x0F` (`0x64`); kind 8/9 types `0x16` (`0x69`), `0x20` (`0x6A`), `0x21` (`0x6F`), `0x1D` (`0x6D`); kind 4/12 type `0x1F` (`0x6E`) |
+
+`DrawViewport` reads `−0x779A(A4)` into a local at `+0x02E6C` before the walk
+and calls `+0x02CF0`, i.e. the blocks are reset per frame. These are the
+in-viewport mouse targets for "pull the chain", "search the alcove", "read the
+plaque", "press the switch", "use the fountain/panel".
+
+##### `+0x25340` — slot `$C8`'s internal layout, read straight off the copy loops (**confirmed byte-exact**)
+
+`+0x25340(D0)` performs two hard-coded opaque 6-plane copies:
+
+| Source | Geometry | Dest | Bytes |
+|---|---|---|---|
+| `$C8 + 0` | 80 × 29 (10 B/row) | (64, 9) | 1,740 |
+| `$C8 + 1,740` when `D0 == 0`, `$C8 + 6,060` when `D0 != 0` | 80 × 72 | (64, 38) | 4,320 |
+
+`1,740 + 4,320 = 6,060` = the documented slot `$C8` size **exactly**, and the
+two dest positions are `(64, 9)` and `(64, 38)` — the same "panel-top (64,9)"
+and "fountain (64,38)" the screenshot composite had only *inferred*. So slot
+`$C8` is **Panel Top (80×29) then Fountain (80×72)**, and the "Panel Top" strip
+is a shared header drawn above *both* variants. The `D0 != 0` (special-panel)
+body at `+6,060` lies past the chunk's declared end — like the alcove/plaque
+buffers, `$C8` must be over-allocated and back-filled; that fill is not traced.
+
 ##### Verification (**confirmed** — two independent geometric oracles, zero deviation)
 
 Nothing here was fitted to the descriptor tables; the loop bounds come from the
@@ -5507,9 +6572,13 @@ screenshot oracle was set up"), not evidence against the layout. Classified
 | ~~The outer "walk the sight line…" driver~~ | **SOLVED — `DrawViewport` S_1 `+0x02D46`.** See "the outer render driver" above. The old entry's premise (zero references, therefore indirect dispatch) was an artefact of searching for unrelocated addresses; superseded by the correction at the top of this section. |
 | ~~Which per-square "kind" table selects the renderer~~ | **SOLVED — two-level dispatch:** the drain loop's 14-entry `kind` jump table at S_1 `+0x03570`, then `DispatchSquareObject` (`+0x025B0`) on the object record's id. The old "each renderer self-selects, no dispatch table" hypothesis is **refuted**. |
 | ~~Kind 11 handler body~~ | **SOLVED — see "Kind 11 … door frame + closed-leaf render" above.** `+0x025CAE` draws the door frame (Door Way 1/2/3) unconditionally; `+0x02613E` draws the closed-only leaf (Door Type 0/1 × 3 depths), gated on the confirmed door-open bit. All 13 descriptors byte-exact against the door chunk's cumulative offset table. |
-| The remaining kind handlers `+0x00224C` (kinds 4/12), `+0x02806` (8/9), `+0x02627A` (10), `+0x02A0E` (0–3) | Kind 4/12's target address is corrected this pass (was mis-cited as `+0x0222A4`; the stub's `jsr` resolves to S_1 `+0x00224C`, confirmed a genuine function — `LINK`/`MOVEM` prologue, reads `objRec[+0x05]` via the standard `-0x6E7A(A4)+D2×20` index, then a large `BRA.W`-table dispatch on that type byte). Its full body (the type-table dispatch) and kinds 8/9, 10, 0–3 are still **not traced** — entry points and calling conventions only, confirmed from the jump table. |
-| The object-type switch on `objRec[+4] & 0xF0` at S_1 `+0x033D2` | Partly decoded (arms at `0x00/0x10/0x20/0x30/0x40/0x50`, sub-tests on `objRec[+5]` for types `0x0F/0x10/0x11/0x14/0x1E/0x22`); not mapped exhaustively onto the documented Structure/Item type tables. |
-| Where the `+0x22244` runtime structure-descriptor array is populated | Not traced. Presumably filled from `bcdfs` structure bytecode at level load. A literal-address search under the **corrected** base (`$A229C`) also returns 0 hits, so it is reached PC-relatively, not through a stored pointer. |
+| ~~The remaining kind handlers `+0x00224C` (kinds 4/12), `+0x02806` (8/9), `+0x02627A` (10), `+0x02A0E` (0–3)~~ | **SOLVED — all four traced; see "Kinds 0–3", "Kinds 4 and 12", "Kinds 8 and 9", "Kind 10" above.** All 14 jump-table entries now have a decoded body. Kind 10 is byte-exact (consumes slot `$B8` whole, 6,528/6,528). Kinds 4/12, 8/9 and 0–3 resolve to 13 named per-structure renderers whose art bindings are byte-exact against the already-documented slot layouts (see "Which routine draws which bank"). Residual sub-cases below. |
+| ~~The object-type switch on `objRec[+4] & 0xF0` at S_1 `+0x033D2`~~ | **SOLVED, and the premise was wrong — the nibble is the square's N/E/S/W wall bitmask, not an object class.** All 11 arms decoded and mapped onto the Structure/Item type tables; whole-corpus census shows 12 distinct values, 11 handled, `0xF0` = monsters (intercepted earlier), and the 4 unhandled values occur zero times. See "The Phase-1 object switch at S_1 `+0x033D2`" above. |
+| Where the `+0x22244` runtime structure-descriptor array is populated | Not traced. Presumably filled from `bcdfs` structure bytecode at level load. A literal-address search under the **corrected** base (`$A229C`) also returns 0 hits, so it is reached PC-relatively, not through a stored pointer. **A second consumer is now known:** the type-`0x2F` (statue) renderer `+0x227B4` reaches it through the same `+0x2201C`/`+0x22042` helpers as `DrawSquareRecord`. |
+| Which container fills graphics-kernel slot `$00` | The floor-plate/trap renderer `+0x21732` blits from slot `$00` at `src` 18,764–18,932 (16×4 and 16×2, 7-plane masked, contiguous). Slot `$00` is not in the `bcdfx`/`bcdfy`/`bcdfz` tileset inventory, and the range is *not* a hole in the floor-item bank (slot `$30` is fully covered 0…31,388 with zero gaps), so it is a third, still-unidentified pixel buffer. |
+| Slot `$C8`'s "special panel" body at `+6,060` | `+0x25340(D0 != 0)` reads 4,320 B starting 4,320 B past the documented end of chunk 10. Same over-allocation pattern as the alcove/plaque mirror buffers, but the code that fills it was not found this pass. |
+| `$51A(A5)` — the door-family position variant | Read by the door frame (`+0x25CAE`), door leaf (`+0x2613E`), door lock (`+0x25DA0`) and door switch (`+0x25F9E`/`+0x26100`); when nonzero each adds `+0x24` to its position table, which uniformly changes the sprite's `y` to 40 at every depth. Almost certainly "this doorway square also carries a door frame, so raise the fitting" — **not verified**, and no write site was searched for. |
+| Kinds 0–3: the `dir == 3` (`+0x25E12` / `+0x26070`) position tables look unreachable | For types `0x22`/`0x0F` the enqueue gate at `+0x032D4` requires `A3 & objRec[+4] == 0`, and the observed `objRec[+0x07]` bit sets (⊆ {1,3} on N+S squares, ⊆ {0,2} on E+W, 157/157) then force `kind = (dir + 4 − facing) & 3 == 2` for every reachable combination — so `D0` is always `1` and only the `+0x25E5A`/`+0x260B8` tables fire. The unused tables are exact mirror images about the 208-px viewport centre (34↔158, 200↔−8, 3/3 laterals × 3 depths), which is strong evidence they *are* real left-wall variants. Either the reachability argument is missing a path or the data never exercises the left-hand case; not resolved. |
 | ~~`DrawDoorAtDepth`'s `$02(a2)` — depth, or party-relative direction?~~ | **SOLVED — party-relative direction.** See the corrected blockquote above "Kind 11" — an exhaustive whole-image caller scan found exactly one caller (`DispatchSquareObject` `+0x027B6`), which always passes the rebased direction `D3`, never a depth. |
 | `A5+$48F` mirror-flag write site | Still not found. Re-checked this pass over a resynced recursive-descent disassembly: all 6 references (`+0x21750`, `+0x22C8E`, `+0x22CC2`, `+0x230B6`, `+0x230FE`, `+0x250AE`) are `TST.B` reads; no write site anywhere in the decoded stream. `DrawViewport` does not touch it, so it is set outside the viewport pipeline. |
 | A genuine 4-entry facing-indexed (`0=N,1=E,2=S,3=W`-shaped) jump table *does* exist, at S_1 `+0x1EB2A` | **Traced and it is not the wall/floor render dispatch.** It's driven by comparing a cached facing byte `$4DE(A5)` against a live one `$4DF(A5)` (`+0x1EA18`) and, on change, jumps through 4 `BRA.W` trampolines to handlers at `+0x1EB3A/1EB50/1EB56/1EB5C`, each of which writes a run of `WAIT`/colour words into a *different* copper list (`$4E2(A5)`) with a per-handler step size — a **per-facing ambient torchlight colour-gradient effect**, not viewport compositing. This *is* a real, disassembly-confirmed direction dispatch in the graphics kernel — it just isn't the one the old (already-retracted) `AGENTS.md` "Direction Dispatch" note was describing, and it should not be re-chased as the wall-selection loop. |
@@ -5771,7 +6840,7 @@ in `bcdfq` (see Palette section):
   monsters and portraits — see the Palette section; there is no separate
   "dungeon" palette)
 
-### bcdfo — Character Portraits + UI Elements
+### bcdfo — Character Portraits + UI Elements — **SOLVED**
 
 | Property         | Value                                      |
 |------------------|--------------------------------------------|
@@ -5779,205 +6848,230 @@ in `bcdfq` (see Palette section):
 | Loader           | bcdfp LAB_00AB → LAB_00AE (reads entire file) |
 | Header           | 96 bytes of `0xFF 0xFF 0xFF 0xFE` repeating |
 | Portraits        | **36** tiles × 32×24×6bpp sequential planar, starting at buffer+$60 |
-| UI elements      | Stored at assembly-specified offsets (bcdfp LAB_010D descriptor table) |
-| Unaccounted      | ~8.3 KB across 4 gaps between known LAB_010D regions — see below |
+| UI elements      | 23 elements at bcdfp `LAB_010D` descriptor offsets — **all 23 are 7-plane masked sprites** |
+| Fonts            | Three 8×8 fonts + one hardware-sprite bank between `chargen_stats` and the sigils |
+| Unaccounted      | **none** — the layout below tiles all 63,010 B with 0 remainder and 0 overlap |
 
 > **Correction:** this was previously documented (and extracted!) as **109**
 > portrait tiles — `(63,010 − 0x60) / 576 = 109.2`, i.e. simply "how many
 > 576-byte slots fit in the rest of the file" with no check that the content
-> at slot 36+ was still a face. It isn't. Rendering all 109 tiles and looking
-> at them individually (not just trusting the arithmetic) shows **36** clean,
-> distinct character portraits (tiles 0–35) followed immediately by a tile
-> that is not a face at all — a solid-colour panel with horizontal white
-> stripes — and increasingly "torn"/horizontally-banded garbage after that.
-> This is not a fuzzy visual judgement call: **tile 36 starts at exactly
+> at slot 36+ was still a face. It isn't. **Tile 36 starts at exactly
 > `0x60 + 36×576 = 0x5160`**, which is bcdfp's `LAB_010D` **desc00** source
-> offset (`chargen_ui`, 128×105 — see the table below). Past that point the
-> file is the *already-documented, differently-shaped* UI descriptor data,
-> not more 32×24 portrait tiles — decoding it at the fixed 576-byte stride
-> just tears each variously-sized real graphic across several wrong-shaped
-> "tile" boundaries, which is exactly the banded-noise look tiles 36–108
-> have. The 23 real LAB_010D elements were already being extracted
-> correctly and separately (`scripts/render_all.py` → `sprites/ui.*`, at
-> their real offsets/sizes) the whole time; the bug was solely in
-> `tools/shared/game-config.ts`'s portrait atlas continuing past tile 35
-> instead of stopping there. Fixed: `N_REAL_PORTRAITS = 36` in
-> `buildAssets`; `sprites/portraits.*` now has 36 frames, not 109.
+> offset (`chargen_ui` — see the table below). Past that point the file is
+> the UI descriptor data, not more 32×24 portrait tiles. Fixed:
+> `N_REAL_PORTRAITS = 36` in `tools/shared/game-config.ts`'s `buildAssets`.
+
+#### UI Element Descriptor Table (bcdfp `LAB_010D` — 28-byte entries)
+
+The 28-byte entry is fully decoded (field offsets are from the entry base;
+`LAB_011E`, `bcdfp.asm:4091`, is the consumer):
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| `+0`  | word | A5 pointer-table offset | `0` for every entry → `0(A5)` = the bcdfo buffer |
+| `+2`  | long | source offset | `ADDA.L 2(A0),A3` / `ADDA.L 2(A0),A1` |
+| `+6`  | long | plane stride | `(w/8) × h`; also `ADDA.L 6(A0),A1` per plane in the blit loop |
+| `+10` | long | **mask offset** | `ADDA.L 10(A0),A3` — used only when flag bit 1 is set |
+| `+14` | word | `BLTSIZE` | `(h << 6) \| words` |
+| `+16` | word | screen modulo | written to `BLTCMOD` and `BLTDMOD` |
+| `+18` | word | X | runtime, written by `LAB_011E` |
+| `+20` | word | Y | runtime, written by `LAB_011E` |
+| `+22` | byte | flags | bit 0 → clipped path (`LAB_0124`); **bit 1 → mask lives at `+10`** |
+| `+24` | word | width (px) | |
+| `+26` | word | height (px) | |
+
+> **Correction — every one of the 23 elements is a *7-plane masked* sprite,
+> and the earlier "appended mask plane" reading of three of them was
+> wrong.** `LAB_011E` picks between two storage layouts on **bit 1 of the
+> flag byte at `+22`** (`BTST #1,22(A0)` — a *byte* test, so the `$0200`
+> longword literal in the descriptor source sets bit 1, not bit 9):
 >
-> The earlier claim that "bcdfo's file size is fully accounted for between
-> the 109 portraits and the LAB_010D UI descriptors, no spare room" is also
-> corrected by this — see "Unaccounted gaps" below; there is spare room, and
-> it isn't more portraits.
+> ```asm
+> ; flag bit1 = 0  (desc00-02):  mask FIRST, colour planes follow
+>   ADDA.L  2(A0),A3        ; A3 = BLTAPT = mask   = base + source_off
+>   MOVEA.L A3,A1
+>   ADDA.L  6(A0),A1        ; A1 = BLTBPT = colour = base + source_off + stride
+> ; flag bit1 = 1  (desc03-22):  colour at source, mask at the separate +10 offset
+>   MOVEA.L A3,A1
+>   ADDA.L  2(A0),A1        ; A1 = colour = base + source_off
+>   ADDA.L  10(A0),A3       ; A3 = mask   = base + alt_off   (shared per group)
+> ```
+>
+> An earlier pass read desc00–02 as 6-plane **opaque** images starting at
+> their source offset. That is off by exactly one plane: the byte at the
+> source offset is the *mask*, so every colour plane was read one plane
+> early and the element's true last colour plane fell outside the span and
+> was catalogued as an "unaccounted gap". Rendering under that reading
+> silently produced a legible but **mis-coloured** image (a rotated palette:
+> `chargen_ui`'s stone border came out purple/olive instead of grey, the
+> guild banners lost their distinct backgrounds). It also invented three of
+> the four "gaps": `0x78C0` is `chargen_ui`'s colour plane 5, `0x99C0` is
+> `chargen_stats`' colour plane 5, and `0xEE98` is `chargen_title`'s colour
+> plane 5 — not masks. The real masks are at the elements' own source
+> offsets and at the `+10` field. See "Full file layout" below.
 
-#### UI Element Descriptor Table (bcdfp LAB_010D — 28-byte entries)
+| Entry | Source | Dimensions | Count | Mask | Description |
+|-------|--------|------------|-------|------|-------------|
+| desc00 | `0x5160` | 128×105 | 1 | first plane, at `0x5160` | `chargen_ui` — 3×3 portrait picker in a stone frame |
+| desc01 | `0x7F50` | 192×47 | 1 | first plane, at `0x7F50` | `chargen_stats` — the `STR/DEX/INT/CON/WIS/POOL` readout strip |
+| desc02 | `0xD758` | 128×62 | 1 | first plane, at `0xD758` | `chargen_title` — `BLACK CRYPT / CHARACTER GENERATION / ENTER CRYPT` |
+| desc03–07 | `0xAE68`–`0xB3A8` | 32×14 | 5 | shared, `0xAE30` | **Mystic sigils** — dithered orange bars carrying 4 rune glyphs (slot 0 blank) |
+| desc08–11 | `0xB658`–`0xCF18` | 128×22 | 4 | shared, `0xB4F8` | **Class guild banners** (Fighter, Cleric, Magic User, Druid) |
+| desc12–22 | `0xF286`–`0xF5CE` | 16×7 | 11 | shared, `0xF278` | **Numeral font** — one blank slot + digits `0`–`9` |
 
-Each entry has a baked-in source offset and tile dimensions:
+> **Correction — desc01 and desc02's descriptions were swapped.** desc01
+> (192×47) is not a "character gen logo / Enter Crypt UI"; it is the stats
+> readout strip. desc02 (128×62) is the panel that carries *both* the
+> "BLACK CRYPT" title and the "ENTER CRYPT" button, not an "adjust
+> character stats panel". Renamed to `chargen_stats` / `chargen_title` in
+> `scripts/render_all.py`. Both are legible in `sprites/ui.png`.
 
-| Entry | Source Offset | Dimensions | Count | Description |
-|-------|---------------|------------|-------|-------------|
-| desc00 | `0x5160` (20,832) | 128×105×6bpp | 1 | Character creation UI |
-| desc01 | `0x7F50` (32,592) | 192×47×6bpp | 1 | Character gen logo / Enter Crypt UI |
-| desc02 | `0xD758` (55,128) | 128×62×6bpp | 1 | Adjust character stats panel |
-| desc03–07 | `0xAE68`–`0xB3A8` | 32×14×6bpp | 5 | **Mystic sigils** (spell/ability icons, gold palette 26-30) |
-| desc08–11 | `0xB658`–`0xCF18` | 128×22×6bpp | 4 | **Class guild banners** (Fighter, Cleric, Magic User, Druid) |
-| desc12–22 | `0xF286`–`0xF5CE` | 16×7×6bpp | 11 | **Numeral font** (gold, for HP/stats display) |
+The last numeral (desc22) ends at exactly `0xF622` = 63,010 = the file size.
 
-The last numeral (desc22) ends at exactly `0xF622` = 63,010 = the file size —
-zero trailing bytes, confirming this is the true end of the file's content.
+#### The text machinery — `0x9E28`–`0xAE30` (code-confirmed)
 
-#### Unaccounted gaps — 3 of 4 SOLVED: they are mask planes, not new assets
+The range the earlier passes called "gap 2" is bcdfp's character-generation
+text machinery. Every offset here is taken from bcdfp's own code, not
+inferred from the bytes.
 
-> **Correction — the "no mask" premise in the descriptor table above is
-> wrong for 6 of the 23 elements.** `chargen_ui`, the 4 guild banners, and
-> `stats_panel` are not plain 6-plane opaque images; they are 7-plane
-> **masked** sprites whose 1-bit mask plane is stored *separately* from the
-> 6 colour planes (not immediately before them, as in every other masked
-> format in this game). That is exactly what 3 of the 4 "gaps" are.
+`LAB_00FD` (`bcdfp.asm:3614`) is the string printer. Per character it does
+`SUBI.B #$20,D0` — so **every bcdfo font is indexed by `ASCII − 0x20`, slot
+0 = space** — then fetches from two banks at once:
 
-The 23 descriptors tile the region between `0x5160` and `0xF622` almost
-contiguously if each mask-bearing element's declared byte span
-(`(w/8) × h × 6`) is extended by one extra plane
-(`(w/8) × h`). Sorting by offset originally left **4 gaps, 8,326 bytes
-total**:
+```asm
+LAB_00FF:
+    MOVE.B  (A0)+,D0                ; next char; 0 terminates
+    BEQ.S   LAB_0102
+    SUBI.B  #$20,D0                 ; slot = ASCII - 0x20
+    MOVE.L  D0,D1
+    LSL.W   #3,D0                   ; slot * 8
+    MOVEA.L D0,A3 / ADDA.L 0(A5),A3
+    ADDA.L  #$0000a148,A3           ; A3 = bcdfo + 0xA148 + slot*8   (mask font)
+    MULU    #$0030,D1               ; slot * 48
+    MOVEA.L D1,A4 / ADDA.L 0(A5),A4
+    ADDA.L  #$0000a320,A4           ; A4 = bcdfo + 0xA320 + slot*48  (colour font)
+    MOVEQ   #7,D2                   ; 8 mask bytes  -> 16(A5), row stride 32
+    MOVEQ   #47,D2                  ; 48 colour bytes -> 12(A5), row stride 32
+```
 
-| Gap (bytes) | File range | Between | Status |
-|-------------|------------|---------|--------|
-| 1,680 | `0x78C0`–`0x7F50` | chargen_ui → chargen_logo | **SOLVED** — `chargen_ui`'s own mask plane (see below) |
-| 5,288 | `0x99C0`–`0xAE68` | chargen_logo → sigil_0 | Still open — not `chargen_logo`'s mask (tested, fails); see paths-tried |
-| 352 | `0xB4F8`–`0xB658` | sigil_4 → guild_fighter | **SOLVED** — one shared mask plane for all 4 guild banners |
-| 1,006 | `0xEE98`–`0xF286` | stats_panel → numeral_0 | **SOLVED** (992 of 1,006 B) — `stats_panel`'s own mask plane |
+`LAB_0102` then blits the assembled line with minterm `$0FCA` (mask in A,
+colour in B), plane stride `256`, `BLTSIZE $0211` = 8 rows × 17 words = a
+272-pixel, **34-character** line, screen modulo 6.
 
-**The key structural fact, found by computing each of the 23 descriptors'
-own 6-plane end offset:** three gaps start at **exactly** the byte where a
-descriptor's 6-plane colour data ends, and each gap's size (or a leading/
-trailing slice of it) equals **exactly** `bpr × h` for that same element —
-i.e. one more bitplane, appended right after the colour data instead of
-prepended before it (the bcdfa/bcdfb convention):
+A second, plain-1-bit printer at bcdfp file `0x02CF4` (inside an IRA `DC.L`
+block — `SUBI.B #$20,D0 / LSL.W #3,D0 / MOVEA.L 0(A5),A3 / ADDA.L
+#$00009E28,A3 / …/ LEA $2A(A1),A1 / SUBA.W #$14F,A1`) draws the font at
+`0x9E28` into a 42-byte-per-row (336 px) 1-bit buffer.
 
-| Element | Colour data ends | 1-plane (mask) size | Gap | Match |
-|---|---|---|---|---|
-| `chargen_ui` (128×105) | `0x78C0` | `16×105 = 1,680` | gap 1: `0x78C0`, 1,680 B | **exact, 0 B remainder** |
-| `stats_panel` (128×62) | `0xEE98` | `16×62 = 992` | gap 4: `0xEE98`, 1,006 B | 992 of 1,006 B consumed (14 B trailing, purpose unclear — possibly alignment padding) |
-| guild banners (128×22, ×4) | gap 3 ends exactly at `guild_fighter`'s start (`0xB658`) | `16×22 = 352` | gap 3: `0xB4F8`, 352 B | **exact, 0 B remainder** — one mask **shared** by all 4 banners (fighter/cleric/mage/druid are the same rectangular shape), stored *before* the group instead of after, unlike `chargen_ui`/`stats_panel` |
+| Font | Offset | Size | Slots | Layout | Confidence |
+|------|--------|------|-------|--------|------------|
+| `chargen-font-a` | `0x9E28` | 512 B | 64 (ASCII 32–95) | 8 B/glyph, 1bpp | **confirmed** — offset + `ASCII−0x20` indexing read off bcdfp `0x02CF4` |
+| `chargen-font-b` | `0xA148` | 472 B | 59 (ASCII 32–90) | 8 B/glyph, 1bpp | **CONFIRMED** — bcdfp `LAB_00FD` `+$A148`; 3,776/3,776 bits vs DOS `"CG Font"` |
+| `chargen-font-cg` | `0xA320` | 2,832 B | 59 (ASCII 32–90) | 48 B/glyph, 6 planes **plane-major within the glyph** | **CONFIRMED** — bcdfp `LAB_00FD` `+$A320`; 3,776/3,776 pixels vs DOS `"CG Font"` at full colour depth |
 
-Verified by rendering, not just by the arithmetic: decoding each element's
-6 colour planes at its documented offset, decoding the adjacent gap as a
-7th (mask) plane, and compositing with `bclib.to_rgba(idx, pal,
-mask=mask)` produces clean, fully legible, non-noise art in every case —
-**0 garbled/noise renders across 3/3 tested elements**:
-- `chargen_ui` — a 3×3 grid of small character-portrait thumbnails inside
-  an ornate purple/cream border, cleanly cut out (previously this element
-  rendered as a plain opaque rectangle with no transparency, since its mask
-  bytes were being left undecoded in the "gap").
-- `guild_fighter` (and, by the same shared mask, the other 3 banners) — a
-  torch-and-gem bordered plaque reading **"FIGHTER GUILD"**, transparent
-  outside the plaque shape.
-- `stats_panel` — an ornate-bordered panel reading **"CHARACTER
-  GENERATION"**, transparent outside the panel.
+- **Font A** is a complete ASCII 32–95 set. Slots 1–3 (`!"#`) and 59–63
+  (`[\]^_`) hold directional-arrow icons instead of their literal glyphs —
+  the same "icons replace unused punctuation slots" convention already
+  documented for bcdfa's message-log font. Slot 32 (`@`) is a `©` glyph.
+- **Font B** is the 1-bit **mask/silhouette** plane of the colour font, and
+  a usable 1-bit font in its own right: the first 33 slots are blank, the
+  last 26 a bold `A`–`Z`.
+- **Font CG** uses only planes 0, 1 and 5 (26 glyphs each; planes 2–4 are
+  entirely zero): plane 1 is the letter body (index 2), plane 0 a highlight
+  (index 3), plane 5 an EHB shadow (index 34) — a bevelled letter. This is
+  the same 59-glyph, 48 B/glyph, plane-major-within-glyph format as
+  **`bcdfv` block 3's ending font** (see that section) — the game-wide Amiga
+  font convention.
 
-This also means the existing `sprites/ui.*` atlas (built by
-`scripts/render_all.py`) has been rendering these 6 elements **without**
-their transparency cutout since it was first extracted — opaque rectangles
-instead of masked art. Fixed in the same pass that found this (see
-"Extractor fix" below).
+**Verification.**
 
-The 5,288 B gap (`0x99C0`–`0xAE68`, between `chargen_logo` and `sigil_0`)
-does **not** fit this pattern — see paths-tried below. It is now **partly**
-solved: two more monochrome 8×8 fonts occupy its middle third — see
-"Gap 2 — two more fonts found" below — but its leading ~1,128 B and trailing
-~2,300 B remain open.
+1. *Structural invariant.* The OR of the colour font's six planes equals the
+   1-bit mask font **byte-for-byte for 59/59 slots** — which is exactly why
+   one 8-byte mask can drive a 48-byte glyph. Checked in
+   `scripts/extract_bcdfo_fonts.py`; it raises if this ever fails.
+2. *Cross-platform oracle, silhouette.* DOS `clipper.clp` entry 207
+   `"CG Font"` is an 8×472 8bpp raster = 59 slots of 8×8. Thresholded to
+   ink/no-ink it agrees with `chargen-font-b` on **3,776 of 3,776 bits
+   (100.000%)** across all 59 slots — including the 33 blank ones.
+3. *Cross-platform oracle, full colour.* Stronger still: the DOS raster's
+   palette indices are the *same numbers* as the Amiga's EHB indices. The
+   only values present in the DOS entry are `{0, 2, 3, 34}`, and the DOS →
+   Amiga index mapping is the **identity** on **3,776 of 3,776 pixels**.
+   (`34` is EHB half-bright of `2`, so this independently confirms the
+   plane-5 EHB reading too.)
 
-##### Gap 2 (`0x99C0`–`0xAE68`) — two monochrome 8×8 fonts found
+For contrast, `chargen-font-a` matches no DOS font: its best is 91.340%
+against `"Scroll Font 1"`/`"Scroll Font 2"` (21 differing slots). It is a
+distinct Amiga face and is documented as **confirmed by code, rendered by
+eye**, not cross-platform-verified.
 
-Found by histogramming non-zero bytes per 200-byte window across the whole
-gap (a cheaper, more direct check than the padding-column/entropy scans
-already tried — see paths tried) rather than by another blind width sweep:
-most of the gap is nearly all-zero, but two contiguous ~600–200 B windows in
-the middle are dense and, decoded as 8×8 1bpp glyph grids (8 bytes/glyph,
-the same stride the message-log font in `bcdfa` uses), render as clean,
-legible text.
+##### `0xA028`–`0xA148` — the mouse-pointer hardware sprite bank
 
-**Font A** — file offset `0x9E30`, 584 B, 73 glyph slots (8×8, 1bpp, 8 B
-each). Visually reads as a straight ASCII run — `&'()*+,-./0123456789:;<=>?`
-`@ABCDEFGHIJKLMNOPQRSTUVWXYZ` — with a handful of slots at the start and end
-replaced by directional-arrow icons and what look like "dissolve"
-transition-effect frames, the same "icons in place of unused punctuation"
-convention already documented for `bcdfa`'s message-log font. **Rendered
-only** — no `LEA`/`MOVEA` displacement matching `0x9E30`/`0x9E28` was found
-in `bcdfp.asm`'s disassembled code (the two raw hits for `$9e28` there are
-inside an unrelated large inline-data block, the already-documented monster
-sprite blitter — a coincidental byte match, not a real xref, checked and
-discarded); no consumer traced this pass.
+288 B = **3 × 96**, the same bank shape as `bcdfa` entry 5's `0x7110`:
+records 0 and 1 are an *attached* SPR0/SPR1 pair (4 planes, 15 colours,
+register base `COLOR16`) each with a 4-byte `SPRxPOS`/`SPRxCTL` header
+(`$7E000000`, patched at runtime), and record 2 is all zeros (the null
+sprite the unused SPR2–SPR7 point at).
 
-**Font B** — file offset `0xA250`, 208 B, 26 glyphs (8×8, 1bpp) — a plain,
-bolder-weight `A`-`Z` alphabet. **Confirmed** against DOS `clipper.clp`
-entry 207, `"CG Font"` (8×472, 59 glyph slots — the first 33 blank, the last
-26 this same alphabet — matching the Amiga convention elsewhere in this
-project of storing only the *real* glyphs and DOS wasting the unused fixed
-slots): decoded as 8×8 1bpp bit grids and compared glyph-for-glyph, **all
-26 letters agree bit-for-bit — 1,664/1,664 bits, a 100.000% match**.
+**CONFIRMED** — these 288 bytes are **byte-identical (288/288)** to
+`bcdfa` entry 5's `0x7110` mouse pointer, which is itself already confirmed
+100.000% against DOS `clipper.clp` entry 163 `"Mouse Arrow"`. The pointer is
+16×10 with a 11×10 content bounding box. Not re-extracted — `sprites/automap.*`
+already carries it from bcdfa; a second copy would be duplicate output.
 
-| Property | Value | Confidence |
-|----------|-------|------------|
-| Font A extent | `0x9E30`–`0xA078` (584 B, 73×8) | **confirmed** (dense/legible under direct render) |
-| Font A content | Punctuation/digit/`@A`-`Z` charset + arrow + "dissolve" icons | **rendered**, ASCII indexing plausible but not code-confirmed |
-| Font B extent | `0xA250`–`0xA320` (208 B, 26×8) | **confirmed** |
-| Font B content | Plain `A`-`Z` alphabet | **CONFIRMED** — 100.000% bit-exact vs DOS `clipper.clp` entry 207 `"CG Font"` |
+#### Full file layout — tiles 63,010 B with 0 remainder
 
-`scripts/extract_bcdfo_gap_font.py` → `sprites/chargen-font-a.*`,
-`sprites/chargen-font-b.*`.
+| Range | Size | Content |
+|-------|------|---------|
+| `0x00000`–`0x00060` | 96 | header (`0xFFFFFFFE` repeating) |
+| `0x00060`–`0x05160` | 20,736 | 36 portrait tiles, 32×24×6bpp |
+| `0x05160`–`0x07F50` | 11,760 | `chargen_ui` 128×105 — mask + 6 colour planes |
+| `0x07F50`–`0x09E28` | 7,896 | `chargen_stats` 192×47 — mask + 6 colour planes |
+| `0x09E28`–`0x0A028` | 512 | **font A** — 64 slots × 8 B |
+| `0x0A028`–`0x0A148` | 288 | **mouse-pointer sprite bank** — 3 × 96 B |
+| `0x0A148`–`0x0A320` | 472 | **font B / CG-font mask** — 59 slots × 8 B |
+| `0x0A320`–`0x0AE30` | 2,832 | **font CG colour** — 59 slots × 48 B |
+| `0x0AE30`–`0x0AE68` | 56 | sigil shared mask (desc03–07 `+10`) — all `0xFF` |
+| `0x0AE68`–`0x0B4F8` | 1,680 | 5 sigils × 336 B |
+| `0x0B4F8`–`0x0B658` | 352 | guild-banner shared mask (desc08–11 `+10`) |
+| `0x0B658`–`0x0D758` | 8,448 | 4 guild banners × 2,112 B |
+| `0x0D758`–`0x0F278` | 6,944 | `chargen_title` 128×62 — mask + 6 colour planes |
+| `0x0F278`–`0x0F286` | 14 | numeral shared mask (desc12–22 `+10`) |
+| `0x0F286`–`0x0F622` | 924 | 11 numerals × 84 B |
 
-The gap's **leading ~1,128 B** (`0x99C0`–`0x9E28`) is a 24-byte-per-row
-(192 px) repeating bar pattern, 23 rows — this is the *same* data already
-tested and rejected as `chargen_logo`'s own mask plane (see paths tried
-below): decoding it at 192×47×1bpp reproduces the "two solid brown
-rectangles" symptom exactly, just now precisely bounded. Still open — either
-a genuine small divider/rule graphic, or unrelated filler.
+Verified programmatically: sorting these 32 records by offset leaves **zero
+holes, zero overlaps, and ends at exactly 63,010** — the file size. Every
+byte of bcdfo is now attributed, and every attribution above is anchored to
+either a `LAB_010D` descriptor field or a `LAB_00FD`/`0x02CF4` code constant.
 
-The gap's **trailing ~2,300 B** (`0xA320`–`0xAE68`) is still open, and still
-includes the previously-flagged weak, unconfirmed lead on its last 280 B as
-a possible shared sigil mask (bit density 28.4%, well under the 85%+ of the
-3 confirmed masks elsewhere in this file) — not chased further this pass.
+#### Palette
 
-##### Extractor fix
+bcdfo's elements are authored against **bcdfp's own 32-word palette**
+(`LAB_0148`, bcdfp file `0x4194` — the loader/character-generation palette,
+byte-identical to `BlackCrypt`+0x2848 and to DOS `Character_Gen_Palette`),
+not bcdfq's `game` palette. The two differ at index 19 and 26–31, and 26–30
+is exactly the accent range the sigils and numerals are drawn in, so the
+distinction is visible. Exposed as `bclib.read_chargen_palette` /
+`BCDFP_CHARGEN_PALETTE`.
 
-`scripts/render_all.py`'s `ui_elements` list now carries an optional mask
-offset per entry (`chargen_ui`→`0x78C0`, `stats_panel`→`0xEE98`, all 4 guild
-banners→the shared `0xB4F8`); when present the element is decoded as
-6 colour planes + 1 mask plane (mask plane appended, not prepended) and
-composited with `to_rgba(..., mask=mask)` instead of
-`transparent_index0=True`. The other 17 elements (logo, sigils, numerals)
-are unchanged. Regenerated `sprites/ui.*` — same 23 frame count, same
-atlas layout, only the 6 affected frames' alpha channel changed (opaque
-rectangle → real cutout).
+##### Paths tried on the "unaccounted gaps"
 
-##### Paths tried on the 4 gaps
-
-The structural padding-column scan that solved `bcdfa`'s UI panel bank and
-the opaque-render sweep were tried first (an earlier pass) and found
-nothing; the mask-plane-adjacency check (this pass) is a different
-technique and is what solved 3 of the 4 gaps.
+Kept because the dead ends are instructive: three separate techniques
+returned confident, plausible, and *wrong* answers before the descriptor's
+own `+10` field settled it.
 
 | Gap | Approach | Result |
 |-----|----------|--------|
-| all 4 | Opaque 6-plane render at 16/32/48/64/80/96/128/192 px | No coherent image at any width in any gap |
-| all 4 | Byte-value/entropy check (unique-byte count per gap) | `0x78C0` gap: 152 unique bytes/1,680 B; `0x99C0` gap: 100 unique/5,288 B; `0xB4F8` gap: **2** unique/352 B; `0xEE98` gap: 100 unique/1,006 B — the first, second and fourth look like real (if unstructured-so-far) image data, the third looks like filler |
-| `0x78C0` (1,680 B), `0xEE98` (1,006 B) | Structural padding-column scan (any single index constant per plane, widths 2–12 bytes, heights 10–39) | **Zero hits** in either gap — no wide uniform backdrop column anywhere, unlike every `bcdfa` UI record |
-| `0x99C0` (5,288 B) | Same scan | Hits in the hundreds of thousands (W=8, H=39 — essentially the whole gap satisfies the weak generic test), i.e. too undiscriminating to isolate real record boundaries here |
-| `0xB4F8` (352 B) | Direct byte dump | 330 of 352 bytes are `0xFF`, the other 22 are `0xC0`, recurring roughly every 32 bytes — **this pass recognised the pattern as a mask plane** (near-solid coverage with periodic corner cutouts), not filler; confirmed by rendering as `guild_fighter`'s mask (see above) |
-| `0x78C0`, `0xB4F8`, `0xEE98` | Computed each of the 23 descriptors' own 6-plane end offset and compared to the 3 remaining gap start offsets; where they matched exactly, decoded the gap as an appended/shared 1-bit mask plane and rendered against the adjacent element's colour data | **3/3 hit** — clean, legible, non-noise art (see table above); this is the technique the two structural scans above were structurally incapable of finding, since it depends on adjacency to an already-known descriptor rather than on any property of the gap bytes alone |
-| `0x99C0` (5,288 B) — DOS `clipper.clp` size cross-check | Enumerated all `clipper.clp` entries whose `(⌈w/16⌉×2) × h × {6,7}` byte formula equals 1,680/5,288/352/1,006; found exact hits for 1,680 (`Plaque C`, `Plaque D`, `AS Stats` at 67×28) but **none for 5,288** | The 1,680 hits are coincidental collisions with the now-solved `chargen_ui` mask (confirmed by direct rendering, not by this filter — `AS Stats` at 67×28 renders as noise, ruling it out); no DOS entry's size matches 5,288 at all, so this cross-check does not narrow gap 2 |
-| `0x99C0` (5,288 B) — tested as `chargen_logo`'s own mask plane (first `24×47=1,128` B of the gap, following the same "colour ends → mask starts" pattern as `chargen_ui`/`stats_panel`) | Renders as a handful of scattered dots and two solid brown rectangles — **not** a coherent cutout | Rules out the simplest hypothesis for gap 2; `chargen_logo` is either genuinely maskless (as originally assumed) or its mask lives somewhere else / at a different size than `24×47` |
-| `0x99C0` (5,288 B) — tested the *last* 280 B of the gap (ending exactly at `sigil_0`'s start, `0xAE68`) as one mask **shared** by all 5 mystic sigils (32×14 each, mirroring the guild-banner convention) | Renders as a small, plausible but low-confidence gold icon-glyph shape; bit density 28.4% (much lower than the 85%+ near-solid density of the 3 confirmed masks) | **Unconfirmed** — shape is not obviously noise but isn't clearly a sigil either; flagged as the most promising lead for the remaining ~5,008 B of gap 2, not claimed as solved |
-
-| `0x99C0` (5,288 B) — per-200-byte non-zero byte count across the whole gap, then direct 8×8/1bpp render of the two dense windows found | **Found two legible monochrome fonts** — 73 glyphs at `0x9E30` (rendered, ASCII-shaped but uncoded), 26 glyphs at `0xA250` (**confirmed** 100.000% bit-exact vs DOS `"CG Font"`) | The technique the padding-column/entropy scans above were structurally incapable of finding — those look for a *constant* column across whole planes (an image-backdrop signature); a 1bpp font is dense but has no constant column at all. A coarse non-zero-density histogram is what isolates it |
-
-None of the pre-existing techniques found anything on their own; the new
-mask-adjacency check solved 3/4 gaps outright, and this pass's byte-density
-histogram found two real fonts in the middle of the 4th. Gap 2
-(`0x99C0`–`0xAE68`, 5,288 B) is down to its leading ~1,128 B (bar pattern,
-still unclear) and trailing ~2,300 B (still open, weak sigil-mask lead on
-the last 280 B unconfirmed) — see "Gap 2 — two more fonts found" above.
+| all 4 | Opaque 6-plane render at 16/32/48/64/80/96/128/192 px | No coherent image at any width in any gap — because none of the four is a standalone image; each is one plane of a neighbouring element or a font |
+| all 4 | Byte-value/entropy check (unique-byte count per gap) | `0x78C0`: 152 unique/1,680 B; `0x99C0`: 100 unique/5,288 B; `0xB4F8`: **2** unique/352 B; `0xEE98`: 100 unique/1,006 B. Correctly flagged `0xB4F8` as mask-like; said nothing useful about the rest |
+| `0x78C0`, `0xEE98` | Structural padding-column scan (constant index per plane, widths 2–12 B, heights 10–39) | **Zero hits** — correct, they are single bitplanes of a larger image, which has no such column |
+| `0x99C0` | Same scan | Hundreds of thousands of hits (W=8, H=39) — too undiscriminating |
+| `0x99C0` | DOS `clipper.clp` size cross-check for `(⌈w/16⌉×2) × h × {6,7}` = 1,680/5,288/352/1,006 | Exact hits for 1,680 (`Plaque C`, `Plaque D`, `AS Stats`) but none for 5,288. All coincidental — the 1,680 figure is a *plane* size, not an element size, so no DOS entry could ever have matched |
+| `0x99C0` | Tested the first 1,128 B as `chargen_logo`'s appended mask plane | "Scattered dots and two solid brown rectangles" — **rejected at the time, and the rejection was right for the wrong reason.** Those bytes *are* part of `chargen_stats`, but as its colour plane 5, and the "two rectangles" are precisely the two dark inset panels visible in the finished element |
+| `0x99C0` | Tested the last 280 B as a mask shared by all 5 sigils | Bit density 28.4%, "plausible but low-confidence". **Refuted** — 224 of those 280 B are the colour font's `V`–`Z` glyphs; only the final 56 B are the sigil mask, and the descriptor names that offset (`$AE30`) outright |
+| `0x78C0`, `0xB4F8`, `0xEE98` | Mask-adjacency: match each descriptor's *6-plane* end offset to a gap start and render the gap as a 7th plane | 3/3 "hit" with legible art — and 2 of the 3 were **wrong**. `0xB4F8` is genuinely the guild mask; `0x78C0` and `0xEE98` are colour plane 5 of `chargen_ui`/`chargen_title`, and using them as masks rotated every plane by one. Legibility survived the rotation, so "it renders cleanly" was not the discriminator it looked like |
+| `0x99C0` | Per-200-byte non-zero density histogram, then 8×8/1bpp render of the dense windows | Found real fonts, but at the **wrong bases and counts** (`0x9E30`/73 slots and `0x9E30`+`0xA250`/26 slots) — a density scan finds where ink is, not where a slot table starts, and both fonts begin with blank slots |
+| all 4 | **Read the descriptor.** Decode all 28 bytes of a `LAB_010D` entry, follow `LAB_011E`, and take the `+10` mask pointer and `+22` flag literally | **Solved everything at once.** The three shared masks (`$AE30`, `$B4F8`, `$F278`) are written out in the descriptor table; the mask-first layout for desc00–02 is a two-instruction branch. The whole file then tiles with 0 remainder. Two prior passes had this table in front of them and read only the source offset and the `w`/`h` words out of it |
 
 ---
 
@@ -6541,7 +7635,7 @@ Each has a gfxNumber in bytes 0–1, and a structure type in byte 5.
 | Type | Structure          | gfxNumber  |
 |------|--------------------|------------|
 | 0x0F | Door switch        | 0x0037     |
-| 0x10 | Illusionary wall / Glyph / Magic field | varies |
+| 0x10 | Illusionary wall / Glyph / Magic field | varies — see the field map below |
 | 0x11 | Door frame         | 0x0035, 0x0036 |
 | 0x12 | Stairs / Teleport / Spinner | varies |
 | 0x14 | Pit                | 0x003A (floor), 0x003B (ceiling) |
@@ -6564,6 +7658,48 @@ Each has a gfxNumber in bytes 0–1, and a structure type in byte 5.
 - Alcoves (0x0039): 199 instances with type byte 0x16.
 - Door switches (0x0037): 99 instances with type byte 0x0F.
 - Illusionary walls (0x00C1, gfx 0x01F3): 37 instances with type byte 0x10.
+
+#### Structure record field map — type `0x10` (Illusionary wall / Magic field / Glyph) — **confirmed**
+
+Type `0x10` is **three** different objects sharing one type byte, told apart by
+the record's **word `+0x0C`**. Every consumer switches on it, and the shipped
+data partitions cleanly: **97 records → 59 / 25 / 13**, each sub-kind with
+exactly one `gfxNumber`, zero mixing.
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| +0x00 | 2 | `gfxNumber` | `0x00C1` (sub-kind 1), `0x0048` (2), `0x003C` (3) — **fully determined by `+0x0C`** |
+| +0x02 | 2 | name ref | `0x01F3` on 37 illusionary walls, else `0x0000` |
+| +0x05 | 1 | type | `0x10` |
+| +0x07 | 1 | index / count | sub-kind 2: 0/7/8/9; sub-kinds 1 and 3: always 0 |
+| +0x0A | 2 | passable flag | nonzero ⇒ `ResolveTargetSquare` returns "open" before any sub-kind test (S_1 `+0x27CC0`) |
+| **+0x0C** | **2** | **sub-kind** | **1** = Illusionary wall (pass through, nothing drawn), **2** = Magic field (blocks, screen-shake), **3** = Glyph |
+| +0x0E | 2 | payload magnitude | sub-kind 3: scales the glyph's damage roll (`5 + rand(5×w0E)` for glyph types 2/3) |
+| **+0x10** | **2** | **BCSPEED effect selector** | sub-kind 3 only: `1…4`. Drawn in the viewport as effect `w10`, played on trigger as effect `w10 + 4`. Sub-kind 2 carries 0/54/56/57 here but never reaches an effect call |
+| +0x12 | 2 | chain-next | same-square object chain |
+
+Consumers (both read the same word `+0x10`; full trace in "bcdfa —
+BCSPEED.EFF" → "Which effect belongs to which spell"):
+
+| `+0x0C` | Movement (`ResolveTargetSquare` S_1 `+0x27CBA`) | Render (`DispatchSquareObject` type-`0x10` case S_1 `+0x0231C`) |
+|---|---|---|
+| 1 — Illusionary wall | falls through ⇒ result 0, party walks through | nothing drawn |
+| 2 — Magic field | result **7** ⇒ blocked + screen-shake jolt | `JSR $A155C` (S_1 `+0x21504`) draws the field |
+| 3 — Glyph | result **5** ⇒ S_1 `+0x04662` plays effect `w10 + 4` and applies the damage handler | static effect tick `w10`, group `byte(+0x07)`, at depth 1 dead-ahead only |
+
+> **Correction — result codes 5 and 6 were missing from the
+> `ResolveTargetSquare` write-up.** That section lists 0/1/2/3/4/7/8/9 and says
+> type `0x10` returns "either the default open fall-through or blocked-code 1".
+> It returns **5** (glyph, sub-kind 3) and **7** (magic field, sub-kind 2) as
+> well, and type `0x1E` returns **6** (S_1 `+0x27CF8`). `MoveParty` handles 5 at
+> `+0x16F86` (`JSR $846BA` = S_1 `+0x04662`) and 6 at `+0x16F8E` (`JSR $8CF8C`
+> with the party X/Y and a `0x1E` tag), both reached from the two-step `SUBQ.W`
+> ladder at `+0x16FA4`.
+
+Sub-kind 2's `+0x10` values (54/56/57 on 5 records, all on map 2) and its
+`+0x07` values (7/8/9) are read by neither the movement nor the render path
+traced here — they are **not** effect indices despite being in range. Whatever
+consumes them is still open.
 
 ---
 
@@ -6588,6 +7724,30 @@ Offset  Size  Description
 
 **First action in a chain is 7 bytes** (no action ID — the ID is in the
 structure field). Subsequent actions are 8 bytes with their own IDs.
+
+> **Correction — the field table above is shifted by one, and every action is
+> 8 bytes.** There is no per-record "action ID" byte at offset `0x00`: an
+> action's id is its **index** into the runtime action array at `A4+0x836`
+> (stride 8, `slot = 0x836 + id×8`), the first id comes from the owning
+> structure's byte `+0x0D`, and each record's byte `+0x07` is the *next* id.
+> The confirmed layout, read off three independent consumers — the executor
+> `+0x0C4F6`, the chain walker `+0x0CF34` and the deferred-event handler
+> `+0x01B70` — is:
+>
+> | Offset | Size | Field | Evidence |
+> |---|---|---|---|
+> | `0x00` | 1 | **Action opcode** (the 36-entry table below) | `MOVE.B (a0,d0.l),d0` → `BRA $0CE9C` at S_1 `+0x0C544`; restored from the event at `+0x01B82` |
+> | `0x01` | 1 | **Clicks to trigger** — compared against the owning structure's click counter (byte `+0x11`) + 1 | S_1 `+0x0D014`/`+0x0D028` |
+> | `0x02` | 1 | **Target column (X)** | `MOVE.B $2(a0,d0.l),d1 → d3` at `+0x0C50E`; used as `col<<2` in the map index |
+> | `0x03` | 1 | **Target row (Y)** | `MOVE.B $3(a0,d0.l),d1 → d4` at `+0x0C520`; used as `row<<8` |
+> | `0x04` | 1 | **Runs remaining** — decremented per fire; `0xFF` is never decremented (`TST.B`/`BLE` skips it) = infinite | S_1 `+0x0D094`/`+0x0D0AA`/`+0x0D0B8` |
+> | `0x05` | 1 | **Delay in turns** — `0` = execute immediately, otherwise schedule at `$1750(a4) + delay` | S_1 `+0x0D0C6`/`+0x0D0BC` |
+> | `0x06` | 1 | **Action value** (accent-ramp index, monster type, wall direction, …) | `MOVE.B $6(a0,d0.l),d5` at `+0x0C530` — matches the already-documented `0x1E`/`0x1F` correction below |
+> | `0x07` | 1 | **Next action id** — `0` ends the chain, the first action's own id loops it | S_1 `+0x0D138`, and the loader's `$987BC` walk |
+>
+> The doc's own worked example already reads offset `0x00` as the opcode
+> (`0B 01 0C 25 01 00 00` = "teleport off, 1 click, target `0x0C,0x25`,
+> 1 run, no delay, no value") — the table was simply out of step with it.
 
 | Action | Description                       |
 |--------|-----------------------------------|
@@ -6651,6 +7811,167 @@ section for the ramp table and the per-level defaults.
 followed by `00 00` or action bytes matches the documented patterns.
 Floor plate actions begin with 7-byte records (e.g., `0B 01 0C 25 01 00 00` for
 "teleport off, 1 click, target 0x0C,0x25, 1 run, no delay, no value").
+
+#### `TriggerActionsAt(col, row, structType)` — S_1 `+0x0CF34` — **SOLVED**
+
+> **Correction — supersedes "a generic structure-toggle/animation-slot
+> dispatcher … a runtime prop-animation-slot table at `A4+0x836` … a generic
+> tag-based resource scheduler".** `A4+0x836` is **not** a prop-animation-slot
+> table: it is the **action array** — the very 8-byte `bcdfs` action records
+> documented above, indexed by action id (`slot = 0x836 + id×8`). `+0x0CF34`
+> is the engine's single **action-chain executor**: "an object of type `T` at
+> `(col,row)` was activated — run its action chain." Every explicit-case /
+> shared-tail framing in the earlier note describes this one routine.
+
+**Signature (confirmed, all 9 call sites agree).** SAS/C stack args, `LINK
+A5,#-8`:
+
+| Frame | Size | Arg | Note |
+|---|---|---|---|
+| `8(a5)` | word | **col (X)** | → `A6`, then `D1` |
+| `0xA(a5)` | word | **row (Y)** | → `D2` |
+| `0xC(a5)` | byte | **structure type to activate** | → `D3` (byte pushes land on the even address — verified against `+0x0C4F6`, which reads its own pushed byte arg at `$8(a5)`) |
+
+It calls the confirmed resolver `JSR $A7D80.l` (S_1 `+0x27D28`,
+`resolveUnique(col, row, type)`) and works on `A4 − 0x6E7A + unique×20`.
+
+**The nine call sites and the type each passes:**
+
+| Call site | Type arg | Context |
+|---|---|---|
+| S_1 `+0x0DD48` | `0x1D` Switch | clicking a wall switch |
+| S_1 `+0x0E012` | `0x1F` Fountain / Special panel | panel interaction |
+| S_1 `+0x11310` | **`0x0F` Door switch** | `OpenDoorAtParty`, **open** branch |
+| S_1 `+0x114AA` | **`0x0F` Door switch** | `OpenDoorAtParty`, **close** branch |
+| S_1 `+0x11838` | `0x1E` Floor plate / Trap | plate/trap interaction |
+| S_1 `+0x11910` | `0x16` Alcove | alcove item match |
+| S_1 `+0x11984` | `0x16` Alcove | alcove item match |
+| S_1 `+0x16314` | `0x21` Plaque (input) | plaque answer accepted |
+| S_1 `+0x16F9A` | `0x1E` Floor plate / Trap | `MoveParty` blocked-code 6, i.e. stepping on a plate |
+
+Each row is byte-exact: every site is `1F3C 00xx` (`MOVE.B #type,-(A7)`)
+followed immediately by the two coordinate `MOVE.W` pushes and the `JSR`,
+9/9 with zero deviation.
+
+**Type `0x11` (Door frame) is never passed to it by any call site.**
+
+> **The set of types passed is exactly the loader's action-owning set.**
+> The nine call sites use `{0x0F, 0x16, 0x1D, 0x1E, 0x1F, 0x21}` — identical,
+> with no extras on either side, to the six structure types the `bcdfs` loader
+> gives an action chain to (`ACTION_TYPES` at S_1
+> `+0x18BB0`/`+0x18BC8`/`+0x18BE0`/`+0x18BF8`/`+0x18C10`/`+0x18C28`, already
+> documented under "Walking the on-disk stream"). Two completely independent
+> parts of the engine — a loader written years before this trace was made and
+> a caller census done by byte pattern — agree on the same six-element set.
+> That is the single strongest confirmation that `+0x0CF34` is the action
+> executor and nothing else.
+
+**Body (confirmed, instruction for instruction):**
+
+```c
+void TriggerActionsAt(int16 col, int16 row, uint8 type) {
+    uint16 u = resolveUnique(col, row, type);          /* +0x0CF50, $A7D80 */
+    Rec *r = &records[u];                              /* A4-0x6E7A + u*20 */
+    if (u == 0 || r->w0A != 0) return;                 /* +0x0CF72 / +0x0CF76 */
+
+    if (r->type == 0x1D) {                             /* Switch: flip visual */
+        r->w08 = 1 - r->w08;
+        redrawPanel(1); repaint(); flushBlits();       /* $82D9E,$A03F8,$A4A32 */
+    }
+    if (r->type == 0x1E) r->w08 = 1 - r->w08;          /* Floor plate: flip */
+
+    uint8 wanted = r->b11 + 1;                         /* click counter + 1 */
+    uint8 first  = r->b0D;                             /* first action id    */
+    uint8 id     = first, maxDelay = 0; int alive = 1;
+
+    dirtyPanel = dirtyMap = dirtyView = 0;             /* $174D/$174C/$1749 */
+    if (!(r->type == 0x1E && r->b07 == 1))
+        PlaySfx(5, 0, 0, 0);                           /* +0x0CFEC, $80506  */
+
+    while (id && alive) {
+        Act *a = &actions[id];                         /* A4+0x836 + id*8   */
+        if (a->clicks != wanted) break;                /* +0x0D018          */
+        if (a->runs) {
+            if (a->runs != 0xFF) a->runs--;            /* 0xFF = infinite   */
+            if (a->delay == 0) ExecuteAction(id);      /* +0x0C4F6, now     */
+            else {                                     /* or later:         */
+                Schedule(0x28, turn + a->delay,
+                         a->col, a->row, a->value, a->opcode, 0);
+                if (a->delay > maxDelay) maxDelay = a->delay;
+            }
+        }
+        id = a->next;
+        if (id == first) alive = 0;                    /* chain looped      */
+    }
+
+    if (maxDelay && r->type != 0x1F) {                 /* +0x0D0EE          */
+        Schedule(0x29, turn + maxDelay, col, row, r->type, 0, 0);
+        r->w0A += 1;                                   /* lock: busy        */
+    }
+    /* +0x0D126: wrap the click counter once the chain has come full circle */
+    if (!alive || (id != 0 && actions[id].clicks <= wanted)) wanted = 0;
+    r->w0C = id;            /* next action id to run on the next activation */
+    r->w10 = wanted;        /* click counter                               */
+    CommitDirtyFlags();                                /* +0x0082A, $80882 */
+}
+```
+
+**Supporting routines (all confirmed this pass):**
+
+| Address | Role |
+|---|---|
+| S_1 `+0x0C4F6` (`$8C54E`) | `ExecuteAction(id)` — loads the action's opcode/col/row/value into `D0`/`D3`/`D4`/`D5` and falls into the 36-entry opcode dispatcher at `+0x0CE9C`. The dispatcher's `BRA.W $CEAC` common exit is **not** a return: it is this same function's epilogue, which re-reads the opcode from `$836(a4)+id×8` and runs a *second*, opcode-keyed feedback pass. (This corrects "Consumer 2 — movement blocking" below, which calls the `JSR $80506` at `+0x0CECE` "the action dispatcher's own default/unhandled-opcode fallback" — it is one arm of that feedback pass, playing sfx `0x0A` positioned at the action's own target square `(D3, D4)`.) |
+| S_1 `+0x004AE` (`$80506`) | `PlaySfx(id, x, y, flag)` — stereo positional sound: scales two 0–100 volumes (defaults 100/100/64 when `x==0`) and calls `$A6CBC(id, vol, side)` once per side. Muted when `$1746(a4) == 2` |
+| S_1 `+0x005EA` (`$80642`) | `Schedule(tag, time, b5, b6, b7, b8, ownerWord)` — inserts into a **150-slot**, 12-byte, time-sorted linked list at `A4+0x1036` (free head `$173E(a4)`, active head `$173F(a4)`, `next` at slot byte `+0x09`, sentinel `150`). Init: S_1 `+0x00272` |
+| S_1 `+0x0082A` (`$80882`) | `CommitDirtyFlags()` — acts on `$1748`/`$1749`/`$174A`/`$174C`/`$174D(a4)`; calls **`DrawViewport` S_1 `+0x02D46`** when `$1748` is set |
+| S_1 `+0x008C8` | the turn tick: `ADDQ.L #1,$1750(a4)` and clears the same four dirty flags — so `$1750(a4)` is the **turn counter** and action delays are in turns |
+| S_1 `+0x012BA` | the event fire loop: pops slots whose longword `+0x00` equals `$1750(a4)`, reads tag `+0x04`, params `+0x05`/`+0x06`, dispatches through the `SUBQ` ladder at `+0x01F34` |
+| S_1 `+0x01B70` | **tag `0x28`** handler — reconstructs the action in the scratch slot `$83D(a4)` and calls `ExecuteAction` — i.e. the deferred action fires identically, `delay` turns later |
+| S_1 `+0x01BC2` | **tag `0x29`** handler — re-resolves `(col,row,type)` and does `w0A -= 1`, releasing the busy lock |
+| S_1 `+0x0B25A` | `CancelEventsForObject(id)` — unlinks pending events by owner word `+0x0A` |
+
+**12-byte scheduled-event record (`A4+0x1036 + slot×12`, confirmed):**
+
+| Offset | Size | Field |
+|---|---|---|
+| `0x00` | 4 | fire turn (`$1750(a4)` value to match) |
+| `0x04` | 1 | tag / kind (`0x01`, `0x05`, `0x0A`, `0x0B`, `0x14`–`0x16`, `0x1E`–`0x25`, `0x28`, `0x29`) |
+| `0x05` | 1 | param A — column for tag `0x28`/`0x29` |
+| `0x06` | 1 | param B — row |
+| `0x07` | 1 | param C — action value (`0x28`) / structure type (`0x29`) |
+| `0x08` | 1 | param D — action opcode (`0x28`) |
+| `0x09` | 1 | next slot index (`150` = end) |
+| `0x0A` | 2 | owner id (used by `CancelEventsForObject`) |
+
+Pending events are **persisted in savegames** — the serializer at S_1
+`+0x19370` and the loader at S_1 `+0x19A88` both special-case tags
+`0x01`/`0x05`/`0x22`/`0x28`/`0x29`.
+
+##### Verification (structural, zero deviation)
+
+0. **Caller-type set == loader action-type set**, 6/6 with no extras either
+   way (box above).
+1. **Opcode-3 target-type oracle.** Every action with opcode `0x03`
+   (`Pillar toggle`, whose handler S_1 `+0x0C5FA` resolves `MOVEQ #$17,D3`)
+   reachable from a Door-switch chain points at a square that really holds a
+   type-`0x17` (Pillar) record: **6 / 6, 0 mismatches**. This simultaneously
+   confirms the byte-`+0x02` = column / byte-`+0x03` = row assignment and the
+   chain walk — a wrong field order would land on unrelated squares.
+2. **Two independent one-shot mechanisms agree.** For the four map-12 chains
+   the action carries `runs = 1`; after firing, `runs` is decremented to 0
+   *and* the write-back `r->w0C = id` stores the chain terminator `0`, which
+   makes the caller's own `TST.W $C` guard fail forever. Two unrelated parts
+   of the routine independently produce "fires exactly once".
+3. **The click ladder round-trips.** Map 9's six-action chain
+   (clicks `1,1,1,2,2,2`, `next` looping `15 → 10`) walks to `w0C = 13`,
+   `w10 = 1` on the first activation, to `w0C = 10`, `w10 = 0` on the second,
+   i.e. exactly back to its initial state — reproducing the documented
+   "action id matching the first action = loop back to the beginning"
+   termination rule from the opposite direction.
+4. **The busy lock is symmetric.** `w0A += 1` on scheduling and `w0A -= 1` in
+   the tag-`0x29` handler are the only two writers of that field outside the
+   `0x0D`/`0x16` and `0x0E`/`0x17` trigger opcodes (which move it by ±2), and
+   the entry gate is `w0A == 0`.
 
 ---
 
@@ -6808,7 +8129,12 @@ non-scripted) writer.
 **Facing encoding — confirmed, not assumed.** `partyFacing` is read/written
 by exactly one place that changes it under player control (`TurnParty`
 below), always via `(partyFacing + delta) & 3` — a plain 2-bit index, not an
-angle or an 8-direction value. The N/E/S/W assignment is confirmed by two
+angle or an 8-direction value. (Census over the whole of S_1: **71 references
+to `$1744(A4)`, only 2 direct writes** — `TurnParty` `+0x1703E` and a `CLR.W`
+reset at `+0x1952C`. The one further writer is indirect: `MoveParty` passes
+`&facing` via `LEA $1744(A4),A0` at `+0x16D2C`, and `ResolveTargetSquare`'s
+special-square tail writes through it at `+0x27C76` — that is the spinner's
+180° about-face, see "Special-square sub-kinds".) The N/E/S/W assignment is confirmed by two
 independent internal invariants that only agree for one assignment:
 
 1. The wall-collision check (below) tests bit `12 + facing` of the current
@@ -6948,50 +8274,225 @@ on its own fields:
     this bit — the action opcodes that set/clear it and the render-side
     consumer that reads it to pick open- vs. closed-door art — is in the new
     "Door State" section directly below this one.
-  - `0x14` (Pit), `0x12` (Stairs/Teleport/Spinner): several further field
-    tests (byte `+0x0A`, a global at absolute `$B2586`, word `+0x10`) that
-    end up either at result **1**/blocked, or fall into a shared "commit"
-    path that can **overwrite `*X`/`*Y` from the record's own bytes `+0x0C`/
-    `+0x0E`** (teleport/stairs destination) and **rotate `*facing`** by the
-    record's byte `+0x08` (a spinner-style forced turn) before returning a
-    sub-code. **Traced byte-for-byte this pass** — both type branches gate on
-    `record[+0x0A] != 0` (⇒ default result 0, open) and the global
-    `$B2586 == 1` (else result **1**, blocked) identically, then diverge:
+  - `0x14` (Pit) and `0x12` (Stairs/Teleport/Spinner) — **fully solved and
+    externally verified; see "Special-square sub-kinds" immediately below.**
+    Both type branches gate on `record[+0x0A] != 0` (⇒ default result 0,
+    open) and the global `$B2586 == 1` (else result **1**, blocked)
+    identically, then **both fall into one shared commit tail** at S_1
+    `+0x27C4E` which optionally writes `*X`/`*Y` from the record's words
+    `+0x0C`/`+0x0E`, always rotates `*facing` by the record's **word**
+    `+0x08`, and finally demultiplexes the result code on the record's own
+    type byte and word `+0x10`.
 
-    - **Type `0x14` (Pit):** when `record[+0x10] == 1` ⇒ default result 0
-      (open); **otherwise falls straight to result 9 without ever reaching
-      the `*X`/`*Y`/facing-commit block at all** (`BRA.B` jumps past it). A
-      genuine Pit record therefore never returns 2, 3, or 4 through this
-      function — only 0, 1, or 9, and its 9 carries **no** destination change.
-    - **Type `0x12` (Stairs/Teleport/Spinner, one structure type covering all
-      three):** first calls a side-effect routine (S_1 `+0x00382A`, registers
-      preserved — a sound/animation cue, not chased further), then branches
-      on `record[+0x10]`:
-      - `record[+0x10] == 4`: **skips** the `*X`/`*Y` destination write
-        entirely (party stays on the square it speculatively stepped onto)
-        but **still** applies the facing forced-turn, and returns **4**.
-      - any other value: **writes** `*X`/`*Y` from `record[+0xC]`/`[+0xE]` and
-        applies the forced-turn, then: `record[+0x10] ∈ {2,3}` ⇒ returns
-        **3**; anything else ⇒ returns **9**.
-      - (Result **2** is set as a default in this shared tail — `MOVEQ #2,D3`
-        — but is **immediately overwritten to 3** by a dead comparison,
-        `CMPI.B #$14,record[+0x05]`, that always reads false on a
-        type-`0x12` record. As traced, **2 is unreachable from this
-        function**; see "Paths tried" for how this was checked and why it's
-        reported as an observation, not a certainty.)
+> **Correction — two errors in the previous pass's trace of this block, both
+> now overturned by re-reading the branch bytes.**
+>
+> 1. **The Pit branch does not skip the commit tail.** It was written up as
+>    "falls straight to result 9 without ever reaching the `*X`/`*Y`/facing
+>    commit block at all (`BRA.B` jumps past it)". The instruction at S_1
+>    `+0x27C30` is `601C` = `BRA.B $27C4E` — a **forward jump *into* the
+>    commit tail**, not past it. Its direction was inverted.
+> 2. **Consequently `CMPI.B #$14,record[+0x05]` at S_1 `+0x27C7A` is not a
+>    dead comparison, and result code 2 is not unreachable.** It reads false
+>    for type-`0x12` records (correctly — they are not pits), but it is
+>    reached by *pits*, for which it reads **true**. It is the tail's
+>    Pit-vs-Stairs/Teleport/Spinner discriminator. **Result 2 is exactly and
+>    only the floor-pit case**, which is what the doc's original label for
+>    code 2 said — only the reachability claim was wrong.
 
-    **This is new evidence the doc's provisional 2/3/4/9 labels didn't have,
-    and it points the other way for 4 and 9 than the original guess:**
-    `record[+0x10]==4` never relocates the party (only turns it) — textbook
-    **spinner** behaviour — while the `record[+0x10]`-fallback case (9) both
-    relocates the party *and* triggers a distinct caller-side sound cue (see
-    the result-code table below) — textbook **teleport** behaviour. `3`
-    (`record[+0x10] ∈ {2,3}`) is well-supported as **stairs** independently
-    (see the table below: `MoveParty`'s code-3 handler is a dedicated
-    level-transition-shaped routine). Kept as a flagged hypothesis, not a
-    relabelling, since no ground truth (a `bcdfs` record known to be a real
-    spinner/teleport tile, or a screenshot) confirms which numeric label the
-    game's own designers would have used.
+##### Special-square sub-kinds (`0x14` Pit, `0x12` Stairs/Teleport/Spinner) — **confirmed**
+
+The shared tail, byte for byte:
+
+```asm
+; ---- type 0x14 (Pit) ----
+27C0A  CMPI.B  #$14,D5              ; structure type = Pit?
+27C0E  BNE.B   $27C32
+27C10  CMPI.W  #$0,$A(A5,D4.W)      ; passable flag
+27C16  BNE.W   $27D18               ;   nonzero  -> leave D3 as-is, chain-walk on
+27C1A  CMPI.W  #$1,$B2586.l         ; global gate
+27C22  BNE.W   $27D16               ;   != 1     -> D3 = 1 (blocked), chain-walk on
+27C26  CMPI.W  #$1,$10(A5,D4.W)
+27C2C  BEQ.W   $27D18               ;   +0x10==1 -> ceiling pit: no fall, chain-walk on
+27C30  BRA.B   $27C4E               ;   else     -> INTO the shared tail  (was mis-read as "past it")
+
+; ---- shared commit tail (reached by Pit above and by type 0x12) ----
+27C4E  MOVEM.L D0-D1/A0-A1,-(A7)
+27C52  JSR     $83882.l             ; S_1 +0x0382A — automap neighbour-reveal, gated on $1E2A(A4)
+27C58  MOVEM.L (A7)+,D0-D1/A0-A1
+27C5C  CMPI.W  #$4,$10(A5,D4.W)
+27C62  BEQ.B   $27C6C               ; sub-kind 4 (Spinner): skip the destination write
+27C64  MOVE.W  $C(A5,D4.W),(A0)     ; *X = record.word(+0x0C)
+27C68  MOVE.W  $E(A5,D4.W),(A1)     ; *Y = record.word(+0x0E)
+27C6C  MOVE.W  $8(A5,D4.W),D5       ; facing delta = record.WORD(+0x08)
+27C70  ADD.W   (A2),D5
+27C72  ANDI.W  #$3,D5
+27C76  MOVE.W  D5,(A2)              ; *facing = (*facing + delta) & 3
+27C78  MOVEQ   #$2,D3
+27C7A  CMPI.B  #$14,$5(A5,D4.W)     ; LIVE: true for a Pit, false for type 0x12
+27C80  BEQ.W   $27D18               ;   -> D3 = 2   (floor pit)
+27C84  MOVEQ   #$3,D3
+27C86  CMPI.W  #$2,$10(A5,D4.W)
+27C8C  BEQ.W   $27D18               ;   -> D3 = 3   (stairs)
+27C90  CMPI.W  #$3,$10(A5,D4.W)
+27C96  BEQ.W   $27D18               ;   -> D3 = 3   (stairs)
+27C9A  MOVEQ   #$4,D3
+27C9C  CMPI.W  #$4,$10(A5,D4.W)
+27CA2  BEQ.W   $27D18               ;   -> D3 = 4   (spinner)
+27CA6  MOVEQ   #$9,D3               ;   -> D3 = 9   (teleport)
+27CA8  BRA.B   $27D18
+
+; ---- chain walk / return ----
+27D16  MOVEQ   #$1,D3               ; blocked
+27D18  MOVE.W  $12(A5,D4.W),D4      ; D4 = chain-next unique
+27D1C  BRA.W   $27BD0               ; loop: if D4 == 0 fall out to the return
+27D20  MOVE.L  D3,D0                ; result = D3 as last written by the chain
+```
+
+**`$27D18` is the chain walk, not a return.** Every arm above sets `D3` and
+then re-enters the per-record switch for the next record chained to the same
+square, so the code a square finally yields is the one written by the **last**
+record in its chain. This matters for exactly one square in the game (below).
+
+The complete sub-kind table. Every row is confirmed against the shipped
+`bcdfs` data *and* against the official **Black Crypt Manual & Clue Book**
+(see "Verification" below); `n` counts all 257 special-square records in the
+file, walked with `bclib.bcdfs`:
+
+| Structure type | word `+0x10` | `gfxNumber` | n | result | **Meaning** | dest `+0x0C`/`+0x0E` | facing Δ word `+0x08` |
+|---|---|---|---|---|---|---|---|
+| `0x14` Pit | 0 | `0x3A` | 18 | **2** | **Floor pit** — party falls to the landing square | populated **18/18** | 0 |
+| `0x14` Pit | 1 | `0x3B` | 15 | **0** | **Ceiling pit** — opening overhead, walk under freely | zero **15/15** | 0 |
+| `0x12` | 0 | `0x41` | 61 | **9** | **Inviso teleport** (not drawn) | populated | 0 |
+| `0x12` | 1 | `0x40` | 82 | **9** | **Teleport** (visible) | populated | 0 (73), 1–3 (9 — sets arrival facing) |
+| `0x12` | 2 | `0x43` | 38 | **3** | **Stairs** (variant a) | populated | 0 (37) |
+| `0x12` | 3 | `0x44` | 36 | **3** | **Stairs** (variant b) | populated | 0 (35) |
+| `0x12` | 4 | `0x1E` | 7 | **4** | **Spinner** — never moves the party, always turns it 180° | zero **7/7** | **2 on 7/7** |
+
+`+0x10` determines `gfxNumber` with **zero mixing** across all 224 type-`0x12`
+and all 33 type-`0x14` records — a clean 7-way partition.
+
+The clue book's map legend lists **eight** stairs/teleport/spinner/pit
+features, and the eighth is accounted for exactly: FLOOR PIT, CEILING PIT,
+**FLOOR/CEILING PIT**, TELEPORT, INVISO TELEPORT, STAIRS UP, STAIRS DOWN,
+SPINNER. "Floor/ceiling pit" is not an eighth record sub-kind — it is a
+square carrying **both** pit records on one chain, and there is exactly
+**one** such square in the whole game (map 7, x=35 y=15, chain
+`gfx 0x3B` → `gfx 0x3A`). The census closes without remainder: 33 pit records
+over 32 distinct squares = 17 floor-only + 14 ceiling-only + 1 both. On that
+one square the chain walk means the ceiling record leaves `D3` at 0 and the
+floor record then sets it to 2, so the party falls — the correct reading of
+"floor **and** ceiling pit".
+
+> **Correction — the doc's original `4 = Teleport` / `9 = Spinner` labels were
+> swapped.** They are now confirmed the other way round: **4 = Spinner,
+> 9 = Teleport**. Code 4 stores no destination (7/7 records have
+> `+0x0C`/`+0x0E` = 0) and carries a uniform 180° facing delta; code 9 always
+> relocates the party. See "Verification" for the external ground truth.
+
+> **Correction — `+0x08` is a *word*, not a byte.** Earlier text called it
+> "the record's byte `+0x08` (a spinner-style forced turn)". The instruction
+> at `+0x27C6C` is `MOVE.W $8(A5,D4.W),D5`. Read as a byte it is 0 on all 224
+> type-`0x12` records, which makes the forced turn look like dead data; read
+> correctly as a word it is **2 on all 7 spinners** (`facing + 2 & 3` = a 180°
+> about-face) and 0 on almost everything else. The turn is not
+> "spinner-style" — it *is* the spinner, exclusively.
+
+**Verification.** Five independent lines, no live capture used:
+
+1. **`+0x10` ↔ `gfxNumber` partition** — zero deviation across all 257
+   records (7 sub-kinds, 7 distinct gfx numbers, no record mixing).
+2. **Destination-field invariant, 33/33 pits** — all 18 floor pits (code 2)
+   carry a non-zero landing square; all 15 ceiling pits (code 0) carry
+   `(0,0)`. Exactly what the corrected control flow requires: the code-2 path
+   passes through the `*X`/`*Y` write, the code-0 path returns before it.
+   Likewise all 7 spinners (code 4, the one sub-kind that *skips* the write)
+   carry `(0,0)`, and all 217 other type-`0x12` records carry real
+   destinations.
+3. **Clue book names four teleports by coordinate** — Level 10 note 14:
+   *"BUTTON: REMOVES ALL TELEPORTS AT (26,13,10), (24,11,10), (22,13,10), AND
+   (24,15,10)"*. `bcdfs` map 4 / level-nibble 1 holds `+0x10 == 1` records at
+   exactly (24,11), (22,13), (26,13), (24,15) — **4/4 exact**, and the book
+   calls them teleports. This alone settles code 9 = Teleport.
+4. **Clue book teleport destinations** — 13 exact `+0x0C`/`+0x0E` matches
+   across three independently anchored levels. Level 7 (map 3 / nibble 2):
+   *"TELEPORT: GOES TO (21,13,7) / (1,13,7) / (5,9,7) / (5,6,7)"* → 4/4 exact;
+   its two *"INVISO PRESSURE PLATE: CREATES TELEPORT AT (5,7,7) / (2,12,7)"*
+   also match record source squares. Level 2 note 1, *"SWITCH: TOGGLES
+   TELEPORT AT (3,14,2) BETWEEN DESTINATIONS (28,23,2) AND (6,9,1)"*, matches
+   the **two type-`0x12` records stacked on the single square (3,14)**, one of
+   whose destinations is the cross-level (6,9) exactly.
+5. **Clue book SPINNER symbols — 7/7, zero extras, zero misses.** Every one
+   of the 7 code-4 records sits on a cell drawn with the legend's spinner
+   symbol, and no cell drawn with that symbol lacks a code-4 record.
+   Classified by normalised cross-correlation of each map page against the
+   legend page's own SPINNER and GLYPH symbol tiles; label = argmax of the
+   two scores, and the **margin** is the evidence (both symbols are a boxed
+   "G", so absolute scores cross-match — the spinner has a solid inner block,
+   the glyph is a uniform stipple):
+
+   | Clue-book level | `bcdfs` region | Spinner cells found | Spinner NCC | Glyph NCC | Other boxed symbols on page |
+   |---|---|---|---|---|---|
+   | 1 | map 1 / nib 1 | (10,1) | 0.821 | 0.630 | 2, both GLYPH (−0.19, −0.21) |
+   | 2 | map 1 / nib 2 | (13,11) (17,11) (11,13) | 0.933 / 0.929 / 0.942 | 0.743 / 0.712 / 0.738 | 5, all GLYPH |
+   | 10 | map 4 / nib 1 | (9,31) (7,33) | 0.872 / 0.876 | 0.740 / 0.598 | 6, all GLYPH |
+   | 14 | map 6 / nib 1 | (24,4) | 0.861 | 0.745 | 7, all GLYPH |
+
+   The "other boxed symbols" column is the control: 20 non-spinner boxed
+   symbols across the four pages, every one classified GLYPH with a negative
+   margin, so the classifier is not simply labelling everything SPINNER.
+   (Level 10's row origin was anchored on the four teleport coordinates the
+   clue book names in evidence 3, not read by eye — an eyeballed origin put
+   this page one row out.)
+   Clue-book pit coordinates agree too: Level 7 note 13 *"REMOVES PIT AT
+   (18,17,7)"* ↔ the single type-`0x14` record on map 3 / nibble 2, at
+   (18,17), `gfx 0x3A`, `+0x10 = 0` → code **2**, landing square (35,29) on a
+   different level of the same map (a fall to the level below).
+6. **Which teleport variant is "inviso" — settled by a controlled pair.** The
+   phrase "INVISO TELEPORT" occurs exactly **twice** in the whole clue book,
+   and both times it lands on `+0x10 = 0` / `gfx 0x41`:
+   - Level 24 (map 11 / nib 1) gives the clean A/B pair — two adjacent notes,
+     *"INVISO TELEPORT: SENDS PARTY TO (4,19,24)"* and *"TELEPORTS PARTY TO
+     (5,19,24)"*, against two records on that level whose destinations are
+     exactly (4,19) — `gfx 0x41`, at (2,28) — and (5,19) — `gfx 0x40`, at
+     (2,30). The destinations disambiguate which note is which record.
+   - Level 14 (map 6 / nib 1) note 9, *"GLYPH OF DEATH; INVISO TELEPORT SENDS
+     PARTY TO (8,21,14)"*, matches that level's **only** `gfx 0x41` record,
+     at (9,26), destination (8,21) exact.
+
+   Every plain-"TELEPORT" mention checked (Level 7 ×5, Level 10 ×4, Level 24
+   ×1) is `gfx 0x40`. So `0x41` = **inviso** (invisible on the floor),
+   `0x40` = the visible teleport.
+
+   > **Update — the render-side mechanism is now traced and it confirms the
+   > labelling independently of the clue book.** The type-`0x12` render case is
+   > not in `DispatchSquareObject` at all; it is in the **kind-4/12 handler
+   > `+0x0224C`** (`+0x022BE`), which switches on `word +0x10` through a
+   > `SUBQ.W #1` ladder: `1` → `+0x214F4` (the stipple field), `2`/`3` →
+   > `+0x251FE` (stairs flight A/B), and **anything else — including `0` —
+   > falls off the ladder and draws nothing**. `word +0x10` is a perfect
+   > function of `gfxNumber` across all 13 maps: `0 ↔ 0x41` (61 records),
+   > `1 ↔ 0x40` (82), `2 ↔ 0x43` (39), `3 ↔ 0x44` (36), `4 ↔ 0x1E` (7, the
+   > spinner — also correctly invisible). So `0x41` is invisible by omission,
+   > not by a special-cased skip. See "Kinds 4 and 12" in "3D Viewport
+   > Compositing".
+
+Level anchoring for 3–5 is itself evidence-based, not assumed: `bcdfs`
+(map, level-nibble) regions were matched to clue-book level numbers by exact
+teleport-destination coordinate overlap, giving map 1/nib 1 → L1, map 1/nib 2
+→ L2, map 3/nib 2 → L7, map 4/nib 1 → L10, map 6/nib 1 → L14, map 11/nib 1
+→ L24. Level-local coordinates equal `bcdfs` grid coordinates minus the
+level region's column/row base (0 for most levels; 28 for map 1/nib 2).
+
+**What a spinner actually does.** It is the one sub-kind that neither blocks
+nor relocates: the party steps on, `*X`/`*Y` are left at the stepped-onto
+square, and `*facing` is rotated by `+0x08 = 2` — turned to face back the way
+it came. `MoveParty` then falls through to the same generic finish-move tail
+as code 0, so there is no distinct sound or screen effect; the disorientation
+*is* the silent about-face. `partyFacing` (`$1744(A4)`) has only three writers
+in the whole of S_1 — `TurnParty` `+0x1703E`, a `CLR.W` reset at `+0x1952C`,
+and this tail's `MOVE.W D5,(A2)` reached through the `LEA $1744(A4),A0`
+`MoveParty` passes at `+0x16D2C` (71 references total, 2 direct writes).
   - `0x17`/`0x10`/`0x1E`/`0x1F`/`0x2F` and a couple of other type bytes
     return either the default "open" fall-through or blocked-code **1**,
     gated on the same byte `+0x0A` field seen in the pit/stairs cases.
@@ -7011,12 +8512,14 @@ revert block above):
 |------|---------|-------------------|
 | 0 | Open floor / empty square | commits, falls to the generic "finish move" tail (`+0x16EE8`: `JSR $A4982.l`, viewport redraw, `JSR $A3826.l`) |
 | 1 | Blocked (closed door / generic wall-ish obstacle) | reverts X/Y, plays a bump SFX (`JSR $80506.l`, effect id 8), returns immediately — no viewport redraw |
-| 2 | Pit | The **only** code reaching S_1 `+0x16DC2`'s fallthrough (every other code that lands there — 3, 4, 9 — is bounced away by an immediate `BNE`): reverts to the pre-`ResolveTargetSquare` position **temporarily** (draws the old square, `JSR $82D9E.l` + 2 more calls), then re-applies `ResolveTargetSquare`'s own `*X`/`*Y`, redraws again (`JSR $82D9E.l` + 2 more) — a confirmed "step in, animate, then land" sequence. Not traced further than this call sequence (what the 4 intermediate `JSR`s individually do). |
+| 2 | **Floor pit** (confirmed — reachable after all) | The **only** code reaching S_1 `+0x16DC2`'s fallthrough (every other code that lands there — 3, 4, 9 — is bounced away by an immediate `BNE`): reverts to the pre-`ResolveTargetSquare` position **temporarily** (draws the old square, `JSR $82D9E.l` + 2 more calls), then re-applies `ResolveTargetSquare`'s own `*X`/`*Y`, redraws again (`JSR $82D9E.l` + 2 more) — a confirmed "step in, animate, then land" sequence, i.e. the **fall animation**, landing on the record's `+0x0C`/`+0x0E` square. Not traced further than this call sequence (what the 4 intermediate `JSR`s individually do). **Emitted only by a type-`0x14` record with `gfx 0x3A` / `+0x10 = 0` (18 of the 33 pits)** — see "Special-square sub-kinds" above; the earlier "code 2 is unreachable / set by a dead comparison" note is retracted there. |
 | 3 | Stairs | **Dedicated handler at `+0x16E14`, traced this pass.** Re-resolves the structure's `unique` at the (now-committed) destination via the confirmed `JSR $A7D80.l` helper, then reads the record's own **byte `+0x07`** (a field not previously mapped) and, if nonzero, pushes it and calls S_1 `+0x16C62` — a small self-contained routine that indexes a table at `A4−0x7C60` by `(record[+0x07]−1)×2`, stores the looked-up word into `$1E62(A4)`, then calls a "load resource by tag" routine (`JSR $82250.l`, pushing a PC-relative string constant) and a DOS-library call (`JSR −0xC6(A6)` off the base at `$1E58(A4)`, `D1=0x12C`). `$1E62(A4)` feeds the already-confirmed `SetDungeonPalette` mechanism ("Dungeon accent ramp"), so this reads as **stairs picking a destination level/ramp from `record[+0x07]`** and triggering a level-transition load — consistent with the doc's "Stairs" label, not contradicted by anything found this pass. |
-| 4 | (doc's original label: Teleport) | **No dedicated handling found** — falls straight through to the same generic tail as code 0 (`+0x16EE8`), no distinct sound, no distinct call. Combined with `ResolveTargetSquare` never writing a new `*X`/`*Y` for this code (see above — only the facing forced-turn applies), this behaves as **"turn in place, don't move"**, which the doc's own **evidence table suggests is Spinner, not Teleport** — see the flagged hypothesis above. |
+| 4 | **Spinner** (confirmed — was mislabelled "Teleport") | **No dedicated handling found** — falls straight through to the same generic tail as code 0 (`+0x16EE8`), no distinct sound, no distinct call. `ResolveTargetSquare` never writes a new `*X`/`*Y` for this code; only the facing rotation applies, and that rotation is **+2 (180°) on all 7 records**. So the square reads as **"don't move, turn to face back the way you came"** — a spinner, silently. Confirmed against the clue book's SPINNER map symbol at all 7 record coordinates (levels 1, 2, 10, 14) — see "Special-square sub-kinds" above. |
+| 5 | **Glyph triggered** (new — was missing from this table) | `ResolveTargetSquare` `+0x27CC8` returns 5 for a type-`0x10` record whose word `+0x0C` is 3. `MoveParty` `+0x16F86` calls S_1 `+0x04662`, which plays BCSPEED effect `record.word(+0x10) + 4` and applies the glyph's damage handler. See the `bcdfs` "Structure record field map — type `0x10`" section |
+| 6 | **Type-`0x1E` floor-plate/trap trigger** (new — was missing from this table) | `ResolveTargetSquare` `+0x27CF8`. `MoveParty` `+0x16F8E` pushes `0x1E` plus the party X/Y and calls `JSR $8CF8C.l` |
 | 7 | Blocked, with "message" | reverts X/Y, plays the same bump SFX, **and** calls `JSR $A39B0.l` with `D0=1`. **Traced this pass — it is not a text message.** `+0x23958` picks one of two small byte tables (S_1 `+0x239A8`/`+0x239F4`, `D0=1` selects the second) that are short **numeric** sequences terminated by `0xFF` (e.g. `0C 10 14 10 0C 08 0C 10 14 18 14 10 …`, an oscillating ramp, not text/ASCII) and passes it to S_1 `+0x26482` — a **hardware blitter setup routine** (writes `BLTCON0`/`BLTCON1`/`BLTAFWM`/`BLTALWM`/`BLTAPT`/`BLTCPT`/`BLTSIZE` off an exec/graphics library base, minterm `$09F0` = confirmed straight screen-to-screen copy) using the table's oscillating values as a per-step position delta. This is a **screen-shake / jolt visual effect**, not a message box — the field/table layout it reads (which words are X/Y/W/H) was not fully mapped this pass, but "text message" is now a retracted premise, not an open question. |
 | 8 | Blocked by monster | reverts X/Y, **no** bump sound, returns immediately |
-| 9 | (doc's original label: Spinner/other) | **`record[+0x10]`-fallback case only** (i.e. type-`0x12` records where `record[+0x10] ∉ {2,3,4}`, *or* a genuine Pit falling through with `record[+0x10] != 1` — two structurally different sources share this one code). When reached from the type-`0x12` path, `*X`/`*Y` **is** overwritten from `record[+0xC]`/`[+0xE]` (a real relocation) and the caller plays a **distinct sound effect (id `0xD`=13)** before the generic tail — the doc's own evidence table suggests this combination (relocate + distinct cue) reads as **Teleport, not Spinner** — see the flagged hypothesis above. When reached from a genuine Pit, no relocation happens at all via this code path. |
+| 9 | **Teleport** (confirmed — was mislabelled "Spinner/other") | **`record[+0x10]`-fallback case only**, and — per the corrected trace above — reached **exclusively from type-`0x12` records with `+0x10 ∈ {0,1}`** (143 records, `gfx 0x41`/`0x40`). **A Pit never reaches it:** the earlier claim that a pit with `record[+0x10] != 1` also lands on 9 is retracted — such a pit falls into the shared tail and hits the `CMPI.B #$14` discriminator first, returning **2**. `*X`/`*Y` **is** overwritten from `record[+0xC]`/`[+0xE]` (a real relocation) and the caller plays a **distinct sound effect (id `0xD`=13)** before the generic tail. Confirmed by the clue book naming four of these squares "TELEPORTS" at exact coordinates (Level 10 note 14) plus 13 exact destination-coordinate matches — see "Special-square sub-kinds" above. |
 
 After a successful (non-blocked) move, the code that follows (not detailed
 above) calls `JSR $82D9E.l` (viewport redraw — the same call `TurnParty`
@@ -7073,7 +8576,11 @@ an `S_1 +0xXXXXX` offset above.
 |----------|--------|-------|
 | Linear disassembly of the whole `bcdft` S_1 image + grep for `, 0x1740(a4)`/`, 0x1742(a4)` (write-position operand only) | 7 write-site pairs found, 1 already known (teleport, `+0xCD0E`) | The read-side grep (`0x1740(a4)`/`0x1742(a4)` as a *source* operand) returns ~40 hits and is not useful for finding writers — had to anchor on operand position, not just presence |
 | Trace the 2 unaccounted write pairs at `+0x6C2E`/`+0xC3DC`/`+0xCA40` | All three are palette/message-trigger side paths (level-transition dialogue, "already there" early-outs) that *also* commit X/Y, not the main per-key mover | Documented as confirming `+0x02D46`'s "called on party movement" claim a second time (the `+0x6C40` call site is a direct `JSR $2D46(PC)` right after committing X/Y), not chased further as separate movement paths since they're guarded by dialogue/one-shot conditions, not the input loop |
-| ~~Determine exact pit/stairs/teleport/spinner sub-behaviour (`ResolveTargetSquare` codes 2/3/4/9)~~ | **Traced to the instruction this pass.** `record[+0x10]` is the discriminator (2/3→3, 4→4 with the destination write skipped, else→9); code 2 is set as a default in the shared tail but immediately overwritten by an always-false comparison — apparently unreachable from a type-`0x12` record, and a genuine Pit (type `0x14`) bypasses the block that sets it entirely, so 2's own trigger condition is still not identified. Caller-side (`MoveParty`) behaviour for every code is now traced too — see the result-code table above. | Found by disassembling `ResolveTargetSquare` and `MoveParty`'s tail fully rather than the entry points alone; the "code 2 unreachable" finding is reported as an observation (one confirmed dead comparison), not asserted as proof no code path anywhere sets it — see `negative-from-addressing-root-not-shapes.md`-style caution: a single function's local dead code isn't a whole-program negative. |
+| ~~Determine exact pit/stairs/teleport/spinner sub-behaviour (`ResolveTargetSquare` codes 2/3/4/9)~~ | **SOLVED — all seven sub-kinds confirmed, see "Special-square sub-kinds" above.** 2 = floor pit, 3 = stairs, 4 = spinner, 9 = teleport, plus ceiling pit → 0. | Superseded; the two rows below record what the intermediate pass got wrong and how it was caught. |
+| ~~"Code 2 is unreachable — a dead `CMPI.B #$14` overwrites it"~~ | **Retracted premise.** The comparison at S_1 `+0x27C7A` is live; it is the shared tail's Pit discriminator. The error was upstream: `+0x27C30`'s `601C` = `BRA.B $27C4E` was read as jumping *past* the commit tail when it jumps *into* it, so the Pit path was thought never to reach the comparison. Code 2 = floor pit, fired by 18 of 33 pit records. | Caught by re-disassembling the Pit branch and resolving the `BRA.B` displacement arithmetically (`0x27C32 + 0x1C = 0x27C4E`) instead of trusting the prose description of the branch. The general lesson matches `negative-from-addressing-root-not-shapes.md`: the "unreachable" verdict was reached by inspecting the comparison itself rather than by enumerating who jumps into the block containing it. |
+| ~~"4 = Teleport / 9 = Spinner", then "possibly swapped, no oracle available"~~ | **Confirmed swapped: 4 = Spinner, 9 = Teleport.** The "no ground-truth oracle" blocker was wrong — the official Manual & Clue Book PDF is a per-level annotated map set that names teleports at exact grid coordinates and draws spinners with a dedicated legend symbol. | The clue book is a 64-page **scanned** PDF with no text layer; `pdfimages` + `tesseract` OCR of all 64 pages made the coordinate annotations greppable, and the map symbols were classified by normalised cross-correlation against the legend page's own symbol tiles. Worth remembering for any commercial-era title: a scanned strategy guide can be a byte-level oracle, not just prose. |
+| Attempt to find a spinner rotation by searching `partyFacing` writers for `0x1744(a4)` | **False negative — 0 hits.** capstone's m68k printer renders the displacement as `$1744(a4)`, not `0x1744(a4)`; the operand-string filter silently matched nothing. Corrected search finds 71 references and 2 direct writes. | Re-ran with the printer's actual syntax after the zero result looked implausible against a known write site (`TurnParty` `+0x1703E`) cited elsewhere in this doc. A census that returns zero should always be re-run against a known-positive control before it is believed. |
+| Census the spinner's forced-turn field as `byte +0x08` | **Wrong field width — reads 0 on all 224 type-`0x12` records**, making the forced turn look like unused data. The instruction is `MOVE.W $8(A5,D4.W),D5`: it is a **word**, whose low byte carries the value. Re-read as a word it is **2 on all 7 spinners**. | Caught by disassembling the consumer instead of inferring the width from the surrounding byte-oriented fields. |
 | Chase blocked-code-7's "message" content | **Retracted premise — it isn't a text message.** `+0x23958`/`+0x26482` decode to a hardware-blitter screen-shake/jolt effect driven by a small oscillating numeric table, not a string. See the result-code table above. | Found by disassembling the call target directly instead of searching for string tables; the two candidate tables it selects between are visibly non-ASCII (an `0xFF`-terminated oscillating byte ramp), which is what redirected the trace away from "text lookup" |
 | Confirm facing encoding and delta formula via amiberry live capture (move party, read `$1742`/`$1740`/`$1744`) | **Not attempted** | Not needed — the wall-check bit position and the `ApplyFacingDelta` jump-table deltas are two independent internal invariants that only agree for one N/E/S/W assignment (see "Facing encoding" above), which meets this project's verification bar without live access. Per the amiberry hard gate, this would have required asking the user first regardless. |
 
@@ -7188,6 +8695,108 @@ is present, only the base blit runs.
 > or does something not surfaced by this trace — is genuinely unresolved; see
 > "Still open" below.
 
+> **Correction — everything above about `+0x112FC`, including the correction
+> block itself, is reading the wrong record. Now SOLVED.** Both the `TST.W $C`
+> at `+0x112E6` and the `BTST.B #0,$F` at `+0x112FC` compute `D0` from
+> **`D3`** — the **Door switch** (`0x0F`) record found by the chain walk at
+> `+0x11198` — not from `D4`, the Door frame. `+0x112FC` therefore has nothing
+> to do with the door's open/closed bit, and the `#$0F` byte pushed at
+> `+0x11304` immediately below it is the **structure-type argument**
+> `+0x0CF34` resolves by. Four consequences:
+>
+> 1. **`+0x0CF34` never receives a type-`0x11` record from anywhere.** All
+>    nine of its call sites pass `0x0F`, `0x16`, `0x1D`, `0x1E`, `0x1F` or
+>    `0x21` (table in "bcdfs — Action bytecode" → "`TriggerActionsAt`") —
+>    exactly the six structure types the loader gives an action chain to.
+>    "What does the shared tail do for a Door frame" is therefore a malformed
+>    question: a Door frame never enters the function. What it *does* receive
+>    here is the door's companion Door-switch record.
+> 2. **`+0x0CF34` is not an animation dispatcher at all.** It is the engine's
+>    generic **action-chain executor** and `A4+0x836` is the **action array**
+>    (8-byte `bcdfs` action records indexed by action id), not a
+>    prop-animation-slot table. Full trace, pseudocode and verification:
+>    "bcdfs — Map / Dungeon Format" → "Action bytecode" →
+>    "`TriggerActionsAt(col, row, structType)` — S_1 `+0x0CF34` — SOLVED".
+> 3. **`+0x112FC` is on the door-OPENING branch, not the closing one.** The
+>    branch structure is `TST.W $E(door)` at `+0x111EA` → **zero ⇒ open**
+>    (fall through, `MOVE.W #$1,$E` at `+0x11226`, then the `+0x11310` call);
+>    **non-zero ⇒ `BNE.W $1131E`**, where `1` ⇒ close (`CLR.W $E` at
+>    `+0x113CE`/`+0x113F0`, then a *second* call at `+0x114AA`) and anything
+>    else ⇒ `THE DOOR IS LOCKED`. The earlier correction had the two branches
+>    the wrong way round.
+> 4. **`+0x0B614` is not "the base wall-tile blit".** It is a ±3-square
+>    neighbourhood scan around the party (`$1742(a4)−3 … +3`, `$1740(a4)−3 …
+>    +3`, S_1 `+0x0B624`–`+0x0B640`) inside the monster-instance region — a
+>    post-interaction monster/awareness pass, not a render call.
+
+#### Consumer 1 (corrected) — the door switch fires the door's action chain — **SOLVED**
+
+Every door interaction is bracketed by two calls to `TriggerActionsAt` on the
+**Door switch** (type `0x0F`) record that sits on the same square as the Door
+frame:
+
+| Call site | Branch | Guard on the `0x0F` record |
+|---|---|---|
+| S_1 `+0x11310` | door was **opened** (state `0` → `1`) | `TST.W +0x0C ≠ 0` **and** `BTST #0, +0x0F` |
+| S_1 `+0x114AA` | door was **closed** (state `1` → `0`) | `TST.W +0x0C ≠ 0` **and** `BTST #1, +0x0F` |
+
+Word `+0x0C` of the switch record is its **first action id** (its low byte is
+the byte `+0x0D` the loader's `$987BC` chain walk reads), so the first guard
+is simply "does this door switch have an action chain". Bits 0 and 1 of byte
+`+0x0F` select **fire-on-open** and **fire-on-close**.
+
+**Shipped-data census (`bcdfs`, all 13 maps, walked with
+`scripts/bclib/bcdfs.py` + action capture):**
+
+* **96** type-`0x0F` records; **96 / 96 sit on a square that also holds a
+  type-`0x11` Door frame**, zero exceptions — the "Door switch" name is
+  structurally confirmed, it is a door's companion trigger record, not a
+  free-standing switch (that is type `0x1D`).
+* byte `+0x0F` bit 0 (fire-on-open) is **0 on all 96** records, and no code
+  anywhere writes word `+0x0E` of a `0x0F` record (see "Paths tried" below).
+  **The open-branch call at `+0x11310` is therefore dead on shipped data.**
+* byte `+0x0F` bit 1 (fire-on-close) is set on **6**; word `+0x0C` is non-zero
+  on **5**. The two sets overlap in exactly **5** records — those five doors,
+  and only those, run an action chain, and only when the party *closes* them.
+
+| Map | Switch (row, col) | Actions | Effect |
+|---|---|---|---|
+| 12 | (8, 12) | 1 × op `0x12` `Monster gen trigger`, value 15, runs 1, delay 0 | spawns immediately, one-shot |
+| 12 | (14, 6) | same, target (14, 2) | " |
+| 12 | (14, 18) | same, target (14, 22) | " |
+| 12 | (20, 12) | same, target (24, 12) | " |
+| 9 | (21, 25) | 6 × op `0x03` `Pillar toggle`, runs `0xFF`, clicks `1,1,1,2,2,2`, delays `23,78,23,25,36,80` | a two-stage timed pillar puzzle: closing the door once moves three pillars, closing it again moves the other three, then the chain wraps |
+
+**So the answer to "is it a no-op for the door path": no.** Even for the 91
+door switches with no action chain the call is never reached (the `TST.W
++0x0C` guard rejects them), and for the 5 that are reached the routine
+(a) plays **sound effect 5** through the stereo `PlaySfx` at `$80506`,
+(b) clears and then commits the three redraw flags `$1749`/`$174C`/`$174D(a4)`
+via `$80882` (which calls `DrawViewport` when `$1748` is set),
+(c) executes or schedules the actions, and
+(d) writes the switch's click counter (word `+0x10`) and next-action id
+(word `+0x0C`) back to the record — state that is saved in savegames.
+
+#### Structure record field map — Door switch (type `0x0F`) — confirmed
+
+| Offset | Size | Field | Evidence |
+|---|---|---|---|
+| `0x00` | 2 | `gfxNumber` — `0x0037` on 96/96 | on-disk |
+| `0x02` | 2 | transient "interaction in progress" flag — set to `1` at S_1 `+0x111D4`, cleared at `+0x11362`/`+0x114DC`; `0` on disk in 96/96 | `OpenDoorAtParty` |
+| `0x04` | 1 | wall-direction mask (`0x50` on 36, `0xA0` on 60) | read at S_1 `+0x032D8` (render/visibility) |
+| `0x05` | 1 | type `0x0F` | on-disk |
+| `0x07` | 1 | sub-image / orientation selector (`1`, `5`, `10`) | read at S_1 `+0x032E6` |
+| `0x0A` | 2 | busy/disabled counter — `+0x0CF34` requires `0`; `+1` while a delayed chain is pending (released by event tag `0x29`), `±2` by action opcodes `0x0D`/`0x16` and `0x0E`/`0x17` | S_1 `+0x0CF76`, `+0x0D11E`, `+0x01BFC`, `+0x0CADC`, `+0x0CB36` |
+| **`0x0C`** | **2** | **next action id** — low byte is the loader's "first action id" byte `+0x0D`; rewritten by `+0x0CF34` as the chain advances. `0` ⇒ no chain, guard fails | S_1 `+0x112E6`, `+0x11480`, `+0x0D146` |
+| **`0x0F`** | **bits** | **bit 0 = fire chain when the door opens** (never set on disk), **bit 1 = fire chain when the door closes** (set on 6) | S_1 `+0x112FC`, `+0x11496` |
+| `0x10` | 2 | **click counter** — compared as `+1` against each action's `clicks` byte; reset to `0` when the chain wraps | S_1 `+0x0CFC0`, `+0x0D14E` |
+| `0x12` | 2 | chain-next (same-square object chain) | generic |
+
+Note `+0x0E`/`+0x0F` here is **not** the door-state word: that lives in the
+Door *frame* (`0x11`) record on the same square. The two records' `+0x0E`
+fields are unrelated, which is exactly the confusion the correction above
+unwinds.
+
 #### Consumer 2 — movement blocking (confirmed, independently by the concurrent movement pass)
 
 See `ResolveTargetSquare` in "Party Movement / Facing State Machine" above:
@@ -7244,7 +8853,7 @@ viewport section).
 |---|---|---|---|
 | `0x00`–`0x01` | 2 | `gfxNumber` (`0x0035`/`0x0036`) | "Structure bytecode" table above |
 | `0x05` | 1 | Structure type (`0x11` = Door frame) | Tested in `ResolveTargetSquare` (movement section) and at S_1 `+0x1117C`/`+0x16C08` (further door-frame-type dispatch sites, not chased this pass) |
-| `0x0C` | 2 (word) | "Structure present" gate / occupancy flag (nonzero ⇒ a structure record is chained to this square) | Tested identically at S_1 `+0x112E6` (render) and, in a non-door context, S_1 `+0xB8F0` (a monster-generator neighbourhood scan) |
+| `0x0C` | 2 (word) | ~~"Structure present" gate / occupancy flag~~ **Not mapped for type `0x11`.** The `TST.W` at S_1 `+0x112E6` cited here reads the *Door switch* (`0x0F`) record, not the Door frame — see the correction under "Consumer 1" above. On a `0x0F` record this word is the next-action id; on `0x10` it is the sub-kind; on `0x22` it is the `lockNumber`. What it means on a Door frame is untraced | — |
 | `0x0E`–`0x0F` | 2 (word, big-endian) | **Door open/closed state** — bit 0 of byte `+0x0F`: 0=closed, 1=open. Rest of the word not characterized (see caveat below). | Write: S_1 `+0x0CB90`/`+0x0CC0C`/`+0x0CC68`, `+0x11226`. Read: S_1 `+0x112FC` (render), `ResolveTargetSquare` (movement) |
 | `0x12` | 2 (word) | Chain-next index (`unique` of next record chained to this square) | "Runtime parser" section above; independently re-confirmed from the movement side in `ResolveTargetSquare`'s "Chain walk" |
 
@@ -7323,6 +8932,15 @@ else" is exactly "bit 1 set".
 > open action. (The nearby `BTST #1,$F(A0,D0.L)` at `+0x11496` is **not** a
 > door-lock test — its `d0` comes from `d3`, the *Door switch* record, whose
 > `+0x0E` is an unrelated type-dependent field.)
+>
+> > **Correction to this correction — the branch labels are swapped, and the
+> > two `BTST`s are now identified.** `+0x112FC` is on the **open**-the-door
+> > branch (`TST.W $E` = 0 ⇒ open); the close branch's equivalent call is at
+> > `+0x114AA`. And the two bits are not "unrelated type-dependent" mystery
+> > fields: on a Door-switch (`0x0F`) record, `+0x0F` bit 0 = *fire the action
+> > chain when the door opens* and bit 1 = *fire it when the door closes*.
+> > See "Consumer 1 (corrected) — the door switch fires the door's action
+> > chain" above.
 
 **Consumer 2 — movement.** Unchanged and re-verified here:
 `ResolveTargetSquare` `+0x27BFC` does `BTST.B #0,$F(A5,D4.W)` and takes the
@@ -7385,7 +9003,7 @@ which is exactly what those opcodes' `ANDI.W #$00FE` masking preserves.
 |---|---|
 | ~~Locked-door state representation~~ | **SOLVED** — bit 1 of the same word `+0x0E`; full key/lock trace above |
 | The 6 state-`2` doors with no Door lock record on or beside them | Unexplained residual (6 of 65). Nothing found so far clears bit 1 except S_1 `+0x16C36`, which requires a `0x22` record, so on the present reading those doors can never be opened by the party — plausible for scenery, not verified |
-| ~~`+0x0CF34`'s exact sub-image selection~~ | **Resolved for the mechanism that matters, narrowed for the residual.** `+0x0CF34` is now traced far enough to show it is a **generic** structure-toggle/animation-slot dispatcher (types `0x1D`/`0x1E` explicitly, `0x11`/Door falls through the shared, non-door-specific tail into a runtime prop-animation-slot table + event scheduler) — it does **not** itself pick a "Door Way" sub-image. The actual frame/leaf sub-image selection for every doorway depth except depth-1/lateral-0 is answered byte-exact by the newly-traced Consumer 3 (kind 11) above. What remains genuinely open is narrow: whether `+0x0CF34` has *any* visible effect for the depth-0 door case beyond the shared toggle/table scaffolding — not chased further this pass. |
+| ~~`+0x0CF34`'s exact sub-image selection~~ / ~~whether it has any visible effect for a depth-0 door~~ | **SOLVED, on a refuted premise.** `+0x0CF34` is `TriggerActionsAt(col, row, structType)` — the engine's generic **action-chain executor** (`A4+0x836` is the action array, not an animation-slot table). It is never called with a Door-frame (`0x11`) record by any of its nine call sites; the door path passes type **`0x0F`** (Door switch), and `+0x112FC`/`+0x112E6` were reading that record all along. It is **not** a no-op: for 5 of the 96 shipped door switches (4 monster-generator triggers on map 12, one 6-action timed pillar puzzle on map 9) closing the door executes or schedules real actions, plus sound effect 5 and a viewport commit. The open-branch call at `+0x11310` is dead on shipped data (its bit is clear on 96/96 records and nothing writes it). Full trace: "Action bytecode" → "`TriggerActionsAt`"; door-side summary and census: "Consumer 1 (corrected)" above. |
 | Caller of the literal `word=1` writer at S_1 `+0x11226` | Not identified — likely a spell effect (`Knock`-style) or scripted trigger, not chased to its own caller |
 | ~~Bits 1–15 of the door-state word beyond bit 0~~ | **RESOLVED — bit 1 is the `locked` flag** (set on 154 of 291 shipped Door frames; read at S_1 `+0x111EA`/`+0x1132E`, cleared at `+0x16C36`). Bits 2-15 really are unused: never non-zero on disk, never written. The old wording ("untouched by every write site found this pass") was a false negative — the three action handlers preserve bit 1 *on purpose* (`ANDI.W #$00FE`), which reads as "untouched" only if you don't look at the on-disk values |
 
@@ -7396,7 +9014,10 @@ which is exactly what those opcodes' `ANDI.W #$00FE` masking preserves.
 | Hand-computed the action dispatcher's jump-table targets for opcodes `0x18`/`0x19`/`0x1A` from the 36-entry table at S_1 `+0x0CE54` | Got Door toggle's target wrong by one hex digit (`0xBB90` instead of the correct `0xCB90`); Door off/on (`0xCC0C`/`0xCC68`) happened to come out right | Redid all 36 entries at once in Python (`struct.unpack('>h', ...)` against every table slot, converting via the confirmed `target = 0xCEAA + signed16(entry)` formula) instead of hand arithmetic — the error was caught immediately because `0x1E`/`0x1F`'s recomputed targets no longer matched the already-confirmed `SetDungeonPalette` handlers, an internal consistency check worth doing on any jump-table walk, not just this one |
 | Assumed the record word at `+0x0E` means "door open/closed" at every site that touches it | Refuted as a blanket claim | See "Caveat" above — the field is structure-type-dependent; only confirmed for type `0x11` |
 | Searched for a direct `wall_flags` mutation (`BSET`/`BCLR`/`BCHG` on the map-array longword's bits 12–15) inside the Door toggle/on/off handlers | None found | Positive evidence against Hypothesis 1: the three handlers only ever read/write the structure-record word at `+0x0E`, never the map array at `A4 − 0x37CA` |
-| Byte-pattern census for `BTST.B #0, 0xF(A0,D0.L)` (the confirmed door-bit test) across the whole S_1 image | 3 hits: `+0x3508`, `+0xCBF0` (inside the toggle handler itself), `+0x112FC` (render) | **Corrected this pass — `+0x3508` *is* a third door consumer, not unrelated.** It sits inside `DrawViewport`'s Phase-2 drain loop, specifically the kind-11 jump-table stub (indexed off `$1E64(A4)`/`$1E68(A4)`, the confirmed display-list head/pointer globals — "spell/status-effect dispatch table" was the wrong read of what that indexing is). See Consumer 3 above and "3D Viewport Compositing" → "Kind 11 …" for the full trace. |
+| Byte-pattern census for `BTST.B #0, 0xF(A0,D0.L)` (the confirmed door-bit test) across the whole S_1 image | 3 hits: `+0x3508`, `+0xCBF0` (inside the toggle handler itself), `+0x112FC` (render) | **Corrected this pass — `+0x3508` *is* a third door consumer, not unrelated.** It sits inside `DrawViewport`'s Phase-2 drain loop, specifically the kind-11 jump-table stub (indexed off `$1E64(A4)`/`$1E68(A4)`, the confirmed display-list head/pointer globals — "spell/status-effect dispatch table" was the wrong read of what that indexing is). See Consumer 3 above and "3D Viewport Compositing" → "Kind 11 …" for the full trace. **Corrected again — `+0x112FC` is the *third* wrong reading of that hit.** It is neither a render site nor a door-frame test: `D0` there comes from `D3`, the Door-*switch* record. A `BTST` census keyed on the *instruction shape* cannot tell you which record it indexes; only the provenance of the index register can (`indexed-operand-needs-base-provenance.md`). |
+| Read the `+0x0CF34` body's `CMPI.B #$1D`/`#$1E` cases and concluded "type `0x11` has no case, so it falls through a shared tail" | **Wrong question.** The function is never called with a `0x11` record; its type argument comes from the *caller's* pushed byte, which is `0x0F` at both door call sites. | The type constant is 6 bytes above the `JSR` at every call site (`MOVE.B #$xx,-(A7)`); enumerating the call sites first would have cost minutes and made the whole "what happens to `0x11` in the tail" investigation unnecessary. Census the callers before reasoning about a switch's default branch. |
+| Read `A4+0x836` (8-byte stride, `+0x01` compare, `+0x07` chain) as a "runtime prop-animation-slot table + event scheduler" | **Refuted — it is the documented `bcdfs` action array.** The tell was already in this document: "Action chain … **8 per action**; first action id = record byte `+0x0D`; each action's byte `+0x07` is the next id" — an exact match for the walk in `+0x0CF34`. | A stride + chain-field + terminator signature that matches an already-documented on-disk struct is almost never a coincidence. Grep the doc for the stride before naming a new table. |
+| Establish whether the open-branch call can ever fire, by checking bit 0 of the Door-switch `+0x0F` on disk | 0 on 96/96 records — but "never set on disk" is not "never set" | Closed it properly instead: censused all 37 `JSR $A7D80` sites for the type constant in `D3` and all `CMPI.B #$F,$5(…)` gates. Only `+0x0CF50` (inside `+0x0CF34` itself), the `0x0D`/`0x16`/`0x0E`/`0x17` trigger handlers (which touch `+0x0A` only), the renderer `+0x02ABA`, the visibility test `+0x032C8`, the loader `+0x18C10` and the savegame walk `+0x192FE` ever see a `0x0F` record — **none of them writes `+0x0E`**. That is the closure argument, not the on-disk histogram. |
 
 Cross-references: "bcdfs — Map / Dungeon Format" → "Structure bytecode" /
 "Action bytecode" / "Runtime parser" (storage format, on-disk origin);
@@ -7483,13 +9104,13 @@ null-terminated name string.
 > **Correction:** this paragraph previously also argued "bcdfo's file size is
 > fully accounted for between the 109 portraits and the LAB_010D UI
 > descriptors, so there's no room for a separate dungeon-tile set" as
-> supporting evidence. That argument no longer holds — bcdfo actually has
-> only **36** real portraits (see the bcdfo section's correction) plus
-> ~8.3 KB across 4 gaps not accounted for by any of the 23 known UI
-> descriptors, so there *is* spare room in the file. This doesn't change the
-> conclusion (the `LAB_0068` trace is separately conclusive on its own), but
-> the "no room" justification should not be reused as evidence for anything
-> else.
+> supporting evidence. That argument was reached by the wrong route (bcdfo
+> has only **36** real portraits, not 109 — see the bcdfo section), even
+> though the file *is* in fact fully accounted for: the 23 UI elements are
+> 7-plane masked sprites, and the region between them holds three 8×8 fonts
+> and the mouse-pointer sprite bank, tiling bcdfo with 0 remainder. There is
+> no spare room — but the `LAB_0068` trace is separately conclusive on its
+> own, so nothing downstream needs the "no room" argument either way.
 >
 > **Front-facing wall tiles remain unlocated** — this table is not the lead
 > plan.md previously treated it as.
@@ -7535,9 +9156,14 @@ public/assets/
     data/floor-item-gfx-table.json       # scripts/extract_floor_items.py — gfxNumber → floor-graphics group
     data/floor-item-names.json           # scripts/extract_floor_items.py — 49 confirmed group names (DOS clipper.clp cross-check)
     sprites/{monsters,ui,bcspeed}.{png,json}  # scripts/extract_monsters.py, scripts/render_all.py
+    sprites/keys.{png,json}              # 29 bcdfa entry-5 key icons — scripts/extract_bcdfa_keys.py
+    sprites/{ui-side-panel,fire-animation,automap}.{png,json}  # the rest of bcdfa entry 5 — scripts/extract_bcdfa_ui_bank.py
+    palettes/automap.json                # 32-word dual-playfield automap palette (bcdft S_1 +0x1E886)
+    data/fire-animation.json             # 15-frame flame: 4 brazier positions + per-corner phase
     sprites/wall-decorations.{png,json}   # scripts/extract_bcdfbn_decor.py — see "Trailing Data — Wall Decorations + Monster Sound Bank"
     audio/level<NN>-sfx.raw              # scripts/extract_bcdfbn_decor.py — per-level monster sound bank (pcm_s8)
     data/level-sfx-banks.json            # scripts/extract_bcdfbn_decor.py
+    sprites/chargen-font-{a,b,cg}.{png,json}  # bcdfo's three 8x8 fonts — scripts/extract_bcdfo_fonts.py
     screens/{raven,title,logo,plot}.png  # scripts/render_all.py
     textures/dungeon-{bcdfx,bcdfy,bcdfz}.{png,json}  # one frame per sub-image; bcdfy is partial (8 of 18)
   blackcrypt/dosvga/
@@ -7564,9 +9190,11 @@ copy of the TS decoder used.
 | `tools/shared/game-config.ts` (`buildAssets`) | 36 bcdfo character portraits (corrected from a 109-tile miscount that ran 73 tiles past the real portrait/UI-descriptor boundary — see the bcdfo section) | `sprites/portraits.*` | Verified pixel-exact against the reference decode in `scripts/render_all.py` for tiles 0-35; tiles 36+ no longer extracted here (already covered by `sprites/ui.*`) |
 | `scripts/extract_monsters.py` | 204 monster sprites, bcdfb–bcdfn, all 13 maps | `sprites/monsters.*` | Verified — see "bcdfb–bcdfn" above; 0 unknown palette indices across 864,128 rendered pixels |
 | `scripts/extract_clipper.py` | 751 images, 7 palettes, 22 sounds from clipper.clp | `sprites/*`, `palettes/*.json`, `audio/*` | Verified — transparency keys confirmed, 0 stray background pixels |
-| `scripts/render_all.py` (dungeon textures via `scripts/bclib/bcdfxyz.py`) | Screens, dungeon textures, bcdfo UI elements, BCSPEED.GFK sprites | `screens/*`, `textures/*`, `sprites/{ui,bcspeed}.*` | Verified for screens/UI. `textures/dungeon-*` now driven by the real in-executable chunk directory (`bclib.read_chunk_directory`/`read_chunks`) and the confirmed per-sub-image `SUB_IMAGES` geometry (`bclib.iter_sub_images`), not the retired size-based `find_payload_by_size` search — that search was blind to raw-stored chunks (e.g. `bcdfz`'s pillar chunk) and to chunks whose compressed size collides with nothing in `bcdfx`/`bcdfz` (e.g. `bcdfy`'s doors). Run confirms **83 sub-images for bcdfx and bcdfz, 46 for bcdfy** — the documented counts, zero short-data warnings — and the per-tileset accent ramp from `read_dungeon_palette_for_tileset` (ramp 0 for bcdfx, 1 for bcdfy, 2 for bcdfz), not a blanket bcdfu-variant-0 default. Regression-checked against the `re-codebreaker` escalation's verified probe: identical 83/46/83 sub-image counts and the same "22 of 654,736 opaque pixels have an out-of-palette index" result, unchanged. The old `floor-ceiling`/`wall-sides`/`viewport-mask` outputs are deleted — they used refuted geometry (P2 as one 208×356 image, P4/P5 as 80×193) and the wrong palette tail |
+| `scripts/extract_bcdfo_fonts.py` | bcdfo's three 8×8 fonts: `0x9E28` (64 slots, 1bpp), `0xA148` (59 slots, 1bpp — the colour font's mask) and `0xA320` (59 slots, 6 planes, 48 B/glyph) | `sprites/chargen-font-{a,b,cg}.*` | **Confirmed.** Offsets and the `ASCII − 0x20` slot indexing are read straight out of bcdfp's string printer (`LAB_00FD`, `bcdfp.asm:3614`, and the second printer at bcdfp `0x02CF4`). Fonts B and CG match DOS `clipper.clp` entry 207 `"CG Font"` at **3,776/3,776 bits** (silhouette) and **3,776/3,776 pixels** (full colour — the DOS palette indices `{0,2,3,34}` map to the Amiga EHB indices by the identity). The script also asserts the structural invariant that the colour font's 6-plane OR equals the mask font for **59/59** slots |
+| `scripts/render_all.py` (dungeon textures via `scripts/bclib/bcdfxyz.py`) | Screens, dungeon textures, bcdfo UI elements (all 23 as 7-plane masked sprites, under the corrected `LAB_010D` `+10`/`+22` mask semantics and bcdfp's own chargen palette), BCSPEED.GFK sprites | `screens/*`, `textures/*`, `sprites/{ui,bcspeed}.*` | Verified for screens/UI. `textures/dungeon-*` now driven by the real in-executable chunk directory (`bclib.read_chunk_directory`/`read_chunks`) and the confirmed per-sub-image `SUB_IMAGES` geometry (`bclib.iter_sub_images`), not the retired size-based `find_payload_by_size` search — that search was blind to raw-stored chunks (e.g. `bcdfz`'s pillar chunk) and to chunks whose compressed size collides with nothing in `bcdfx`/`bcdfz` (e.g. `bcdfy`'s doors). Run confirms **84 sub-images for bcdfx and bcdfz, 47 for bcdfy** — the documented counts, zero short-data warnings — (the 84th being the 1-plane `door-clip-stencil` that closes slot `$0C`; before it was identified the counts were 83/46/83 with a 320-byte hole) and the per-tileset accent ramp from `read_dungeon_palette_for_tileset` (ramp 0 for bcdfx, 1 for bcdfy, 2 for bcdfz), not a blanket bcdfu-variant-0 default. Regression-checked against the `re-codebreaker` escalation's verified probe: identical pixel-image counts (83/46/83, before the stencil entry existed) and the same "22 of 654,736 opaque pixels have an out-of-palette index" result, unchanged. The old `floor-ceiling`/`wall-sides`/`viewport-mask` outputs are deleted — they used refuted geometry (P2 as one 208×356 image, P4/P5 as 80×193) and the wrong palette tail |
 | `scripts/extract_items.py` | 180 item icons (bcdfa banks at `0x1B5B3` + `0x2FE5C`), 24×24 @ 6bpp, no mask | `sprites/items.*`, `palettes/ui.json` | Confirmed — bank byte-exact against chip RAM in 3 savestates (75,600/75,600 B); 100.000% DOS silhouette match (103,680/103,680 px, 180/180 frames); 100.000% pixel match against 13 icon placements in 3 real screenshots (3,683/3,683 opaque px) |
 | `scripts/extract_floor_items.py` | 147 dungeon-floor item sprites (49 items × 3 view depths, `bcdfa+0x270C4` + descriptor table in `bcdft` S_1 `+0x271B6`), masked mask+6bpp EHB, variable geometry; group names from `bclib.FLOOR_ITEM_NAMES` | `sprites/floor-items.*`, `data/floor-item-gfx-table.json`, `data/floor-item-names.json` | Confirmed — 147/147 descriptors satisfy all three self-describing invariants and tile the 31,388-byte bank with 0 gaps/overlaps ending exactly on its length; 100.000% pixel match against 43 sprite placements in 10 real screenshots (7,474/7,474 visible opaque px); regression vs. the verified probe has **0** differing index/mask pixels over 35,872. Names cross-checked against DOS `clipper.clp`'s own `Start Floor Items`/`End Floor Items` block: 147/147 dimensions exact, 35,869/35,872 silhouette pixels agree (99.992%) — see `scripts/verify_floor_item_dos_names.py` |
+| `scripts/extract_bcdfa_ui_bank.py` (+ `scripts/verify_bcdfa_entry5_dos.py`) | The 11 remaining records of bcdfa entry 5: the "Stone" side panel, its blank-stone erase strip, Scroll Top + Scroll Piece, the 15-frame Fire Animation (with its 4 brazier positions and per-corner phase), the mouse-pointer and bubble hardware sprites, Auto Map Block + the 24 Auto Map Tiles, and the two Treasure Chest states — plus the 32-word automap palette from `bcdft` S_1 `+0x1E886` | `sprites/{ui-side-panel,fire-animation,automap}.*`, `palettes/automap.json`, `data/fire-animation.json` | Confirmed — the 13 records tile the 34,340-byte chunk with **0 remainder** (`bclib.check_text_resource_layout`), and `verify_bcdfa_entry5_dos.py` reports **12/12 comparisons at ≥99.9%** against named DOS `clipper.clp` entries (ten at exactly 100.000%; "Stone" at 99.986% with its 2-px residue and baked-in "Castor 0" both accounted for; the automap palette within 10/255 over 11 entries). Regression vs. the verified probe: **0 differing pixels** across all eleven records |
 | `scripts/extract_bcdfa.py`, `scripts/extract_bcdfb_bcdfn.py` | Debug renders under superseded premises (bcdfa as flat 64×24 tiles; bcdfb even-height frame splitting) | `build/cache/blackcrypt/*_debug/` | Superseded — kept for reference only, do not treat their output as ground truth |
 | `scripts/decompress_bcdft.py`, `tools/bcdft_decompress/` | Raw decompressed blobs (not images) | `build/cache/blackcrypt/*.bin` | Working; `bcdft` decompression is byte-verified (contains "POTION OF WATER BREATHING" at offset 118185) |
 | `scripts/extract_bcdfv.py` (+ `scripts/bclib/bcdfv.py`) | The whole bcdfv endgame sequence: 15 screens, 10 × 160×99 panels, 59 font glyphs, 9 palettes, 29 narration lines | `screens/ending-*.png`, `sprites/ending-{panels,font}.*`, `palettes/ending-*.json`, `data/ending-script.json` | Confirmed — 16/16 blocks decode to their exact expected size with zero deviation; panel and text-panel placement independently confirmed against the frame bitmap (0/14,080 non-black pixels in the text rectangle, non-black 1-px ring on all four sides); regression vs. the verified probe has **0 unexplained differing pixels**. Supersedes the deleted `decompress_bcdfv.py` and `extract_bcdfv_sprites.py`, both of which encoded the refuted "monster sprites in bcdfv" premise |

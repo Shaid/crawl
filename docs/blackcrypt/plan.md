@@ -25,9 +25,10 @@ main executable.
   concatenation of chunks whose directory lives in the decompressed `bcdft` S_1
   image (12 chunks for bcdfx/bcdfz, 7 for bcdfy), summing to the file size
   exactly, 3/3. Every chunk is a *sequence* of independent sub-images described
-  by blit-descriptor tables in `bcdft`'s own graphics kernel. **83 named
-  sub-images in bcdfx/bcdfz, 46 in bcdfy; 205,602 of 205,922 decompressed bytes
-  assigned with zero overlap** (one 320-byte tail open). Do not RLE-scan these
+  by blit-descriptor tables in `bcdft`'s own graphics kernel. **84 named
+  sub-images in bcdfx/bcdfz, 47 in bcdfy; 205,922 of 205,922 decompressed bytes
+  assigned with zero overlap and zero remainder** (the former 320-byte tail is
+  the door-animation clip stencil, solved). Do not RLE-scan these
   files — five chunks per file are stored uncompressed, which is what produced
   every wrong payload table in this document's history. See the format spec.
   **Level assignment confirmed** (`bcdft` S_1 `+0x1A5CC`, hardcoded level-range
@@ -52,14 +53,15 @@ main executable.
   of notes saying otherwise. Spec + evidence in the data-structure doc's
   "bcdfv" section; extractor `scripts/extract_bcdfv.py`.
 - **clipper.clp** (DOS): Resource archive — 816 entries (751 images, 7 palettes,
-  22 sounds). Format fully decoded. Image categorization corrected: the 505
-  previously-unnamed images dumped into one generic "misc" bucket are mostly
-  real, identifiable content (180 more item icons, 73 spell-effect icons,
-  19 chest-armor icons) — see `docs/blackcrypt/dos/data-structure.md`'s "Item
-  icons and other unnamed entries" section. DOS now has **247** item icons
-  total (48 named + 180 + 19; the 19 were briefly split out as a separate
-  "heraldry" bucket before being corrected to chest armor and folded into
-  `items` — there is no `heraldry` category in the current output), a
+  22 sounds). Format fully decoded, and image categorization is now
+  **complete**: the generic "misc" bucket is gone (505 → 233 → 19 → **0**).
+  All 505 unnamed images resolve through `clipper.clp`'s own type-`0x01`
+  `Start X`/`End X` marker brackets — which `crypt.exe` itself looks up by
+  name — so the earlier dimension-clustering guesses are retired and each of
+  them (items 24×24, spell-effects 16×16, chest armor 32×29) is confirmed by
+  the bracket that contains exactly that cluster. See
+  `docs/blackcrypt/dos/data-structure.md`'s "The marker brackets classify the
+  archive completely" section. DOS item icons are a
   count-plausible match for the Amiga `bcdft` item-name table's 254 distinct
   names (not an index-verified 1:1 mapping — see the same doc's Amiga
   cross-reference section). **Update:** the Amiga side is now index-verified
@@ -317,8 +319,8 @@ correct for bcdfo portraits and bcdfa icon tiles.
   inside `bcdfa`; see "bcdfa — Item Icon Bank" in
   `docs/blackcrypt/amiga/data-structure.md` for the byte-level spec and the
   verification evidence. Extractor: `scripts/extract_items.py`. The earlier
-  bcdfo-gaps lead was **not** the answer and remains unexamined (still ~8.3 KB
-  of unexplained data there — a separate question). Both follow-ups are now
+  bcdfo-gaps lead was **not** the answer; those "gaps" are now closed as a
+  separate question — bcdfo is fully accounted for, 0 remainder. Both follow-ups are now
   closed: `gfxNumber` → icon index is a 256-byte LUT in the decompressed
   `bcdft` S_1 at `+0x26EF2` (**confirmed**), and the larger paperdoll art is
   two banks — 19 chest armours at `bcdfa+0x2D05E` and 7 large panel records
@@ -333,9 +335,9 @@ correct for bcdfo portraits and bcdfa icon tiles.
   "Dungeon-floor item sprites" section in `data-structure.md` for the spec,
   the evidence and why the first search missed it.
 - Remaining tail of the `bcdfa+0x036FD` stream (~11 KB of other UI art at
-  32/16/80-px row widths) and 4 gaps in `bcdfo` between LAB_010D descriptors
-  (~8.3 KB total) are both still unclassified — tracked in `TODO.md`
-  (`bcdfa-paperdoll-tail`, `bcdfo-ui-gaps`), evidence in `data-structure.md`.
+  32/16/80-px row widths) is still unclassified — tracked in `TODO.md`
+  (`bcdfa-paperdoll-tail`), evidence in `data-structure.md`. The `bcdfo`
+  "gaps" are closed: that file is now fully accounted for, 0 remainder.
 
 ### Phase 3: Overlay Disassembly (In Progress)
 

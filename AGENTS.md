@@ -9,7 +9,7 @@ index plus a log of dead ends worth not repeating; where the two disagree,
 
 ### Solved and extracted
 - **bcdfr**: 4 full-screen images (Raven logo, Title, Logo banner, Plot text)
-- **bcdfo**: **36** character portraits (32×24×6bpp) + UI elements via LAB_010D descriptors.
+- **bcdfo**: **36** character portraits (32×24×6bpp) + 23 **7-plane masked** UI elements via LAB_010D descriptors + three 8×8 fonts and the mouse-pointer sprite bank. Fully accounted, 0 remainder.
   **Correction:** previously miscounted as 109 — tiles 36-108 are not more
   portraits, they're the same-file-but-differently-shaped LAB_010D UI
   descriptor region (already separately extracted correctly by
@@ -157,8 +157,9 @@ index plus a log of dead ends worth not repeating; where the two disagree,
   pixel-exactly (3,683/3,683 opaque px). Extractor `scripts/extract_items.py`
   -> `sprites/items.*`. Spec + evidence:
   `docs/blackcrypt/amiga/data-structure.md`, "bcdfa - Item Icon Bank".
-  The bcdfo-gap lead was **not** it; those 4 gaps are tracked separately in
-  `docs/blackcrypt/TODO.md` (`bcdfo-ui-gaps`).
+  The bcdfo-gap lead was **not** it; those 4 "gaps" turned out not to exist —
+  bcdfo is now fully accounted for, 0 remainder (see data-structure.md's
+  bcdfo section).
   `gfxNumber` -> icon index is now **confirmed** as `table[gfxNumber]` via a
   236-byte LUT in the decompressed `bcdft` S_1 at `+0x26EF2` (max value 174),
   reached by `MULU.W #$1B0` at five sites - the earlier "no `MULU #$1B0`
@@ -232,8 +233,8 @@ index plus a log of dead ends worth not repeating; where the two disagree,
   size, RLE flag, A5 slot, zero-terminated) and each sums to the file's exact
   byte size (3/3, zero deviation). `scripts/bclib/bcdfxyz.py` reads this
   directory (`read_chunk_directory`/`read_chunks`) and the confirmed
-  per-sub-image geometry (`iter_sub_images`/`SUB_IMAGES`, 83 named sub-images
-  for bcdfx/bcdfz, 46 for bcdfy) directly — `render_all.py` no longer scans
+  per-sub-image geometry (`iter_sub_images`/`SUB_IMAGES`, 84 named sub-images
+  for bcdfx/bcdfz, 47 for bcdfy) directly — `render_all.py` no longer scans
   RLE-decompressed payload sizes (`find_payload_by_size`, retired: it was
   blind to raw-stored chunks and to same-size collisions) and no longer
   defaults to a blanket bcdfu-variant-0 palette; it calls
@@ -289,7 +290,7 @@ index plus a log of dead ends worth not repeating; where the two disagree,
 | bcdfa `0x06F4D`-`0x0DFFB` | Byte-value entropy/autocorrelation profiling (this range's entropy, 6.91 bits/byte, was *higher* than the file's own confirmed-compressed streams, and its lag-1..10 autocorrelation decayed smoothly like a waveform, not like image or compressed data) then cross-referencing every DOS `clipper.clp` `type=4` sound entry (`XOR 0x80`) against the raw byte range | **10 unique PCM samples, byte-identical to 14 DOS sound entries, tiling the whole 28,846 B span with 0 gap** | Retracts the "336-byte raw movement/delta table" guess — that span is the tail of the last sample. See data-structure.md's "bcdfa — Effect Sound Bank" |
 | bcdfa `0x10779`-`0x1AE70` | Opaque/masked render sweeps (widths 16-208px) plus both padding-column scans | No coherent image; strict scan found 0 hits, generalised scan found too many (100K+) to be useful | **Superseded — `bcdfa` does have a loader.** Found it (`bcdft` S_1 `+0x1DBD2`, structurally identical to `OpenTilesetFile`) and its 13-entry container directory, which resolved this whole span at once: entry 4 (`0x10779`, 4,288 B) is a confirmed message-log font; entry 5 (`0x111E1`, 34,340 B) has 14 real consumer-code hits (heterogeneous bank, not one image, still open); entry 6 (`0x15F8D`, 20,195 B) is directory-confirmed **raw, not RLE** — explaining why it never chained as RLE — **solved** as BCSPEED.EFF via `re-codebreaker` + independent re-verification. See data-structure.md's "bcdfa — Container Directory" and "bcdfa — BCSPEED.EFF" |
 | bcdfa container directory | Found by re-applying the bcdfx/y/z "template-patch + in-executable directory" mechanism to bcdfa itself (a 4th patch site of the same shared `"bcdf?"` template, hardcoded rather than parameterised) | **13-entry directory at S_1 `+0x1DC54`, sums to bcdfa's exact 197,894 B file size, 13/13 zero deviation; 10/13 entries land byte-exact on already-confirmed banks** | Retroactively fixed a wrong "chest armour size looks inconsistent" hand-check (an off-by-one cumulative-offset arithmetic slip, not a real inconsistency). See data-structure.md's "bcdfa — Container Directory" |
-| bcdfo UI descriptor gaps (4 gaps, 8,326 B total) | Opaque 6-plane render sweep (8 widths) plus both padding-column scans, applied per-gap | No coherent image in any of the 4 gaps; one gap (`0xB4F8`-`0xB658`, 352 B) is 94% a single byte value (0xFF) with a periodic 0xC0, reading as blank/filler rather than a distinct asset | **Superseded — 3 of 4 gaps solved.** They aren't filler or new assets: `chargen_ui`, the 4 guild banners and `stats_panel` are 7-plane masked sprites whose mask plane is stored *outside* the descriptor's own colour span (the "94% 0xFF" gap is the guild banners' shared mask, not blank filler). Found by comparing each gap's start offset to every descriptor's own 6-plane end offset, not by any render sweep. The 5,288 B gap between `chargen_logo` and `sigil_0` is still open. See data-structure.md's "bcdfo — Character Portraits + UI Elements" § "Unaccounted gaps". |
+| bcdfo UI descriptor gaps (4 gaps, 8,326 B total) | Opaque 6-plane render sweep (8 widths), both padding-column scans, a byte-density histogram, and a "mask-adjacency" check that matched each descriptor's 6-plane end offset to a gap start | Every technique returned a confident wrong or partial answer | **Superseded — there were never 4 gaps.** The `LAB_010D` descriptor's **`+10` field is an explicit mask pointer** and its `+22` flag byte's bit 1 selects mask-first vs. mask-elsewhere storage (`LAB_011E`, `bcdfp.asm:4091`). All 23 elements are 7-plane masked sprites; three of the four "gaps" were simply the last *colour* plane of `chargen_ui`/`chargen_stats`/`chargen_title`, read one plane early. The 5,288 B range between them is bcdfp's text machinery — three 8x8 fonts at `0x9E28`/`0xA148`/`0xA320` (the latter two confirmed 100.000% vs DOS `"CG Font"`, at full colour depth) plus the mouse-pointer sprite bank at `0xA028` (byte-identical to bcdfa's). bcdfo now tiles with **0 remainder**. Lesson: the descriptor table was in front of two prior passes, which read only its source offset and `w|h` word. See data-structure.md's "bcdfo" section. |
 
 ## Agent: amiga-re (Amiga 68k Reverse Engineering Specialist)
 
@@ -462,8 +463,10 @@ Each chunk is a *sequence* of independent sub-images, back to back, no header
 or separator — every image has its own width, height and plane count.
 Sequential planar; 6 planes = opaque, **7 planes = mask plane first**.
 
-- **83 named sub-images in bcdfx and bcdfz, 46 in bcdfy. 205,602 of 205,922
-  decompressed bytes assigned, zero overlap**, one 320-byte tail still open.
+- **84 named sub-images in bcdfx and bcdfz, 47 in bcdfy. 205,922 of 205,922
+  decompressed bytes assigned, zero overlap, zero remainder.** The 84th is a
+  1-plane `door-clip-stencil` (slot `$0C` +42,434, 80x32) that the door
+  open/close animation feeds to the blitter's A channel.
 - The geometry comes from the game's own blit-descriptor tables, not from
   guessing: a **20-byte** record (walls/ceiling/floor, S_1 `+0x22CE2`/`+0x22D96`),
   a **28-byte** record carrying its own `slot`, `src`, `bytesPerPlane`,

@@ -23,12 +23,13 @@ far-tier zigzag; see docs/blackcrypt/amiga/data-structure.md, "Monster sprite
 clustering", Paths tried).
 
 Calibration and validation:
-  * factor=1.4 reproduces map 1's known split exactly (Two Head 7 / the
+  * factor=1.4 reproduced map 1's ORIGINAL 4-way split (Two Head 7 / a
     unidentified 64x71 singleton / Rock Eye+tail 6) with zero tuning specific
     to map 1 — it falls out of the same rule applied uniformly.
   * for maps 2-13, the resulting cluster COUNT matches the file header's
     "Graphics & sound effects ID" count (the number of distinct monster types
-    the game itself says are on that level) exactly for 12 of 13 maps.
+    the game itself says are on that level) exactly. With map 1's corrected
+    2-way split (below) that is now 13/13 maps, and main() asserts it.
   * map 9 is the one exception: the algorithm over-splits one creature into
     two blocks (a front-view pose vs. a profile-view pose of the same red
     crab-like monster) because the front-to-profile transition happens to
@@ -39,37 +40,50 @@ Calibration and validation:
     see the data-structure.md section for the montage-based confirmation
     notes (e.g. map 2's three clusters render as a grey ogre-gorilla, a green
     beetle, and a horned orange caterpillar; map 6's two clusters are
-    identical-dimension colour recolours of one humanoid, consistent with the
-    file header's own note that one of its two IDs is generator-spawned only).
+    identical-dimension colour recolours of one humanoid, only one of which
+    (0xb8) is ever placed on the map).
+
+CLUSTER -> GRAPHICS ID
+----------------------
+Cluster i is the i'th graphics ID in the bcdfb-n file header (+4/+6/+8). Those
+words are stored in **sprite-store order, not sorted** (bcdfj reads `c4, bf`
+and bcdfl reads `be, c6, bd`), which is what makes the binding positional and
+useful. It is cross-checked three ways: against map 1's DOS ground truth,
+against the 214-byte secondary table's trailing 3 x 12 per-creature hitbox
+blocks (whose degenerate slots land exactly on the degenerate clusters — see
+data-structure.md), and against per-ID behaviour in `bcdfs` (map 7's
+one-sprite cluster is the movement-type-1 "stationary" ID). `main()` asserts
+cluster count == header ID count for all 13 maps, so a segmenter regression
+breaks the build rather than silently relabelling creatures.
 
 NAMING
 ------
-Real creature names require an oracle beyond geometry. Two are available:
+Real creature names require an oracle beyond geometry; there is no bestiary
+table anywhere in bcdft/bcdft-S2/bcdfs (confirmed negative). Three oracles:
 
-  * Map 1: already solved via a 100% DOS `clipper.clp` silhouette match
-    (Two Head, Rock Eye) — reused verbatim, not recomputed here.
-  * Map 6: `bcdfs`'s monster stat records hold exactly one entry, in the
-    entire 265-record corpus, with movement-type byte 0x0F == 5
-    ("Possessor", a value already named in the documented monster-bytecode
-    field), at map 6 gfx ID 0xb8. `bcdft`'s taunt text names "THE POSSESSOR"
-    in prose, and `bcdfu`'s ending epilogue independently names a defeated
-    boss "THE EVIL POSSESSOR DEMON" outright. Map 6's other gfx ID (0xb7) is
-    already documented as an identically-dimensioned, generator-spawned
-    recolour of the same base sprite, so both of map 6's clusters are named
-    "Possessor Demon".
+  * DOS `clipper.clp`'s developer-authored entry names, which cover map 1
+    only ("Rock Eye 1 N" ... "Two Head A 0", 7 entries per creature).
+  * The official Black Crypt Manual & Clue Book, which names creatures per
+    *dungeon level* — turned into a per-file, per-cluster name by MAP_LEVELS
+    above. This is where Dragonlich / Ram Demon / Ram Lord / Waterlord /
+    Medusa / Statue come from, several of them pinned by an exact match
+    between a clue-book note's item list and the monster record's own carried
+    sub-chain (the Ram Lord's four items are the clue book's four items).
+  * `bcdfu`'s ending epilogue, which names the six unique bosses and supplies
+    the Ogre <-> EMERALD KEY link that identifies map 1's "Two Head".
 
-A full search of bcdft's only readable text region (~12.8 KB, spell/class
-names + quest riddles + boss taunts + a large unique-item name list) and of
-bcdft S_2 and bcdfs turned up no per-graphics-ID creature name table — see
-data-structure.md for the offsets searched and the (unconfirmed, narrative-
-only) leads on Medusa/Waterlord/Ram Demon/Ogre/Dragonlich that were
-deliberately left unnamed for lack of a structural link.
+See NAMED_CLUSTERS for the per-cluster evidence and data-structure.md,
+"Creature names from the Manual & Clue Book", for the full write-up.
 
-Everything else is a geometry-only placeholder, "Map N Creature X".
+11 of the 26 clusters (90 of the 204 sprites) are named this way. The other 15
+are creatures the clue book never had a reason to name; they stay
+"Map N Creature X", but every group now carries its confirmed graphics ID and
+dungeon levels.
 
 Output: public/assets/blackcrypt/amiga/data/monster-names.json
 """
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -82,23 +96,91 @@ from extract_monsters import LETTERS, read_directory
 BPR_FACTOR = 1.4
 BPR_WINDOW = 2
 
-# Map 1 is already solved (100% DOS clipper.clp silhouette match) — reuse
-# the verified table rather than re-derive it. See data-structure.md,
+# Map 1 is already solved (DOS clipper.clp silhouette match) — reuse the
+# verified table rather than re-derive it. See data-structure.md,
 # "Verified Sprite Table (bcdfb, map 1)".
+#
+# CORRECTION (2026-08-02): the bpr segmenter over-split map 1 into FOUR
+# blocks; the trailing three are one creature. DOS `clipper.clp`'s own
+# developer-authored entry names settle it byte-for-byte — its
+# `Start Monsters`/`End Monsters` bracket holds exactly 14 entries,
+# 7 per creature:
+#     Rock Eye 1 N / 1 E / 1 S / 2 S / 3 S / A 0 / A 1     (7)
+#     Two Head 1 S / 1 E / 2 S / 2 E / 3 S / 3 E / A 0     (7)
+# (`<tier> <facing>` = near/mid/far x S/E/N, `A n` = attack pose.) The Amiga
+# map-1 store likewise holds 7 + 7 sprites, so the old
+# "Unidentified"(1) + "Rock Eye"(4) + "Projectile/Effect"(2) = 7 are all
+# Rock Eye. Rendering agrees: 45206 is a mid-size open star-eye and
+# 65394/66290 are the closed stone ball at far range.
 MAP1_GROUPS = [
-    ('Two Head', [0, 10836, 21252, 31836, 36260, 40796, 42980]),
-    ('Map 1 Unidentified', [45206]),
-    ('Rock Eye', [49182, 56154, 59234, 62314]),
-    ('Map 1 Projectile/Effect', [65394, 66290]),
+    ('Two Head (the Ogre)', [0, 10836, 21252, 31836, 36260, 40796, 42980]),
+    ('Rock Eye', [45206, 49182, 56154, 59234, 62314, 65394, 66290]),
 ]
 
-# One structurally-confirmed name beyond map 1 — see module docstring.
+# bcdfb-bcdfn map index -> the dungeon levels that map covers. One `bcdfs`
+# "map" is a *load unit* holding several clue-book levels, told apart by each
+# square's own 4-bit level nibble; nibble k is that map's k-th level.
+# Established against the official Manual & Clue Book — see data-structure.md,
+# "Map <-> dungeon-level mapping".
+MAP_LEVELS = {
+    1: [1, 2], 2: [3, 4, 5], 3: [6, 7, 8, 9], 4: [10, 11, 12], 5: [13],
+    6: [14, 15], 7: [16, 17, 18, 19], 8: [20], 9: [21, 22], 10: [23],
+    11: [24, 25, 26], 12: [27], 13: [28],
+}
+
+# Creature names resolved beyond geometry, keyed by (map, cluster index).
+# Cluster order == the order of the three graphics IDs in the bcdfb-n file
+# header (+4/+6/+8) == the block order of the 214-byte secondary table; see
+# data-structure.md, "Cluster -> graphics-ID binding". Every entry below is
+# backed by an external oracle (clue book / ending epilogue / DOS labels) —
+# full evidence in data-structure.md, "Creature names from the Clue Book".
 NAMED_CLUSTERS = {
-    (6, 0): 'Possessor Demon',
-    (6, 1): 'Possessor Demon (recolour variant)',
+    # gfx 0x50, level 10. No static placement at all (its only bcdfs record is
+    # a row-0 prototype) because it is *summoned*: clue book L10 note 10
+    # "PLACE IDOLS OF TEMIN HERE TO OPEN THE WAY TO THE DRAGON LICH", epilogue
+    # "USING 3 EVIL IDOLS, YOU SUMMONED AND DEFEATED THE DREADED DRAGONLICH".
+    (4, 2): 'Dragonlich',
+    # gfx 0xb7 / 0xb8. 0xb8 is the placed one (movement type 5 = "Possessor",
+    # the only such record in the corpus) and carries the game's only SOUL KEY
+    # — clue book L15 note 2: "POSSESSOR HAS THE KEY AND MUST BE KILLED FOR IT".
+    (6, 0): 'Possessor Demon (variant)',
+    (6, 1): 'Possessor Demon',
+    # gfx 0xb5: the only key-holding monster on level 17 (an IRON KEY) —
+    # clue book L17 note 2 "RAM MINOR DEMON - HOLDS KEY TO DOOR AT (10,4,17)".
+    (7, 0): 'Ram Demon',
+    # gfx 0xb6, level 20, 550 HP. Its four carried items are, byte for byte,
+    # clue book L20 note 2's list: "RAM LORD - HOLDS KEYS TO TWO LOCKED DOORS
+    # AS WELL AS AMULET OF POWER (+2 AC, +4 STRENGTH), AND BELT OF SUSTENANCE".
+    (8, 0): 'Ram Lord',
+    # gfx 0xbc, level 23, 375 HP, carries RING OF LOCATION + a key — clue book
+    # L23 note 3 "WATERLORD, HOLDS KEY TO DOOR AT (4,5,23), AND RING OF LOCATION".
+    (10, 0): 'The Great Waterlord',
+    # gfx 0xbe: the only unique monster on level 24, the Medusa level.
+    (11, 0): 'Medusa',
+    # gfx 0xbd is NOT a monster: 0x00BD is the *Statue* structure gfxNumber,
+    # and map 11 is the only map carrying type-0x2F statue records (9 of them,
+    # all on level 24 = "PREVIOUS ADVENTURERS WERE PLACED HERE WHEN TURNED TO
+    # STONE"). It owns no monster record anywhere and its 214-byte block is
+    # all zeros.
+    (11, 2): 'Statue (petrified adventurer)',
+    # gfx 0xc5, level 28, 350 HP — the final boss, already special-cased in
+    # code as gfx word 0x80C5.
+    (13, 0): 'Estoroth Paingiver',
 }
 
 LABELS = 'ABCDEFGH'
+
+
+def header_gfx_ids(src, letter):
+    """The bcdfb-n header's graphics IDs at +4/+6/+8, **in file order**.
+
+    NOT sorted: bcdfj is `c4, bf` and bcdfl is `be, c6, bd`. The order is the
+    order the creatures' sprites appear in the RLE stream, so ID i belongs to
+    cluster i.
+    """
+    raw = (src / f'bcdf{letter}').read_bytes()
+    ids = struct.unpack_from('>3H', raw, 4)
+    return [i for i in ids if i]
 
 
 def segment(bprs, factor=BPR_FACTOR, window=BPR_WINDOW):
@@ -164,8 +246,12 @@ def main():
         assert len(matches) == 1, (off, matches)
         return matches[0]
 
-    for name, offs in MAP1_GROUPS:
-        groups.append({'index': idx, 'name': name, 'frames': [m1_frame(o) for o in offs]})
+    map1_ids = header_gfx_ids(src, 'b')
+    assert len(map1_ids) == len(MAP1_GROUPS), (map1_ids, len(MAP1_GROUPS))
+    for bi, (name, offs) in enumerate(MAP1_GROUPS):
+        groups.append({'index': idx, 'name': name,
+                       'gfxId': f'0x{map1_ids[bi]:02x}', 'dungeonLevels': MAP_LEVELS[1],
+                       'frames': [m1_frame(o) for o in offs]})
         idx += 1
 
     for letter in LETTERS[1:]:  # skip 'b' == map 1, handled above
@@ -179,11 +265,22 @@ def main():
         if mapno == 9 and len(blocks) == 3:
             blocks = [blocks[0], blocks[1] + blocks[2]]
 
+        # Cluster i <-> header graphics ID i. Asserting the counts match is the
+        # same invariant the doc uses to validate the segmenter, and it is what
+        # makes the positional ID binding safe: if a map ever segments into a
+        # different number of blocks than it declares creatures, the binding
+        # (and every name hanging off it) is wrong and this stops the build.
+        ids = header_gfx_ids(src, letter)
+        assert len(blocks) == len(ids), (
+            f'map {mapno}: {len(blocks)} clusters vs {len(ids)} header graphics IDs')
+
         for bi, block in enumerate(blocks):
             frs = [f"m{mapno}_off{off}_{e['width']}x{e['height']}" for off, e in
                    (items[i] for i in block)]
             name = NAMED_CLUSTERS.get((mapno, bi), f'Map {mapno} Creature {LABELS[bi]}')
-            groups.append({'index': idx, 'name': name, 'frames': frs})
+            groups.append({'index': idx, 'name': name,
+                           'gfxId': f'0x{ids[bi]:02x}', 'dungeonLevels': MAP_LEVELS[mapno],
+                           'frames': frs})
             idx += 1
 
     all_frames = [f for g in groups for f in g['frames']]
@@ -193,35 +290,43 @@ def main():
     assert not missing and not extra, f'coverage mismatch: missing={missing} extra={extra}'
 
     source = (
-        "Map 1: pre-existing verified grouping (100% silhouette match vs DOS clipper.clp "
-        "'Start/End Monsters' marker block; see data-structure.md). Maps 2-13: automated "
+        "Clustering — map 1: DOS clipper.clp's own developer-authored entry names "
+        "('Rock Eye 1 N ... A 1', 'Two Head 1 S ... A 0'), 7 entries per creature, "
+        "matching the Amiga store's 7 + 7 sprites exactly. Maps 2-13: automated "
         "same-file offset-order segmentation — a new cluster starts where a sprite's "
         "bytes-per-plane (bpr, proportional to rendered area) exceeds 1.4x the max bpr of "
         "the 2 preceding entries (a size-ladder discontinuity: a fresh 'near' pose "
-        "following a 'far' pose). Calibrated to reproduce map 1's known split with no "
-        "map-1-specific tuning; validated against the bcdfb-n header's 'Graphics & sound "
-        "effects ID' count (matches 12/13 maps exactly) and against a rendered contact "
-        "sheet per map (scripts/cluster_monster_names.py docstring). Map 9's two "
-        "size-flagged sub-blocks were manually merged after the render showed them to be "
-        "front-view and profile-view poses of one creature. 'Possessor Demon' (map 6) is "
-        "the only name resolved beyond geometry: bcdfs holds exactly one movement-type-5 "
-        "('Possessor') monster record in the whole 265-record corpus, at map 6 gfx 0xb8; "
-        "bcdft's taunt text names 'THE POSSESSOR' in prose and bcdfu's ending epilogue "
-        "independently names 'THE EVIL POSSESSOR DEMON' outright; map 6's other gfx ID "
-        "(0xb7) is the documented generator-spawned, identically-dimensioned recolour of "
-        "the same sprite, so both "
-        "map 6 clusters are named. No per-graphics-ID creature name table was found "
-        "anywhere in bcdft/bcdft-S2/bcdfs after a full read of bcdft's only text region "
-        "(~12.8 KB) — everything else is a geometry-only placeholder ('Map N Creature X')."
+        "following a 'far' pose), with one hardcoded merge on map 9. Cluster count now "
+        "equals the bcdfb-n header's graphics-ID count for 13/13 maps. "
+        "Cluster -> graphics-ID binding: cluster i is header ID i (+4/+6/+8, which are "
+        "stored in sprite-store order, NOT sorted — bcdfj is c4,bf and bcdfl is "
+        "be,c6,bd); independently corroborated by the 214-byte secondary table, whose "
+        "trailing 3 x 12 pair-blocks track each cluster's per-tier width/height and whose "
+        "third block is all-zero exactly on bcdfl, whose third ID (0xbd) owns no monster "
+        "record. "
+        "Names — resolved against the official Black Crypt Manual & Clue Book plus "
+        "bcdfu's ending epilogue, via the map<->dungeon-level mapping in "
+        "docs/blackcrypt/amiga/data-structure.md: Two Head/the Ogre (carries the game's "
+        "only EMERALD KEY, which the epilogue says is taken from 'THE OGRE'), Rock Eye, "
+        "Dragonlich (summoned by the 3 Idols of Temin on level 10), Possessor Demon "
+        "(level 14/15; only movement-type-5 record, carries the only SOUL KEY), Ram Demon "
+        "(only key-holder on level 17), Ram Lord (level 20; its 4 carried items are clue "
+        "book L20 note 2's list byte for byte), The Great Waterlord (level 23; RING OF "
+        "LOCATION + key), Medusa (only unique monster on level 24), Statue (gfx 0xbd is "
+        "the Statue structure gfxNumber, not a creature) and Estoroth Paingiver (level "
+        "28 final boss). No per-graphics-ID creature name table exists anywhere in "
+        "bcdft/bcdft-S2/bcdfs — the remaining clusters are geometry-only placeholders "
+        "('Map N Creature X') carrying their confirmed graphics ID and dungeon levels."
     )
 
     out_path = bclib.asset_dir('data') / 'monster-names.json'
     bclib.write_json(out_path, {'source': source, 'groups': groups}, pretty=True)
 
-    real_named = sum(len(g['frames']) for g in groups if not g['name'].startswith('Map '))
+    named = [g for g in groups if not g['name'].startswith('Map ')]
+    real_named = sum(len(g['frames']) for g in named)
     print(f'  data/monster-names: {len(groups)} groups, {len(all_frames)} frames')
     print(f'  {real_named}/{len(all_frames)} frames carry a real creature name '
-          f'(Two Head, Rock Eye, Possessor Demon x2); the rest are geometry-clustered placeholders')
+          f'across {len(named)} clusters; the rest are geometry-clustered placeholders')
 
     bclib.set_groups_file('sprites/monsters', 'data/monster-names.json')
 

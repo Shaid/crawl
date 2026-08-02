@@ -3771,25 +3771,43 @@ LAB_010C:
 	DC.L	$00000200,$00200018
 LAB_010D:
 ; ── UI element tile descriptors (28-byte entries, indexed by LAB_010E) ──
-; Structure: DS.L 1 (source idx), source_off | ?, ?, BLTSIZE, ?, ?, resv, w|h
-; Source offset = upper word of byte[4] (since DS.L=0 fills bytes 2-3).
+; Fully decoded (see docs/blackcrypt/amiga/data-structure.md, bcdfo section).
+; Field offsets are from the entry base; LAB_011E is the consumer:
+;   +0  word  A5 pointer-table offset (0 = the bcdfo buffer)
+;   +2  long  source offset          (ADDA.L 2(A0),...)
+;   +6  long  plane stride = (w/8)*h (ADDA.L 6(A0),A1 per plane)
+;   +10 long  MASK offset            (ADDA.L 10(A0),A3 — only if flag bit 1)
+;   +14 word  BLTSIZE = (h<<6)|words
+;   +16 word  screen modulo -> BLTCMOD/BLTDMOD
+;   +18 word  X   (runtime, written by LAB_011E)
+;   +20 word  Y   (runtime, written by LAB_011E)
+;   +22 byte  flags: bit0 = clipped path (LAB_0124);
+;                    bit1 = mask lives at +10 (else mask is the FIRST plane,
+;                           stored at the source offset, colour planes after)
+;   +24 word  width in pixels
+;   +26 word  height in pixels
+; EVERY element is a 7-plane masked sprite (1-bit mask + 6 EHB colour planes).
+; NOTE the earlier comment here read the entry as "source_off | ?, ?, BLTSIZE,
+; ?, ?, resv, w|h" and missed the +10 mask pointer entirely; two RE passes then
+; mis-read desc00-02 as 6-plane opaque images, which is off by exactly one
+; plane and invented three phantom "gaps" in bcdfo.
 ;
-; desc00: source=0x5160 (+20832), 128×105×6bpp — character creation UI (1 tile)
+; desc00: source=0x5160, 128×105, mask+6 planes (flag bit1=0) — chargen portrait picker
 	DS.L	1
 	DC.L	$51600000,$06900000,$00001a49,$00160000
 	DS.L	1
 	DC.L	$00800069
-; desc01: source=0x7F50 (+32592), 192×47×6bpp (1 tile)
+; desc01: source=0x7F50, 192×47, mask+6 planes (flag bit1=0) — STR/DEX/... stats strip
 	DS.L	1
 	DC.L	$7f500000,$04680000,$00000bcd,$000e0000
 	DS.L	1
 	DC.L	$00c0002f
-; desc02: source=0xD758 (+55128), 128×62×6bpp (1 tile)
+; desc02: source=0xD758, 128×62, mask+6 planes (flag bit1=0) — BLACK CRYPT / ENTER CRYPT panel
 	DS.L	1
 	DC.L	$d7580000,$03e00000,$00000f89,$00160000
 	DS.L	1
 	DC.L	$0080003e
-; desc03-07: source=0xAE68-0xB3A8, 32×14×6bpp (5 entries)
+; desc03-07: source=0xAE68-0xB3A8, 32×14×6bpp, shared mask 0xAE30 — mystic sigils
 	DS.L	1
 	DC.L	$ae680000,$00380000,$ae300383,$00220000
 	DC.L	$00000200,$0020000e
@@ -3805,7 +3823,7 @@ LAB_010D:
 	DS.L	1
 	DC.L	$b3a80000,$00380000,$ae300383,$00220000
 	DC.L	$00000200,$0020000e
-; desc08-11: source=0xB658-0xCF18, 128×22×6bpp (4 entries)
+; desc08-11: source=0xB658-0xCF18, 128×22×6bpp, shared mask 0xB4F8 — guild banners
 	DS.L	1
 	DC.L	$b6580000,$01600000,$b4f80589,$00160000
 	DC.L	$00000200,$00800016
@@ -3818,7 +3836,7 @@ LAB_010D:
 	DS.L	1
 	DC.L	$cf180000,$01600000,$b4f80589,$00160000
 	DC.L	$00000200,$00800016
-; desc12-22: source=0xF286-0xF5CE, 16×7×6bpp (11 entries, mouse pointers & tiny icons)
+; desc12-22: source=0xF286-0xF5CE, 16×7×6bpp, shared mask 0xF278 — blank + digits 0-9
 	DS.L	1
 	DC.L	$f2860000,$000e0000,$f27801c2,$00240000
 	DC.L	$00000200,$00100007

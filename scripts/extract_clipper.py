@@ -40,9 +40,10 @@ DEFAULT_CLP = bclib.data_dir(GAME, PLATFORM) / 'clipper.clp'
 #   cyan  (0,255,255) on sky and wall tiles
 KNOWN_BG = ((95, 67, 51), (0, 255, 255))
 
-# Which atlas a named entry lands in. First match wins; unmatched named entries
-# go to 'items' and unnamed (numeric/empty-name) ones fall through to the
-# dimension-based rules below, and only reach 'misc' if none of those match either.
+# Which atlas a *named* entry lands in when no MARKER_GROUPS bracket claims it
+# first. First match wins; unmatched named entries go to 'items'. Unnamed
+# entries never reach this table — all 505 of them sit inside a marker bracket
+# (see MARKER_GROUPS), which is why the 'misc' bucket no longer exists.
 GROUPS = [
     ('dungeon', ('wall', 'door', 'floor', 'ceiling', 'pillar', 'stairs',
                  'alcove', 'plaque', 'pit', 'button', 'pressure plate',
@@ -92,10 +93,60 @@ GROUPS = [
 # `items` and the 98 unnamed depth-1/2 entries into `misc`, split apart from
 # each other and from unrelated content. Routed here as one `floor-items`
 # bucket instead, mirroring the Amiga side's own `sprites/floor-items.*`.
+#
+# `Start CG Numbers`/`End CG Numbers` (208-220, 11 x 8x7, unnamed) is the
+# character-generation numeral font, and it is **byte-identical** to the
+# Amiga `bcdfo` numeral bank (`scripts/render_all.py`'s `numerals`,
+# 0xF286...0xF5CE, 11 glyphs x 16x7 with the shared 1-bit mask at 0xF278):
+# that mask is `11111111 00000000` on every row, so the Amiga glyph only
+# ever occupies its left 8 columns, and cropping it there reproduces the
+# DOS entry's *palette indices* exactly — 616/616 px (100.000%) across
+# 11/11 glyphs, same ink registers 27/28/29 on the same background 30.
+# Slot 0 is a blank glyph, slots 1-10 are digits `0`-`9`, matching the
+# Amiga bank's documented "one blank slot + digits 0-9". Routed to `ui`,
+# next to `CG Font`/`CG Options`/`CG Guild N`.
+#
+# `Start Throwing Items`/`End Throwing Items` (432-445, 12 entries) is the
+# in-flight projectile sprite bank: **four** weapons x 3 shrinking view
+# depths, only the near-depth entry of each named (`Arrow` 16x11, `Dagger`
+# 16x7, `Sword` 32x15, `Hammer` 16x13) — the archive's usual "name the
+# first of N" convention, which is why the 8 mid/far entries used to fall
+# into `misc` while their 4 named near siblings scattered into `ui`
+# (keyword `arrow`) and `items`. The first six shapes are the DOS
+# counterpart of the Amiga `bcdfa` entry-12 bank (16x11/16x8/16x5 arrow,
+# 16x7/16x5/16x3 dagger — 6/6 exact); `Sword` and `Hammer` are
+# **DOS-exclusive**: the Amiga bank is closed at 2 weapons (12 descriptors
+# tiling 1,092 B with zero slack, a 2-way `TST.W D0` weapon-type branch in
+# the flight animator at S_1 `+0x21A78`, and a 12-B-per-weapon hot-spot
+# table with 2 rows). This art is distinct from the same weapons'
+# `floor-items` sprites, which are 2-5x wider (a sword lying on the floor
+# is 80x9; the thrown one is 32x15).
+#
+# The five remaining brackets below hold entries the *dimension* fallback
+# already bucketed correctly, but by eye rather than by evidence. Routing
+# them through their markers makes the classification archive-driven and
+# leaves membership unchanged, while independently confirming the earlier
+# visual calls with zero deviation:
+#   Speed Graphics (227-301) = 73 entries, all 16x16 == the whole 16x16
+#     unnamed cluster the doc labelled `spell-effects` by eye
+#   Items (446-622) = 175 + Misc (623-629) = 5, all 24x24 == the whole
+#     180-entry 24x24 cluster the doc labelled `items` by eye
+#   Chest (630-650) = 19, all 32x29 == the whole 19-entry 32x29 cluster,
+#     first guessed `heraldry`, then corrected to chest armor by eye —
+#     `Chest` is the equipment slot, so the correction was right
+#   Monsters (800-815) = 14, exactly the 14 the `rock eye`/`two head`
+#     keywords already caught
 MARKER_GROUPS = (
+    ('Start CG Numbers', 'End CG Numbers', 'ui'),
     ('Start Keys', 'End Keys', 'keys'),
     ('Start Key Holes', 'End Key Holes', 'key-holes'),
+    ('Start Throwing Items', 'End Throwing Items', 'throwing-items'),
+    ('Start Speed Graphics', 'End Speed Graphics', 'spell-effects'),
+    ('Start Items', 'End Items', 'items'),
+    ('Start Misc', 'End Misc', 'items'),
+    ('Start Chest', 'End Chest', 'items'),
     ('Start Floor Items', 'End Floor Items', 'floor-items'),
+    ('Start Monsters', 'End Monsters', 'monsters'),
 )
 
 
@@ -112,27 +163,22 @@ def marker_group_ranges(entries):
     return out
 
 
-# Dimension-based rules for entries clipper.clp gives NO name to (empty or
-# purely numeric — clipper's own directory just has nothing there, so
-# keyword matching above can never fire for them). Most of the 751 images'
-# "misc" bucket (505 of them) was actually unnamed real content, not
-# genuinely uncategorizable junk — spot-checked by rendering every entry at
-# a given (w, h) together: each size cluster turned out to be one coherent
-# visual category (confirmed by eye, not from any clipper.clp metadata,
-# since none exists for these entries):
-#   24x24 (180 entries) - weapon/armor/food/jewelry/container icons, the same
-#                          visual language as the 48 explicitly-named "items"
-#                          entries (Sword, Dagger, Potion, ...) just without
-#                          name strings in the archive
-#   16x16 (73 entries)  - coloured starburst/orb spell-effect icons
-#   32x29 (19 entries)  - coloured chest-armor icons (corrected from an
-#                          earlier "heraldry/shield-crest emblem" guess —
-#                          these are armor items, folded into 'items' below,
-#                          not a separate decorative category)
-# `keys`/`key-holes` (see MARKER_GROUPS above) are resolved before this
-# table is ever consulted. Everything else unnamed (16x11, 16x15, 8x14
-# outside the marker brackets, and other small/thin sizes) stays in `misc`
-# — rendered but not confidently classified in this pass.
+# Residual safety net, kept but **no longer reachable for this build of
+# clipper.clp**: with `MARKER_GROUPS` above covering every bracket, all
+# **505/505** unnamed image entries (empty or purely-numeric name — clipper's
+# own directory just has nothing there, so the keyword classifier can never
+# fire for them) now resolve through a type-1 marker bracket, zero deviation,
+# and the `misc` bucket is empty. This table is what used to sort them, by
+# rendering every entry of a given (w, h) together and calling the cluster by
+# eye; each of those three visual calls is now independently confirmed by the
+# bracket that turns out to contain exactly that cluster and nothing else:
+#   24x24 (180) -> `items`          == Start Items (175) + Start Misc (5)
+#   16x16  (73) -> `spell-effects`  == Start Speed Graphics (73)
+#   32x29  (19) -> `items`          == Start Chest (19)  ["Chest" is the
+#                  equipment slot, so the earlier `heraldry` guess really was
+#                  wrong and its correction to chest armor really was right]
+# Left in place only so a different clipper.clp (e.g. the full retail archive
+# rather than this demo) with an unbracketed run still lands somewhere sane.
 UNNAMED_DIMENSION_GROUPS = {
     (24, 24): 'items',
     (16, 16): 'spell-effects',
@@ -161,12 +207,96 @@ def parse_clp(path):
     return entries
 
 
-def pick_palette(name, palettes, default):
-    """Pick the palette an image was authored against, by name hint."""
+# Marker brackets whose (unnamed) entries were authored against a palette the
+# name-hint rules in `pick_palette` can't see, because the entries carry no
+# name at all. `Start CG Numbers` is the character-generation numeral font:
+# every glyph is drawn purely out of registers 27/28/29 on background 30 —
+# the same accent ramp `CG Symbol 1`-`4` and `CG Stat Area` use, and the same
+# registers the Amiga bank the glyphs are byte-identical to draws them in.
+# Under the default `Palette` that ramp is a muddy brown (83,67,35 ->
+# 131,115,83); under `Character Gen Palette` it is the intended orange
+# (192,64,0 -> 240,112,48).
+MARKER_PALETTES = {
+    'Start CG Numbers': 'Character Gen Palette',
+}
+
+
+def marker_palette_ranges(entries):
+    """``{entry_index: palette_name}`` for every entry in a `MARKER_PALETTES` bracket."""
+    markers = {e['name'].strip(): e['index'] for e in entries if e['type'] == 1}
+    out = {}
+    for start_name, pal_name in MARKER_PALETTES.items():
+        start, end = markers.get(start_name), markers.get('End ' + start_name[6:])
+        if start is None or end is None:
+            continue
+        for i in range(start + 1, end):
+            out[i] = pal_name
+    return out
+
+
+# Atlas frame labels for brackets whose entries carry no name of their own but
+# whose contents are individually identified (see the DOS data-structure doc).
+# Without these the frames read `434_entry_0434`, which loses everything the
+# identification established.
+#
+# `Start Throwing Items` uses the archive's "name the first of N" convention:
+# each weapon's near-depth entry is named and its mid/far siblings are not, so
+# the near name propagates forward with a depth suffix. Verified against the
+# Amiga bank for the first six (silhouette 624/624 px, 100.000%).
+#
+# `Start CG Numbers` is a blank glyph followed by digits 0-9 — byte-identical
+# to the Amiga `bcdfo` numeral bank cropped to its mask's left 8 columns
+# (616/616 palette indices, 100.000%).
+DEPTH_SUFFIXES = ('near', 'mid', 'far')
+DEPTH_LABELLED_BRACKETS = ('Start Throwing Items',)
+CG_NUMBER_LABELS = ('blank',) + tuple(str(d) for d in range(10))
+
+
+def derived_labels(entries):
+    """``{entry_index: label}`` for unnamed entries this project has identified."""
+    markers = {e['name'].strip(): e['index'] for e in entries if e['type'] == 1}
+    by_index = {e['index']: e for e in entries}
+    out = {}
+
+    for start_name in DEPTH_LABELLED_BRACKETS:
+        start, end = markers.get(start_name), markers.get('End ' + start_name[6:])
+        if start is None or end is None:
+            continue
+        stem, depth = None, 0
+        for i in range(start + 1, end):
+            name = by_index[i]['name'].strip()
+            if name:
+                stem, depth = name, 0
+            elif stem is None:
+                continue    # unnamed run before any named entry — nothing to inherit
+            else:
+                depth += 1
+            if depth < len(DEPTH_SUFFIXES):
+                out[i] = f'{stem}_{DEPTH_SUFFIXES[depth]}'
+
+    start, end = markers.get('Start CG Numbers'), markers.get('End CG Numbers')
+    if start is not None and end is not None and end - start - 1 == len(CG_NUMBER_LABELS):
+        for n, i in enumerate(range(start + 1, end)):
+            out[i] = f'CG Number {CG_NUMBER_LABELS[n]}'
+    return out
+
+
+def pick_palette(name, palettes, default, forced=None):
+    """Pick the palette an image was authored against, by name hint.
+
+    `forced` (a palette name from `marker_palette_ranges`) wins outright — it
+    comes from clipper.clp's own section markers, which cover the entries that
+    have no name for the hints below to match on.
+    """
+    if forced and forced in palettes:
+        return palettes[forced]
     n = name.lower()
     if any(k in n for k in ('automap', 'map')):
         return palettes.get('Automap Palette', default)
-    if any(k in n for k in ('char', 'portrait', 'guild')):
+    # `cg ` (character generation) before the `options` rule below, so
+    # `CG Options` gets the chargen palette its 26-30 accent ramp is drawn in
+    # rather than the standalone options screen's.
+    if n.startswith('cg ') or any(k in n for k in ('char', 'portrait', 'guild')):
         return palettes.get('Character Gen Palette', default)
     if any(k in n for k in ('title', 'logo', 'raven')):
         return palettes.get('Title Palette', default)
@@ -229,6 +359,8 @@ def main():
     entries = parse_clp(clp)
     stats = Counter()
     marker_ranges = marker_group_ranges(entries)
+    marker_pals = marker_palette_ranges(entries)
+    labels = derived_labels(entries)
 
     palettes = {e['name']: e['data'] for e in entries if e['type'] == 3}
     default_pal = next(iter(palettes.values()), None)
@@ -247,11 +379,14 @@ def main():
     for e in entries:
         if e['type'] != 2:
             continue
-        rgba = to_rgba(e, pick_palette(e['name'], palettes, default_pal))
+        rgba = to_rgba(e, pick_palette(e['name'], palettes, default_pal,
+                                       marker_pals.get(e['index'])))
         if rgba is None:
             stats['images_skipped'] += 1
             continue
-        label = e['name'].strip() or f'entry_{e["index"]:04d}'
+        label = (labels.get(e['index'])
+                 or e['name'].strip()
+                 or f'entry_{e["index"]:04d}')
         buckets.setdefault(group_for(e, marker_ranges), []).append((f'{e["index"]:03d}_{label}', rgba))
         stats['images'] += 1
 

@@ -367,7 +367,7 @@ def font_big_glyphs(font_chunk):
 #
 # The last 2,436 bytes of container-directory entry 5's 34,340-byte chunk
 # (`SLOT_TEXT_RESOURCE`) are the 29 inventory-key icons — the only
-# sub-record of that still largely-unclassified bank that is fully solved.
+# sub-record of that bank to be identified; the whole bank is solved now.
 # Confirmed via its own consumer code (two independent call sites, S_1
 # `+0x1FB40` and `+0x206D4`, both `SUBI.W #$C8,D0` / `MULU.W #$54,D0` —
 # `gfxNumber - 200`, times the 84-byte record size) and against the DOS
@@ -423,8 +423,8 @@ def key_icon_sprites(text_resource_chunk):
 # DOS 8bpp raster, produces a **100.000% silhouette match (17,920/17,920
 # pixels)** -- not just matching dimensions, the per-index opaque-pixel
 # *counts* agree exactly (8,016 / 2,130 / 935 / 774 / 620 for the five most
-# common indices in both images). See data-structure.md's "bcdfa -- Text/UI
-# Resource Bank" for the full writeup and the two DOS-size-collision
+# common indices in both images). See data-structure.md's "bcdfa -- UI /
+# Automap Resource Bank" for the full writeup and the two DOS-size-collision
 # candidates that were tested and rejected the same way (silhouette
 # agreement at chance level, ~22-58%, not a real match).
 SPELL_BOOK_OFFSET = 0x0000      # offset within the decoded SLOT_TEXT_RESOURCE chunk
@@ -447,6 +447,265 @@ def spell_book_background(text_resource_chunk):
     if len(rec) != SPELL_BOOK_BYTES:
         raise ValueError(f'bcdfa: Spell Book background truncated ({len(rec)} of {SPELL_BOOK_BYTES} B)')
     return decode_planar(rec, SPELL_BOOK_WIDTH, SPELL_BOOK_HEIGHT, SPELL_BOOK_COLOR_PLANES)
+
+
+# ── SLOT_TEXT_RESOURCE — the full 34,340-byte layout ─────────────────────
+#
+# Every sub-record of bcdfa container-directory entry 5 is now identified,
+# and the thirteen records **tile the chunk exactly, 0 remainder**. Each
+# record's offset and geometry comes from its own consumer's literal
+# `LEA <disp>(An)` displacement plus the copy loop's own counters (see
+# data-structure.md, "bcdfa -- UI / Automap Resource Bank"); every record except
+# the two Amiga-only ones is then confirmed pixel-for-pixel against a named
+# DOS `clipper.clp` entry.
+#
+# All six-plane records here are **plane-major** (`decode_planar`'s layout)
+# and 14 bytes (112 px) wide unless stated otherwise -- the width of the
+# game's right-hand side panel, which sits at screen byte 26 (x = 208).
+TEXT_RESOURCE_BYTES = 34340
+
+#: (offset, size, attribute-name, DOS `clipper.clp` entry or None).
+#: Consecutive offsets and the exact chunk length are asserted by
+#: `check_text_resource_layout`.
+TEXT_RESOURCE_LAYOUT = (
+    (0x0000, 13440, 'spell_book',        147),   # "Spell Book"        320x56
+    (0x3480, 11844, 'stone_panel',        90),   # "Stone"             103x139 (+ Castor 0)
+    (0x62C4,  1932, 'panel_clear_strip', None),  # Amiga-only 112x23 blank-stone erase strip
+    (0x6A50,   924, 'scroll_top',        165),   # "Scroll Top"        110x11
+    (0x6DEC,    84, 'scroll_piece',      167),   # "Scroll Piece"      110x1 (tiled 84x)
+    (0x6E40,   720, 'fire_animation',    157),   # "Fire Animation"    8x105 = 15 frames of 8x7
+    (0x7110,   288, 'mouse_pointer',     163),   # "Mouse Arrow"       (11x11 of a 24x24 raster)
+    (0x7230,   288, 'bubble',            164),   # "Bubble"            5x5
+    (0x7350,    80, 'automap_block',     132),   # "Auto Map Block"    16x20
+    (0x73A0,   576, 'automap_tiles',     131),   # "Auto Map Tiles"    8x192 = 24 tiles of 8x8
+    (0x75E0,   864, 'treasure_chest_0',  158),   # "Treasure Chest 0"  54x24 (Amiga crops to 48)
+    (0x7940,   864, 'treasure_chest_1',  159),   # "Treasure Chest 1"  54x24
+    (0x7CA0,  2436, 'key_icons',         None),  # 29 keys, clipper entries 313-341
+)
+
+
+def check_text_resource_layout():
+    """Assert that TEXT_RESOURCE_LAYOUT tiles the chunk with zero remainder.
+
+    This is the bank's structural invariant, and it is what makes each
+    record's *end* as trustworthy as its start: every boundary from
+    `0x62C4` onwards is independently pinned by the 100.000% DOS match of
+    the record that begins there.
+    """
+    pos = 0
+    for off, size, name, _dos in TEXT_RESOURCE_LAYOUT:
+        if off != pos:
+            raise ValueError(
+                f'bcdfa entry 5: {name} starts at {off:#x}, expected {pos:#x}')
+        pos += size
+    if pos != TEXT_RESOURCE_BYTES:
+        raise ValueError(
+            f'bcdfa entry 5: layout sums to {pos} B, chunk is {TEXT_RESOURCE_BYTES} B')
+    return True
+
+
+#: Panel-family records: 14 bytes (112 px) per row, 6 sequential planes.
+PANEL_WIDTH = 112
+PANEL_COLOR_PLANES = 6
+#: Screen byte column the whole panel family is blitted to (S_1 `+0x25C7E`,
+#: `+0x236C2`, `+0x236FA`, `+0x24430`): 26 bytes = x 208 on a 320px screen.
+PANEL_SCREEN_BYTE_X = 26
+
+STONE_PANEL_OFFSET = 0x3480
+STONE_PANEL_HEIGHT = 141           # `MOVE.W #$8C,D1` at S_1 +0x25C86 -> 141 rows
+STONE_PANEL_BYTES = (PANEL_WIDTH // 8) * STONE_PANEL_HEIGHT * PANEL_COLOR_PLANES  # 11,844
+#: Where DOS `clipper.clp` entry 90 ("Stone", 103x139) sits inside it.
+STONE_PANEL_DOS_ORIGIN = (2, 6)    # (row, col) of DOS pixel (0,0)
+#: Where DOS entry 107 ("Castor 0", 36x11) is *baked into* the Amiga art.
+STONE_PANEL_CASTOR_ORIGIN = (11, 63)
+
+PANEL_CLEAR_STRIP_OFFSET = 0x62C4
+PANEL_CLEAR_STRIP_HEIGHT = 23      # `MOVEQ #$16,D1` at S_1 +0x236CA
+PANEL_CLEAR_STRIP_BYTES = ((PANEL_WIDTH // 8) * PANEL_CLEAR_STRIP_HEIGHT
+                           * PANEL_COLOR_PLANES)  # 1,932
+
+SCROLL_TOP_OFFSET = 0x6A50
+SCROLL_TOP_HEIGHT = 11
+SCROLL_TOP_BYTES = (PANEL_WIDTH // 8) * SCROLL_TOP_HEIGHT * PANEL_COLOR_PLANES  # 924
+
+SCROLL_PIECE_OFFSET = 0x6DEC
+SCROLL_PIECE_HEIGHT = 1
+SCROLL_PIECE_BYTES = (PANEL_WIDTH // 8) * SCROLL_PIECE_HEIGHT * PANEL_COLOR_PLANES  # 84
+#: S_1 `+0x2443E` (`MOVEQ #$53,D0`) repeats the single row 84 times, starting
+#: at screen offset `$4A2` = row 29.
+SCROLL_PIECE_REPEAT = 84
+SCROLL_PIECE_SCREEN_ROW = 29
+#: The 110px-wide DOS art sits 2px in from the Amiga record's left edge.
+SCROLL_DOS_X_ORIGIN = 2
+
+#: "Fire Animation" -- 15 flame frames. Stored 8 rows per plane, but the
+#: blitter at S_1 `+0x1EC92` copies only 7 (`MOVE.B (A2)+,(A1)` x7 then
+#: `ADDQ.L #1,A2` skips the 8th), which is exactly DOS's 8x105 = 15 x 8x7.
+FIRE_ANIMATION_OFFSET = 0x6E40
+FIRE_ANIMATION_WIDTH = 8
+FIRE_ANIMATION_STORED_HEIGHT = 8
+FIRE_ANIMATION_HEIGHT = 7
+FIRE_ANIMATION_COLOR_PLANES = 6
+FIRE_ANIMATION_FRAME_BYTES = 48    # `MULU.W #$30,D1` at S_1 +0x1EC82
+FIRE_ANIMATION_COUNT = 15
+#: The four screen offsets the flame is drawn at (word table at S_1 +0x1ECBA),
+#: as (x, y) on the 320x200 6-plane screen: the corners of the main panel.
+FIRE_ANIMATION_POSITIONS = ((16, 151), (296, 151), (296, 178), (16, 178))
+#: Per-corner phase: four free-running counters seeded 0/10/20/30 (S_1
+#: +0x1EC28), each wrapping at 60 and indexed through a 60-byte ramp
+#: (S_1 +0x1EC2C) that holds every frame for 4 ticks -- `frame = tick // 4`.
+FIRE_ANIMATION_PERIOD = 60
+FIRE_ANIMATION_TICKS_PER_FRAME = 4
+FIRE_ANIMATION_PHASES = (0, 10, 20, 30)
+#: Colour index that stands in for transparency (DOS uses two backdrop
+#: shades, 131/132, where the Amiga uses this one).
+FIRE_ANIMATION_BACKDROP_INDEX = 26
+
+#: Hardware-sprite records: 24 lines x 4 bytes. Records 0 and 1 of each bank
+#: are an *attached* SPR0/SPR1 pair (4 bitplanes, 15 colours); record 2 is
+#: all zeros. The consumers copy only the leading `*_SPRITE_LINES` longwords.
+SPRITE_RECORD_BYTES = 96
+SPRITE_RECORDS_PER_BANK = 3
+SPRITE_WIDTH = 16
+
+MOUSE_POINTER_OFFSET = 0x7110
+MOUSE_POINTER_LINES = 18           # `MOVEQ #$11,D1` at S_1 +0x1E8DA
+MOUSE_POINTER_BYTES = SPRITE_RECORD_BYTES * SPRITE_RECORDS_PER_BANK  # 288
+
+BUBBLE_OFFSET = 0x7230
+BUBBLE_LINES = 5                   # `MOVEQ #$4,D1` at S_1 +0x1E90A
+BUBBLE_BYTES = SPRITE_RECORD_BYTES * SPRITE_RECORDS_PER_BANK  # 288
+
+#: The automap is a dual-playfield screen: playfield 1 is a 3-plane 8x8
+#: tilemap (82 bytes/row, plane stride 0x8020), playfield 2 a 2-plane
+#: 21x10 grid of 16x20 cells (42 bytes/row, plane stride 0x20D0).
+AUTOMAP_BLOCK_OFFSET = 0x7350
+AUTOMAP_BLOCK_WIDTH = 16
+AUTOMAP_BLOCK_HEIGHT = 20
+AUTOMAP_BLOCK_PLANES = 2
+AUTOMAP_BLOCK_BYTES = (AUTOMAP_BLOCK_WIDTH // 8) * AUTOMAP_BLOCK_HEIGHT * AUTOMAP_BLOCK_PLANES  # 80
+#: Playfield-2 pixel value v lights COLOR(8 + v).
+AUTOMAP_BLOCK_COLOR_BASE = 8
+AUTOMAP_GRID_COLUMNS = 21          # `DIVU.W #$15,D0` at S_1 +0x1F9AE
+
+AUTOMAP_TILE_OFFSET = 0x73A0
+AUTOMAP_TILE_SIZE = 8
+AUTOMAP_TILE_PLANES = 3
+AUTOMAP_TILE_BYTES = 24            # `MULU.W #$18,D2` at S_1 +0x1FA10
+AUTOMAP_TILE_COUNT = 24
+AUTOMAP_TILE_BANK_BYTES = AUTOMAP_TILE_BYTES * AUTOMAP_TILE_COUNT  # 576
+
+TREASURE_CHEST_OFFSET = 0x75E0
+TREASURE_CHEST_WIDTH = 48
+TREASURE_CHEST_HEIGHT = 24         # `MOVEQ #$17,D1` at S_1 +0x23F30
+TREASURE_CHEST_COLOR_PLANES = 6
+TREASURE_CHEST_RECORD_BYTES = ((TREASURE_CHEST_WIDTH // 8) * TREASURE_CHEST_HEIGHT
+                               * TREASURE_CHEST_COLOR_PLANES)  # 864
+TREASURE_CHEST_COUNT = 2           # `TST.W D2` / `LEA $360(A0),A0` at S_1 +0x23F1C
+#: Screen offset `$1B32` = row 174, byte column 2 -> (16, 174).
+TREASURE_CHEST_SCREEN_XY = (16, 174)
+#: DOS's rasters are 54 wide; the Amiga's 48 are DOS columns 3..50.
+TREASURE_CHEST_DOS_X_ORIGIN = 3
+
+
+def _slice(chunk, off, size, what):
+    rec = chunk[off:off + size]
+    if len(rec) != size:
+        raise ValueError(f'bcdfa entry 5: {what} at chunk+{off:#x} truncated '
+                         f'({len(rec)} of {size} B)')
+    return rec
+
+
+def stone_panel(text_resource_chunk):
+    """Decode the 112x141 right-hand side panel ("Stone") -- 6 planes."""
+    from .planar import decode_planar
+    rec = _slice(text_resource_chunk, STONE_PANEL_OFFSET, STONE_PANEL_BYTES, 'stone panel')
+    return decode_planar(rec, PANEL_WIDTH, STONE_PANEL_HEIGHT, PANEL_COLOR_PLANES)
+
+
+def panel_clear_strip(text_resource_chunk):
+    """Decode the 112x23 blank-stone erase strip (no DOS counterpart)."""
+    from .planar import decode_planar
+    rec = _slice(text_resource_chunk, PANEL_CLEAR_STRIP_OFFSET,
+                 PANEL_CLEAR_STRIP_BYTES, 'panel clear strip')
+    return decode_planar(rec, PANEL_WIDTH, PANEL_CLEAR_STRIP_HEIGHT, PANEL_COLOR_PLANES)
+
+
+def scroll_top(text_resource_chunk):
+    """Decode the 112x11 scroll roller ("Scroll Top") -- 6 planes."""
+    from .planar import decode_planar
+    rec = _slice(text_resource_chunk, SCROLL_TOP_OFFSET, SCROLL_TOP_BYTES, 'scroll top')
+    return decode_planar(rec, PANEL_WIDTH, SCROLL_TOP_HEIGHT, PANEL_COLOR_PLANES)
+
+
+def scroll_piece(text_resource_chunk):
+    """Decode the single 112x1 parchment row ("Scroll Piece") -- 6 planes."""
+    from .planar import decode_planar
+    rec = _slice(text_resource_chunk, SCROLL_PIECE_OFFSET, SCROLL_PIECE_BYTES, 'scroll piece')
+    return decode_planar(rec, PANEL_WIDTH, SCROLL_PIECE_HEIGHT, PANEL_COLOR_PLANES)
+
+
+def scroll_panel(text_resource_chunk, body_rows=SCROLL_PIECE_REPEAT):
+    """Compose the scroll the way the game draws it: roller + tiled body."""
+    import numpy as np
+    top = scroll_top(text_resource_chunk)
+    body = np.repeat(scroll_piece(text_resource_chunk), body_rows, axis=0)
+    return np.vstack([top, body])
+
+
+def fire_animation_frames(text_resource_chunk):
+    """Yield ``(index, 8x7 index array)`` for the 15 flame frames.
+
+    Stored 8 rows per plane; only the first 7 are drawn (and only those 7
+    exist in DOS's 8x105 raster), so the 8th stored row is dropped here.
+    """
+    from .planar import decode_planar
+    for n in range(FIRE_ANIMATION_COUNT):
+        off = FIRE_ANIMATION_OFFSET + n * FIRE_ANIMATION_FRAME_BYTES
+        rec = _slice(text_resource_chunk, off, FIRE_ANIMATION_FRAME_BYTES, f'flame frame {n}')
+        idx = decode_planar(rec, FIRE_ANIMATION_WIDTH, FIRE_ANIMATION_STORED_HEIGHT,
+                            FIRE_ANIMATION_COLOR_PLANES)
+        yield n, idx[:FIRE_ANIMATION_HEIGHT]
+
+
+def mouse_pointer_sprite(text_resource_chunk):
+    """Decode the mouse pointer as a 16 x 18 attached-sprite-pair image."""
+    from .planar import decode_sprite_pair
+    rec = _slice(text_resource_chunk, MOUSE_POINTER_OFFSET, MOUSE_POINTER_BYTES, 'mouse pointer')
+    return decode_sprite_pair(rec, MOUSE_POINTER_LINES, SPRITE_RECORD_BYTES)
+
+
+def bubble_sprite(text_resource_chunk):
+    """Decode the 16 x 5 "Bubble" attached-sprite-pair image."""
+    from .planar import decode_sprite_pair
+    rec = _slice(text_resource_chunk, BUBBLE_OFFSET, BUBBLE_BYTES, 'bubble')
+    return decode_sprite_pair(rec, BUBBLE_LINES, SPRITE_RECORD_BYTES)
+
+
+def automap_block(text_resource_chunk):
+    """Decode the 16x20 "Auto Map Block" cell -- 2 planes (playfield 2)."""
+    from .planar import decode_planar
+    rec = _slice(text_resource_chunk, AUTOMAP_BLOCK_OFFSET, AUTOMAP_BLOCK_BYTES, 'automap block')
+    return decode_planar(rec, AUTOMAP_BLOCK_WIDTH, AUTOMAP_BLOCK_HEIGHT, AUTOMAP_BLOCK_PLANES)
+
+
+def automap_tiles(text_resource_chunk):
+    """Yield ``(index, 8x8 index array)`` for the 24 automap tiles (3 planes)."""
+    from .planar import decode_planar
+    for n in range(AUTOMAP_TILE_COUNT):
+        off = AUTOMAP_TILE_OFFSET + n * AUTOMAP_TILE_BYTES
+        rec = _slice(text_resource_chunk, off, AUTOMAP_TILE_BYTES, f'automap tile {n}')
+        yield n, decode_planar(rec, AUTOMAP_TILE_SIZE, AUTOMAP_TILE_SIZE, AUTOMAP_TILE_PLANES)
+
+
+def treasure_chest_sprites(text_resource_chunk):
+    """Yield ``(index, 48x24 index array)`` for the closed/open chest art."""
+    from .planar import decode_planar
+    for n in range(TREASURE_CHEST_COUNT):
+        off = TREASURE_CHEST_OFFSET + n * TREASURE_CHEST_RECORD_BYTES
+        rec = _slice(text_resource_chunk, off, TREASURE_CHEST_RECORD_BYTES, f'treasure chest {n}')
+        yield n, decode_planar(rec, TREASURE_CHEST_WIDTH, TREASURE_CHEST_HEIGHT,
+                               TREASURE_CHEST_COLOR_PLANES)
 
 
 GFK_MARKER = b'BCSPEED\x00GFK\x00'

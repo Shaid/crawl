@@ -6,6 +6,12 @@
     "png": "sprites/armour.png"
   },
   {
+    "name": "sprites/automap",
+    "sprites": 27,
+    "hasPalette": false,
+    "png": "sprites/automap.png"
+  },
+  {
     "name": "sprites/bcspeed",
     "sprites": 73,
     "hasPalette": false,
@@ -13,15 +19,21 @@
   },
   {
     "name": "sprites/chargen-font-a",
-    "sprites": 73,
+    "sprites": 64,
     "hasPalette": false,
     "png": "sprites/chargen-font-a.png"
   },
   {
     "name": "sprites/chargen-font-b",
-    "sprites": 26,
+    "sprites": 59,
     "hasPalette": false,
     "png": "sprites/chargen-font-b.png"
+  },
+  {
+    "name": "sprites/chargen-font-cg",
+    "sprites": 59,
+    "hasPalette": false,
+    "png": "sprites/chargen-font-cg.png"
   },
   {
     "name": "sprites/ending-font",
@@ -34,6 +46,12 @@
     "sprites": 10,
     "hasPalette": false,
     "png": "sprites/ending-panels.png"
+  },
+  {
+    "name": "sprites/fire-animation",
+    "sprites": 15,
+    "hasPalette": false,
+    "png": "sprites/fire-animation.png"
   },
   {
     "name": "sprites/floor-items",
@@ -117,6 +135,12 @@
     "png": "sprites/ui-panel.png"
   },
   {
+    "name": "sprites/ui-side-panel",
+    "sprites": 7,
+    "hasPalette": false,
+    "png": "sprites/ui-side-panel.png"
+  },
+  {
     "name": "sprites/wall-decorations",
     "sprites": 117,
     "hasPalette": false,
@@ -124,19 +148,19 @@
   },
   {
     "name": "textures/dungeon-bcdfx",
-    "sprites": 83,
+    "sprites": 84,
     "hasPalette": false,
     "png": "textures/dungeon-bcdfx.png"
   },
   {
     "name": "textures/dungeon-bcdfy",
-    "sprites": 46,
+    "sprites": 47,
     "hasPalette": false,
     "png": "textures/dungeon-bcdfy.png"
   },
   {
     "name": "textures/dungeon-bcdfz",
-    "sprites": 83,
+    "sprites": 84,
     "hasPalette": false,
     "png": "textures/dungeon-bcdfz.png"
   }

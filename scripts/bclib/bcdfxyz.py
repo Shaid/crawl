@@ -20,10 +20,11 @@ wall records, a self-describing 28-byte record, and an 18-byte stairs
 record — see data-structure.md), confirmed byte-exact against the DOS
 `clipper.clp` dungeon manifest. Plane count 7 means a 1-bit mask plane first,
 then 6 EHB colour planes (`planar.decode_masked`); plane count 6 is opaque
-colour planes only (`planar.decode_planar`).
+colour planes only (`planar.decode_planar`); plane count 1 is a bare 1-bit
+stencil with no colour data (only `door-clip-stencil`).
 
-`bcdfx`/`bcdfz` carry all 12 chunks (83 sub-images each); `bcdfy` carries only
-7 of the 12 (46 sub-images) — it genuinely lacks the pit, alcove, plaque,
+`bcdfx`/`bcdfz` carry all 12 chunks (84 sub-images each); `bcdfy` carries only
+7 of the 12 (47 sub-images) — it genuinely lacks the pit, alcove, plaque,
 panel/fountain and button chunks. `iter_sub_images` silently skips any
 sub-image whose slot isn't present in the chunk set passed to it, so the same
 `SUB_IMAGES` table drives all three files.
@@ -107,8 +108,14 @@ SUB_IMAGES = [
     ('doorway-2a', 0x0C, 34930, 32, 69, 7),
     ('doorway-2c', 0x0C, 36862, 32, 69, 7),
     ('doorway-3', 0x0C, 38794, 80, 52, 7),
-    # 320 B tail after doorway-3 is unaccounted -- no descriptor references
-    # it (see "Still open" in data-structure.md); deliberately not listed.
+    # 1-plane (mask-only) clip stencil, anchored at the depth-1 doorway frame's
+    # screen origin (64, 9). The door open/close animation (S_1 +0x262C2 /
+    # +0x262CC) reads its rows 9..31 -- chunk bytes 42,524..42,754 -- as the
+    # blitter A channel to re-clip the sliding door leaf to the closed door's
+    # silhouette every frame. All-zero in bcdfx/bcdfy (their depth-1 leaves are
+    # square-topped, so the blit is a no-op there). See "Slot $0C tail" in
+    # data-structure.md.
+    ('door-clip-stencil', 0x0C, 42434, 80, 32, 1),
 
     # slot 0x10 (16) -- floor/ceiling pits, masked
     ('floor-pit-d-left', 0x10, 0, 48, 32, 7),

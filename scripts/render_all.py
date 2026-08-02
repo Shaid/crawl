@@ -40,6 +40,13 @@ def main():
     pal_game = bclib.read_named_palette(bcdfq, 'game')
     ehb_game = bclib.ehb_palette(pal_game)
     ehb_title = bclib.ehb_palette(pal_title)
+    # bcdfo's 23 UI elements all live on the character-generation screen, whose
+    # palette is bcdfp's own (LAB_0148) record — not bcdfq's `game` palette.
+    # The two differ at index 19 and 26-31, and 26-30 is exactly the accent
+    # range the sigils and numerals are drawn in.
+    bcdfp_path = AMIGA / 'bcdfp'
+    ehb_chargen = (bclib.ehb_palette(bclib.read_chargen_palette(bcdfp_path.read_bytes()))
+                   if bcdfp_path.exists() else ehb_game)
 
     # Palettes are assets in their own right — the browser needs them to remap.
     pal_dir = bclib.asset_dir('palettes')
@@ -109,6 +116,15 @@ def main():
             for name, w, h, planes, blob in bclib.iter_sub_images(chunks):
                 if planes == 7:
                     idx, mask = bclib.decode_masked(blob, w, h, 6)
+                elif planes == 1:
+                    # bare 1-bit stencil, no colour data: emit a white
+                    # silhouette so the shape is visible in the atlas.
+                    mask = bclib.decode_stencil(blob, w, h)
+                    if mask is None:
+                        print(f'  WARN {src} {name}: short data')
+                        continue
+                    sprites.append((name, bclib.stencil_to_rgba(mask)))
+                    continue
                 else:
                     idx, mask = bclib.decode_planar(blob, w, h, 6), None
                 if idx is None:
@@ -146,29 +162,34 @@ def main():
         print(f'  screens: {", ".join(n for n, *_ in screens)}')
 
     # ── bcdfo UI elements (offsets from bcdfp LAB_010D descriptors) ───
-    # `mask_off`: 6 of the 23 elements (chargen_ui, stats_panel, and all 4
-    # guild banners) are 7-plane masked sprites whose 1-bit mask plane lives
-    # *outside* the descriptor's own 6-plane colour span,
-    # in what earlier passes mis-catalogued as "unaccounted gaps" (see
-    # data-structure.md's bcdfo "Unaccounted gaps" section). chargen_ui and
-    # stats_panel each have their own mask appended right after their colour
-    # data; the 4 guild banners share ONE mask, stored once before the group
-    # (same rectangular shape, no per-banner different mask needed).
-    # Confirmed by rendering: clean cutouts, no noise, matching legible art
-    # ("FIGHTER GUILD", "CHARACTER GENERATION", a bordered portrait grid).
+    # *Every* one of the 23 elements is a 7-plane masked sprite: a 1-bit mask
+    # plus 6 EHB colour planes. bcdfp's blitter LAB_011E (bcdfp.asm:4091) picks
+    # between two storage layouts on bit 1 of the descriptor's flag byte
+    # (+22), so `mask_off` here mirrors the descriptor's own +10 field:
+    #   * mask_off is None (flag bit1 = 0) — the mask is the FIRST plane, at the
+    #     descriptor's source offset, with the 6 colour planes following it
+    #     (`ADDA.L 2(A0),A3 / MOVEA.L A3,A1 / ADDA.L 6(A0),A1`).
+    #   * mask_off is an int (flag bit1 = 1) — colour planes at the source
+    #     offset, mask at the descriptor's separate +10 offset, shared by every
+    #     element of the group (`ADDA.L 10(A0),A3`).
+    # See data-structure.md's bcdfo section. An earlier pass read desc00-02 as
+    # 6-plane opaque images and mistook their *last colour plane* for a mask,
+    # which rotated every plane by one and mis-coloured all three.
     bcdfo_path = AMIGA / 'bcdfo'
     if bcdfo_path.exists():
         bcdfo = bcdfo_path.read_bytes()
-        GUILD_MASK_OFF = 0xB4F8  # shared by all 4 guild banners, 352 B
+        SIGIL_MASK_OFF = 0xAE30    # desc03-07 +10, shared by all 5 sigils
+        GUILD_MASK_OFF = 0xB4F8    # desc08-11 +10, shared by all 4 banners
+        NUMERAL_MASK_OFF = 0xF278  # desc12-22 +10, shared by all 11 numerals
         ui_elements = [
-            ('chargen_ui',    0x5160, 128, 105, 0x78C0),
-            ('chargen_logo',  0x7F50, 192, 47, None),
-            ('stats_panel',   0xD758, 128, 62, 0xEE98),
-            ('sigil_0',       0xAE68, 32, 14, None),
-            ('sigil_1',       0xAFB8, 32, 14, None),
-            ('sigil_2',       0xB108, 32, 14, None),
-            ('sigil_3',       0xB258, 32, 14, None),
-            ('sigil_4',       0xB3A8, 32, 14, None),
+            ('chargen_ui',    0x5160, 128, 105, None),
+            ('chargen_stats', 0x7F50, 192, 47, None),
+            ('chargen_title', 0xD758, 128, 62, None),
+            ('sigil_0',       0xAE68, 32, 14, SIGIL_MASK_OFF),
+            ('sigil_1',       0xAFB8, 32, 14, SIGIL_MASK_OFF),
+            ('sigil_2',       0xB108, 32, 14, SIGIL_MASK_OFF),
+            ('sigil_3',       0xB258, 32, 14, SIGIL_MASK_OFF),
+            ('sigil_4',       0xB3A8, 32, 14, SIGIL_MASK_OFF),
             ('guild_fighter', 0xB658, 128, 22, GUILD_MASK_OFF),
             ('guild_cleric',  0xBE98, 128, 22, GUILD_MASK_OFF),
             ('guild_mage',    0xC6D8, 128, 22, GUILD_MASK_OFF),
@@ -177,20 +198,20 @@ def main():
         # 11 numerals, 16x7 each, 84 bytes per glyph.
         numerals = [0xF286, 0xF2DA, 0xF32E, 0xF382, 0xF3D6, 0xF42A,
                     0xF47E, 0xF4D2, 0xF526, 0xF57A, 0xF5CE]
-        ui_elements += [(f'numeral_{i}', off, 16, 7, None) for i, off in enumerate(numerals)]
+        ui_elements += [(f'numeral_{i}', off, 16, 7, NUMERAL_MASK_OFF)
+                        for i, off in enumerate(numerals)]
 
         sprites = []
         for name, off, w, h, mask_off in ui_elements:
-            size = (w // 8) * h * 6
-            idx = bclib.decode_planar(bcdfo[off:off + size], w, h, 6)
-            if idx is None:
+            plane = (w // 8) * h
+            colour_off = off if mask_off is not None else off + plane
+            mask_at = mask_off if mask_off is not None else off
+            idx = bclib.decode_planar(bcdfo[colour_off:colour_off + plane * 6], w, h, 6)
+            mask = bclib.decode_planar(bcdfo[mask_at:mask_at + plane], w, h, 1)
+            if idx is None or mask is None:
                 print(f'  WARN ui {name}: short data')
                 continue
-            if mask_off is not None:
-                mask = bclib.decode_planar(bcdfo[mask_off:mask_off + (w // 8) * h], w, h, 1)
-                sprites.append((name, bclib.to_rgba(idx, ehb_game, mask=mask)))
-            else:
-                sprites.append((name, bclib.to_rgba(idx, ehb_game, transparent_index0=True)))
+            sprites.append((name, bclib.to_rgba(idx, ehb_chargen, mask=mask)))
         if sprites:
             sheet, frames = bclib.pack_atlas(sprites)
             entries.append(bclib.write_atlas('ui', sheet, frames, register=False))

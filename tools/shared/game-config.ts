@@ -157,8 +157,9 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       // scripts/render_all.py at their real documented offsets/sizes) — this
       // atlas should stop at the real portrait count instead of continuing
       // past it. See data-structure.md's "bcdfo" section for the full
-      // writeup, including ~8.3 KB across 4 gaps between the known UI
-      // descriptors that isn't accounted for by any of the 23 named elements.
+      // writeup. (bcdfo is now fully accounted for — every byte from 0x5160
+      // to EOF belongs to one of the 23 UI elements, its mask, one of three
+      // 8x8 fonts, or the mouse-pointer sprite bank; 0 remainder.)
       const N_REAL_PORTRAITS = 36;
       try {
         const { words, rgb } = loadGamePalette(dataDir);
