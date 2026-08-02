@@ -279,6 +279,7 @@ from .paths import (
     write_atlas,
     write_json,
     write_png,
+    write_wav,
     write_manifest,
     write_platform_index,
     manifest_entry,
@@ -386,6 +387,6 @@ __all__ = [
     'read_named_palette', 'ehb_palette', 'load_palette_json',
     'pack_atlas', 'frames_to_json', 'Frame',
     'ROOT', 'asset_root', 'asset_dir', 'cache_dir', 'data_dir',
-    'write_atlas', 'write_json', 'write_png', 'write_manifest', 'set_groups_file',
+    'write_atlas', 'write_json', 'write_png', 'write_wav', 'write_manifest', 'set_groups_file',
     'write_platform_index', 'manifest_entry',
 ]

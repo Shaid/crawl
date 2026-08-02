@@ -313,15 +313,75 @@ multiple open/closed animation states), free-standing statues, trees,
 wall reliefs/tapestries, and small "postcard" vignette scene pictures — see
 `public/assets/eotb3/dosvga/sprites/res/batch-*.png`.
 
-**Open**: which named palette resource (§3.2) pairs with which bitmap
-resource is not yet resolved (no direct id cross-reference found in the
-container structure itself — likely resolved by the AESOP bytecode at
-runtime, e.g. a SOP object property naming both its bitmap and its
-palette). The batch atlases in `sprites/res/` are therefore rendered in a
-**neutral greyscale ramp** (index value stretched across 0–255), not final
-game colours — shape/structure confirmed, colour not yet confirmed for the
-general case (the "Wight" + "Human paladin palette" pairing above is a
-manually-chosen spot-check, not a general resolution mechanism).
+**Bitmap↔palette resolution — confirmed mechanism, majority resolved.**
+There is no on-disk cross-reference at all (no field in `EntryHeader`/table0
+names a bitmap's palette) — but the runtime mechanism is fully recoverable
+from ThirdEye's own source, and it is **not** a per-resource pairing: it's a
+fixed set of 5 windows into the 256-colour VGA DAC, loaded by SOP bytecode
+calling `set_palette(region, paletteResource)`
+(`apps/thirdeye/runtime/graphics.cpp`, `kFirstColor[5] = {0x00, 0xB0, 0xC0,
+0xE0, 0xB0}` — `PAL_FIXED`/`PAL_WALLS`/`PAL_M1`/`PAL_M2`/`PAL_OUT`):
+
+| Region | DAC base | Width | Use |
+|---|---|---|---|
+| `PAL_FIXED` | `0x00` | 176 | shared, always resident (UI, items, common outlines) |
+| `PAL_WALLS`/`PAL_OUT` | `0xB0` | 16 | one dungeon-theme's wall/decoration set (time-multiplexed with OUT) |
+| `PAL_M1` | `0xC0` | 32 | monster render slot 1 |
+| `PAL_M2` | `0xE0` | 32 | monster render slot 2 |
+
+A VFX shape's stored pixel bytes are **raw DAC indices**, not resource-local
+ones — so which window a bitmap needs is fully determined by its own
+pixel-value range, no bytecode trace required. **Verified corpus-wide, zero
+exceptions**: decoded the masked pixel range of all 312 bitmap resources —
+every single one falls entirely inside exactly one window (never spans two
+non-adjacent windows, never exceeds `0xFF`). Breakdown:
+
+| Bucket | Count | Resolution |
+|---|---|---|
+| Fixed-only (max index < 176) | 160 | **confirmed** — renders correctly today with just the `"Fixed palette"` resource, no per-resource pairing needed |
+| Region palette, name-matched + width-consistent | 105 | **confirmed** — see below |
+| Region palette, name-matched but width/shape mismatch ("outtake" family — single shape, 70+ unique colours spanning multiple windows) | 19 | rendered, not confirmed — see "Still open" |
+| Region palette, name-matched but neither of the above | 2 | open |
+| Region palette, no name match at all | 26 | open — see "Still open" |
+
+For the 105 confirmed pairs: normalize both the bitmap's name and every
+`"<X> palette"`/`"<X> pal"` resource's name (strip "palette"/"pal", strip
+non-alphanumerics), substring-match, then require the candidate's own
+declared `numColours` header field to equal the target window's width
+exactly (16 or 32). E.g. `"Wight"` (pixel range 192–223 → `PAL_M1`) ↔
+`"Wight/Flar palette"` (`numColours=32`); `"Marble stairs down"` (pixel
+range 10–189, spanning `PAL_FIXED`+`PAL_WALLS`) ↔ `"Marble palette"`
+(`numColours=16`). Rendered output is unambiguous: `"Wight"` renders as a
+recognizable undead humanoid with red eyes and dark tattered clothing;
+`"Chimera"` renders as a lion/dragon/goat tri-head with bat wings in
+correct AD&D-canon colouring (green lion eyes, red dragon head); `"Marble
+stairs down"` renders as a coherent blue-grey marble stairwell corridor —
+see `public/assets/eotb3/dosvga/sprites/res/batch-*.png`. Implementation:
+`scripts/eotb3lib/palette_regions.py`; per-resource resolution tier +
+matched palette name recorded in
+`public/assets/eotb3/dosvga/data/eotb3-bitmap-palette-resolution.json`.
+Extractor (`scripts/extract_eotb3_res.py`) now renders the 265 confirmed
+(fixed-only + region-matched) resources in real colour and keeps the
+neutral greyscale ramp only for the 47 still-unresolved ones.
+
+**Still open** (47/312 bitmaps): the "outtake" family (single-shape,
+full-scene story-art resources like `"Fflar outtake"`/`"Human paladin
+outtake"`) pair unambiguously by name with an 80-colour palette resource,
+but that resource's DAC placement isn't a clean contiguous window like the
+32/16-colour cases — the exact base-offset formula for an 80-colour block
+isn't nailed down. Separately, several `PAL_WALLS`-region bitmaps have no
+name match to any of the 4 named 16-colour theme palettes (`Forest`/
+`Mausoleum`/`Ruins`/`Marble palette`) — most visibly the `"Temple ..."`
+decoration family (gold door, altar, lock, font, statue, ...), which almost
+certainly **reuses** one of those 4 (thematically `"Marble palette"`,
+matching EOB3's Temple of Lathander architecture) rather than needing a
+5th palette — i.e. the walls/outdoor region appears to be a **per-dungeon-
+area** palette shared across many differently-named bitmaps, not a strict
+1:1 name pairing, and which area owns which of the 4 palettes isn't
+resolved for every case. A couple of monster-family resources
+(`"Death knight"`, `"Earth elemental"`, `"Shadow of Death"`) also have no
+matching named palette at all — likely reusing another monster's M1/M2
+slot at runtime rather than owning a dedicated palette resource.
 
 ### 4.3 `CHARGEN/CHARPICS.BMP` portrait directory — confirmed
 
@@ -403,6 +463,44 @@ global palette. That render looks plausible (readable dialogue-scene art,
 a green-hued robed antagonist) but is **not independently colour-verified**
 for those two files — flagged `rendered`, not `confirmed`, for palette
 accuracy specifically (the pixel/shape decode itself is confirmed).
+
+**Investigated further, still open — no oracle available.** ThirdEye's own
+cutscene sequencer (`apps/thirdeye/resources/gffi.cpp` `getSequence()`)
+**only hand-codes `INTRO.GFF`**'s playback (`if (filename == "INTRO.GFF")`,
+the one branch in the whole function) — `DARK.GFF`/`LICH.GFF`/`FINALE.GFF`
+aren't handled at all, so ThirdEye provides zero ground truth for this
+question (worth recording so a future pass doesn't re-check ThirdEye
+expecting an answer). Two structural checks against the fallback
+hypothesis:
+- **Pixel-usage-profile comparison across all 4 GFF files**: `INTRO.GFF`
+  and `FINALE.GFF` (both *have* an embedded `PAL`) use BMP/BMA pixel
+  indices spanning nearly the whole 0–255 range with ~170–190 distinct
+  values each — a self-contained, wide-gamut custom palette, not the
+  narrow AESOP DAC-region scheme from §4.2. `DARK.GFF`'s own BMP frames
+  (0–246, 179 distinct values) have the **same shape** — evidence
+  `DARK.GFF` originally needed its own dedicated ~256-colour palette (a
+  missing/stripped `PAL` block), not a scheme where borrowing an unrelated
+  screen's active palette would be structurally sound. `LICH.GFF` is
+  different again: it has **no `BMP` tag at all** (only `BMA` —
+  animation), and a narrower pixel range (max 152, 116 distinct values) —
+  consistent with it being a short effect/animation composited over
+  whatever's already on screen (plausibly `DARK.GFF`'s own scene) rather
+  than needing a full palette of its own, though this is not confirmed.
+- **Cross-file palette sharing ruled out**: compared `INTRO.GFF`'s 2
+  embedded `PAL` blocks against `FINALE.GFF`'s — only ~100/256 (39%)
+  entries match (concentrated in the low, standard-VGA-ramp indices), and
+  `INTRO.GFF`'s own two `PAL` blocks differ from *each other*. There is no
+  single shared "cutscene palette" across the GFF family to substitute for
+  `CHARGEN/PALETTE.COL`.
+
+`CHARGEN/PALETTE.COL` remains the best available fallback (checked
+directly: it's a non-degenerate, varied 256-colour palette across its full
+index range, not padding) but is unverified. No further path is available
+without either the missing original palette data or running the actual
+`CINE.EXE` cutscene player (a separate DOS binary from `AESOP.EXE`, not
+covered by any tooling in this project) to a specific late-game trigger and
+comparing colours by eye — out of proportion for this item; recorded as
+still open rather than pursued further.
 
 Extractor: `scripts/extract_eotb3_gff.py`.
 
@@ -550,17 +648,135 @@ or extracted it; the format itself is not in doubt.
 
 ---
 
+## 9. `EYE.RES` non-bitmap resource types — sounds/maps/strings confirmed, rest classified
+
+`EYE.RES`'s own container carries **no type tag** — `EntryHeader.data_
+attributes` (u32, observed values 0/16/32/33) doesn't correlate with
+content class, and AESOP resolves a resource's meaning purely by which VM
+function it's handed to (`draw_bitmap`, `set_palette`, `play_sound`, ...),
+never by an on-disk marker. `scripts/eotb3lib/classify.py` classifies every
+one of the 2449 entries by a structural/statistical fingerprint of its own
+bytes; `scripts/extract_eotb3_res.py` extracts the 3 newly-decoded asset
+types this pass adds. Corpus-wide tally (also in `resources.json`'s
+`typeCounts`):
+
+| Type | Count | Status |
+|---|---|---|
+| `vfx_bitmap` | 312 | confirmed, see §4.2 |
+| `sop_dict` | 758 | AESOP dictionary blobs (special tables 0–4, `<name>.IMPT`/`.EXPT` export/import tables) — code linkage, not asset data, see §1.4 |
+| `string` | 749 | **confirmed, newly extracted** — see below |
+| `unknown` | 379 | not asset data — see below |
+| `pcm_sound` | 116 | **confirmed, newly extracted** — see below |
+| `iff_cue` | 66 | structurally identified, not decoded — see below |
+| `palette` | 55 | confirmed, see §3.2 |
+| `map32x32` | 14 | **confirmed, newly extracted** — see below |
+
+### 9.1 Strings — confirmed
+
+749 resources hold a flat `"S:"` + text + trailing NUL, no other structure
+(e.g. `"S:Yes\0"`, `"S:HP\0"`, `"S:\nPlease enter the requested word from
+your Eye of the Beholder III Rule Book.\n\nPage #%d, line #%d, word
+#%d\0"` — the manual-lookup copy-protection prompt). These are UI/menu
+labels, combat log tokens, and code-wheel/manual-page copy-protection
+strings; resource names double as internal IDs (`"cp2"` → `"S:guard-
+captain\0"`, part of the copy-protection word table). **Confirmed**: 100%
+of the 749 `string`-classified resources parse cleanly under this rule
+(fixed 2-byte prefix + NUL-terminated), and the decoded content reads as
+grammatical English UI copy throughout a random sample of 60+ entries with
+zero garbled results.
+
+Extractor output: `data/eotb3-strings.json` (flat `name -> text` map, `"S:"`
+prefix and trailing NUL stripped).
+
+### 9.2 Dungeon-level maps (`map32x32`) — confirmed
+
+Exactly 1024 bytes (32×32, one byte per cell), a dominant byte value
+(usually `0xFF`). Matches ThirdEye's own runtime layout exactly: `apps/
+thirdeye/automap.cpp` reads a live "dungeon" class instance's `B:lvlmap@0..
+1023` as a 32×32 wall-type grid where `0xFF` = floor and any other value
+blocks passage (`isMapWall()`). **Confirmed**: exactly **14** resources
+match, one per dungeon level (`"Mausoleum 1/2"`, `"Graveyard"`, `"Forest
+Trail"`, `"Guild Hall Quarter"`, `"Mages' Guild 1-4"`, `"Temple Quarter"`,
+`"Temple of Lathander 1-4"`) — byte-exact match to ThirdEye's own `kLevels
+= 15` constant (`0` unused + **14** real levels). Rendered as a floor/wall
+contact sheet (`0xFF` → parchment cream, else → grey), every level shows a
+coherent maze of rooms and corridors with no visible corruption — see
+`public/assets/eotb3/dosvga/textures/maps.png`. Cell values other than
+`0xFF` (wall/feature sub-type) are not decoded this pass.
+
+Extractor output: `data/eotb3-maps.json` (raw 32×32 grids, one per level),
+`textures/maps.{png,json}` (rendered contact sheet).
+
+### 9.3 Sounds (`pcm_sound`) — confirmed
+
+Headerless raw byte streams whose value histogram is a bell curve centred
+near 128 — the silence level for 8-bit unsigned PCM. **Confirmed** against
+ThirdEye's `apps/thirdeye/sound/sound.cpp`: `#define SOUND_RATE 8000` and
+`alBufferData(source.bufferId, AL_FORMAT_MONO8, ..., SOUND_RATE)` — 8-bit
+unsigned mono, 8000 Hz, no header, matching the observed byte-value shape
+exactly (peak at/near 128 for every one of the 116 classified resources,
+names like `"BOWTWANG"`, `"BIRD2"`, `"13SLING"`, `"ARMOR7M"` read as sound-
+effect names on inspection).
+
+Extractor output: `audio/<name>.wav` (wrapped in a standard WAV container
+via the new `bclib.write_wav` helper — playable directly in-browser),
+`data/eotb3-sounds.json` (manifest).
+
+### 9.4 `iff_cue` — structurally identified, not decoded
+
+66 resources (`CUE1`-`CUE9` + `A`/`P` variants, `AVON`, `AVPC`, `CHGE`/
+`CHGEA`/`CHGEP`, `FLAPC`, ...) begin with an EA-IFF-85 `FORM....XDIR`
+wrapper: `FORM` + BE u32 (constant `14` across every instance — doesn't
+reflect real payload size, so likely a fixed sub-header template rather
+than a true top-level FORM length) + `"XDIR"` + an `INFO` chunk (2 B) +
+a `CAT ` chunk holding the actual variable-size payload. Names and sizing
+(paired `<name>`/`<name>A`/`<name>P` triples of decreasing size, e.g.
+`CUE1`/`CUE1A`/`CUE1P` = 1268/1054/490 B) strongly suggest in-engine
+"outtake"/dialogue cue bundles analogous to GFF's already-deferred `ACF`/
+`*SEQ` cutscene-sequencing tag blocks (same rationale: playback/timing
+data, not renderable/playable asset content) — the inner `CAT ` payload
+wasn't decoded this pass. Not extracted; classification only.
+
+### 9.5 `unknown` (379 resources) — predominantly AESOP class objects, not asset data
+
+Checked this bucket specifically against `generic-bucket-hides-real-
+content.md` (a large residual "unknown" bucket after a classifier pass is
+a red flag for real content the classifier missed) before accepting it.
+The largest entries by size are named `"camp"` (15690 B), `"PC"` (13129 B),
+`"spell"` (12922 B), `"kernel"` (12871 B), `"NPC"` (9734 B), `"dungeon"`
+(5085 B) — these are exactly the AESOP class names ThirdEye's own C++
+source references directly as class IDs (`kKernelCls = 1382`, `kDungeonCls
+= 1381` in `automap.cpp`). The bulk of the remainder are weapon/item-type
+class names matching `ITEMTYPE.DAT` exactly (`"axe"`, `"long sword"`,
+`"dagger"`, ...) and per-level scripting objects (`"mauslvl2"`,
+`"templvl1"`, `"magelvl3"`, ...). These are **SOP class objects without a
+`.IMPT`/`.EXPT` suffix** (so they don't match the `sop_dict` classifier,
+but they're the same category: AESOP bytecode/game logic) — confirms the
+bucket isn't hiding overlooked asset content, it's the code side of the
+engine, same scope as the already out-of-scope AESOP bytecode item. Three
+small exceptions remain genuinely unidentified: `"8x8 font"` (6200 B),
+`"6x8 font"` (3866 B), `"Ornate font"` (5536 B) — checked against the
+confirmed `CHARGEN/FONT6.FNT`/`FONT8.FNT` layout (§7) and don't match (a
+constant `11826`-ish size-check field appears regardless of the resource's
+actual size, ruling that reading out) — a different, undecoded font-like
+structure, low priority given two font families are already confirmed.
+
+Extractor: `scripts/extract_eotb3_res.py` (§9.1–9.3); classifier:
+`scripts/eotb3lib/classify.py`.
+
+---
+
 ## Still open
 
 | Item | Status | Notes |
 |---|---|---|
-| EYE.RES bitmap ↔ palette resolution | open | §4.2 — 312 bitmap resources decode correctly in shape/mask but render in neutral greyscale; no cross-reference to the correct named palette resource found in the container structure itself. Likely resolved by AESOP bytecode (SOP object properties) at runtime — would need to disassemble at least one drawing routine's bytecode to confirm the mechanism generally, not just spot-check one pairing by hand. |
-| DARK.GFF / LICH.GFF colour accuracy | rendered, not confirmed | §5 — no embedded PAL block; extractor falls back to the CHARGEN.PALETTE.COL global palette, which renders plausibly but is unverified for these two files specifically. |
-| AESOP bytecode (SOP code objects) | not attempted | 376 code objects live inside EYE.RES (per ThirdEye); this is game logic, not asset data, and out of scope for an asset-extraction pass — ThirdEye's `daesop` disassembler already covers this ground. |
-| GFF `ACF`/`MERR`/`*SEQ` tag blocks | not decoded | Likely error-message tables + cutscene playback sequencing (ThirdEye's `gffi.cpp getSequence()` hand-codes INTRO.GFF's sequence rather than parsing a `*SEQ` block, suggesting these aren't a generic data format ThirdEye itself fully cracked either). Out of scope this pass — not visual/audio asset content. |
-| `EYE.RES` non-bitmap resource types (sounds, maps, strings) | not extracted | Only the `"1.10"` VFX-shape subset (§4.2) was batch-decoded. `resources.json` (§1.4) has the full name/size/offset manifest for follow-up work. |
+| EYE.RES bitmap ↔ palette resolution — remaining 47/312 | open | §4.2 — mechanism (5 DAC regions) confirmed and 265/312 (85%) bitmaps resolved to real colour. Remaining: the "outtake" family's 80-colour DAC placement formula (19), a few `PAL_WALLS`-region bitmaps that reuse a theme palette without a matching name (26, e.g. the `"Temple ..."` family likely reusing `"Marble palette"`), 2 other mismatches. |
+| DARK.GFF / LICH.GFF colour accuracy | rendered, not confirmed | §5 — no embedded PAL block, no oracle (ThirdEye only hand-codes INTRO.GFF's sequence); pixel-usage-profile analysis and cross-file palette comparison both investigated this pass without resolving it. `CHARGEN.PALETTE.COL` fallback remains unverified. |
+| AESOP bytecode (SOP code objects) | not attempted | 376 code objects live inside EYE.RES (per ThirdEye); this is game logic, not asset data, and out of scope for an asset-extraction pass — ThirdEye's `daesop` disassembler already covers this ground. §9.5 confirms the residual `unknown` classification bucket is predominantly this same category (SOP class objects without an `.IMPT`/`.EXPT` suffix), not overlooked asset content. |
+| GFF `ACF`/`MERR`/`*SEQ` tag blocks, and EYE.RES `iff_cue` resources | not decoded | Likely error-message tables + cutscene/outtake playback sequencing (ThirdEye's `gffi.cpp getSequence()` hand-codes INTRO.GFF's sequence rather than parsing a `*SEQ` block, suggesting these aren't a generic data format ThirdEye itself fully cracked either). §9.4 identified a second family of the same kind of data (`EYE.RES`'s `FORM....XDIR`-wrapped `iff_cue` resources, 66 of them) but didn't decode its `CAT ` payload either. Out of scope this pass — not visual/audio asset content. |
 | `CHARGEN/EOSPREFS.DAT` (6 B) | not decoded | Too small/low-value to prioritize (`03 00 00 00 01 00` — plausibly two u16/u32 fields; not attempted). |
 | `SAVEGAME/*.TMP`/`*.BIN` extractor | not written | Format is documented (§8, citing ThirdEye) and spot-verified against our files, but no committed extractor — this is save state, not a shipped asset. |
+| `"8x8 font"`/`"6x8 font"`/`"Ornate font"` EYE.RES resources | not decoded | §9.5 — checked against the confirmed CHARGEN FONT6/FONT8.FNT layout (§7) and ruled that out (size-check field doesn't match); a different, undecoded font-like structure. Low priority given 2 font families are already confirmed. |
 
 ---
 
@@ -568,6 +784,9 @@ or extracted it; the format itself is not in doubt.
 
 | Approach | Result | Why it stopped there |
 |---|---|---|
-| Search `EYE.RES` container structure for a bitmap→palette id field | No direct field found in `EntryHeader`/dictionary structures | The container's own metadata (storage time, attributes, size) carries no cross-reference; attributes field wasn't decoded bit-by-bit against a large enough resource-type sample to rule out a hidden reference there — see next row |
-| Bit-decode `EntryHeader.data_attributes` across resource types | Not attempted this pass | Would need to correlate `data_attributes` values against resource *content* (VFX bitmap vs SOP code vs string) across a large sample to see whether it's a type tag or something else — the natural next step, not started for lack of time budget |
-| Manual palette pairing (`"Human paladin palette"` + `"Wight"`) | Renders a recognizable, correctly-shaped silhouette | Confirms VFX shape decode is correct; does **not** establish a general pairing rule (the palette name was chosen by inspection, not derived) |
+| Search `EYE.RES` container structure for a bitmap→palette id field | No direct field found in `EntryHeader`/dictionary structures | The container's own metadata (storage time, attributes, size) carries no cross-reference; confirmed this pass by cross-checking against ThirdEye's own runtime source instead — see next row |
+| Manual palette pairing (`"Human paladin palette"` + `"Wight"`) | Renders a recognizable, correctly-shaped silhouette | Confirms VFX shape decode is correct; does **not** establish a general pairing rule (the palette name was chosen by inspection, not derived) — superseded, see next row |
+| Trace ThirdEye's runtime `set_palette`/`draw_bitmap` handlers (`apps/thirdeye/runtime/graphics.cpp`) for the DAC-region constants, then verify a bitmap's own masked pixel-index range against those regions corpus-wide | **Confirmed**: `kFirstColor[5]` gives the 4 usable DAC windows; all 312 bitmaps' pixel ranges fall cleanly into exactly one window with zero exceptions; combined with a name-normalization + `numColours`-width-consistency check against the 55 palette resources, 265/312 (85%) resolve to real, visually-plausible colour | This is the mechanism — see §4.2. Remaining 47/312 need either the "outtake" family's wider placement formula or a per-dungeon-area (not per-bitmap-name) palette-reuse map, neither derived this pass |
+| DARK.GFF/LICH.GFF: check ThirdEye's `gffi.cpp getSequence()` for a palette-loading branch for these files | No branch exists — only `INTRO.GFF` is hand-coded | Confirms ThirdEye provides no oracle for this question at all (not just "didn't check" — verified by reading the whole function) |
+| DARK.GFF/LICH.GFF: compare BMP/BMA pixel-usage profile (range, distinct-value count) against INTRO.GFF/FINALE.GFF (both have their own embedded PAL) | DARK.GFF's profile (0-246, 179 distinct values) matches INTRO/FINALE's "needs a dedicated wide-gamut palette" shape; LICH.GFF's is narrower and has no BMP tag at all | Doesn't produce a specific palette, but rules out "borrow whatever's already loaded" as a good structural fit for DARK.GFF specifically, and suggests LICH.GFF may not need one at all |
+| DARK.GFF/LICH.GFF: check whether INTRO.GFF's and FINALE.GFF's own embedded PAL blocks are identical (a shared cross-file "cutscene palette" to borrow instead of CHARGEN.PALETTE.COL) | Only ~39% of entries match between the two, and INTRO's own 2 PAL blocks differ from each other | No shared GFF-family palette exists to substitute; CHARGEN.PALETTE.COL fallback stands unverified |

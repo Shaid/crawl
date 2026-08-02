@@ -17,6 +17,7 @@ Intermediates that the browser never loads (decompressed streams, .bin blobs)
 belong in `build/cache/<game>/` instead.
 """
 import json
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -66,6 +67,23 @@ def write_png(path, rgba):
     path.parent.mkdir(parents=True, exist_ok=True)
     arr = np.ascontiguousarray(rgba, dtype=np.uint8)
     Image.fromarray(arr, 'RGBA').save(path)
+    return path
+
+
+def write_wav(path, pcm_bytes, sample_rate=8000, sample_width=1, channels=1):
+    """Wrap headerless raw PCM in a standard WAV container (browser-playable).
+
+    Defaults match Miles-Sound-System-era 8-bit unsigned mono SFX (e.g.
+    EOB3's EYE.RES sound resources, confirmed against ThirdEye's
+    `apps/thirdeye/sound/sound.cpp`: `SOUND_RATE=8000`, `AL_FORMAT_MONO8`).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), 'wb') as w:
+        w.setnchannels(channels)
+        w.setsampwidth(sample_width)
+        w.setframerate(sample_rate)
+        w.writeframes(bytes(pcm_bytes))
     return path
 
 
