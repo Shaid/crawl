@@ -3,9 +3,16 @@ data/blackcrypt/amiga/bcdf*
 data/blackcrypt/amiga/BlackCrypt
 data/blackcrypt/amiga/*.cnf
 data/blackcrypt/amiga/adf/
+data/blackcrypt/amiga/configuration.dat
 data/blackcrypt/dosvga/
 data/blackcrypt/dos/
+data/blackcrypt/*.mmd0
+data/blackcrypt/*.8svx
+data/blackcrypt/bcdfa_render.png
+data/blackcrypt/bcdfa_tiles.png
+data/eotb/amiga/
 data/eotb/dosvga/
+data/eotb2/amiga/
 data/eotb2/dosvga/
 data/eotb3/
 data/landsoflore/
@@ -13,6 +20,8 @@ data/landsoflore/
 # Extracted/output
 data/blackcrypt/extracted/
 data/blackcrypt/.raw
+data/eotb/extracted/
+data/extracted/
 public/assets/
 build/
 
