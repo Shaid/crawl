@@ -831,6 +831,21 @@ ITEM_BANK_STREAMS = (0x1B5B3, 0x2FE5C)
 #: RGB 0x222222, the same colour as the inventory slot interior (index 20).
 ITEM_BACKDROP_INDEX = 53
 
+#: `bcdfs` item-record byte +5 ("item type") -> its confirmed engine category.
+#: Sourced from `scripts/extract_bcdfs_items.py`'s walk of every placed item
+#: record; used there per-instance and by `scripts/build_item_icon_groups.py`
+#: to bucket the icon atlas by category for the viewer.
+ITEM_TYPE_NAMES = {
+    0x01: 'weapon', 0x02: 'weapon-special', 0x04: 'spell-scroll',
+    0x05: 'potion', 0x06: 'key', 0x07: 'helm', 0x08: 'shield',
+    0x09: 'armor', 0x0A: 'leggings', 0x0B: 'boots', 0x0C: 'spellbook',
+    0x0E: 'food', 0x13: 'container', 0x15: 'ring', 0x18: 'scroll',
+    0x19: 'belt', 0x1A: 'amulet', 0x1B: 'shirt', 0x1C: 'pants',
+    0x23: 'chest', 0x24: 'bow', 0x25: 'arrow', 0x26: 'death-gem',
+    0x27: 'other', 0x29: 'spellcaster', 0x2A: 'bracers',
+    0x2B: 'panel-item', 0x2C: 'idol', 0x2D: 'crown', 0x30: 'tablet',
+}
+
 
 def item_icons(raw):
     """Yield ``(bank, index, icon_bytes)`` for every 24x24 item icon in bcdfa.

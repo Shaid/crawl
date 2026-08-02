@@ -23,6 +23,17 @@ export interface AssetEntry {
   spriteCount: number;
 }
 
+export interface AssetGroup {
+  name: string;
+  frames: string[];
+}
+
+export interface GroupsFile {
+  source?: string;
+  frameLabels?: Record<string, string>;
+  groups: AssetGroup[];
+}
+
 export function rgbaFromPalette(palette: PaletteData | null, index: number): [number, number, number, number] {
   if (!palette) return [128, 128, 128, 255];
   const c = palette.colors[index];

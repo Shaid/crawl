@@ -119,6 +119,7 @@ from .bcdfa import (
     ITEM_ICON_BYTES,
     ITEM_BANK_STREAMS,
     ITEM_BACKDROP_INDEX,
+    ITEM_TYPE_NAMES,
     item_icons,
     ARMOUR_WIDTH,
     ARMOUR_HEIGHT,
@@ -200,6 +201,7 @@ from .paths import (
     write_manifest,
     write_platform_index,
     manifest_entry,
+    set_groups_file,
 )
 
 __all__ = [
@@ -242,7 +244,7 @@ __all__ = [
     'GFK_COLOR_PLANES', 'gfk_stream_start', 'gfk_records', 'gfk_frames',
     'prg_records',
     'ITEM_WIDTH', 'ITEM_HEIGHT', 'ITEM_COLOR_PLANES', 'ITEM_ICON_BYTES',
-    'ITEM_BANK_STREAMS', 'ITEM_BACKDROP_INDEX', 'item_icons',
+    'ITEM_BANK_STREAMS', 'ITEM_BACKDROP_INDEX', 'ITEM_TYPE_NAMES', 'item_icons',
     'ARMOUR_WIDTH', 'ARMOUR_HEIGHT', 'ARMOUR_COLOR_PLANES',
     'ARMOUR_RECORD_BYTES', 'ARMOUR_STREAM', 'ARMOUR_BACKDROP_INDEX',
     'armour_icons',
@@ -270,6 +272,6 @@ __all__ = [
     'read_named_palette', 'ehb_palette', 'load_palette_json',
     'pack_atlas', 'frames_to_json', 'Frame',
     'ROOT', 'asset_root', 'asset_dir', 'cache_dir', 'data_dir',
-    'write_atlas', 'write_json', 'write_png', 'write_manifest',
+    'write_atlas', 'write_json', 'write_png', 'write_manifest', 'set_groups_file',
     'write_platform_index', 'manifest_entry',
 ]

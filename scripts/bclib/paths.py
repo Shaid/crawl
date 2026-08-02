@@ -69,13 +69,35 @@ def write_png(path, rgba):
     return path
 
 
-def manifest_entry(name, sprites, has_palette=False):
-    return {
+def manifest_entry(name, sprites, has_palette=False, groups_file=None):
+    entry = {
         'name': name,
         'sprites': int(sprites),
         'hasPalette': bool(has_palette),
         'png': f'{name}.png',
     }
+    if groups_file:
+        entry['groupsFile'] = groups_file
+    return entry
+
+
+def set_groups_file(name, groups_file, game='blackcrypt', platform='amiga'):
+    """Point an already-registered manifest entry at a groups sidecar.
+
+    For groups data that's only known after the atlas itself was written
+    (e.g. a name catalog built by a separate, later script) — `write_atlas`'s
+    `groups=` argument covers the common case where both are produced together.
+    """
+    root = asset_root(game, platform)
+    path = root / 'manifest.json'
+    if not path.exists():
+        return
+    entries = json.loads(path.read_text())
+    for e in entries:
+        if e['name'] == name:
+            e['groupsFile'] = groups_file
+            break
+    path.write_text(json.dumps(sorted(entries, key=lambda e: e['name']), indent=2))
 
 
 def write_manifest(entries, game='blackcrypt', platform='amiga'):
@@ -106,7 +128,7 @@ def write_manifest(entries, game='blackcrypt', platform='amiga'):
 
 def write_atlas(name, sheet, frames, category='sprites',
                 game='blackcrypt', platform='amiga', has_palette=False,
-                register=True):
+                register=True, groups=None):
     """Write an atlas PNG + frame sidecar and register it in the manifest.
 
     `name` may contain a subpath ('monsters'); the manifest key becomes
@@ -116,6 +138,14 @@ def write_atlas(name, sheet, frames, category='sprites',
     separately under `palettes/`. `has_palette` only controls whether the
     viewer additionally fetches `<name>.pal.json`; leave it False unless the
     caller writes that sidecar too.
+
+    `groups`, if given, is an asset-root-relative path (e.g.
+    'data/floor-item-names.json') to a sidecar of the shape
+    `{"groups": [{"name": str, "frames": [frameName, ...]}, ...]}` — every
+    frame name must appear in exactly one group. The viewer renders a
+    two-level tree (group -> frames) instead of a flat frame list when
+    present. Use `set_groups_file` instead when the groups data is only
+    known after the atlas is written (e.g. by a separate, later script).
     """
     out_dir = asset_dir(category, game, platform)
     png_path = out_dir / f'{name}.png'
@@ -123,7 +153,7 @@ def write_atlas(name, sheet, frames, category='sprites',
     write_json(out_dir / f'{name}.json',
                frames_to_json(frames, sheet.shape[1], sheet.shape[0]), pretty=True)
 
-    entry = manifest_entry(f'{category}/{name}', len(frames), has_palette)
+    entry = manifest_entry(f'{category}/{name}', len(frames), has_palette, groups)
     if register:
         write_manifest([entry], game, platform)
     return entry

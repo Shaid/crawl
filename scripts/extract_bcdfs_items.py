@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from bclib import bcdfs, paths
+from bclib import bcdfa, bcdfs, paths
 
 ROOT = Path(__file__).resolve().parents[1]
 BCDFS = ROOT / 'data' / 'blackcrypt' / 'amiga' / 'bcdfs'
@@ -34,16 +34,7 @@ S2_PATH = ROOT / 'data' / 'blackcrypt' / 'extracted' / 'bcdft_s2_data.bin'
 GFX_TO_ICON_LUT = 0x26EF2
 GFX_TO_ICON_COUNT = 236
 
-ITEM_TYPES = {
-    0x01: 'weapon', 0x02: 'weapon-special', 0x04: 'spell-scroll',
-    0x05: 'potion', 0x06: 'key', 0x07: 'helm', 0x08: 'shield',
-    0x09: 'armor', 0x0A: 'leggings', 0x0B: 'boots', 0x0C: 'spellbook',
-    0x0E: 'food', 0x13: 'container', 0x15: 'ring', 0x18: 'scroll',
-    0x19: 'belt', 0x1A: 'amulet', 0x1B: 'shirt', 0x1C: 'pants',
-    0x23: 'chest', 0x24: 'bow', 0x25: 'arrow', 0x26: 'death-gem',
-    0x27: 'other', 0x29: 'spellcaster', 0x2A: 'bracers',
-    0x2B: 'panel-item', 0x2C: 'idol', 0x2D: 'crown', 0x30: 'tablet',
-}
+ITEM_TYPES = bcdfa.ITEM_TYPE_NAMES
 
 
 def main():

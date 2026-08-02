@@ -76,7 +76,7 @@ def main():
         return
 
     sheet, frames = bclib.pack_atlas(sprites, max_width=512)
-    bclib.write_atlas('floor-items', sheet, frames)
+    bclib.write_atlas('floor-items', sheet, frames, groups='data/floor-item-names.json')
     print(f'  sprites/floor-items: {len(frames)} sprites '
           f'({bclib.FLOOR_ITEM_GROUPS} items x {bclib.FLOOR_ITEM_DEPTHS} depths, '
           f'{sheet.shape[1]}x{sheet.shape[0]} atlas)')
@@ -98,7 +98,7 @@ def main():
                    "plus per-pixel silhouette agreement (35,869/35,872 "
                    "opaque-vs-transparent pixels, 99.992%) -- see "
                    "scripts/verify_floor_item_dos_names.py"),
-        'groups': [{'index': i, 'name': n, 'frames': [f'floor{i:02d}-d{d}' for d in range(3)]}
+        'groups': [{'name': n, 'frames': [f'floor{i:02d}-d{d}' for d in range(3)]}
                    for i, n in enumerate(bclib.FLOOR_ITEM_NAMES)],
     }, pretty=True)
     print(f'  data/floor-item-names: {len(bclib.FLOOR_ITEM_NAMES)} confirmed group names')

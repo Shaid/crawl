@@ -1,4 +1,4 @@
-import { setHidden, type AtlasMeta, type PaletteData, type AtlasFrame } from './shared.ts';
+import { setHidden, type AtlasMeta, type PaletteData, type AtlasFrame, type AssetGroup, type GroupsFile } from './shared.ts';
 import { getAssetBasePath, getViewerConfig } from '../shared/viewer-config.ts';
 import {
   DEFAULT_GAME,
@@ -17,6 +17,7 @@ interface ManifestEntry {
   sprites: number;
   hasPalette: boolean;
   png: string;
+  groupsFile?: string;
 }
 
 const listEl = document.getElementById('list')!;
@@ -41,6 +42,14 @@ let currentAtlas: AtlasMeta | null = null;
 let currentPalette: PaletteData | null = null;
 let currentFrames: AtlasFrame[] = [];
 let currentFrame = 0;
+
+// Grouped browsing (`groupsFile`): which top-level entries are expanded in
+// the sidebar, their loaded groups data, and which group (if any) is being
+// viewed — narrows `currentFrames` to that group's frames instead of the
+// whole atlas.
+const expandedAssets = new Set<string>();
+const groupsCache = new Map<string, GroupsFile>();
+let selectedGroup: AssetGroup | null = null;
 
 let currentGame: GameId = DEFAULT_GAME;
 let currentPlatform: PlatformId = DEFAULT_PLATFORM;
@@ -104,6 +113,7 @@ function resetSelection() {
   currentPalette = null;
   currentFrames = [];
   currentFrame = 0;
+  selectedGroup = null;
   titleEl.textContent = 'No asset selected';
   metaEl.textContent = '';
   frameInfoEl.textContent = '';
@@ -131,6 +141,9 @@ async function loadManifest(): Promise<void> {
     );
     return;
   }
+
+  expandedAssets.clear();
+  groupsCache.clear();
 
   try {
     const res = await fetch(`${assetBase}/manifest.json`);
@@ -173,21 +186,89 @@ function renderList() {
   for (const a of filtered) {
     const item = document.createElement('div');
     item.className = 'item';
-    if (selected === a) item.classList.add('selected');
-    item.innerHTML = `<span class="item-label">${a.name}</span><span class="item-dim">${a.sprites}sp${a.hasPalette ? ' · pal' : ''}</span>`;
-    item.addEventListener('click', () => selectAsset(a));
+    if (selected === a && !selectedGroup) item.classList.add('selected');
+    const caret = a.groupsFile ? `<span class="item-caret">${expandedAssets.has(a.name) ? '▾' : '▸'}</span>` : '';
+    item.innerHTML = `${caret}<span class="item-label">${a.name}</span><span class="item-dim">${a.sprites}sp${a.hasPalette ? ' · pal' : ''}</span>`;
+    item.addEventListener('click', () => {
+      if (a.groupsFile) toggleExpanded(a);
+      else selectAsset(a);
+    });
     listEl.appendChild(item);
+
+    if (a.groupsFile && expandedAssets.has(a.name)) {
+      const groupsData = groupsCache.get(a.name);
+      if (!groupsData) {
+        const loading = document.createElement('div');
+        loading.className = 'item-group loading';
+        loading.textContent = 'Loading groups…';
+        listEl.appendChild(loading);
+      } else {
+        for (const g of groupsData.groups) {
+          const gEl = document.createElement('div');
+          gEl.className = 'item item-group';
+          if (selected === a && selectedGroup === g) gEl.classList.add('selected');
+          gEl.innerHTML = `<span class="item-label">${g.name}</span><span class="item-dim">${g.frames.length}</span>`;
+          gEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectGroup(a, groupsData, g);
+          });
+          listEl.appendChild(gEl);
+        }
+      }
+    }
   }
 }
 
-async function selectAsset(asset: ManifestEntry) {
+async function toggleExpanded(asset: ManifestEntry) {
+  if (expandedAssets.has(asset.name)) {
+    expandedAssets.delete(asset.name);
+    renderList();
+    return;
+  }
+  expandedAssets.add(asset.name);
+  renderList();
+  if (asset.groupsFile && !groupsCache.has(asset.name)) {
+    const data = await loadJSON<GroupsFile>(asset.groupsFile);
+    if (data) groupsCache.set(asset.name, data);
+    renderList();
+  }
+  // Show the full atlas as an overview alongside the expanded group list.
+  if (selected !== asset) await selectAsset(asset, { keepGroup: false });
+}
+
+async function selectAsset(asset: ManifestEntry, opts: { keepGroup?: boolean } = {}) {
   selected = asset;
   currentFrame = 0;
+  if (!opts.keepGroup) selectedGroup = null;
   currentAtlas = await loadJSON<AtlasMeta>(`${asset.name}.json`);
   currentPalette = asset.hasPalette ? await loadJSON<PaletteData>(`${asset.name}.pal.json`) : null;
-  currentFrames = currentAtlas?.frames ?? [];
+  const allFrames = currentAtlas?.frames ?? [];
+  if (selectedGroup) {
+    const byName = new Map(allFrames.map(f => [f.name, f]));
+    currentFrames = selectedGroup.frames.map(n => byName.get(n)).filter((f): f is AtlasFrame => !!f);
+  } else {
+    currentFrames = allFrames;
+  }
   renderList();
   drawAsset();
+}
+
+async function selectGroup(asset: ManifestEntry, groupsData: GroupsFile, group: AssetGroup) {
+  selectedGroup = group;
+  if (selected === asset && currentAtlas) {
+    const byName = new Map(currentAtlas.frames.map(f => [f.name, f]));
+    currentFrames = group.frames.map(n => byName.get(n)).filter((f): f is AtlasFrame => !!f);
+    currentFrame = 0;
+    renderList();
+    drawAsset();
+  } else {
+    await selectAsset(asset, { keepGroup: true });
+  }
+}
+
+function frameLabel_(asset: ManifestEntry, frame: AtlasFrame): string | null {
+  const data = groupsCache.get(asset.name);
+  return data?.frameLabels?.[frame.name] ?? null;
 }
 
 function drawAsset() {
@@ -200,13 +281,16 @@ function drawAsset() {
   const frame = currentFrames[currentFrame];
 
   if (frame) {
-    titleEl.textContent = `${selected.name} — sprite ${currentFrame + 1}/${currentFrames.length}`;
+    const groupPrefix = selectedGroup ? `${selectedGroup.name} — ` : '';
+    const label = frameLabel_(selected, frame);
+    const frameName = label ? `${label} (${frame.name})` : frame.name;
+    titleEl.textContent = `${groupPrefix}${frameName} — ${currentFrame + 1}/${currentFrames.length}`;
     metaEl.textContent = `${frame.w}×${frame.h}`;
     frameInfoEl.textContent = `atlas ${currentAtlas.width}×${currentAtlas.height}`;
     setHidden(frameStrip, currentFrames.length <= 1);
     frameSlider.max = String(currentFrames.length - 1);
     frameSlider.value = String(currentFrame);
-    frameLabel.textContent = `Sprite ${currentFrame + 1} / ${currentFrames.length}`;
+    frameLabel.textContent = `${currentFrame + 1} / ${currentFrames.length}`;
 
     const img = new Image();
     img.onload = () => {
