@@ -39,7 +39,8 @@
     "name": "sprites/floor-items",
     "sprites": 147,
     "hasPalette": false,
-    "png": "sprites/floor-items.png"
+    "png": "sprites/floor-items.png",
+    "groupsFile": "data/floor-item-names.json"
   },
   {
     "name": "sprites/font-big",
@@ -69,7 +70,8 @@
     "name": "sprites/items",
     "sprites": 180,
     "hasPalette": false,
-    "png": "sprites/items.png"
+    "png": "sprites/items.png",
+    "groupsFile": "data/item-icon-groups.json"
   },
   {
     "name": "sprites/keys",
@@ -81,7 +83,8 @@
     "name": "sprites/monsters",
     "sprites": 204,
     "hasPalette": false,
-    "png": "sprites/monsters.png"
+    "png": "sprites/monsters.png",
+    "groupsFile": "data/monster-names.json"
   },
   {
     "name": "sprites/paperdoll",

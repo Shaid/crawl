@@ -3479,6 +3479,150 @@ one pose, reusing identical pixel data. There are 42 directory slots but only
 asserts the length self-check. Zero unknown palette indices across all 204
 sprites.
 
+#### Monster sprite clustering (maps 2-13) and name resolution — **rendered / partly confirmed**
+
+Map 1's 14 sprites are grouped and named via a 100% DOS `clipper.clp`
+silhouette match (see above). The other 12 files' 190 sprites had no such
+cross-reference, so which directory entries are different render-distance/
+mirror views of *one* creature vs. genuinely different creatures sharing a
+file was undetermined. `scripts/cluster_monster_names.py` now answers this
+and writes `public/assets/blackcrypt/amiga/data/monster-names.json`
+(`{index, name, frames}` groups, every one of the 204 `sprites/monsters.json`
+frame names covered exactly once).
+
+**Method.** Within one file, entries are already sorted by `data_off`
+(`extract_monsters.py`'s own dedup order). A creature's near/mid/far/mirror
+poses turn out to be stored as a *contiguous run* with non-increasing
+bytes-per-plane (`bpr`, proportional to rendered area) — confirmed by the
+already-verified map 1 table (Two Head's 7 entries run `1548→...→318`
+bpr before Rock Eye's block starts at `996`, a rebound). The segmenter starts
+a new cluster at entry `i` iff `bpr[i] > 1.4 * max(bpr[i-1], bpr[i-2])` — a
+**local** rebound test, not a global running minimum (a global-minimum
+version was tried first; see Paths tried below).
+
+**Calibration/validation, cheapest first:**
+
+1. Applied with no map-1-specific tuning, the rule reproduces map 1's own
+   confirmed split exactly: Two Head (7) / the "—" unidentified 64×71
+   singleton / Rock Eye + tail (6, offsets 49182→66290 — the same set the
+   existing doc leaves merged).
+2. Per-map cluster **count** matches the bcdfb-n header's own "Graphics &
+   sound effects ID" count (the number of distinct monster types the game
+   says are on that level) for **12 of 13 maps** (2-8, 10-13). Only map 9
+   mismatches (3 clusters found vs. 2 known IDs).
+3. Every map's clusters were rendered to a contact-sheet PNG (one thumbnail
+   per sprite, grouped/labelled by cluster) and visually inspected. All 12
+   matching-count maps render as internally consistent creatures — e.g. map 2:
+   a grey ogre-gorilla (7), a green horned beetle (4), a horned orange/gold
+   caterpillar (10); map 7: a ram-horned minotaur warrior (10) + one
+   standalone giant magenta-accented rock/gargoyle face (1); map 11: a
+   skull-and-snakes gorgon-like creature (10), a hooded wraith (4), a
+   grey robed statue-guardian (3). Recolour pairs are common and expected
+   (e.g. map 3's clusters 0/1 are the *same* floating horned demon-face
+   shape in red/pink vs. grey/silver — two distinct known IDs, not a
+   clustering error) and are called out as such rather than merged.
+4. Map 9's mismatch was root-caused by the same visual check: its 3rd cluster
+   split into a 2-entry block (a front-view pose, chest emblem visible) and
+   an 8-entry block (profile-view poses) of what the render shows is **one**
+   red crab/lobster-humanoid (yellow eyes, brown claws, segmented shell) —
+   the bpr jump between "front pose 2" and "profile near pose" crosses the
+   1.4x threshold by coincidence. Fixed with one hardcoded merge in the
+   script (`mapno == 9`); after the merge map 9 also matches its known count
+   of 2.
+
+**Confidence:** high for the clustering itself (matches known ID counts
+12/13 before any correction, and every cluster renders as a coherent single
+creature on visual inspection) — treat as *rendered*, not *confirmed*, since
+there's no byte-exact oracle (unlike the DOS cross-reference used for map 1).
+
+**Naming.** Only one new name was resolved beyond geometry: **Possessor
+Demon**, map 6, both of its clusters (10+10, identical dimensions —
+recolours of one base sprite). `bcdfs`'s monster stat records hold exactly
+**one** entry, in the entire 265-record corpus, with movement-type byte
+`+0x0F == 5` ("Possessor" — a value already named in the documented
+monster-bytecode field table) — at map 6 gfx ID `0xb8`. Independently,
+`bcdft`'s taunt text names `"THE POSSESSOR"` in prose (decompressed S_1
+offset `0x1C026`), and `bcdfu`'s ending-epilogue text independently names a
+defeated boss `"THE EVIL POSSESSOR DEMON ..."` outright. Map 6's other gfx ID
+(`0xb7`) is already documented above as the generator-spawned,
+identically-dimensioned recolour of the same sprite (no static placement, 0
+records in the census), so both clusters are labelled Possessor Demon /
+"Possessor Demon (recolour variant)". This is a structural (movement-type
+census) + double-independent-text match, not a literal name-pointer, so it
+is **not** given the same confidence as the DOS-cross-reference names — call
+it high-confidence but short of "confirmed".
+
+Everything else beyond map 1 and map 6 is a **geometry-only placeholder**
+(`"Map N Creature A/B/C..."`) — see "Bestiary name table search" below for
+why no further names could be resolved.
+
+##### Paths tried (sprite clustering)
+
+| Approach | Result | Why it failed / was superseded |
+|----------|--------|--------------------------------|
+| Pixel-content similarity (crop-to-mask-bbox, pad-to-square, resize, IoU + colour correlation) between every sprite pair in a file | Rejected as the primary signal | Confirmed same-creature pairs (map 1's Rock Eye near vs. far, ground truth) scored *lower* (~0.47-0.54) than some confirmed different-creature pairs, because near/far poses in this game are separately hand-drawn, not scaled copies — shape/colour correlation is too weak a same-creature signal here. Still useful as a spot-check, not a clusterer |
+| Width-only ratio boundary (`width[i] > 1.3 * running-block-min-width`) | Mostly right, two failure modes | (a) `48→64` width steps *within* one creature's own near-tier (e.g. map4's `128,112,128,64,80,...`) sat right at the threshold and were sensitive to its exact value; (b) a **global running minimum** lets one very small "far" outlier lock in a floor that makes a later, still-legitimate same-creature value look like a big jump (false split, e.g. map 10's `...,32,48,32` far-tier zigzag) |
+| bpr (byte-per-plane, ~ rendered area) with a **global running-minimum** floor, factor swept 1.3-1.6 | Same false-split failure mode as width-global-min | Confirmed on map 9 (5 blocks vs. 2 known) and map 11 (5-6 vs. 3 known) at every factor tried; switching to a **local** 2-entry-window rebound test (not a global floor) fixed both while keeping map 1/3/4's correct splits |
+| Trusting the header's per-file known-ID count as an exact target and forcing that many clusters | Not used as-is | It's the right *validation* signal (matched 12/13 maps) but not a splitting rule on its own — it doesn't say *where* to cut, and one map (9) needed the geometric segmenter's own output plus a visual check to reconcile a genuine off-by-one |
+
+##### Bestiary name table search (bcdft / bcdft S_2 / bcdfs)
+
+Searched for a monster bestiary / creature-name table indexed by the same
+"Graphics & sound effects ID" byte that drives the sprite-file headers and
+the monster stat records, and for any code path indexing such a table by
+that field.
+
+**What was checked:**
+
+- Full `strings` dump of decompressed `bcdft` S_1 (166,676 B). Its *only*
+  readable-text region is offsets **`0x1A87F`–`0x1DA34`** (≈12.8 KB, ends where
+  the file returns to 68k code/binary noise on both sides — every string
+  outside this range that superficially looked like a name (e.g. `XORC`,
+  `TORB`, `RDRB`) is a coincidental opcode-byte pattern, not text). Its
+  contents, in order: **32 spell names** (`LIGHT`, `HEALING I`, ... `STONE TO
+  FLESH`), **4 class names** (`FIGHTER CLERIC MAGIC USER DRUID`), ~40
+  riddle/quest-journal entries (in-fiction diary pages, one of which reads
+  `"...TO ATTACK THE TWO HEADED BEAST HE IS FAR TO STRONG..."` — an
+  independent third corroboration of map 1's already-confirmed "Two Head"
+  name), a set of "Estoroth" boss-taunt lines naming a few creatures in prose
+  (`"MY RAM GENERAL"`, `"MY BEAUTIFUL MEDUSA"`, `"THE POSSESSOR"`,
+  `"THE RAM DEMONS"`), and a ~340-entry unique/magic-item name list
+  (`"OGRE BLADE"`, `"DEMON DICER"`, ... — this is the table the existing
+  "abandoned bcdft string-table approach" note already describes; item, not
+  monster, names).
+- `bcdft` S_2 (40,808 B, the `A4` small-data segment): its only strings are a
+  QWERTY keyboard-remap table, unrelated.
+- `bcdfs` (the dungeon map/entity file): no readable strings at all.
+- `BlackCrypt` (main executable) and `bcdfp/q/r/v`: no monster-keyword string
+  hits.
+- `bcdfu` (epilogue overlay): **does** contain readable boss text — a
+  victory-epilogue block naming defeated "lieutenants" in sequence: `OGRE`
+  (associated with `OGREBLADE`/Emerald Key), the `DREADED DRAGONLICH`, `THE
+  HIDEOUS MEDUSA`, `THE EVIL POSSESSOR DEMON`, `THE GREAT WATERLORD`, and
+  `THE MIGHTY RAM DEMON` — six named unique bosses total.
+
+**Conclusion: no indexed bestiary table exists in any of these files.**
+Every creature-adjacent string found is prose (quest riddles, boss taunts, an
+ending epilogue), not an array addressable by monster/graphics ID, and no
+code path indexing a string table by that ID field was found (none of the
+regions above have the array-of-pointers or fixed-stride-record shape the
+confirmed item-name tables have).
+
+**Unconfirmed leads (deliberately not applied to `monster-names.json`).**
+`bcdfu`'s 6 epilogue boss names are plausible matches for some of the
+geometry clusters on thematic/visual grounds, but none has the kind of
+structural link that resolved "Possessor Demon" (map 6) — no HP/movement-type
+outlier, no unique single-instance record, or an outlier that doesn't
+resolve to a single map/cluster cleanly:
+
+| Epilogue name | Candidate | Basis | Why not applied |
+|---|---|---|---|
+| Medusa | Map 11 cluster A (10 sprites) | Visual: skull head with snake-like radiating limbs; textual: "MY BEAUTIFUL MEDUSA" taunt | Thematic/visual only — no HP/movement-type/gfx-ID outlier found linking it specifically |
+| Great Waterlord | Map 9 cluster A (10 sprites) | Visual: blue-green merman with a trident, clearly aquatic | Same — map 9's two gfx IDs (`bf` n=13, `c4` n=28) are both common "regular" record counts, no unique-boss signature |
+| Ram Demon / Ram General | Map 7 cluster A (10, ram-horned minotaur) and/or cluster B (1, standalone 192×103 rock/gargoyle face) | Textual: "THE RAM DEMONS", "MY RAM GENERAL", "THE MIGHTY RAM DEMON" | Map 7's two gfx IDs (`b5` n=9, `b9` n=10, HP up to 300) are both multi-instance — no clean 1:1 "this is the unique Ram General" signal, and cluster B doesn't look ram-themed at all |
+| Dragonlich | Map 4 cluster C (2 sprites, giant winged skeletal figure, gfx `0x50`) | Structural: `0x50` is the **only** single-record (n=1), highest-HP (220 vs. 65-110/25-95 for the map's other two IDs) monster on map 4 — a genuine unique-boss signature; visual: skeletal + winged fits "lich" imagery | Held back anyway — the HP/singleton signature is solid, but "Dragonlich" specifically (vs. some other unique) is still a narrative inference, not a name pointer. Closest of the five to being upgradable; worth a closer look if more evidence turns up |
+| Ogre | — (no candidate identified) | Textual only (`OGREBLADE`/Emerald Key) | No visually ogre-like cluster or HP outlier stood out among the reviewed contact sheets |
+
 ---
 
 ### RLE Decompression (shared across bcdfv, bcdfx, bcdfy, bcdfz)
