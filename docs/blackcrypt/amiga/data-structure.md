@@ -1661,6 +1661,232 @@ no DOS counterpart.) This also re-confirms, on a third independent record,
 the **Amiga index → DOS index + 64** relationship the Spell Book decode first
 showed.
 
+###### The automap tilemap — where the 24 tiles come from — **SOLVED**
+
+> **Correction — supersedes "nothing traces which `bcdfs` dungeon square
+> becomes which of the 24 tiles, nor what writes the playfield-1 tilemap
+> buffer at `$78(A5)`".** Both are now traced end to end, and the premise
+> behind the question was slightly off: **there is no tilemap buffer.**
+> `$78(A5)` is the playfield-1 **bitplane** base, and the tiles are blitted
+> straight into it 24 bytes at a time. The thing that behaves like a tilemap
+> is a **field inside the runtime map array itself** (see below).
+
+**The tile index is stored in the square's own longword.** The runtime 64×64
+map array at `A4 − 0x37CA` (index `(row << 8) | (col << 2)`, the same array
+and formula the loader and the per-square palette override already use) holds
+each square as the on-disk 4-byte square, *reinterpreted*:
+
+| Bits | On disk | At runtime |
+|---|---|---|
+| 31-28 | square type nibble (`+1` wall, `+2` darkness, `+4` spell-failed, `+8` water) | unchanged |
+| **27-20** | the two constant `0xF` nibbles — **`0xFF` in all 14,168 squares of all 13 maps** | **automap tile index 0-23**; `0xFF` = *not yet explored* |
+| 19-16 | level nibble | unchanged |
+| 15-12 | `wall_flags` (N/E/S/W) | unchanged |
+| 11-0 | `unique` | unchanged |
+
+That `0xFF` is the explored-state sentinel: the render loop skips any square
+still holding it, and the reveal routine overwrites it with a tile index as
+the party walks. **Verified: bits 27-20 are `0xFF` on every one of the 14,168
+squares in `bcdfs`, zero deviation** — the field is untouched on disk, so it
+is pure runtime state.
+
+**Writer — `RevealAroundParty()` S_1 `+0x0382A`** (gated on `$1E2A(A4)`; ten
+call sites, including `MoveParty`'s tail at `+0x27C52`). For `d5 = 0…4` — the
+four neighbours **and** the party's own square (`d5 = 4` skips the step,
+`ApplyFacingDelta` no-ops on facings ≥ 4) — it picks a tile and commits it
+with a read-modify-write that touches only bits 27-20:
+
+```asm
+03846  MOVE.L  #$F00000,D2        ; default = tile 15 (plain floor)
+0385E  ...                        ; if wall_flags bit (1 << (d5+12)) set -> D2 = 0
+0388A  JSR     $2B4(PC)           ; ApplyFacingDelta(&X, &Y, d5)
+038E8  BTST.B  #4,(A0,D0.L)       ; square type bit 0 (wall)     -> D2 = 0
+03908  BTST.B  #5,(A0,D0.L)       ; square type bit 1 (darkness) -> D2 = $1000000
+03916  TST.L   D2 / BEQ $3B36     ; blocked -> commit tile 0 without consulting objects
+0391C  ...                        ; walk the square's object chain (word +0x12)
+03B1A  SUBI.W  #$10,D0            ; switch on the record's type byte +0x05
+03B26  MOVE.W  $3AFA(PC,D0.W),D0  ; 16-entry jump table, base $3B2C
+03B60  ANDI.L  #$F00FFFFF,D0      ; <-- clear bits 27-20 ...
+03B66  ADD.L   D2,D0              ; ... and OR in the chosen tile << 20
+03B82  MOVE.L  D0,(A0,D1.L)       ; commit
+```
+
+**Helper — `RevealWalls(X, Y)` S_1 `+0x0369E`**, called by most tile handlers.
+For each of the 5 directions: if `(X,Y)` has a `wall_flags` bit in that
+direction, the square *beyond* it is forced to **tile 0** (a wall block);
+otherwise, if the neighbour holds an illusionary wall (type `0x10`,
+`word +0x0A == 0`, `word +0x0C == 1`) it is forced to **tile 21**. This is
+what paints the wall outline around anything you can see.
+
+**Reader — `ShowAutomap()` S_1 `+0x03B94`.** Installs the automap copper list
+(`JSR $9F962` = S_1 `+0x1F90A`: `COP1LC = $64(A5)`, `$4F6(A5) = 1`, then a
+blitter clear of `$78(A5)`), takes the current level from the party's own
+square, makes **two** passes over the whole 64×64 array — one to find the
+bounding box of squares whose level matches *and* whose tile ≠ `0xFF`, one to
+draw — then restores `COP1LC = $50(A5)` (`+0x1F978`) and re-requests screen
+mode 1. Centring and the bottom-up row order:
+
+```asm
+03CC8  A2 = $28 - (maxCol-minCol)/2       ; 40 = half of the 82-tile PF1 row
+03CD2  A3 = $19 + (maxRow-minRow)/2       ; 25 = half of the 50-tile PF1 column
+03D7C  D1 = A3 - (row - minRow)           ; screen tile row  (map row 0 at the BOTTOM)
+03D82  D0 = A2 + (col - minCol)           ; screen tile column
+03D88  JSR     $9FA52.l                   ; DrawAutomapTile(D0=col, D1=row, D2=tile)
+03DA8  D2 = $1744(A4) + $11               ; party arrow = tile 17 + facing
+```
+
+**`DrawAutomapTile(D0, D1, D2)` — S_1 `+0x1F9FA`** (the only writer of the
+playfield-1 bitplane): `D1 × 656` (`$290` = 8 rows × 82 B) `+ D0` off
+`$78(A5)`, then 3 planes × 8 unrolled `MOVE.B (A1)+,(A0)` / `LEA $52(A0),A0`
+(82-byte rows) with `ADDA.L #$7D90,A0` (= `$8020 − 656`) between planes;
+source is `$B4(A5) + $73A0 + D2 × 24`.
+
+###### The 24 automap tiles — **confirmed**
+
+Every discriminator below partitions the shipped corpus by `gfxNumber` with
+**zero mixing**, and the artwork (already extracted byte-exact as
+`sprites/automap.*`) independently depicts what the code selects.
+
+The **Squares** column counts how many map squares end up carrying each tile
+when the simulator below explores all 13 maps exhaustively — it is a count of
+*squares*, not of records (a record on an unreachable or level-0 square never
+gets drawn).
+
+| Tile | Selected when | Art | Squares |
+|---|---|---|---|
+| **0** | blocked: a `wall_flags` bit between party and square, or square type bit 0 (wall). Also forced by `RevealWalls` | shaded 3-D block | 5,724 |
+| **1** | type `0x12`, `word +0x10` = **2** (gfx `0x43`) — **STAIRS UP** | wedge widening downward | 38 |
+| **2** | type `0x12`, `word +0x10` = **3** (gfx `0x44`) — **STAIRS DOWN** | wedge narrowing downward | 33 |
+| **3** | type `0x11` door frame, `byte +0x04` bit 4 **clear**, `byte +0x0F` bit 0 **set** | horizontal bar **with a gap** = open | 3 |
+| **4** | type `0x11`, `+0x04` bit 4 clear, `+0x0F` bit 0 clear | solid horizontal bar = closed | 91 |
+| **5** | type `0x11`, `+0x04` bit 4 **set**, `+0x0F` bit 0 set | vertical bar with a gap = open | 1 |
+| **6** | type `0x11`, `+0x04` bit 4 set, `+0x0F` bit 0 clear | solid vertical bar = closed | 79 |
+| **7** | type `0x17` Pillar, `word +0x0A == 0` | dark blob | 206 |
+| **8** | type `0x14` Pit, `word +0x10 == 0` (gfx `0x3A` = **floor** pit), `+0x0A == 0` | hole with shadow | 12 |
+| **9** | type `0x12`, `+0x10` = **0 or 1** (gfx `0x41` inviso / `0x40` visible) — teleport | magenta/blue sparkle checker | 123 |
+| **10** | type `0x10`, `word +0x0C` = **2** (gfx `0x48`) — magic field | blue dot lattice | 25 |
+| **11** | type `0x10`, `+0x0C` = **3** (gfx `0x3C`) — glyph | blue panel on floor | 13 |
+| **12** | type `0x1F`, `word +0x0E == 0` (gfx `0x45`) — fountain | framed blue panel | 26 |
+| **13** | type `0x1E`, `byte +0x07 == 0`, `+0x0A == 0`, `word +0x0E == 0` (gfx `0x42`) — floor plate | empty framed square | 25 |
+| **14** | type `0x1E`, `byte +0x07 == 0`, `+0x0E != 0`, `+0x0C != 0` — a **visible trap** | framed square, magenta fill | **0** — see below |
+| **15** | default: an unobstructed, featureless floor square | floor stipple | 6,601 |
+| **16** | square type bit 1 (darkness) | dark dither | 99 |
+| **17-20** | party marker, `tile = 17 + $1744(A4)` (facing 0=N,1=E,2=S,3=W) | up / right / down / left arrows | 1 per draw |
+| **21** | type `0x10`, `+0x0C` = **1** (gfx `0xC1`) — illusionary wall; also forced by `RevealWalls` on neighbours | *brightened* wall block | 59 |
+| **22** | type `0x12`, `+0x10` = **4** (gfx `0x1E`) — spinner | magenta-cornered swirl | 7 |
+| **23** | type `0x1F`, `word +0x0E != 0` (gfx `0x46`) — special panel | wall block with a bright inset | 14 |
+
+Types `0x13`, `0x15`, `0x16` (alcove), `0x18`-`0x1D` and everything outside
+`0x10`-`0x1F` fall through the jump table to the "next record in the chain"
+arm — **alcoves, switches, plaques, locks, monster generators and statues get
+no automap marker at all**, which is why the clue book marks them but the
+in-game map does not.
+
+**`byte +0x07` of a type-`0x1E` record is the "inviso" flag** (new this pass).
+The clue book's legend carries *both* `FLOOR PLATE` and `INVISO FLOOR PLATE`,
+and Level 1's two type-`0x1E` records split exactly along `+0x07`:
+
+| Square | gfx | `byte +0x07` | Automap | Clue-book cell, best NCC over all 30 legend icons |
+|---|---|---|---|---|
+| (18, 8) | `0x42` | **1** | *nothing* | **`INVISO FLOOR PLATE` +0.329** (rank 1); `FLOOR PLATE` −0.006 |
+| (25, 10) | `0x42` | **0** | tile 13 | `FLOOR PLATE` **+0.419** vs `INVISO FLOOR PLATE` +0.264 |
+
+Every one of the 41 **trap** records (gfx `0x4A`) in all 13 maps has
+`byte +0x07 = 1`, so **tile 14 is never drawn from shipped on-disk state** —
+the trap marker is reachable only if something clears `+0x07` at runtime.
+(11 candidate `byte +0x07` writers exist in S_1; none was traced to the
+`A4 − 0x6E7A` object array this pass. See `TODO.md` row `automap-trap-tile`.)
+
+###### Verification (ground truth)
+
+The whole chain — reveal, tile selection and render — was reimplemented in
+Python from the disassembly and compared against the **official Manual &
+Clue Book**'s printed per-level maps (scanned PDF, rendered at 250 dpi, grid
+lattice located from its own printed rulings, cells classified black/white by
+window mean; the 30 legend icons segmented from p. 31 at 600 dpi and matched
+by normalised cross-correlation).
+
+1. **Bounding box, exact.** Simulating full exploration of Level 1 (map 1,
+   level nibble 1) yields a used area of **28 columns × 24 rows**. The clue
+   book's Level 1 grid has drawn content in exactly **columns 0-27, rows
+   0-23** — same extent, same origin, no offset.
+2. **Wall/floor agreement, Level 1:** of the 401 cells the simulation marks
+   tile 0 or tile 15 and the clue book renders as a *pure* black or white
+   cell, **398 agree — 99.25 %** (tile 0: 232/233 black; tile 15: 166/168
+   white). Every remaining cell the simulation marks with a *special* tile
+   lands on a clue-book cell carrying a symbol, never on plain floor.
+3. **Wall/floor agreement, Level 2** (map 1, nibble 2, clue book p. 34):
+   **595/607 = 98.02 %** at the grid alignment derived from that page's own
+   lattice.
+4. **Stairs, three independent ways.** (a) The Level 1 stairs square (5, 18)
+   cross-correlates **+0.440 with `STAIRS DOWN` and −0.140 with `STAIRS UP`**;
+   the simulation puts `word +0x10 = 3` / gfx `0x44` / tile 2 there. (b) The
+   tile art itself: tile 2 is a wedge narrowing downward (the legend's
+   `STAIRS DOWN` funnel), tile 1 a wedge widening downward (`STAIRS UP`).
+   (c) A whole-corpus census over all 28 dungeon levels — **level 1, the top
+   of the dungeon, has 0 × gfx `0x43` and 1 × gfx `0x44`; level 28, the
+   bottom, has 1 × gfx `0x43` and 0 × gfx `0x44`**, and levels 7 / 8 carry a
+   matched **11 × `0x44` / 11 × `0x43`** pair with none of the opposite kind
+   on either side.
+
+> **Correction — resolves the stairs `+0x10` = 2 vs 3 hypothesis left open
+> under "Special-square sub-kinds".** It is settled: `+0x10` = **2** (gfx
+> `0x43`, sprite-slot flight A) = **STAIRS UP**, `+0x10` = **3** (gfx `0x44`,
+> flight B) = **STAIRS DOWN**.
+
+**The door orientation bit reads the corridor, not the door leaf.** `byte
++0x04` of a door frame takes only two values across all **291** door frames —
+`0x50` (walls **N + S**) and `0xA0` (walls **E + W**) — i.e. the two side
+walls of the corridor the door sits in. `BTST #4` therefore tests "N wall
+present", which means the corridor runs **east-west**, so the door leaf is
+drawn as a **vertical** bar (tiles 5/6); `0xA0` gives the horizontal bar
+(tiles 3/4). `byte +0x0F` bit 0 is the already-confirmed open/closed flag
+(see "Door State"), and the art agrees independently: tiles 3 and 5 have a
+gap in the middle of the bar, tiles 4 and 6 are solid.
+
+###### `$490(A5)` — the screen-mode selector — **SOLVED**
+
+> **Correction — supersedes "mode 1 is the automap".** It is not. **The
+> automap is not a `$490(A5)` mode at all**: `ShowAutomap` swaps `COP1LC`
+> directly to `$64(A5)` (S_1 `+0x1F90A`), restores it to `$50(A5)` on exit
+> (`+0x1F978`), and then *re-requests mode 1* (`+0x03E42`). Mode 1 is the
+> screen the automap returns **to**.
+
+`$492(A5)` is the *request*, `$490(A5)` the *committed* mode. Apart from the
+`CLR.B` in the init block at S_1 `+0x2033E` (which also seeds `$490(A5) = 1`
+directly at `+0x20354`, without running the dispatcher), the only writer of
+the request is `SetScreenMode(D0)` at S_1 `+0x231FC`; the VBlank chain
+latches it at `+0x1E9EA` and dispatches:
+
+```asm
+1E9EA  MOVE.W  $492(A5),D0        ; 0 = no change
+1E9F4  MOVE.W  D0,$490(A5)
+1E9FC  CMPI.W  #$1,D0 -> $1EAB2   ; copper sub-list $54(A5)
+1EA04  CMPI.W  #$2,D0 -> $1EAE6   ;                 $58(A5)
+1EA0C  CMPI.W  #$3,D0 -> $1EB00   ;                 $5C(A5)
+1EA14  BRA     $1EACC             ; default          $60(A5)
+```
+
+Each arm only patches the two address halves at `$2(A0)`/`$6(A0)` where
+`A0 = $48A(A5)` — a `COP2LC` pair inside the main list built at `+0x1E066` —
+so a "mode" is a copper **sub-list**, not a whole display.
+
+Each mode is named by the **mouse hot-spot table** its call site installs
+immediately afterwards through `InstallHotspotList(A0)` (S_1 `+0x1FF9C`,
+which walks a singly-linked list of 14-byte `x, y, w, h, id, next` records
+into the live region list at `$158(A5)`):
+
+| `$490(A5)` | Copper | Requested at | Hot-spot table | Screen |
+|---|---|---|---|---|
+| **1** | `$54(A5)` — per-scanline `COLOR19/26/27` gradient over lines `$BA`-`$D1` and `$D5`-`$EC` | `+0x14D88`, `+0x10A70`, `+0x10E66`, `+0x15D5A`, `+0x1A74C`, `+0x03E42` | S_2 `0x09AC`, 30 regions | **Main dungeon screen** — 4 × 31×24 portraits at (127/161, 146/173), 4 × 63×25 character panels at (3/252, 145/172), 8 × 24×24 hand slots, HP/stamina/food bars. The four brazier positions the fire animation gates on mode 1 for — (16,151), (296,151), (296,178), (16,178) — frame exactly this panel |
+| **2** | `$58(A5)` — `COLOR26` ramp, same two line bands; also references `$60(A5)` at `+0x1E47E` | `+0x150DE` (inside a per-character function keyed on `$1A16(A4)`, character records at `$1758(A4)`, stride 168) | S_2 `0x0B42`, 41 regions | **Inventory / equipment (paperdoll) screen** — a body-shaped cluster of 9 irregular slots at x 213-309, y 4-116 (head/neck/torso/arms/hands/legs), 4 × 23×22 character selectors at y 121, and a 16-slot 24×24 backpack grid at x 110-309, y 148-197 |
+| **3** | `$5C(A5)` — 1 bitplane from `$3C(A5)` (a 2,320 B = 40×58 buffer pre-filled `$FF`) from line `$B6`, 16 warm colours from `+0x1E560`, plus `$4C8(A5) = +0x24816` and `$4CC(A5) = $FF` | `+0x1549C` (sets `$174A(A4) = 3`) | S_2 `0x0D3A`, 13 regions | **Spell book** — 4 × 186×10 text lines at (75, 159/169/179/189), 5 small buttons in a row at y 123, and 7×25 scroll arrows at (229, 89)/(288, 89). These sit exactly inside the 320×56 **"Spell Book" background** that `bcdfa` entry-5 record `0x0000` draws at (0, 144) |
+| **4 / default** | `$60(A5)` | **never requested** — all 8 `SetScreenMode` call sites pass 1, 2 or 3, and `D0 = 0` is filtered out at `+0x1E9EE` | — | Unreachable as a mode in the shipped build. Unlike the other three, `$60(A5)`'s builder (`+0x1E5C0`) emits a **complete standalone list** (DMACON, 8 null sprite pointers, `BPL1PT`/`BPL2PT` from `$40(A5)`/`$44(A5)`, `BPLCON0 = $2400` → 2 planes **DBLPF**, `BPL1MOD = $2A`, DIW `$F281`/`$FAC1`, an 8-line `COLOR1`/`COLOR9` cycle) that ends by pointing `COP1LC` back at `$50(A5)`. It is better read as a shared sub-list that mode 2's list jumps to than as a fourth screen |
+
+`$174A(A4)` is a separate, loosely-coupled **screen id** taking 1, 2, 3, 4 and
+10; `ShowAutomap` sets it to 1 on exit (`+0x03E3C`) alongside its
+`SetScreenMode(1)`.
+
 ###### `0x6E40` — the Fire Animation and its four braziers (confirmed)
 
 The blitter and its caller are a complete, self-contained animation driver:
@@ -5441,15 +5667,24 @@ caller's X/Y at S_1 `+0x27C64`). Resolving those against the destination
 square's `level` nibble: sub-kind `2` goes to a **lower** level number in 27 of
 its 33 resolvable cases (3 same-level, 3 higher), sub-kind `3` to a **higher**
 one in 26 of 35 (6 same-level, 3 lower) — a clean mirror pair, consistent with
-`2`/`0x0043` = flight A = Up and `3`/`0x0044` = flight B = Down (this half is *hypothesis*: it assumes the `level` nibble
-increases with depth, which is not independently confirmed).
+`2`/`0x0043` = flight A = **Up** and `3`/`0x0044` = flight B = **Down**.
 
-> **Investigated further, still open.** A dedicated pass looked for the
-> consumer of the 18-byte table three more ways, all negative, and also
-> checked whether the DOS catalog's item *order* can substitute for a code
-> trace — it can't, reliably. See "Still open" below for the full paths-tried
-> writeup; the appearance-based A=Up/B=Down guess is left as-is because
-> nothing found this pass is strong enough to overturn it.
+> **Correction — this is no longer a hypothesis, and the `level`-nibble
+> assumption it rested on is no longer load-bearing.** Flight A = Up /
+> flight B = Down is **confirmed** by the pixel comparison against DOS
+> `clipper.clp`'s own labelled entries 43-48 (see "Still open" below:
+> 1.0000/~0.999 for the correct pairing at all three depths versus 0.63-0.80
+> for the wrong one, 38,240 px), and **independently re-derived three further
+> ways** by the automap pass — see "bcdfa — UI / Automap Resource Bank" →
+> "The 24 automap tiles" → "Verification (ground truth)": the clue book's
+> `STAIRS DOWN` legend icon cross-correlates to the Level 1 stairs square
+> (which is `+0x10 = 3`), the automap tile art for the two flights is the
+> same up/down wedge pair the legend uses, and a 28-level census shows the
+> dungeon's **top** level carrying only `0x44` and its **bottom** level only
+> `0x43`, with levels 7/8 forming a matched 11 × `0x44` / 11 × `0x43` pair.
+> The earlier note here ("Investigated further, still open … the
+> appearance-based A=Up/B=Down guess is left as-is") is superseded: the guess
+> was right, and four independent oracles now agree.
 
 ###### Slot `$C8` (6,060 B) — Panel Top + Fountain (confirmed)
 
@@ -6250,7 +6485,12 @@ maps with `scripts/bclib/bcdfs.py` (2,536 records, 14,168 squares) gives exactly
 - `objRec[+0x07]` on the `0x50`/`0xA0` decoration path is a 4-bit mask whose set
   bits are **⊆ {1,3} on every N+S square and ⊆ {0,2} on every E+W square**
   (157/157, zero deviation) — i.e. bit `d` corresponds to the wall in direction
-  `(d + 3) & 3`.
+  `(d + 3) & 3`. That mapping is re-derived from disassembly and pinned against
+  both the corner arms and the corridor arm in "Kind 3 and the left-wall
+  position tables" below; the invariant is a *consequence* of it (a bit can
+  only name a wall the square actually has), not a coincidence in the data.
+  Only bits 0–3 are ever tested (`CMPI.W #4,D7` at `+0x03306`), and the shipped
+  values are exactly `{0x01, 0x02, 0x04, 0x05, 0x08, 0x0A}`.
 
 ##### Kinds 0–3 (S_1 `+0x03550` stub → `+0x02A0E`) — wall-mounted decorations, door locks and door switches (**confirmed**)
 
@@ -6269,6 +6509,162 @@ At `depth == 1 && lateral == 0` both special cases also register a **clickable
 hotspot** (see below): code `0x6B` for the door lock, `0x64` for the door
 switch, both with rect `(0x1F or 0x9C, 0x28, 0x15, 0x25)` — left or right of
 the viewport depending on `dir`.
+
+> **Important — `dir ≤ 1` on a `0x22`/`0x0F` record draws *nothing*, it does
+> not fall through to the generic renderer.** `+0x02A3E` (`CMPI.W #1,D2 /
+> BLE $2AA6`) and `+0x02AC4` (`CMPI.W #1,D2 / BLE.W $2B5A`) both branch to
+> `BRA $2B7E`, the function epilogue. The generic `+0x21C84` call at
+> `+0x02B5C` is reached only when the type byte is *neither* `0x22` nor
+> `0x0F`. This matters — see the next subsection.
+
+##### Kind 3 and the left-wall position tables — unreachable, and an off-by-one in the engine (**confirmed**)
+
+> **Correction — supersedes the former "Still open" row "the `dir == 3`
+> (`+0x25E12`/`+0x26070`) position tables look unreachable".** That row
+> asserted the gate plus the data "force `kind == 2` for every reachable
+> combination — so `D0` is always `1`". **`kind == 2` is not forced.**
+> `kind ∈ {0, 2}` in an exact 50/50 split (252 / 252 over the whole corpus),
+> and it was never checked whether both through-corridor facings had been
+> swept. They have been now: they are both legal, both physically playable on
+> 153/157 records, and *neither* produces `kind == 3`. The conclusion the old
+> row reached is right; its reasoning was not.
+
+**The whole chain, re-derived from disassembly this pass** (nothing below is
+taken from the earlier prose):
+
+| Site | Instruction evidence | Establishes |
+|---|---|---|
+| `+0x02E44` | `MOVEQ #1,D0 / MOVE.W -$10(A5),D1 / ASL.W D1,D0 / ASL.W #4,D0 / MOVEA.W D0,A3` | `A3 = 1 << (partyFacing + 4)`; `-0x10(A5)` is the low word of the long loaded from `$1744(A4)` at `+0x02DFC` — the same `partyFacing` global `+0x02B86` uses |
+| `+0x032D0` | `TST.W D2 / BLE $330C` | the corridor arm requires `depth > 0` |
+| `+0x032D4`–`+0x032DE` | `MOVE.W A3,D0 / MOVEQ #0,D1 / MOVE.B $4(A2),D1 / AND.W D1,D0 / BNE $330C` | **the gate**: the party's own facing bit must *not* be one of the square's walls (only the high nibble can match, `A3 ≥ 0x10`) |
+| `+0x032E0`–`+0x0330A` | `MOVEQ #0,D7 … MOVEQ #1,D1 / ASL.W D7,D1 / AND.W D1,D0 / … MOVE.W D7,-(A7) / JSR $2B86(PC) … CMPI.W #4,D7 / BCS` | one `+0x02B86` call per set bit of `objRec[+0x07]`, and the argument is the **raw bit index `D7` (0–3)**, not a transformed value. Only bits 0–3 are ever tested |
+| `+0x02BA2`–`+0x02BAC` | `MOVE.W D2,D0 / ADDQ.W #4,D0 / SUB.W $1744(A4),D0 / MOVE.W D0,D2 / ANDI.W #3,D2` | `kind = (dir + 4 − partyFacing) & 3` |
+| `+0x02A3E` / `+0x02AC4` | `CMPI.W #1,D2 / BLE →epilogue` | `kind ≤ 1` ⇒ **nothing drawn** |
+| `+0x02A44`–`+0x02A50` | `CMPI.W #2,D2 / BNE → MOVEQ #0,D0` else `MOVEQ #1,D0` | `side = (kind == 2)` |
+| `+0x25DB6`–`+0x25DC0` | `LEA $25E12(PC),A1 / TST.W $6(A0) / BEQ $25DC4 / LEA $25E5A(PC),A1` | `side == 0` ⇒ `+0x25E12`; `side != 0` ⇒ `+0x25E5A` |
+| `+0x25DCE`–`+0x25DDE` | `MOVE.W $2(A0),D0 / MULU #$C,D0 / MOVE.W $4(A0),D1 / LSL.W #2,D1 / ADD.W D0,D1` | position index = `(depth−1)×12 + lateral×4`, i.e. 3 laterals × 3 depths of `(x, y)` words; `$51A(A5)` adds `+0x24` = the second such block |
+
+**Call graph is closed** (whole-image scan for absolute `JSR/JMP xxx.l` under
+base `0x80058` *and* `d16(PC)` forms): `+0x02A0E` has exactly **one** caller
+(`+0x03568`, the kind 0–3 stub); `+0x02B86` has exactly **five** (the four
+corner arms `+0x0337A`/`+0x03390`/`+0x033A6`/`+0x033BC` with constant
+`dir = 0/1/2/3`, and the corridor arm `+0x032FC`); `+0x25DA0`, `+0x25F9E` and
+`+0x26100` have exactly one caller each, all inside `+0x02A0E`. So the *only*
+route to the `side = 0` tables is `+0x02A0E` receiving `kind == 3`.
+
+**The bit → wall mapping, re-derived (confirmed).** `dir` is the raw bit index
+`d`; the wall it names is `w = (d + 3) & 3` (equivalently `d = (w + 1) & 3`),
+with `0=N, 1=E, 2=S, 3=W`. Two independent constraints pin this down, and only
+this mapping satisfies both:
+
+- **Corners.** The four constant-`dir` arms must name a wall the corner
+  actually has: `0x30` (N+E) → `dir 1`, `0x60` (E+S) → `dir 2`, `0xC0` (S+W)
+  → `dir 3`, `0x90` (W+N) → `dir 0`. `w = (d+3)&3` gives N/E/S/W respectively
+  — 4/4 inside the corner's wall pair. (`w = d` also passes here, which is why
+  corners alone are not sufficient.)
+- **Corridors.** On `0x50` (walls N+S) the set bits are ⊆ {1,3}; `w = (d+3)&3`
+  → {N, S} ✓, whereas `w = d` → {E, W}, walls that square does not have ✗.
+  On `0xA0` (walls E+W) bits ⊆ {0,2} → {W, E} ✓ vs {N, S} ✗.
+
+So the "157/157 bits ⊆ {1,3} / {0,2}" invariant is **not a coincidence in the
+data** — it is a *consequence* of the mapping: a decoration bit can only name
+one of the two walls the square has.
+
+**What `kind` means geometrically.** Writing `r = (w − partyFacing) & 3` for
+the party-relative wall direction (`0` ahead, `1` right, `2` behind, `3` left
+— the engine's own convention, independently confirmed by the kinds 8/9
+handler's `D3 = (D0 − partyFacing − 1) & 3` at `+0x02806`), the formula
+collapses to **`kind = (r + 1) & 3`**:
+
+| `kind` | `r` | The decorated wall is… | What `+0x02A0E` does |
+|---|---|---|---|
+| 0 | 3 | on the party's **left** | `BLE` → epilogue, **nothing drawn** |
+| 1 | 0 | **ahead**, seen head-on (far wall) | `BLE` → epilogue, **nothing drawn** |
+| 2 | 1 | on the party's **right** | `side = 1` → `+0x25E5A`/`+0x260B8`, x = 158 |
+| 3 | 2 | **behind** — the near edge, between party and square | `side = 0` → `+0x25E12`/`+0x26070`, x = 34 |
+
+The `side` tables confirm the left/right reading independently of the mapping
+— read at `depth 1, lateral 0` they are `(34, 52)` for `side = 0` and
+`(158, 52)` for `side = 1`, and `34 + 16 + 158 = 208` is an exact mirror about
+the viewport width for the 16-px-wide sprite. They also skip complementary
+laterals (`side = 0` blanks lateral −1, `side = 1` blanks lateral +1), exactly
+as a left/right pair should. The hotspot rects agree: x = `0x1F` (31) for
+`kind 3`, `0x9C` (156) for `kind 2`.
+
+**The off-by-one.** `kind 3` — what the `side = 0` tables are dispatched on —
+means *the wall on the near edge of the target square*, i.e. a wall standing
+between the party and the square. That is **precisely the configuration the
+gate at `+0x032D4` exists to reject** (`A3 & objRec[+4] != 0` ⇒ skip). The
+case the `side = 0` tables were actually written for, *the wall on the party's
+left*, arrives as `kind 0` — and the same `dir ≥ 2` test throws it away. The
+handler's `CMPI.W #1,D2 / BLE` should have been a test that admits `kind 0`
+(the left wall) rather than `kind 3` (the invisible one).
+
+**Consequence, and it is directly observable in-game:** on a two-opposite-wall
+square a door lock or door switch is **only ever drawn on the wall to the
+party's right**. The left-hand wall's copy is silently dropped, and turning
+180° swaps which physical wall is "the right one" — so the player sees exactly
+one decoration, always on the right, and never both at once.
+
+**Verification — exhaustive sweep, zero deviation.** Walking all 13 maps with
+`scripts/bclib/bcdfs.py` and evaluating the transcribed dispatch for **every
+record × every one of the four facings × every set bit**:
+
+- **All 157** `0x22`/`0x0F` records in the game sit on a `0x50`/`0xA0` square
+  (69 on `0x50`, 88 on `0xA0`; type `0x0F` 96, type `0x22` 61). **Zero** sit on
+  a corner or single-wall square, so the four constant-`dir` corner arms never
+  carry one either. `objRec[+4]` takes only the two values `0x50`/`0xA0`
+  (no low-nibble bits) and `objRec[+0x07]` only `{0x01, 0x02, 0x04, 0x05,
+  0x08, 0x0A}`.
+- `objRec[+4] >> 4` equals the square's own `wall_flags` on **157/157**.
+- The gate leaves exactly the two along-corridor facings legal: `{1,3}` (E/W)
+  on `0x50`, `{0,2}` (N/S) on `0xA0`.
+- Over the resulting **504 (record, facing, bit) combinations**: **kind 0 ×
+  252, kind 2 × 252, kind 1 × 0, kind 3 × 0.** Per nibble: `0x50` → {0: 105,
+  2: 105}; `0xA0` → {0: 147, 2: 147}.
+- **Walkability cross-check** (square type bit 0 = wall, plus the single-sided
+  `wall_flags` collision rule of `MoveParty` `+0x16CDC`, deltas from
+  `ApplyFacingDelta` `+0x002B4`): on **153/157** records *both* traversal
+  facings are genuinely playable — the corridor is open at both ends — and on
+  the remaining 4 exactly one is. **Zero** records are unreachable. So the
+  "sweep both facings" scenario is not hypothetical, it is the norm, and it
+  still never yields `kind 3`.
+- **95 records** carry a decoration on **both** walls (`mask 0x0A` on `0x50`,
+  `0x05` on `0xA0`) *and* have both ends open — the strongest possible test
+  fixture. In every one, the two bits split as `{kind 0, kind 2}` from one
+  facing and swap under the 180° turn.
+
+This is a **structural** negative, not an empirical one: `kind` is odd iff
+`dir` and `partyFacing` differ in parity; the gate forces `partyFacing` to the
+parity opposite the wall axis, and the bit→wall mapping forces `dir` to that
+same parity. No data value and no facing can make `kind` odd. `kind 3` is
+therefore unreachable for types `0x22`/`0x0F` **by construction**.
+
+**`kind 3` is not dead in general** — only for these two types. The 287
+non-monster records that sit on corner squares (`0x30`/`0x60`/`0x90`/`0xC0`)
+reach `+0x02B86` with a constant `dir`, and over 4 facings produce a perfectly
+uniform `{0: 287, 1: 287, 2: 287, 3: 287}`. Those records are none of them
+type `0x22`/`0x0F`, so they take the `+0x02B5C` → `+0x21C84` generic branch,
+which passes `kind` straight through as its `dir` argument. The kind-3 jump
+path is live; only the door-lock/door-switch `side = 0` tables are not.
+
+**In-game fixture for a screenshot oracle** (should anyone want to confirm the
+missing left-hand decoration visually): **map 1, dungeon level 1, row 11,
+col 20** — a type-`0x0F` door switch (drawn as the Pull Chain, slot `$20`),
+`objRec[+4] = 0x50` (N+S walls, so an E–W corridor), `objRec[+0x07] = 0x0A`
+(chains on **both** the N and S walls), square longword `0F F1 50 49`. Both
+neighbours are open floor (`(11,19)` = `0F F1 40 00`, `(11,21)` =
+`0F F1 20 00`; neither carries a blocking `wall_flags` bit on the shared
+edge). Predictions:
+
+- Party at **(row 11, col 19) facing E**: bit 3 (S wall) → `kind 2`, chain
+  drawn at x = 158 (right); bit 1 (N wall) → `kind 0`, **not drawn**.
+- Party at **(row 11, col 21) facing W**: bit 1 (N wall) → `kind 2`, chain
+  drawn at x = 158 (right); bit 3 (S wall) → `kind 0`, **not drawn**.
+
+i.e. one chain on the right in both directions, never a chain on the left, and
+never two chains at once. (Map 1 rows 8/37 and 5/55 are equivalent fixtures on
+dungeon level 2.)
 
 ##### Kinds 4 and 12 (S_1 `+0x034D4` stub → `+0x0224C`) — every free-standing structure (**confirmed**)
 
@@ -6578,7 +6974,7 @@ screenshot oracle was set up"), not evidence against the layout. Classified
 | Which container fills graphics-kernel slot `$00` | The floor-plate/trap renderer `+0x21732` blits from slot `$00` at `src` 18,764–18,932 (16×4 and 16×2, 7-plane masked, contiguous). Slot `$00` is not in the `bcdfx`/`bcdfy`/`bcdfz` tileset inventory, and the range is *not* a hole in the floor-item bank (slot `$30` is fully covered 0…31,388 with zero gaps), so it is a third, still-unidentified pixel buffer. |
 | Slot `$C8`'s "special panel" body at `+6,060` | `+0x25340(D0 != 0)` reads 4,320 B starting 4,320 B past the documented end of chunk 10. Same over-allocation pattern as the alcove/plaque mirror buffers, but the code that fills it was not found this pass. |
 | `$51A(A5)` — the door-family position variant | Read by the door frame (`+0x25CAE`), door leaf (`+0x2613E`), door lock (`+0x25DA0`) and door switch (`+0x25F9E`/`+0x26100`); when nonzero each adds `+0x24` to its position table, which uniformly changes the sprite's `y` to 40 at every depth. Almost certainly "this doorway square also carries a door frame, so raise the fitting" — **not verified**, and no write site was searched for. |
-| Kinds 0–3: the `dir == 3` (`+0x25E12` / `+0x26070`) position tables look unreachable | For types `0x22`/`0x0F` the enqueue gate at `+0x032D4` requires `A3 & objRec[+4] == 0`, and the observed `objRec[+0x07]` bit sets (⊆ {1,3} on N+S squares, ⊆ {0,2} on E+W, 157/157) then force `kind = (dir + 4 − facing) & 3 == 2` for every reachable combination — so `D0` is always `1` and only the `+0x25E5A`/`+0x260B8` tables fire. The unused tables are exact mirror images about the 208-px viewport centre (34↔158, 200↔−8, 3/3 laterals × 3 depths), which is strong evidence they *are* real left-wall variants. Either the reachability argument is missing a path or the data never exercises the left-hand case; not resolved. |
+| ~~Kinds 0–3: the `dir == 3` (`+0x25E12` / `+0x26070`) position tables look unreachable~~ | **SOLVED — they are genuinely unreachable, and the reason is an off-by-one in the engine's own `kind → side` dispatch, not a gap in the reachability argument.** `kind == 3` is structurally impossible for types `0x22`/`0x0F` from *either* through-corridor facing, and the physically-left wall arrives as `kind == 0`, which `+0x02A0E` discards. The old row's arithmetic was also wrong: `kind == 2` is *not* forced — `kind ∈ {0, 2}` in an exact 50/50 split. See "Kind 3 and the left-wall position tables" above for the full derivation, the 504-combination sweep and the in-game fixture. |
 | ~~`DrawDoorAtDepth`'s `$02(a2)` — depth, or party-relative direction?~~ | **SOLVED — party-relative direction.** See the corrected blockquote above "Kind 11" — an exhaustive whole-image caller scan found exactly one caller (`DispatchSquareObject` `+0x027B6`), which always passes the rebased direction `D3`, never a depth. |
 | `A5+$48F` mirror-flag write site | Still not found. Re-checked this pass over a resynced recursive-descent disassembly: all 6 references (`+0x21750`, `+0x22C8E`, `+0x22CC2`, `+0x230B6`, `+0x230FE`, `+0x250AE`) are `TST.B` reads; no write site anywhere in the decoded stream. `DrawViewport` does not touch it, so it is set outside the viewport pipeline. |
 | A genuine 4-entry facing-indexed (`0=N,1=E,2=S,3=W`-shaped) jump table *does* exist, at S_1 `+0x1EB2A` | **Traced and it is not the wall/floor render dispatch.** It's driven by comparing a cached facing byte `$4DE(A5)` against a live one `$4DF(A5)` (`+0x1EA18`) and, on change, jumps through 4 `BRA.W` trampolines to handlers at `+0x1EB3A/1EB50/1EB56/1EB5C`, each of which writes a run of `WAIT`/colour words into a *different* copper list (`$4E2(A5)`) with a per-handler step size — a **per-facing ambient torchlight colour-gradient effect**, not viewport compositing. This *is* a real, disassembly-confirmed direction dispatch in the graphics kernel — it just isn't the one the old (already-retracted) `AGENTS.md` "Direction Dispatch" note was describing, and it should not be re-chased as the wall-selection loop. |
