@@ -2,6 +2,31 @@
 
 **Status:** Unverified — Internet research. Not cross-checked against real game files.
 
+> **Correction (game-re pass, real-bytes verification):** This document's two
+> headline technical claims are **wrong**. See
+> `docs/eotb3/dosvga/data-structure.md` for the verified replacement:
+>
+> 1. **The engine is AESOP/16, not AESOP/32.** `EYE.RES`'s own file header
+>    reads `"AESOP/16 V1.00"` literally at offset 0 — not a 32-bit engine at
+>    all, contra this doc's §"AESOP Bytecode Engine" and its
+>    architecture-comparison table.
+> 2. **CPS was not replaced with "packed BMP."** `CHARGEN/CHARGEN.CPS`,
+>    `CHARGENB.CPS`, and `ITEMICN.CPS` are ordinary Westwood CPS files
+>    (LCW/Format80-compressed, 320x200, exact byte-for-byte match to the
+>    documented Westwood CPS header), decoding cleanly to full backdrop
+>    screens and an item-icon sheet. EOB3 does use a *different* format
+>    ("1.10" VFX shape tables, §4.2 of the corrected doc) for bitmaps
+>    embedded directly inside `EYE.RES` — but that coexists with real CPS
+>    files, it didn't replace them.
+>
+> ThirdEye (this doc's suggested primary source) turned out to be an
+> excellent, actively-maintained ground-truth oracle — its own source code
+> (not just its docs) was used to verify every format in the corrected doc,
+> and one offset error in *its* docs (`ITEMTYPE.DAT` field layout) was found
+> and fixed along the way. The rest of this file is preserved as-is for
+> historical context; treat every claim below as unverified pending
+> cross-check against the corrected doc.
+
 **CRITICAL:** Eye of the Beholder 3 is **NOT supported by ScummVM.** It uses a completely different engine (AESOP/32) from EOB1/2 and has no official reimplementation. Use [ThirdEye](https://github.com/psi29a/thirdeye) as the primary source for format documentation.
 
 ## ScummVM Support
