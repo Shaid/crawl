@@ -2,6 +2,13 @@
 
 **Status:** Unverified — Internet research. Not cross-checked against real game files.
 
+> **Superseded (2026-08-02):** the DOS/VGA port has now been verified
+> against real game files — see `docs/eotb2/dosvga/data-structure.md`.
+> That doc confirms or corrects every claim below (the PAK/CPS/LCW/VCN/VMP/
+> MAZ claims held up; the `.PAL` size guess — 64-byte Amiga-style — was
+> wrong for DOS, which uses 768-byte VGA palettes like EOB1). Read the
+> verified doc first; this file remains as the original research trail.
+
 ## ScummVM Support
 
 Eye of the Beholder 2 is **fully supported by ScummVM** via the **KYRA engine**. The engine includes a dedicated EOB2 sub-engine with excellent compatibility.

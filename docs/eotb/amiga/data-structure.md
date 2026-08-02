@@ -360,18 +360,4 @@ Raw 8-bit PCM audio samples. Level-specific sounds: `LEVEL1.SAM` through
 
 ## Open Questions
 
-1. **VCN palette encoding** — The 24-bit RGB palette at VCN offset 0x40 uses
-   non-standard 8-bit-per-channel values that don't map cleanly to Amiga
-   12-bit colors (not multiples of 17). The exact scaling factor or bit depth
-   is unknown.
-2. **VCN tile decompression** — The tile data after the palette may use
-   compression. The decompression algorithm has not been implemented.
-3. **DEC file format** — Decoration data structure is documented in the
-   [Shikadi wiki](https://moddingwiki.shikadi.net/wiki/Eye_of_the_Beholder_Decorations_Format)
-   but not verified against the data files.
-4. **DCR file format** — Creature resources are undocumented and not analyzed.
-5. **Save game format** — `EOBDATA.SAV` structure is documented but not
-   verified against the actual file.
-6. **EOB2 multi-palette CPS** — Some EOB2 CPS files contain multiple palettes
-   for different screen quadrants or effects (e.g., lightning flashes). The
-   multi-palette rendering logic needs implementation.
+See `docs/eotb/TODO.md`.

@@ -37,8 +37,20 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
   eotb: {
     gameId: 'eotb',
     name: GAME_DISPLAY_NAMES.eotb,
-    defaultPlatform: 'amiga',
-    supportedPlatforms: [],
+    defaultPlatform: 'dosvga',
+    supportedPlatforms: ['dosvga'],
+  },
+  eotb2: {
+    gameId: 'eotb2',
+    name: GAME_DISPLAY_NAMES.eotb2,
+    defaultPlatform: 'dosvga',
+    supportedPlatforms: ['dosvga'],
+  },
+  landsoflore: {
+    gameId: 'landsoflore',
+    name: GAME_DISPLAY_NAMES.landsoflore,
+    defaultPlatform: 'dosvga',
+    supportedPlatforms: ['dosvga'],
   },
 };
 

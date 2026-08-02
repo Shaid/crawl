@@ -2,6 +2,17 @@
 
 **Status:** Unverified — Internet research. Not cross-checked against real game files.
 
+> **Superseded (2026-08-02):** the DOS/VGA port has now been verified
+> against real game files — see `docs/landsoflore/dosvga/data-structure.md`.
+> That doc confirms or corrects every claim below. Biggest correction:
+> `GAME.DAT` is not a Kyra resource file at all — it's a raw ISO 9660 CD
+> image; the real PAK files live inside it. The PAK/CPS/VCN claims held
+> up; the "CMZ→WLL→VMP→VCN pipeline" framing turned out to be simpler
+> than described (CMZ is just an LCW-compressed copy of the same MAZ grid
+> format EOB uses, VMP is the same index table LCW-wrapped) and SHP's
+> exact byte layout is now documented precisely. Read the verified doc
+> first; this file remains as the original research trail.
+
 ## ScummVM Support
 
 Lands of Lore (1993) is **fully supported by ScummVM** via the **KYRA engine**. The game uses the same Westwood resource architecture as the Kyrandia series.
