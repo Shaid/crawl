@@ -5,6 +5,10 @@ data/blackcrypt/amiga/*.cnf
 data/blackcrypt/amiga/adf/
 data/blackcrypt/dosvga/
 data/blackcrypt/dos/
+data/eotb/dosvga/
+data/eotb2/dosvga/
+data/eotb3/
+data/landsoflore/
 
 # Extracted/output
 data/blackcrypt/extracted/
