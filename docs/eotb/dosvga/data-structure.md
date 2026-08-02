@@ -61,7 +61,24 @@ output from `EOB.EXE`, `INTRO.EXE`, or `START1.EXE` (which all only
 reference `eobdata1.pak`...`eobdata6.pak`). `INSTALL.BAT` states the game
 "must be run from the Eye of the Beholder CD only" — `EYE.PAK` is most
 likely a CD-distribution artifact (e.g. a separate installer payload) not
-loaded by the shipped executables at all. Left unparsed; see "Open items".
+loaded by the shipped executables at all.
+
+**Confirmed (2026-08-02, ScummVM source):** `Resource::loadPakFiles`
+(`resource/resource.cpp:148-171`) enumerates every `*.PAK`/`*.APK` in the
+game directory and loads each as an archive — **except** two filenames it
+explicitly skips with the comment `// No PAK file`:
+`resource.cpp:153`: `if (name == "TWMUSIC.PAK" || name == "EYE.PAK") continue;`.
+`TWMUSIC.PAK` (a sibling game's file, Kyra1/FM-Towns) is the "real, still
+used but opened raw" case — it's loaded directly via
+`_res->fileData("twmusic.pak", ...)` in `sound/sound_towns_lok.cpp:328,355`.
+`EYE.PAK` has **no such fallback anywhere in the engine** — a project-wide
+grep for `"EYE"`/`"eye.pak"`/`fileData` calls referencing it turns up
+nothing beyond the one skip line. This confirms `EYE.PAK` is genuinely
+unused by the shipped DOS engine: the engine authors knew the file existed
+(hence the explicit skip, to avoid it erroring out `loadArchive` as "not a
+valid PAK") but never wrote any code path that opens it. Consistent with
+the CD-installer-payload hypothesis; not pursued further (out of engine
+scope entirely, not just deprioritized). **Closed.**
 
 ### PAK directory listing (this corpus)
 
@@ -165,19 +182,48 @@ second `EOBPAL.COL`/`PALETTE.COL` copy — `EOBDATA4.PAK` lists each of these
 7 names twice; only the first occurrence is used, matching how a real
 filename-keyed loader would resolve it).
 
-**Per-file palette selection is a hypothesis, not confirmed:** the actual
-game logic that picks which palette a given `.CPS`/`.CMP` uses at runtime is
-data-driven (level `.INF` files reference a palette by name for wall-set
-screens; UI/cutscene screens are loaded by hardcoded filename in the
-executable) and was not traced screen-by-screen. This extractor uses a
-simple, effective substitute: name-match `<STEM>.PAL` then `<STEM>.COL`
-across the merged directory of all 6 PAKs, falling back to `EOBPAL.COL`.
-This reproduced the exact known title screen and Westwood/SSI logo screens
-correctly (see below), so it is very likely right for anything with a
-same-named `.COL`/`.PAL`; screens using the `EOBPAL.COL` fallback (most
-monster CPS files, which have no matching `.COL`) are **rendered, not
-confirmed** — colours may be off from what the game actually shows in
-context (e.g. a monster palette swap for a special encounter).
+**Confirmed (2026-08-02, ScummVM source) for wall-set/dungeon screens:**
+`EoBCoreEngine::initLevelData` (`engine/scene_eob.cpp:185-205`) is the real
+mechanism, and it is byte-for-byte the same name-match this extractor
+already does. The level's `.INF` file (see "INF" section below) embeds the
+wall-set's stem name (e.g. `"brick"`) as a 12-byte field; that string is
+plugged into `"%s.PAL"` and loaded straight into the active screen palette:
+```
+const char *paletteFilePattern = ... "%s.PAL";   // EOB1 always takes this branch
+Common::String tmpStr = Common::String::format(paletteFilePattern, (const char *)pos);
+...
+_screen->loadPalette(tmpStr.c_str(), _screen->getPalette(0));
+setLevelPalettes(_currentLevel);
+```
+`EoBEngine::setLevelPalettes` (`engine/eob.cpp:868-877`) — the natural place
+to look for a further per-level palette *patch* — is a **no-op for every
+platform except SegaCD** (`if (_flags.platform != Common::kPlatformSegaCD)
+return;`). So for DOS (and Amiga), the wall-set's `<STEM>.PAL` load is the
+*entire* palette-selection mechanism for dungeon views — there is no
+additional per-level tint/patch step to account for. This upgrades the
+wall-set-screen part of the heuristic from "very likely right" to
+**confirmed identical to the game's own logic**.
+
+UI/cutscene screens (`TITLE-E.CMP`, `WESTWOOD.CMP`, etc.) are indeed loaded
+by hardcoded filename+palette pairs scattered through `eob.cpp`/
+`sequences_eob.cpp` (not traced call-by-call — there are dozens), consistent
+with this extractor's name-match-else-fallback substitute; the two spot
+checks below (title, Westwood logo) confirm the substitute gets these
+right.
+
+**Monster CPS files: heuristic refined, not fully confirmed.** The
+`EOBPAL.COL` fallback this extractor uses for monster sprites (no matching
+`.COL`/`.PAL`) is very likely **not** what the live game shows — per the
+trace above, a monster CPS is normally composited over an already-loaded
+dungeon view, so its true palette is whatever wall-set `.PAL` is active for
+the level that monster appears in (e.g. `KOBOLD.CPS` → `BRICK.PAL`, since
+kobolds are levels 1-3/BRICK per `EOBDATA3.PAK`'s contents), not the
+game-wide `EOBPAL.COL`. This wasn't corrected in the extractor this pass
+(would require a monster→level→wall-set lookup table, itself dependent on
+the now-decoded INF monster-shape-filename fields — see "INF" below); noted
+as a still-open refinement, downgraded from "may be off" to "specifically,
+likely wrong — should use the owning level's wall-set palette instead of
+`EOBPAL.COL`."
 
 ### Rendering verification
 
@@ -195,6 +241,72 @@ context (e.g. a monster palette swap for a special encounter).
 This is byte-exact-oracle-strength verification for the CPS+LCW+PAK pipeline
 (known, recognisable screens reproduced exactly) even though individual
 monster-CPS palette choices remain a "rendered" hypothesis.
+
+---
+
+## EGA render mode (`.EGA` / `.ECN` / `.EMP`)
+
+**Confirmed — same container/codec as VGA, different palette source.**
+EOB1 (and EOB2/Kyra1) support a switchable "render mode" (VGA/EGA/CGA),
+selected at runtime (`Screen::_renderMode`, `screen.cpp:203-206`) — the
+`.EGA`/`.ECN`/`.EMP` files in this DOS/VGA corpus are the assets for that
+alternate mode, shipped alongside the VGA ones in the same PAKs (e.g.
+`EOBDATA2.PAK` contains both `DOOR.EGA` and would contain `DOOR.CPS` too if
+this were a VGA-only release).
+
+**`.EGA` = the shared Kyra bitmap format (identical to `.CPS`), just the
+render-mode-specific extension.** `Screen_EoB::init` builds the CPS
+filename pattern from a lookup table indexed by render mode:
+`cpsExt[] = {"CPS","EGA","SHP","BIN"}` (`graphics/screen_eob.cpp:194-206`)
+— EOB1 selects index 1 (`"EGA"`) when `_renderMode` is EGA or CGA. **No new
+codec is needed**: verified against the real `DOOR.EGA` (13,699 bytes,
+`EOBDATA2.PAK`) — its header decodes with the existing
+`format80`/Kyra-bitmap-header parser exactly like a `.CPS` file:
+`fileSizeField=13697(=size-2)`, `compType=4` (LCW, same decoder), `imgSize=64000`
+(same 320×200 full-screen size as VGA), `palSize=0`; the payload's first
+byte (`0x89`) decodes as a valid LCW literal-run opcode. So `.EGA` bitmaps
+decode through `scripts/kyralib/format80.py` unmodified.
+
+**Palette is the real difference.** EGA-mode palette bytes are not raw RGB
+— each byte is an **index into a fixed 16-colour hardware EGA table**,
+`Palette::_egaColors[]` (`graphics/screen.cpp:4269-4276`, the classic
+6-bit-VGA-DAC-scaled EGA/CGA RGBI palette: `00,00,AA,55,FF` component
+values), consumed by `Palette::loadEGAPalette`
+(`screen.cpp:4175-4185`). For EOB1, **all `.EGA` screens share one single
+game-wide palette** loaded once at `EoBEngine::init()`
+(`engine/eob.cpp:141-144`) from a **hardcoded 16-byte index array**,
+`EoBEngine::_egaDefaultPalette[]` (`resource/staticres_eob.cpp:1785-1787`):
+`{0, 5, 3, 2, 10, 14, 12, 6, 4, 11, 9, 1, 0, 8, 7, 15}` — i.e. index into
+`_egaColors`, not a per-file `.PAL`/`.COL` lookup at all. This is *simpler*
+than the VGA per-CPS palette-selection mechanism (no name-matching needed
+for EGA mode — one static palette for the whole game).
+
+```python
+EGA_COLORS = [  # Palette::_egaColors, 16 x (R,G,B), 0-63 range
+    (0x00,0x00,0x00),(0x00,0x00,0xAA),(0x00,0xAA,0x00),(0x00,0xAA,0xAA),
+    (0xAA,0x00,0x00),(0xAA,0x00,0xAA),(0xAA,0x55,0x00),(0xAA,0xAA,0xAA),
+    (0x55,0x55,0x55),(0x55,0x55,0xFF),(0x55,0xFF,0x55),(0x55,0xFF,0xFF),
+    (0xFF,0x55,0x55),(0xFF,0x55,0xFF),(0xFF,0xFF,0x55),(0xFF,0xFF,0xFF),
+]
+EGA_DEFAULT_PALETTE = [0,5,3,2,10,14,12,6,4,11,9,1,0,8,7,15]  # EoBEngine::_egaDefaultPalette
+```
+
+**`.ECN`/`.EMP` are the EGA/CGA-mode `.VCN`/`.VMP`** — confirmed directly
+from `EoBEngine::init` (`engine/eob.cpp:150-154`):
+```cpp
+if (platform == PC98)                       vcnFilePattern = "%s.ECB";
+else if (renderMode == EGA || renderMode == CGA)  vcnFilePattern = "%s.ECN", vmpFilePattern = "%s.EMP";
+```
+i.e. exactly the "EGA-mode equivalents of `.VCN`/`.VMP`" the previous pass
+already suspected — now confirmed structurally identical containers, same
+`_vcnSrcBitsPerPixel` question applies (likely 4bpp packed same as VGA
+`.VCN`, not independently verified this pass — the container-format
+confirmation was the priority).
+
+**Not implemented as an extractor this pass** (structure fully understood,
+time went to the higher-priority INF/ITEM.DAT closures) — this is now a
+"known format, not yet wired into the pipeline" item rather than a
+"format unknown" item.
 
 ---
 
@@ -301,47 +413,224 @@ All 12 `LEVELn.MAZ` extracted to `public/assets/eotb/dosvga/data/levelN_maz.json
 
 ---
 
-## INF — Level configuration (open)
+## INF — Level configuration
 
-**Not decoded this session.** Structurally located and loaded (`readLevelFileData`,
-`engines/kyra/engine/scene_eob.cpp:34-152`), but its record layout
-(monster spawns, decoration commands `0xEC`/`0xFB`, event-script bytecode)
-was not traced field-by-field — deprioritized in favour of breadth across
-all 3 games. The Amiga doc's INF description likely transfers with
-different offsets (the DOS loader path in `initLevelData`,
-`scene_eob.cpp:154-309`, shows byte-for-byte structure but wasn't ported to
-a decoder here). See TODO.
+**Confirmed (2026-08-02, ScummVM source + byte-exact structural
+verification against `LEVEL1.INF`).** `.INF` files are **LCW-compressed**
+using the exact same shared Kyra bitmap header as `.CPS`/`.CMP`/`.VCN`
+(confirmed: `LEVEL1.INF` header = `compType=4, imgSize=2929, palSize=0`;
+`format80.decode_frame4` on the payload reproduces exactly 2929 bytes).
+This wasn't obvious from the filename/extension alone — the previous pass
+treated `.INF` as raw data. Port: `EoBCoreEngine::loadLevel`/
+`readLevelFileData`/`initLevelData` (`engine/scene_eob.cpp:34-309`).
+
+**Important:** `readLevelFileData` (`scene_eob.cpp:115-152`) has a
+`skip=true` 4-byte-prefix-skip branch identical in spirit to the one noted
+for VCN — but for INF the *opposite* choice applies. The branch that
+triggers `loadBitmap(file, 5, 5, 0, true)` (skip=true) does **not** produce
+a self-consistent header on this project's PAK-extracted bytes; parsing the
+raw file directly at offset 0 (no skip) does. Same underlying cause as the
+VCN case (`Resource::fileData()`'s live in-memory return apparently carries
+a 4-byte prefix that PAK directory offsets don't need) — resolved
+empirically the same way.
+
+### Decompressed buffer layout (EOB1)
+
+All offsets below are relative to the **decompressed** buffer (2929 bytes
+for `LEVEL1.INF`), which is what `EoBCoreEngine`'s pointer walk actually
+operates on (ScummVM loads it into "screen page 5" and reads directly from
+that buffer — no separate parse step).
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| 0x000 | 2 | `trailerOffset` (u16 LE) | absolute offset of the block-property override list (below); `EOB1Engine::loadLevel` also passes `(data, trailerOffset)` to `EoBInfProcessor::loadData` — see "Event script" below |
+| 0x002 | 12 | `mazStem` (cstring, NUL-padded) | e.g. `"level1.maz\0\0"` — passed to `loadBlockProperties`/`getBlockFileData`, i.e. the `.MAZ` file for this level |
+| 0x00E | 12 | `wallSetStem` (cstring, NUL-padded) | e.g. `"brick\0..."` — used for `<stem>.VMP` (`getVmpData`), `<stem>.PAL` (see palette section above), and stored as `_curGfxFile`/passed to `loadVcnData` for `<stem>.VCN` |
+| 0x01A | 1 | flag byte | read but its EOB2-only branch (second wall-set name) never taken for EOB1 |
+| 0x01B | 11 | reserved | vestigial EOB2 field width (EOB2's second-wallset-name field is 13 bytes = 1 flag + 12; EOB1 skips all of it) |
+| 0x026 | 4 | `doorType1, shapeId1, doorType2, shapeId2` (u8 each) | → `EoBEngine::loadDoorShapes` (`engine/eob.cpp:757`) |
+| 0x02A | 1 | `scriptTimersMode` (u8) | |
+| 0x02B | 2 | `scriptTimer0Ticks` (u16 LE) | |
+| 0x02D | 2 | `stepsUntilScriptCall` (u16 LE) | |
+| 0x02F | 13×2 | monster-shape slots (2 entries) | each: `u8 monsterType` (0xFF = none) + 12-byte cstring monster-CPS stem (e.g. `"kobold"`, `"leech"`) → `EoBCoreEngine::loadMonsterShapes` (`engine/sprites_eob.cpp:34`); `hasDecorations` is hardcoded `false` for EOB1, so **EOB1 never loads a `.DCR` file** (see Amiga doc DCR note) |
+| 0x049 | var | monster-timer list | repeating `(u8 monsterSlot, u8 interval)` pairs terminated by a `0xFF` slot byte → `EoBCoreEngine::loadActiveMonsterData` (`engine/sprites_eob.cpp:62`) |
+| — | 420 | active-monster array | exactly 30 × 14-byte `EoBMonsterInPlay`-init records, unconditionally consumed even for inactive (`0xFF`) slots: `u8 index, u8 unit, u16 LE block, u8 pos, s8 dir, u8 type, u8 shpIndex, u8 mode, u8 spellStatusLeft, u16 LE randItem, u16 LE fixedItem` |
+| — | 2 | decoration-list count (u16 LE) | |
+| — | var | decoration-list entries | each starts with a 1-byte tag: `0xEC` → 24-byte payload (two 12-byte cstring stems: CPS decoration-shape stem, `.DEC` file stem) via `loadDecorations` (`scene_eob.cpp:428-462`, also fully decodes `.DEC` — see below); anything else → 5-byte `assignWallsAndDecorations(wallIndex u8, vmpIndex u8, decIndex s8, specialType u8, flags u8)` |
+| `trailerOffset` | 2 | override-list count `len` (u16 LE) | |
+| `trailerOffset+2` | `len`×5 | block-property overrides | each: `u16 LE blockIndex, u8 flags, u16 LE assignedObjects` — `assignedObjects` doubles as a **byte offset into the event-script region** (see below) when nonzero |
+
+**Verified byte-exact** on `LEVEL1.INF` (`EOBDATA3.PAK`): walking this
+layout with a throwaway probe produces fully legible, semantically correct
+strings with zero garbage — `mazStem="level1.maz"`, `wallSetStem="brick"`,
+monster stems `"kobold"`/`"leech"` (matching `EOBDATA3.PAK`'s known BRICK
+wall set + kobold/leech monster roster), and 3 decoration entries with
+stems `"brick1"`/`"brick2"`/`"brick3"` all paired with `dec="brick.dat"`.
+The trailer-list invariant is exact: `trailerOffset(2737) + 2 + 38*5 ==
+2929` (file size) with **zero residue**, across all 38 override records.
+One override record's `assignedObjects` field is `719` — exactly the byte
+offset where the decoration-list walk above terminates, confirming the
+event-script region (below) starts immediately after the decoration list
+and that `assignedObjects` is indeed a script-entry-point offset, not a
+coincidence.
+
+### Event script (`EoBInfProcessor`, the bytes between decoration-list-end and `trailerOffset`)
+
+**Confirmed as a bytecode region** (2018 bytes for `LEVEL1.INF`, offsets
+719–2737), not yet decoded opcode-by-opcode. `EoBCoreEngine::_inf` is an
+`EoBInfProcessor` (`script/script_eob.h:35`, `script/script_eob.cpp`) — a
+proper stack-free bytecode VM triggered per-dungeon-block:
+```cpp
+// EoBInfProcessor::run(func, flags), script/script_eob.cpp:169-197
+int o = _vm->_levelBlockProperties[func].assignedObjects;   // = script entry offset
+int8 *pos = (int8 *)(_scriptData + o);
+do {
+    int8 cmd = *pos++;                        // signed opcode byte
+    if (cmd <= _commandMin || cmd >= 0) continue;   // literal/NOP passthrough
+    pos += (*_opcodes[-(cmd + 1)]->proc)(pos);      // dispatch, operand-length is opcode-specific
+} while (!_abortScript && !_abortAfterSubroutine);
+```
+`_scriptData` is loaded via `_inf->loadData(data, trailerOffset)`
+(`scene_eob.cpp:69` for EOB1) — i.e. **bytes `[0, trailerOffset)` of the
+same decompressed INF buffer**, so the event-script region overlaps the
+already-decoded header/tables at the byte level (the VM only ever jumps
+into the tail past the decoration list in practice, per the
+`assignedObjects` cross-check above). ~30 named opcodes are registered via
+the `Opcode(x)` macro (`script_eob.cpp:93-149`) — `oeob_setWallType,
+toggleWallState, openDoor, closeDoor, replaceMonster, movePartyOrObject,
+printMessage_v1, setFlags, playSoundEffect, removeFlags,
+modifyCharacterHitPoints, calcAndInflictCharacterDamage, jump, end,
+returnFromSubroutine, callSubroutine, eval_v1, deleteItem,
+loadNewLevelOrMonsters, increasePartyExperience, createItem_v1,
+launchObject, changeDirection, identifyItems, sequence, delay, drawScene,
+dialogue, specialEvent` — names and dispatcher confirmed; per-opcode
+operand byte-widths not individually decoded this pass (would require
+reading all ~30 `oeob_*` bodies in `script_eob.cpp`). This is the
+"event-script bytecode" the original TODO item named — narrowed from
+"not located" to "located, dispatcher confirmed, opcode table named,
+operand encoding not yet exhaustively decoded."
+
+### .DEC — decoration definitions (confirmed, shared DOS/Amiga)
+
+Port of `EoBCoreEngine::loadDecorations`/`getDecDefinitions`
+(`scene_eob.cpp:420-462`), read via `createEndianAwareReadStream(decFile,
+Resource::kForceLE)` — **always little-endian regardless of platform**
+(no Amiga override of `getDecDefinitions` exists outside SegaCD, so this
+format is identical on the Amiga port — see `docs/eotb/amiga/data-structure.md`).
+
+```
+u16 LE  decCount
+repeat decCount:                    # LevelDecorationProperty, 52 bytes
+    u8[10]  shapeIndex   (0xFF sentinel)
+    u8      next
+    u8      flags
+    s16 LE[10]  shapeX
+    s16 LE[10]  shapeY
+u16 LE  rectCount
+repeat rectCount:                   # EoBRect8, 8 bytes
+    u16 LE x, y, w, h
+```
+
+Not independently byte-verified against a real `.DEC` file this pass (no
+time; the record shape is unambiguous from the reader — every field is a
+fixed-width sequential stream read with no branching) — logged as
+**confirmed (source), rendered/unverified (data)**.
 
 ---
 
-## ITEM.DAT / ITEMTYPE.DAT (open — endianness-flipped hypothesis)
+## ITEM.DAT / ITEMTYPE.DAT
 
-Same size as the already-verified Amiga tables (9,601 / 914 bytes). A
-byte-diff against `data/eotb/amiga/ITEM.DAT` shows the two are related but
-not identical — several diffs are exact adjacent-byte swaps (e.g. DOS bytes
-`[0xC0, 0x01]` where Amiga has `[0x01, 0xC0]`), consistent with the same u16
-fields stored little-endian (DOS) vs. big-endian (Amiga). A full
-byte-swap-and-diff pass (attempting several record-stride hypotheses: 8,
-10, 12, 15, 16, 20, 24, 25, 30 bytes) did not land on one that divides
-`9601` evenly (`9601` doesn't factor into any of the Amiga doc's candidate
-15-byte-record layout either — the Amiga doc itself notes the file "ends
-with a name string table" appended after a variable-length record region,
-so a flat `size / stride` count isn't meaningful without first locating
-that boundary). Left as **hypothesis**, not extracted as structured JSON
-this session — the raw bytes are in `public/assets/eotb/dosvga/data/pak_directory.json`'s
-listing (offset/size only, not content) for a follow-up pass to pull from
-`EOBDATA6.PAK` directly.
+**Confirmed, byte-exact.** Port of `EoBCoreEngine::loadItemDefs`
+(`engine/items_eob.cpp:35-143`). The previous pass's stride search (8, 10,
+12, 15, 16, 20, 24, 25, 30 bytes) missed the actual record sizes — **14**
+bytes for `EoBItem` and **16** bytes for `EoBItemType` — because it
+miscounted the field list by hand instead of reading the reader function
+field-by-field.
+
+### ITEM.DAT
+
+```
+u16 LE  numItems
+repeat numItems:                    # EoBItem, 14 bytes
+    u8  nameUnid
+    u8  nameId
+    u8  flags
+    s8  icon
+    s8  type
+    s8  pos
+    s16 LE  block
+    s16 LE  next
+    s16 LE  prev
+    u8  level
+    s8  value
+u16 LE  numNames
+repeat numNames:
+    char[35]  name   (NUL-padded, not necessarily NUL-terminated at a fixed point)
+```
+
+**Verified against `EOBDATA6.PAK`'s `ITEM.DAT` (9,601 bytes):**
+`numItems=448` → item table ends at `2 + 448*14 = 6274`; `numNames=95` at
+that offset → name table `6276 + 95*35 = 9601` = **file size exactly, zero
+residue**. All 90 embedded ASCII runs found by a whole-file string scan
+land exactly on 35-byte record boundaries (confirmed via modular-offset
+check), and decode to fully legible, game-correct item names: `"Mouse
+Pointer"`, `"Leather armor"`, `"Robe"`, `"Dagger"`, `"Spellbook"`,
+`"Jeweled Key"`, `"Potion"`, `"Adamantite Long Sword"`, `"'Guinsoo'"`,
+`"Orb of Power"`, `"Scepter of Kingly Might"`, `"Spell Book"`, etc. — 90
+recognisable AD&D/EOB item names with zero garbled entries.
+
+### ITEMTYPE.DAT
+
+```
+u16 LE  numTypes
+repeat numTypes:                    # EoBItemType, 16 bytes
+    u16 LE  invFlags
+    u16 LE  handFlags
+    s8  armorClass
+    s8  allowedClasses
+    s8  requiredHands
+    s8  dmgNumDiceS
+    s8  dmgNumPipsS
+    s8  dmgIncS
+    s8  dmgNumDiceL
+    s8  dmgNumPipsL
+    s8  dmgIncL
+    u8  unk1
+    u16 LE  extraProperties
+```
+
+**Verified against `EOBDATA6.PAK`'s `ITEMTYPE.DAT` (914 bytes):**
+`numTypes=57` → `2 + 57*16 = 914` = **file size exactly, zero residue**
+(the previous pass's 15-byte guess was off by one field-width; recounting
+the 13 fields in `loadItemDefs` field-by-field gives 16, which is the only
+stride that divides the file cleanly with the independently-confirmed
+`numTypes=57` header value).
+
+Both tables' byte-swap relationship to the Amiga versions noted previously
+(DOS LE vs. Amiga BE, same field widths) still holds — not re-verified
+field-by-field against Amiga bytes this pass, but the DOS-side record
+widths (14/16 bytes) are now unambiguous ground truth for that comparison
+if revisited.
+
+Not yet wired into `scripts/extract_eotb_dosvga.py`/`pak_directory.json` as
+structured JSON output — the format is fully confirmed but extraction
+into `public/assets/eotb/dosvga/data/` wasn't implemented this pass (time
+budget went to closing the format-unknown status of every TODO item first).
 
 ---
 
 ## Not extracted this session (open items)
 
-| Item | Why deferred | Where to pick up |
-|------|---------------|-------------------|
-| `EYE.PAK` contents | Doesn't parse as a Kyra PAK; not referenced by any shipped .EXE — likely CD-installer artifact, not game data | Confirm via `strings`/entropy whether it's a self-extracting archive; if genuinely unused by the game, may not be worth pursuing |
-| `.EGA` / `.ECN` / `.EMP` files (EGA render-mode graphics) | VGA/MCGA (`.CPS`/`.VCN`/`.VMP`) is the primary target; EGA is a secondary 16-colour render path for lower-end hardware | `Palette::loadEGAPalette` (`screen.cpp:4175-4185`) + a 4bpp-planar-or-packed pixel format guess would need the same treatment as `.CPS`/`.VCN` |
-| `INF` level-config records | Structurally located, not field-decoded | `engine/scene_eob.cpp` `initLevelData`/`loadActiveMonsterData`/`loadDecorations` |
-| `ITEM.DAT` / `ITEMTYPE.DAT` field layout | Same size as Amiga, byte-swap hypothesis only, record stride not resolved | `engines/kyra/engine/items_eob.cpp` (not yet fetched) |
+All items below are now **format-confirmed** (structure known from
+ScummVM source, cited above) but not yet wired into the extractor
+pipeline as JSON/PNG output — a pipeline-implementation task, not a
+format-unknown task.
+
+| Item | Status | Where to pick up |
+|------|--------|-------------------|
+| `.EGA` / `.ECN` / `.EMP` files (EGA render-mode graphics) | Confirmed: same container/codec as `.CPS`/`.VCN`/`.VMP`, different palette source (see "EGA render mode" above) | `scripts/kyralib/format80.py` (reuse unmodified) + a new `ega_palette.py` for `_egaColors`/`_egaDefaultPalette` |
+| `INF` level-config records | Confirmed structurally, byte-exact verified on `LEVEL1.INF` (see "INF" above); event-script opcode operand widths not exhaustively decoded | `engine/scene_eob.cpp` `initLevelData` (ported above); `script/script_eob.cpp` `oeob_*` for opcode operands if pursued further |
+| `ITEM.DAT` / `ITEMTYPE.DAT` field layout | Confirmed byte-exact (see "ITEM.DAT / ITEMTYPE.DAT" above) | Not yet wired into `scripts/extract_eotb_dosvga.py` |
 | `ADLIB.DAT` / `PCSOUND.DAT` / `SOUND.DAT` | Audio, out of scope for palette/sprite/container breadth pass | `engines/kyra/sound/` |
 | VMP-driven full-viewport render (VMP+VCN combined 22×15 scene) | Per-tile atlas already extracted; full composite is a nice-to-have | `engine/scene_rpg.cpp` `generateBlockDrawingBuffer` |
 

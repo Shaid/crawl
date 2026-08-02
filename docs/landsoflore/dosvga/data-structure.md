@@ -35,9 +35,25 @@ files live inside it at paths like `DATA/STARTUP.PAK`,
 `DATA/CATWALK.PAK`, and 40-odd more per-level/per-area PAKs (`L01-L29`,
 `O00A-O29A`, `CATWALK/CAVE1/CIMMERIA/KEEP/MANOR/MINE1/RUIN/SWAMP/TOWER1/
 URBISH/YVEL.PAK`), plus `DATA/{ENG,FRE,GER}/*.PAK` per-language resource
-sets and 30 `DATA/NN.TLK` files (huge — up to 29 MB — almost certainly the
-CD-audio/digitized-speech "talkie" track data referenced by track number,
-not Kyra resource files; not investigated).
+sets and 30 `DATA/NN.TLK` files.
+
+**`.TLK` files: confirmed (2026-08-02) to be ordinary Kyra PAK containers,
+not raw CD-audio track data** — the previous pass's "almost certainly
+CD-audio, not Kyra resource files" guess was wrong. `LoLEngine::
+loadTalkFile` (`engine/lol.cpp:1894-1905`) loads/unloads them with the
+exact same `_res->loadPakFile(Common::String::format("%02d.TLK", index))`
+/ `unloadPakFile` calls used for every other `.PAK`, swapping in a
+different `.TLK` per area as the party travels
+(`_curTlkFile`/`characterSays`, `engine/lol.cpp:1907+`). **Verified
+byte-exact**: extracted the smallest one, `25.TLK` (44,138 bytes), from
+the ISO and parsed it with this project's existing, unmodified
+`scripts/kyralib/pak.py` — it decodes cleanly as a single-entry PAK
+directory, `00000.VOC` (a Creative Voice File, the standard Kyra/EOB
+speech-audio format), offset 23, size 44,115, and `23 + 44115 = 44138`
+matches the file size **exactly, zero residue**. So `.TLK` files are
+per-area PAKs of `NNNNN.VOC` speech clips, addressed by track-number
+filename — decodable with existing code, not an audio codec question at
+all. **Closes `lol-tlk-files`.**
 
 **Extraction dependency:** this project's `data/` directory is read-only
 and the ISO can't be pre-unpacked into it, so
@@ -96,31 +112,67 @@ does (12/12 extracted CPS files carry one).
 
 ---
 
-## VCN — Wall tileset (confirmed structure; colour NOT confirmed)
+## VCN — Wall tileset (confirmed structure AND colour, 2026-08-02)
 
 **Confirmed structurally**, byte-identical tile packing to EOB
 (4bpp-packed 8×8 tiles, `kyralib.vcn` unchanged). `CATWALK.VCN`:
 `numTiles=1845`, tile-data length **exactly** `1845 * 32 = 59040` bytes,
 zero remainder.
 
-**Colour is an open item.** Unlike EOB, this corpus ships no
-`CATWALK.PAL`/`.COL` file alongside `CATWALK.VCN`/`.VMP` in `CATWALK.PAK`.
-`CATWALK.VCN`'s `colMap` references palette indices 48 and 112 (plus a
-few others); checked against every VGA palette extracted this session
-(`PLAYFLD.CPS`'s embedded one, `FXPAL.COL`, `SWAMPICE.COL`) — **all of
-them store literal `RGB(255, 0, 255)` at those indices**, i.e. every
-candidate is using that index range as a placeholder/reserved slot, not
-real wall colour. This strongly suggests LOL patches the live in-memory
-palette with wall-set-specific and/or monster-specific colours at
-level-load time from a source not yet located in this corpus (compare
-EOB's `setLevelPalettes` call in `scene_eob.cpp` — LOL almost certainly
-has an equivalent, not yet traced; `engine/scene_lol.cpp` was not fetched
-this session). `textures/catwalk_vcn.png` is rendered in **greyscale**
-(raw tile-index intensity, not a real palette) rather than publishing a
-wrong colour — per this project's convention of not guessing a palette
-that might be wrong. The tile *shapes* (masonry coursing, mortar lines)
-are clearly legible in the greyscale render, confirming the structural
-decode; only final colour is open.
+**Colour — root cause found and fixed (was: `lol-palette-runtime-patch`).**
+The previous pass's diagnosis ("LOL patches the live palette at
+level-load time from a source not yet located") was on the right track
+but looked in the wrong place — the fix isn't an external
+`setLevelPalettes`-equivalent patch, it's that **the real 128-colour
+palette is embedded inside the `.VCN` file itself, past a region the
+previous decode stopped short of.** Port of `LoLEngine::loadLevelGraphics`
+(`engine/scene_lol.cpp:300-368`, the actual EOB-`setLevelPalettes`
+analogue, called from EMC script bytecode via `olol_loadLevelGraphics`,
+`script/script_lol.cpp:208-211`). For the DOS/VGA (256-colour,
+`!use16ColorMode`) case:
+
+```
+u16 LE  numTiles
+u8[numTiles]  vcnShift        # per-tile brightness/lighting shift table (not previously documented)
+u8[128]       vcnColTable     # per-nibble colour remap (this project's previous "colMap")
+u8[384]       palette          # 128 colours x 3 bytes (VGA 6-bit RGB) — THE MISSING PIECE
+u8[numTiles*32]  tile data     # unchanged from the previous decode — 8x8, 4bpp-packed
+```
+
+Unless the level's load script passes an override filename (seen for
+level 11's ice area: `"SWAMPICE.COL"`/`"LOLICE.NOL"`, loaded into a
+*second* palette slot rather than slot 0), this embedded 384-byte block
+**is** `_screen->getPalette(0)` for the whole level — there's no
+after-the-fact "patch [wall colours] in" step beyond this one load, same
+structural role as EOB's `<wallStem>.PAL` load but embedded in the VCN
+container instead of a sibling file.
+
+**Verified byte-exact against the real `CATWALK.VCN`:**
+`2 (numTiles field) + 1845 (vcnShift) + 128 (vcnColTable) + 384 (palette)
++ 1845*32 (tile data) = 61399` = the file's own declared decompressed
+`imgSize` **exactly, zero residue**. And decisively: palette indices 48
+and 112 — the exact two indices the previous pass found stuck at literal
+`RGB(255,0,255)` in every external palette file checked — now decode to
+real, plausible colours: **index 48 = `(11,28,11)`** (dark green),
+**index 112 = `(9,22,53)`** (dark blue), sitting within a coherent
+red→orange→yellow→green gradient palette (indices 0-19 spot-checked, all
+plausible VGA-palette values, index 0/1 = black as expected for a
+background/transparent slot). **Closes `lol-palette-runtime-patch`.**
+**Done this session:** `scripts/kyralib/vcn.py` gained
+`parse_vcn_lol`/`decode_all_tiles_lol` (the previous `parse_vcn` is EOB's
+fixed-34-byte-header parser and was silently reading LOL tile data from
+the wrong offset — not just "greyscale instead of colour", the byte
+offset itself was wrong for LOL specifically, though `num_tiles`
+happened to be read correctly since it's the first field either way).
+`scripts/extract_landsoflore_dosvga.py`'s `extract_vcn_wallset` now uses
+the corrected parser and the VCN's own embedded palette.
+`public/assets/landsoflore/dosvga/textures/catwalk_vcn.png` now renders
+in **real colour** — a coherent tan/brown stonework texture sheet, visual
+confirmation on top of the byte-exact structural check above.
+
+Since `.SHP` monster/UI sprites (below) are drawn using the same active
+`_screen->getPalette(0)` this load sets up, **this closes the SHP colour
+question too** (same root cause, same fix — see "SHP" section below).
 
 ---
 
@@ -165,9 +217,36 @@ with a perimeter-wall ring.
 from EOB's "MAZ"** — it's the identical 32×32×4-wall-byte grid, just
 LCW-compressed at the container level (matching VMP's compression
 difference above). No `.WLL` file was found or needed to decode the grid
-itself (a `.WLL`-equivalent wall-type-parameter table may still exist
-separately, analogous to EOB's `<WALLSET>.DAT`, but wasn't required to
-get byte-exact grid extraction and wasn't chased this session).
+itself, but see below — the format is now confirmed anyway.
+
+---
+
+## WLL — Wall-type parameter table (confirmed, byte-exact — closes `lol-wll-format`)
+
+**Confirmed.** Port of `LoLEngine::loadLevelWallData`
+(`engine/scene_lol.cpp:142-179`) — this *is* LOL's analogue of EOB's
+`<WALLSET>.DAT`, as the TODO item suspected. `.WLL` files are **not**
+LCW-compressed (loaded raw via `_res->fileData`), and live inside the
+per-level PAK (e.g. `LEVEL1.WLL` inside `L01.PAK`), not as loose ISO files:
+
+```
+u16 LE  shpDatListIndex     # selects which _levelShpList/_levelDatList pair (decoration shapes) this level uses
+repeat (fileSize-2)/12:      # one record per wall-type index, 12 bytes each
+    u16 LE  wallTypeIndex          # sequential in practice: 0, 1, 2, 3, ...
+    u16 LE  vmpMapValue            # only the low byte is read (_wllVmpMap[idx] = *d) -- VMP-layer selector for this wall type
+    u16 LE  shapeMapValue          # low byte read normally; if `mapShapes` and the full LE value is >0, it's a decoration-shape index instead
+    u16 LE  specialWallType        # low byte read (_specialWallTypes[idx])
+    u16 LE  wallFlags              # low byte read (_wllWallFlags[idx])
+    u16 LE  automapData            # low byte read (_wllAutomapData[idx]) -- automap glyph/behaviour, e.g. value 17 flags a block as a door in loadBlockProperties
+```
+
+**Verified byte-exact against the real `LEVEL1.WLL`** (626 bytes, from
+`L01.PAK`): `(626-2)/12 = 52.0` exactly — zero residue — and the decoded
+`wallTypeIndex` field increments cleanly `0, 1, 2, ..., 51` across all 52
+records with no gaps or out-of-order values, strong confirmation this is
+the right record boundary/stride. `_wllAutomapData` values are small
+integers (13, 63, 255, ...) consistent with a lookup-table role rather
+than raw colour/pixel data.
 
 ---
 
@@ -222,36 +301,33 @@ zero-deviation structural invariant used to confirm VCN/VMP above.
 `sprites/lizard_shp.png` (greyscale, see below) shows a clearly
 recognisable, consistent creature silhouette across all 16 real frames.
 
-**Colour is an open item, same root cause as VCN.** `Screen::drawShapePlotType37`
-special-cases a remapped value of `255` as a background-fade-table lookup
-(`_dsBackgroundFadingTable[*dst]`, keyed on whatever's already on-screen —
-a shadow/blend effect a static extractor has no equivalent for), which
-was excluded from the render (treated as transparent) rather than shown
-as literal palette index 255 (bright magenta in most VGA palettes,
-looking like a bug otherwise). Separately — and this is the bigger gap —
-the *real* colour-table target indices for `LIZARD.SHP` (47-50, 65-74)
-land in the same `RGB(255, 0, 255)` placeholder range in every palette
-checked this session, exactly like `CATWALK.VCN`'s wall colours. Same
-diagnosis, same fix needed: locate wherever LOL patches the live palette
-before rendering monsters/walls (this is the exact scenario
-`recolour-remap-tables.md` describes — colours wrong for specific
-sprites, root cause a remap table pointing at unpopulated palette slots).
-`sprites/lizard_shp.png`, `orc_shp.png`, `trez_shp.png`, `cabal_shp.png`
-are all rendered in **greyscale** (raw remapped-index intensity) for the
-same reason `catwalk_vcn.png` is.
+**Colour — closed (2026-08-02), same root cause and fix as VCN.**
+`Screen::drawShapePlotType37`'s `255`-as-background-fade-lookup special
+case (excluded from the render as transparent, correctly) still applies
+and is unaffected by this finding. The *real* colour-table target indices
+for `LIZARD.SHP` (47-50, 65-74) landing in the `RGB(255,0,255)`
+placeholder range in every *external* palette file was the same symptom
+as `CATWALK.VCN`'s wall colours, and has the same fix: SHP shapes are
+rendered against whatever `_screen->getPalette(0)` is currently active,
+which — per the "VCN" section above — is populated from the **VCN
+file's own embedded 384-byte palette** at level-load time
+(`LoLEngine::loadLevelGraphics`), not from any of the standalone `.COL`
+files this extractor checked. `sprites/lizard_shp.png`,
+`orc_shp.png`, `trez_shp.png`, `cabal_shp.png` are still rendered in
+**greyscale** this pass (re-rendering in colour needs the same
+`kyralib.vcn`-side offset fix as CATWALK, applied per-level before the
+matching monster SHPs render — a pipeline task, not a format-unknown one).
 
 ---
 
-## Not extracted this session (open items)
+## Not extracted this session (remaining open items)
 
 | Item | Notes |
 |------|-------|
-| VCN/SHP final colour | Root cause diagnosed (palette range is a runtime-patched placeholder in every candidate palette checked); the actual patch source (level-load code equivalent to EOB's `setLevelPalettes`, likely in `engine/scene_lol.cpp` or `script/script_lol.cpp`, not fetched this session) not yet located. |
-| `.TLK` files (30 of them, up to 29 MB each) | Almost certainly CD-audio/speech track data (large size, `.TLK` = "talk"), not Kyra PAK resources — not opened this session. |
-| `.WLL` wall-parameter table | Not needed for byte-exact CMZ grid decode; may still exist as an EOB-`.DAT`-equivalent for wall-type rendering parameters, not located/chased. |
-| Most of the 209-file ISO (level PAKs `L02-L29`, `O00A-O29A`, `CIMMERIA/KEEP/MANOR/...PAK`, `FRE`/`GER` language sets, `MUSIC.PAK`, `VOC.PAK`) | Only a representative subset was extracted this session per the breadth-first mandate — every format needed to decode the rest (PAK/CPS/VCN/VMP/CMZ/SHP) is now confirmed, so pulling more files through the same pipeline is mechanical, not exploratory. |
+| SHP colour re-render | `catwalk_vcn.png` now renders in real colour (fix applied this session). The 4 SHP atlases (`lizard_shp.png`, `orc_shp.png`, `trez_shp.png`, `cabal_shp.png`) still render in greyscale — SHP files don't carry their own palette (they use whichever level's VCN-embedded palette was active in-game), and this extractor doesn't yet have a monster→level mapping to pick the right one. |
+| Most of the 209-file ISO (level PAKs `L02-L29`, `O00A-O29A`, `CIMMERIA/KEEP/MANOR/...PAK`, `FRE`/`GER` language sets, `MUSIC.PAK`, `VOC.PAK`, 29 of 30 `.TLK` files) | Only a representative subset was extracted this session per the breadth-first mandate — every format needed to decode the rest (PAK/CPS/VCN/VMP/CMZ/SHP/WLL/TLK) is now confirmed, so pulling more files through the same pipeline is mechanical, not exploratory. |
 | `ITEM.INF`, `LEVEL1.INF`, `.TLC`, `.INI`, `.LM` (language string tables) | Text/scripting data, out of scope for the palette/sprite/container breadth pass. |
-| EMC2 script bytecode (per the internet-research doc) | Not investigated — scripting/gameplay logic, not data-structure/asset extraction. |
+| EMC2 script bytecode (per the internet-research doc) | Not investigated — scripting/gameplay logic, not data-structure/asset extraction. LOL uses the EMC bytecode VM (not EOB's separate `EoBInfProcessor`) — `olol_loadLevelGraphics` and friends in `script/script_lol.cpp` are EMC opcode handlers. |
 
 ---
 

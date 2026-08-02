@@ -22,13 +22,16 @@ an EOB .MAZ via kyralib.maze. LOL also introduces a new format, .SHP
 (multi-frame creature/UI sprites) — kyralib.shp, ported from ScummVM's
 Screen_v2::getPtrToShape + Screen::drawShape's scanline decoder.
 
-Known unresolved issue (see doc): the default/UI palettes in this corpus
-reserve a placeholder range at literal RGB (255, 0, 255) for wall-texture
-and monster-body colours, which the live game patches in at runtime from
-a source not yet located in this static corpus. This extractor renders
-that placeholder range as transparent rather than publishing bogus
-magenta pixels — VCN/SHP *structure* is confirmed byte-exact; final
-colour for those two asset classes is not.
+2026-08-02 update: the VCN wall-tile colour question is now resolved. The
+real 128-colour palette is embedded in the .VCN file itself, past a
+per-tile shift table and a 128-byte col_table this extractor previously
+stopped short of (see kyralib.vcn.parse_vcn_lol and the doc's "VCN — Wall
+tileset" section) — CATWALK now renders in real colour. SHP monster/UI
+sprite colour is still open: SHP files don't carry their own palette (they
+render against whichever level's VCN-embedded palette was active when
+they were drawn in-game), and this extractor doesn't yet have a
+monster-to-level mapping to pick the right one, so SHP sprites are still
+rendered in greyscale below.
 """
 from __future__ import annotations
 
@@ -45,7 +48,7 @@ from bclib.paths import asset_dir, cache_dir, write_atlas, write_json, data_dir
 from kyralib.pak import parse_pak, read_entry
 from kyralib.format80 import decompress_bitmap
 from kyralib.palette import vga_palette_to_rgb, palette_to_rgba
-from kyralib.vcn import parse_vcn, decode_all_tiles
+from kyralib.vcn import parse_vcn_lol, decode_all_tiles_lol
 from kyralib.maze import parse_maz
 from kyralib.shp import parse_shp_container, decode_shape_indices
 
@@ -155,15 +158,20 @@ def extract_vcn_wallset(root: Path, pak_rel: str, stem: str):
     vcn_name = f'{stem}.VCN'
     if vcn_name not in entries:
         return False
-    vcn = parse_vcn(read_entry(data, entries[vcn_name]))
-    tiles = decode_all_tiles(vcn)
+    # LOL's .VCN header is NOT EOB's fixed-34-byte layout (2026-08-02
+    # correction) -- it's a variable-length header (num_tiles-sized shift
+    # table + 128-byte col_table + a 384-byte EMBEDDED PALETTE) confirmed
+    # byte-exact against the file's own declared decompressed size. Using
+    # kyralib.vcn.parse_vcn (the EOB parser) here was silently reading
+    # tile pixel data from the wrong offset for LOL files. See
+    # docs/landsoflore/dosvga/data-structure.md "VCN — Wall tileset".
+    vcn = parse_vcn_lol(read_entry(data, entries[vcn_name]))
+    tiles = decode_all_tiles_lol(vcn)
 
-    # Rendered in greyscale, not colour -- see module docstring: this
-    # corpus's wall-tile colour source (colMap indices land in a palette
-    # range that's a literal (255,0,255) placeholder in every candidate
-    # palette checked) is not resolved. Structure (tile count, byte size)
-    # IS confirmed; colour is not.
-    rgba_pal = greyscale_ramp_rgba()
+    rgb = vga_palette_to_rgb(vcn.palette)  # 128 x 3, 0-255
+    if rgb.shape[0] < 256:
+        rgb = np.concatenate([rgb, np.zeros((256 - rgb.shape[0], 3), dtype=np.uint8)])
+    rgba_pal = palette_to_rgba(rgb, transparent_index=0)
     cols = 32
     rows = (vcn.num_tiles + cols - 1) // cols
     sheet_idx = np.zeros((rows * 8, cols * 8), dtype=np.uint8)
@@ -238,7 +246,7 @@ def main():
         print(f'  skip {name}: {reason}')
 
     ok = extract_vcn_wallset(root, 'DATA/CATWALK.PAK', 'CATWALK')
-    print(f'CATWALK VCN wall tileset: {"ok" if ok else "missing"} (rendered greyscale, see docs)')
+    print(f'CATWALK VCN wall tileset: {"ok" if ok else "missing"} (rendered in real colour from the VCN-embedded palette)')
 
     ok = extract_shp_sprites(root, 'DATA/MONSTER.PAK', 'LIZARD')
     print(f'LIZARD SHP creature sprite: {"ok" if ok else "missing"} (rendered greyscale, see docs)')
