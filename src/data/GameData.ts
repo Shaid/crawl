@@ -7,19 +7,9 @@
  * the game runtime, since both read the same public/assets/ output.
  */
 
-export interface AtlasFrame {
-  name: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+import type { AtlasMeta } from '@seer/core';
 
-export interface AtlasMeta {
-  frames: AtlasFrame[];
-  width: number;
-  height: number;
-}
+export type { AtlasMeta };
 
 export interface PaletteColor {
   r: number;
