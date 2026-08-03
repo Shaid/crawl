@@ -2,11 +2,23 @@
 title: Spell Effects Gallery
 ---
 
+import EffectAnimGallery from '../../../../components/EffectAnimGallery.astro';
 import SpriteGallery from '../../../../components/SpriteGallery.astro';
 
 # Spell Effects Gallery
 
-The **73** 16×16 BCSPEED effect frames from `bcdfa`: fireballs, stars, ice,
-flames, skulls, serpents, bolts and other spell/projectile effects.
+Real, frame-accurate playback of the game's own particle simulation for each
+of the 95 `BCSPEED.EFF` effects — fireballs, chants, traps, glyph runes and
+more — not just the raw 16×16 sprite frames. Names come from the confirmed
+effect→spell mapping (92 of 95 attributed); the few still-unattributed
+indices are simply not shown, rather than given an invented name. Hover a
+card to pause it.
+
+<EffectAnimGallery />
+
+## The raw sprite bank
+
+The **73** underlying 16×16 `BCSPEED.GFK` frames these animations are built
+from:
 
 <SpriteGallery manifest="bcspeed" label="effect" />
