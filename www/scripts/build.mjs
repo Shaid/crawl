@@ -58,23 +58,25 @@ if (fontFiles.every((file) => existsSync(join(fontDir, file)))) {
 }
 
 const textureDir = join(ASSET_DST, 'amiga', 'textures');
-// At least one variant per tileset (bcdfx/bcdfz get 5: fountain, door,
-// plaque, alcove, empty; bcdfy's smaller sub-image set only supports
-// door + empty) -- "every variant" isn't a fixed list since availability
-// depends on which decoration sub-images that tileset actually ships.
-const hasAnyTileView = (name) =>
-	existsSync(join(textureDir, `dungeon-${name}-view-empty.png`));
-if (existsSync(join(textureDir, 'dungeon-bcdfx.json'))) {
-	const tilesetResult = spawnSync(
+const dungeonDataDir = join(ASSET_DST, 'amiga', 'dungeon');
+// A tileset has *some* real walker-rendered views once its manifest exists
+// (scripts/render_dungeon_views.ts writes dungeon-<name>-views.json
+// alongside the PNGs) -- which views/variants a tileset gets isn't a fixed
+// list, since it depends on which M4/M5 props that tileset's own map data
+// and art actually have (e.g. bcdfy has no plaque/alcove art at all).
+const hasViewManifest = (name) =>
+	existsSync(join(textureDir, `dungeon-${name}-views.json`));
+if (existsSync(join(dungeonDataDir, 'levels.json'))) {
+	const dungeonViewsResult = spawnSync(
 		'node',
-		[join(root, 'scripts', 'generate_tileset_views.mjs'), textureDir],
+		[join(root, 'scripts', 'render_dungeon_views.ts'), textureDir],
 		{ stdio: 'inherit' },
 	);
-	if (tilesetResult.status !== 0) throw new Error('Could not generate composited tileset views');
-} else if (['bcdfx', 'bcdfy', 'bcdfz'].every(hasAnyTileView)) {
-	console.log(`Using committed composited tileset views in ${textureDir}`);
+	if (dungeonViewsResult.status !== 0) throw new Error('Could not render real dungeon views');
+} else if (['bcdfx', 'bcdfy', 'bcdfz'].every(hasViewManifest)) {
+	console.log(`Using committed real dungeon views in ${textureDir}`);
 } else {
-	throw new Error(`Missing tileset source and committed views: ${textureDir}`);
+	throw new Error(`Missing dungeon walker source data and committed views: ${dungeonDataDir}`);
 }
 
 const faviconPath = join(root, 'public', 'favicon.png');

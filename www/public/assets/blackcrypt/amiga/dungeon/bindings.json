@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "mode": "positional",
+  "bindings": {
+    "forward": ["KeyW", "ArrowUp"],
+    "back": ["KeyS", "ArrowDown"],
+    "strafeLeft": ["KeyA"],
+    "strafeRight": ["KeyD"],
+    "turnLeft": ["KeyQ", "ArrowLeft"],
+    "turnRight": ["KeyE", "ArrowRight"],
+    "interact": ["Space"],
+    "automap": ["Tab"]
+  }
+}

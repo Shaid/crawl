@@ -153,15 +153,33 @@
     "png": "textures/dungeon-bcdfx.png"
   },
   {
+    "name": "textures/dungeon-bcdfx-indexed",
+    "sprites": 83,
+    "hasPalette": false,
+    "png": "textures/dungeon-bcdfx-indexed.png"
+  },
+  {
     "name": "textures/dungeon-bcdfy",
     "sprites": 47,
     "hasPalette": false,
     "png": "textures/dungeon-bcdfy.png"
   },
   {
+    "name": "textures/dungeon-bcdfy-indexed",
+    "sprites": 46,
+    "hasPalette": false,
+    "png": "textures/dungeon-bcdfy-indexed.png"
+  },
+  {
     "name": "textures/dungeon-bcdfz",
     "sprites": 84,
     "hasPalette": false,
     "png": "textures/dungeon-bcdfz.png"
+  },
+  {
+    "name": "textures/dungeon-bcdfz-indexed",
+    "sprites": 83,
+    "hasPalette": false,
+    "png": "textures/dungeon-bcdfz-indexed.png"
   }
 ]

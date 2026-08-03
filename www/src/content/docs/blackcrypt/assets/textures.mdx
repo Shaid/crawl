@@ -7,15 +7,13 @@ import DungeonViewCycle from '../../../../components/DungeonViewCycle.astro';
 
 # Dungeon Textures
 
-The three dungeon tilesets (`bcdfx`, `bcdfy`, `bcdfz`), rendered as composite
-208×140 first-person viewport mockups from the game's own blit descriptors and
-confirmed on-screen dest-positions. Served from
-`/assets/blackcrypt/amiga/textures/`.
+The three dungeon tilesets (`bcdfx`, `bcdfy`, `bcdfz`), shown through real,
+208×140 first-person viewport renders produced by **`@seer/dungeon`**, the
+same walker package that backs the interactive `tools/walker/` harness. Served
+from `/assets/blackcrypt/amiga/textures/`.
 
-Each tileset is shown at its accent ramp, cycling through a few faux dungeon
-scenes built from the tileset's own decoration sub-images (hover to pause).
-These are composited illustrations built from the real extracted art, not
-frames captured from the game itself:
+Each tileset is shown at its accent ramp, cycling through a handful of real
+poses picked from the actual explored maps (hover to pause):
 
 <div style="display:flex; flex-wrap:wrap; gap:1.5rem; align-items:flex-start;">
 	<DungeonViewCycle tileset="bcdfx" caption="bcdfx — levels 1–4 & 12–13 (tan / grey)" />
@@ -34,14 +32,56 @@ walls, front walls, ceiling, floor, doors, pits, pillars, alcoves, plaques,
 stairs, pull chains, panels, fountains and wall buttons. See
 [bcdfx/bcdfy/bcdfz](/blackcrypt/files/bcdfxyz/).
 
-## About the composited views
+## These are real game output, not illustrations
 
-These mockups draw from the confirmed dest-position table in the raw notes
-(`docs/blackcrypt/amiga/data-structure.md` § "3D Viewport Compositing" →
-"Screenshot corroboration") plus empirical alignment against real emulator
-screenshots. They favour an open-corridor composition — side walls receding
-on both sides toward a decorated far wall — since that's what actual play
-screenshots show; a wall directly ahead (the game's `wall0` art) only occurs
-one square from a dead end and mostly fills the frame, which makes for a much
-less legible illustration. Treat these as "looks right", not a byte-exact
-reproduction of any specific in-game frame.
+Earlier versions of this page showed hand-composited mockups: a script picked
+plausible-looking dest positions and stacked a fixed "corridor + centrepiece"
+layout together by hand, because at the time there was no working renderer to
+produce actual game output. That's no longer true. `@seer/dungeon` is now a
+verified walker — it reproduces the game's own view-geometry walk
+(`buildViewList`), draw order (`compositeDrawList`/`paintOrder`) and indexed
+palette compositing byte-for-byte, and every image above is that exact
+pipeline run headlessly (`www/scripts/render_dungeon_views.ts`) against a real
+`(map, x, y, facing)` pose from the actual exported dungeon data — the same
+inputs `tools/walker/` renders interactively in a browser. There is no
+separate "illustration" step anymore: this page's build now fails if the real
+renderer fails.
+
+Every pose below is reproducible: run the interactive harness
+(`npm run dev` at the repo root, then open `tools/walker/index.html` with
+these query params) and it renders the identical frame pixel-for-pixel.
+
+**bcdfx**
+
+| view | map | cell | facing | shows |
+|---|---|---|---|---|
+| corridor | bcdfb (`map=1`) | (57, 1) | E | open corridor, side walls receding to a far wall |
+| alcove | bcdfc (`map=2`) | (35, 2) | W | a search alcove set into the left wall |
+| plaque | bcdfd (`map=3`) | (34, 1) | W | a wall plaque |
+| stairs | bcdfc (`map=2`) | (28, 24) | S | a stairway |
+| door | bcdfc (`map=2`) | (28, 21) | N | a locked door's wall decoration |
+
+**bcdfy** — this tileset's own atlas (46 sub-images vs. 83 for bcdfx/bcdfz)
+has no alcove or plaque art at all, so its set shows a floor item instead —
+a real fact about the tileset's art, not a gap in the walker:
+
+| view | map | cell | facing | shows |
+|---|---|---|---|---|
+| corridor | bcdff (`map=5`) | (45, 1) | E | open corridor, side walls receding to a far wall |
+| floor-item | bcdff (`map=5`) | (38, 4) | W | a floor item |
+| stairs | bcdff (`map=5`) | (1, 13) | E | a stairway, centred and close |
+| door | bcdff (`map=5`) | (3, 1) | E | a pull-chain door switch |
+
+**bcdfz**
+
+| view | map | cell | facing | shows |
+|---|---|---|---|---|
+| corridor | bcdfg (`map=6`) | (43, 4) | E | open corridor, side walls receding to a far wall |
+| alcove | bcdfg (`map=6`) | (39, 5) | N | a search alcove |
+| plaque | bcdfl (`map=11`) | (8, 1) | W | a wall plaque |
+| stairs | bcdfg (`map=6`) | (9, 15) | S | a stairway |
+| door | bcdfg (`map=6`) | (9, 13) | N | a locked door's ornate iron decoration, dead ahead |
+
+Facings are `N`/`E`/`S`/`W`, matching the walker's own `0`/`1`/`2`/`3`
+encoding and the harness's `facing` URL param (e.g. `?map=1&x=57&y=1&facing=1`
+for the first `bcdfx` row).

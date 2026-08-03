@@ -1,0 +1,55 @@
+{
+  "tileset": "bcdfx",
+  "views": [
+    {
+      "variant": "corridor",
+      "map": 1,
+      "x": 57,
+      "y": 1,
+      "facing": 1,
+      "note": "open corridor, side walls receding to a far wall",
+      "mapLabel": "bcdfb",
+      "facingLabel": "E"
+    },
+    {
+      "variant": "alcove",
+      "map": 2,
+      "x": 35,
+      "y": 2,
+      "facing": 3,
+      "note": "search alcove set into the left wall",
+      "mapLabel": "bcdfc",
+      "facingLabel": "W"
+    },
+    {
+      "variant": "plaque",
+      "map": 3,
+      "x": 34,
+      "y": 1,
+      "facing": 3,
+      "note": "wall plaque",
+      "mapLabel": "bcdfd",
+      "facingLabel": "W"
+    },
+    {
+      "variant": "stairs",
+      "map": 2,
+      "x": 28,
+      "y": 24,
+      "facing": 2,
+      "note": "stairway",
+      "mapLabel": "bcdfc",
+      "facingLabel": "S"
+    },
+    {
+      "variant": "door",
+      "map": 2,
+      "x": 28,
+      "y": 21,
+      "facing": 0,
+      "note": "a locked door’s wall decoration",
+      "mapLabel": "bcdfc",
+      "facingLabel": "N"
+    }
+  ]
+}

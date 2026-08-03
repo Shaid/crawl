@@ -1,0 +1,55 @@
+{
+  "tileset": "bcdfz",
+  "views": [
+    {
+      "variant": "corridor",
+      "map": 6,
+      "x": 43,
+      "y": 4,
+      "facing": 1,
+      "note": "open corridor, side walls receding to a far wall",
+      "mapLabel": "bcdfg",
+      "facingLabel": "E"
+    },
+    {
+      "variant": "alcove",
+      "map": 6,
+      "x": 39,
+      "y": 5,
+      "facing": 0,
+      "note": "search alcove",
+      "mapLabel": "bcdfg",
+      "facingLabel": "N"
+    },
+    {
+      "variant": "plaque",
+      "map": 11,
+      "x": 8,
+      "y": 1,
+      "facing": 3,
+      "note": "wall plaque",
+      "mapLabel": "bcdfl",
+      "facingLabel": "W"
+    },
+    {
+      "variant": "stairs",
+      "map": 6,
+      "x": 9,
+      "y": 15,
+      "facing": 2,
+      "note": "stairway",
+      "mapLabel": "bcdfg",
+      "facingLabel": "S"
+    },
+    {
+      "variant": "door",
+      "map": 6,
+      "x": 9,
+      "y": 13,
+      "facing": 0,
+      "note": "a locked door’s ornate iron decoration, dead ahead",
+      "mapLabel": "bcdfg",
+      "facingLabel": "N"
+    }
+  ]
+}

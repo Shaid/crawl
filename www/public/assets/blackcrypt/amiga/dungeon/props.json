@@ -1,0 +1,1296 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "spec": "docs/blackcrypt/amiga/data-structure.md#m5-prop-placement-tables"
+  },
+  "doorLock": {
+    "bank": "wall-decorations",
+    "frameTemplate": "m{mapId}_decor{gfxIndex}_{depthLabel}",
+    "gfxTable": [
+      {
+        "gfxIndex": 0,
+        "gfxNumber": 81,
+        "depth": 0,
+        "depthLabel": "near",
+        "w": 16,
+        "h": 20
+      },
+      {
+        "gfxIndex": 0,
+        "gfxNumber": 81,
+        "depth": 1,
+        "depthLabel": "mid",
+        "w": 16,
+        "h": 15
+      },
+      {
+        "gfxIndex": 0,
+        "gfxNumber": 81,
+        "depth": 2,
+        "depthLabel": "far",
+        "w": 16,
+        "h": 11
+      },
+      {
+        "gfxIndex": 1,
+        "gfxNumber": 82,
+        "depth": 0,
+        "depthLabel": "near",
+        "w": 16,
+        "h": 20
+      },
+      {
+        "gfxIndex": 1,
+        "gfxNumber": 82,
+        "depth": 1,
+        "depthLabel": "mid",
+        "w": 16,
+        "h": 15
+      },
+      {
+        "gfxIndex": 1,
+        "gfxNumber": 82,
+        "depth": 2,
+        "depthLabel": "far",
+        "w": 16,
+        "h": 11
+      },
+      {
+        "gfxIndex": 2,
+        "gfxNumber": 83,
+        "depth": 0,
+        "depthLabel": "near",
+        "w": 16,
+        "h": 20
+      },
+      {
+        "gfxIndex": 2,
+        "gfxNumber": 83,
+        "depth": 1,
+        "depthLabel": "mid",
+        "w": 16,
+        "h": 15
+      },
+      {
+        "gfxIndex": 2,
+        "gfxNumber": 83,
+        "depth": 2,
+        "depthLabel": "far",
+        "w": 16,
+        "h": 11
+      }
+    ],
+    "positions": [
+      {
+        "depth": 0,
+        "lateral": -1,
+        "destX": -8,
+        "destY": 52
+      },
+      {
+        "depth": 0,
+        "lateral": 0,
+        "destX": 158,
+        "destY": 52
+      },
+      {
+        "depth": 1,
+        "lateral": -1,
+        "destX": 32,
+        "destY": 47
+      },
+      {
+        "depth": 1,
+        "lateral": 0,
+        "destX": 138,
+        "destY": 47
+      },
+      {
+        "depth": 2,
+        "lateral": -1,
+        "destX": 49,
+        "destY": 46
+      },
+      {
+        "depth": 2,
+        "lateral": 0,
+        "destX": 127,
+        "destY": 46
+      }
+    ],
+    "note": "Only side=1 (party right), $51A=0 (direct) is reachable; art is per-map (wall-decorations bank), resolved at runtime from the entity gfxNumber and the level unit id."
+  },
+  "floorPlate": {
+    "note": "Geometry confirmed; art source resolved this pass -- bcdfa UI panel bank (sprites/ui-panel.json), frames pressure_plate_{1,2}_{up,down}. Not yet wired into buildViewList (the 13-near/11-far fixed sub-tile grid positions need their own placement-index derivation, beyond this pass's scope) -- see docs/blackcrypt/TODO.md blackcrypt-floorplate-art-source.",
+    "bank": "ui-panel",
+    "nearPositionsDirect": [
+      [
+        54,
+        115
+      ],
+      [
+        53,
+        107
+      ],
+      [
+        64,
+        100
+      ],
+      [
+        81,
+        117
+      ],
+      [
+        81,
+        106
+      ],
+      [
+        92,
+        98
+      ],
+      [
+        104,
+        116
+      ],
+      [
+        113,
+        107
+      ],
+      [
+        128,
+        99
+      ],
+      [
+        133,
+        117
+      ],
+      [
+        142,
+        107
+      ],
+      [
+        142,
+        107
+      ],
+      [
+        142,
+        107
+      ]
+    ],
+    "nearPositionsMirrored": [
+      [
+        56,
+        114
+      ],
+      [
+        45,
+        108
+      ],
+      [
+        58,
+        100
+      ],
+      [
+        78,
+        115
+      ],
+      [
+        68,
+        106
+      ],
+      [
+        77,
+        99
+      ],
+      [
+        105,
+        115
+      ],
+      [
+        90,
+        106
+      ],
+      [
+        109,
+        100
+      ],
+      [
+        132,
+        115
+      ],
+      [
+        116,
+        106
+      ],
+      [
+        139,
+        102
+      ],
+      [
+        145,
+        110
+      ]
+    ],
+    "farPositions": [
+      [
+        73,
+        89
+      ],
+      [
+        69,
+        85
+      ],
+      [
+        77,
+        83
+      ],
+      [
+        86,
+        90
+      ],
+      [
+        86,
+        85
+      ],
+      [
+        92,
+        82
+      ],
+      [
+        100,
+        89
+      ],
+      [
+        103,
+        85
+      ],
+      [
+        114,
+        83
+      ],
+      [
+        119,
+        89
+      ],
+      [
+        125,
+        85
+      ]
+    ],
+    "descriptors": {
+      "near-unpressed": {
+        "slot": 0,
+        "src": 18764,
+        "w": 16,
+        "h": 4,
+        "ok": true,
+        "frame": "pressure_plate_1_up"
+      },
+      "near-pressed": {
+        "slot": 0,
+        "src": 18820,
+        "w": 16,
+        "h": 4,
+        "ok": true,
+        "frame": "pressure_plate_1_down"
+      },
+      "far-unpressed": {
+        "slot": 0,
+        "src": 18876,
+        "w": 16,
+        "h": 2,
+        "ok": true,
+        "frame": "pressure_plate_2_up"
+      },
+      "far-pressed": {
+        "slot": 0,
+        "src": 18904,
+        "w": 16,
+        "h": 2,
+        "ok": true,
+        "frame": "pressure_plate_2_down"
+      }
+    }
+  },
+  "floorItem": {
+    "note": "Anchor/registration/scatter tables confirmed and wired into buildViewList (schema/slots.ts FloorItemPlacement) -- see docs/blackcrypt/amiga/data-structure.md, floor-item placement section. This section is retained for verification/documentation purposes.",
+    "anchor": [
+      {
+        "depth": 0,
+        "lateral": -1,
+        "x": 0,
+        "y": -1
+      },
+      {
+        "depth": 0,
+        "lateral": 0,
+        "x": 103,
+        "y": 75
+      },
+      {
+        "depth": 0,
+        "lateral": 1,
+        "x": 0,
+        "y": -1
+      },
+      {
+        "depth": 1,
+        "lateral": -1,
+        "x": -8,
+        "y": 60
+      },
+      {
+        "depth": 1,
+        "lateral": 0,
+        "x": 103,
+        "y": 60
+      },
+      {
+        "depth": 1,
+        "lateral": 1,
+        "x": 215,
+        "y": 60
+      },
+      {
+        "depth": 2,
+        "lateral": -1,
+        "x": 23,
+        "y": 54
+      },
+      {
+        "depth": 2,
+        "lateral": 0,
+        "x": 103,
+        "y": 54
+      },
+      {
+        "depth": 2,
+        "lateral": 1,
+        "x": 183,
+        "y": 54
+      }
+    ],
+    "registration": [
+      {
+        "group": 0,
+        "depth": 0,
+        "x": 25,
+        "y": 6
+      },
+      {
+        "group": 0,
+        "depth": 1,
+        "x": 17,
+        "y": 4
+      },
+      {
+        "group": 0,
+        "depth": 2,
+        "x": 9,
+        "y": 3
+      },
+      {
+        "group": 1,
+        "depth": 0,
+        "x": 16,
+        "y": 12
+      },
+      {
+        "group": 1,
+        "depth": 1,
+        "x": 8,
+        "y": 7
+      },
+      {
+        "group": 1,
+        "depth": 2,
+        "x": 8,
+        "y": 4
+      },
+      {
+        "group": 2,
+        "depth": 0,
+        "x": 8,
+        "y": 12
+      },
+      {
+        "group": 2,
+        "depth": 1,
+        "x": 7,
+        "y": 7
+      },
+      {
+        "group": 2,
+        "depth": 2,
+        "x": 9,
+        "y": 4
+      },
+      {
+        "group": 3,
+        "depth": 0,
+        "x": 26,
+        "y": 16
+      },
+      {
+        "group": 3,
+        "depth": 1,
+        "x": 17,
+        "y": 9
+      },
+      {
+        "group": 3,
+        "depth": 2,
+        "x": 8,
+        "y": 5
+      },
+      {
+        "group": 4,
+        "depth": 0,
+        "x": 17,
+        "y": 7
+      },
+      {
+        "group": 4,
+        "depth": 1,
+        "x": 18,
+        "y": 5
+      },
+      {
+        "group": 4,
+        "depth": 2,
+        "x": 9,
+        "y": 3
+      },
+      {
+        "group": 5,
+        "depth": 0,
+        "x": 8,
+        "y": 3
+      },
+      {
+        "group": 5,
+        "depth": 1,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 5,
+        "depth": 2,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 6,
+        "depth": 0,
+        "x": 8,
+        "y": 3
+      },
+      {
+        "group": 6,
+        "depth": 1,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 6,
+        "depth": 2,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 7,
+        "depth": 0,
+        "x": 9,
+        "y": 11
+      },
+      {
+        "group": 7,
+        "depth": 1,
+        "x": 10,
+        "y": 8
+      },
+      {
+        "group": 7,
+        "depth": 2,
+        "x": 10,
+        "y": 4
+      },
+      {
+        "group": 8,
+        "depth": 0,
+        "x": 16,
+        "y": 3
+      },
+      {
+        "group": 8,
+        "depth": 1,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 8,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 9,
+        "depth": 0,
+        "x": 7,
+        "y": 11
+      },
+      {
+        "group": 9,
+        "depth": 1,
+        "x": 6,
+        "y": 7
+      },
+      {
+        "group": 9,
+        "depth": 2,
+        "x": 8,
+        "y": 5
+      },
+      {
+        "group": 10,
+        "depth": 0,
+        "x": 41,
+        "y": 4
+      },
+      {
+        "group": 10,
+        "depth": 1,
+        "x": 24,
+        "y": 3
+      },
+      {
+        "group": 10,
+        "depth": 2,
+        "x": 16,
+        "y": 2
+      },
+      {
+        "group": 11,
+        "depth": 0,
+        "x": 16,
+        "y": 12
+      },
+      {
+        "group": 11,
+        "depth": 1,
+        "x": 8,
+        "y": 7
+      },
+      {
+        "group": 11,
+        "depth": 2,
+        "x": 8,
+        "y": 5
+      },
+      {
+        "group": 12,
+        "depth": 0,
+        "x": 16,
+        "y": 7
+      },
+      {
+        "group": 12,
+        "depth": 1,
+        "x": 8,
+        "y": 4
+      },
+      {
+        "group": 12,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 13,
+        "depth": 0,
+        "x": 18,
+        "y": 4
+      },
+      {
+        "group": 13,
+        "depth": 1,
+        "x": 16,
+        "y": 3
+      },
+      {
+        "group": 13,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 14,
+        "depth": 0,
+        "x": 32,
+        "y": 11
+      },
+      {
+        "group": 14,
+        "depth": 1,
+        "x": 16,
+        "y": 6
+      },
+      {
+        "group": 14,
+        "depth": 2,
+        "x": 17,
+        "y": 3
+      },
+      {
+        "group": 15,
+        "depth": 0,
+        "x": 32,
+        "y": 11
+      },
+      {
+        "group": 15,
+        "depth": 1,
+        "x": 16,
+        "y": 6
+      },
+      {
+        "group": 15,
+        "depth": 2,
+        "x": 17,
+        "y": 3
+      },
+      {
+        "group": 16,
+        "depth": 0,
+        "x": 16,
+        "y": 6
+      },
+      {
+        "group": 16,
+        "depth": 1,
+        "x": 8,
+        "y": 5
+      },
+      {
+        "group": 16,
+        "depth": 2,
+        "x": 8,
+        "y": 3
+      },
+      {
+        "group": 17,
+        "depth": 0,
+        "x": 14,
+        "y": 9
+      },
+      {
+        "group": 17,
+        "depth": 1,
+        "x": 8,
+        "y": 6
+      },
+      {
+        "group": 17,
+        "depth": 2,
+        "x": 8,
+        "y": 4
+      },
+      {
+        "group": 18,
+        "depth": 0,
+        "x": 39,
+        "y": 4
+      },
+      {
+        "group": 18,
+        "depth": 1,
+        "x": 24,
+        "y": 3
+      },
+      {
+        "group": 18,
+        "depth": 2,
+        "x": 16,
+        "y": 2
+      },
+      {
+        "group": 19,
+        "depth": 0,
+        "x": 16,
+        "y": 4
+      },
+      {
+        "group": 19,
+        "depth": 1,
+        "x": 16,
+        "y": 2
+      },
+      {
+        "group": 19,
+        "depth": 2,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 20,
+        "depth": 0,
+        "x": 8,
+        "y": 10
+      },
+      {
+        "group": 20,
+        "depth": 1,
+        "x": 8,
+        "y": 6
+      },
+      {
+        "group": 20,
+        "depth": 2,
+        "x": 8,
+        "y": 3
+      },
+      {
+        "group": 21,
+        "depth": 0,
+        "x": 7,
+        "y": 19
+      },
+      {
+        "group": 21,
+        "depth": 1,
+        "x": 7,
+        "y": 12
+      },
+      {
+        "group": 21,
+        "depth": 2,
+        "x": 8,
+        "y": 8
+      },
+      {
+        "group": 22,
+        "depth": 0,
+        "x": 15,
+        "y": 1
+      },
+      {
+        "group": 22,
+        "depth": 1,
+        "x": 15,
+        "y": 0
+      },
+      {
+        "group": 22,
+        "depth": 2,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 23,
+        "depth": 0,
+        "x": 7,
+        "y": 2
+      },
+      {
+        "group": 23,
+        "depth": 1,
+        "x": 7,
+        "y": 1
+      },
+      {
+        "group": 23,
+        "depth": 2,
+        "x": 7,
+        "y": 1
+      },
+      {
+        "group": 24,
+        "depth": 0,
+        "x": 7,
+        "y": 6
+      },
+      {
+        "group": 24,
+        "depth": 1,
+        "x": 7,
+        "y": 5
+      },
+      {
+        "group": 24,
+        "depth": 2,
+        "x": 7,
+        "y": 2
+      },
+      {
+        "group": 25,
+        "depth": 0,
+        "x": 6,
+        "y": 7
+      },
+      {
+        "group": 25,
+        "depth": 1,
+        "x": 7,
+        "y": 4
+      },
+      {
+        "group": 25,
+        "depth": 2,
+        "x": 7,
+        "y": 2
+      },
+      {
+        "group": 26,
+        "depth": 0,
+        "x": 15,
+        "y": 7
+      },
+      {
+        "group": 26,
+        "depth": 1,
+        "x": 7,
+        "y": 5
+      },
+      {
+        "group": 26,
+        "depth": 2,
+        "x": 7,
+        "y": 3
+      },
+      {
+        "group": 27,
+        "depth": 0,
+        "x": 7,
+        "y": 8
+      },
+      {
+        "group": 27,
+        "depth": 1,
+        "x": 6,
+        "y": 4
+      },
+      {
+        "group": 27,
+        "depth": 2,
+        "x": 7,
+        "y": 3
+      },
+      {
+        "group": 28,
+        "depth": 0,
+        "x": 8,
+        "y": 13
+      },
+      {
+        "group": 28,
+        "depth": 1,
+        "x": 8,
+        "y": 10
+      },
+      {
+        "group": 28,
+        "depth": 2,
+        "x": 7,
+        "y": 5
+      },
+      {
+        "group": 29,
+        "depth": 0,
+        "x": 6,
+        "y": 3
+      },
+      {
+        "group": 29,
+        "depth": 1,
+        "x": 7,
+        "y": 2
+      },
+      {
+        "group": 29,
+        "depth": 2,
+        "x": 7,
+        "y": 1
+      },
+      {
+        "group": 30,
+        "depth": 0,
+        "x": 17,
+        "y": 5
+      },
+      {
+        "group": 30,
+        "depth": 1,
+        "x": 8,
+        "y": 3
+      },
+      {
+        "group": 30,
+        "depth": 2,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 31,
+        "depth": 0,
+        "x": 12,
+        "y": 10
+      },
+      {
+        "group": 31,
+        "depth": 1,
+        "x": 14,
+        "y": 6
+      },
+      {
+        "group": 31,
+        "depth": 2,
+        "x": 6,
+        "y": 5
+      },
+      {
+        "group": 32,
+        "depth": 0,
+        "x": 23,
+        "y": 8
+      },
+      {
+        "group": 32,
+        "depth": 1,
+        "x": 16,
+        "y": 5
+      },
+      {
+        "group": 32,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 33,
+        "depth": 0,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 33,
+        "depth": 1,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 33,
+        "depth": 2,
+        "x": 7,
+        "y": 0
+      },
+      {
+        "group": 34,
+        "depth": 0,
+        "x": 16,
+        "y": 4
+      },
+      {
+        "group": 34,
+        "depth": 1,
+        "x": 8,
+        "y": 3
+      },
+      {
+        "group": 34,
+        "depth": 2,
+        "x": 7,
+        "y": 1
+      },
+      {
+        "group": 35,
+        "depth": 0,
+        "x": 7,
+        "y": 19
+      },
+      {
+        "group": 35,
+        "depth": 1,
+        "x": 8,
+        "y": 14
+      },
+      {
+        "group": 35,
+        "depth": 2,
+        "x": 7,
+        "y": 8
+      },
+      {
+        "group": 36,
+        "depth": 0,
+        "x": 15,
+        "y": 13
+      },
+      {
+        "group": 36,
+        "depth": 1,
+        "x": 14,
+        "y": 6
+      },
+      {
+        "group": 36,
+        "depth": 2,
+        "x": 8,
+        "y": 4
+      },
+      {
+        "group": 37,
+        "depth": 0,
+        "x": 22,
+        "y": 3
+      },
+      {
+        "group": 37,
+        "depth": 1,
+        "x": 15,
+        "y": 2
+      },
+      {
+        "group": 37,
+        "depth": 2,
+        "x": 15,
+        "y": 1
+      },
+      {
+        "group": 38,
+        "depth": 0,
+        "x": 15,
+        "y": 21
+      },
+      {
+        "group": 38,
+        "depth": 1,
+        "x": 8,
+        "y": 13
+      },
+      {
+        "group": 38,
+        "depth": 2,
+        "x": 7,
+        "y": 8
+      },
+      {
+        "group": 39,
+        "depth": 0,
+        "x": 21,
+        "y": 7
+      },
+      {
+        "group": 39,
+        "depth": 1,
+        "x": 15,
+        "y": 4
+      },
+      {
+        "group": 39,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 40,
+        "depth": 0,
+        "x": 23,
+        "y": 9
+      },
+      {
+        "group": 40,
+        "depth": 1,
+        "x": 15,
+        "y": 5
+      },
+      {
+        "group": 40,
+        "depth": 2,
+        "x": 7,
+        "y": 3
+      },
+      {
+        "group": 41,
+        "depth": 0,
+        "x": 22,
+        "y": 7
+      },
+      {
+        "group": 41,
+        "depth": 1,
+        "x": 15,
+        "y": 4
+      },
+      {
+        "group": 41,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 42,
+        "depth": 0,
+        "x": 22,
+        "y": 16
+      },
+      {
+        "group": 42,
+        "depth": 1,
+        "x": 15,
+        "y": 9
+      },
+      {
+        "group": 42,
+        "depth": 2,
+        "x": 7,
+        "y": 4
+      },
+      {
+        "group": 43,
+        "depth": 0,
+        "x": 16,
+        "y": 12
+      },
+      {
+        "group": 43,
+        "depth": 1,
+        "x": 7,
+        "y": 6
+      },
+      {
+        "group": 43,
+        "depth": 2,
+        "x": 7,
+        "y": 3
+      },
+      {
+        "group": 44,
+        "depth": 0,
+        "x": 29,
+        "y": 24
+      },
+      {
+        "group": 44,
+        "depth": 1,
+        "x": 20,
+        "y": 15
+      },
+      {
+        "group": 44,
+        "depth": 2,
+        "x": 15,
+        "y": 10
+      },
+      {
+        "group": 45,
+        "depth": 0,
+        "x": 15,
+        "y": 7
+      },
+      {
+        "group": 45,
+        "depth": 1,
+        "x": 7,
+        "y": 4
+      },
+      {
+        "group": 45,
+        "depth": 2,
+        "x": 7,
+        "y": 2
+      },
+      {
+        "group": 46,
+        "depth": 0,
+        "x": 8,
+        "y": 4
+      },
+      {
+        "group": 46,
+        "depth": 1,
+        "x": 8,
+        "y": 2
+      },
+      {
+        "group": 46,
+        "depth": 2,
+        "x": 8,
+        "y": 1
+      },
+      {
+        "group": 47,
+        "depth": 0,
+        "x": 15,
+        "y": 11
+      },
+      {
+        "group": 47,
+        "depth": 1,
+        "x": 7,
+        "y": 8
+      },
+      {
+        "group": 47,
+        "depth": 2,
+        "x": 8,
+        "y": 6
+      },
+      {
+        "group": 48,
+        "depth": 0,
+        "x": 16,
+        "y": 8
+      },
+      {
+        "group": 48,
+        "depth": 1,
+        "x": 7,
+        "y": 3
+      },
+      {
+        "group": 48,
+        "depth": 2,
+        "x": 8,
+        "y": 2
+      }
+    ],
+    "scatter": [
+      {
+        "dx": 0,
+        "dy": 0
+      },
+      {
+        "dx": -1,
+        "dy": 1
+      },
+      {
+        "dx": 1,
+        "dy": -1
+      },
+      {
+        "dx": 1,
+        "dy": 1
+      },
+      {
+        "dx": -1,
+        "dy": -1
+      },
+      {
+        "dx": 1,
+        "dy": 0
+      },
+      {
+        "dx": -1,
+        "dy": 0
+      },
+      {
+        "dx": 0,
+        "dy": 1
+      },
+      {
+        "dx": 0,
+        "dy": -1
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "tileset": "bcdfy",
+  "views": [
+    {
+      "variant": "corridor",
+      "map": 5,
+      "x": 45,
+      "y": 1,
+      "facing": 1,
+      "note": "open corridor, side walls receding to a far wall",
+      "mapLabel": "bcdff",
+      "facingLabel": "E"
+    },
+    {
+      "variant": "floor-item",
+      "map": 5,
+      "x": 38,
+      "y": 4,
+      "facing": 3,
+      "note": "a floor item",
+      "mapLabel": "bcdff",
+      "facingLabel": "W"
+    },
+    {
+      "variant": "stairs",
+      "map": 5,
+      "x": 1,
+      "y": 13,
+      "facing": 1,
+      "note": "stairway, centred and close",
+      "mapLabel": "bcdff",
+      "facingLabel": "E"
+    },
+    {
+      "variant": "door",
+      "map": 5,
+      "x": 3,
+      "y": 1,
+      "facing": 1,
+      "note": "a pull-chain door switch",
+      "mapLabel": "bcdff",
+      "facingLabel": "E"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "confidence": "confirmed",
+  "source": "docs/blackcrypt/amiga/data-structure.md#bcdfs--mapdungeon-format (wallFlags bits), cross-checked against scripts/automap_tiles.py (reveal_around)",
+  "walls": {
+    "1": {
+      "label": "north wall",
+      "blocksMovement": true,
+      "blocksSight": true,
+      "pieceKind": "wall"
+    },
+    "2": {
+      "label": "east wall",
+      "blocksMovement": true,
+      "blocksSight": true,
+      "pieceKind": "wall"
+    },
+    "4": {
+      "label": "south wall",
+      "blocksMovement": true,
+      "blocksSight": true,
+      "pieceKind": "wall"
+    },
+    "8": {
+      "label": "west wall",
+      "blocksMovement": true,
+      "blocksSight": true,
+      "pieceKind": "wall"
+    }
+  },
+  "features": {}
+}
