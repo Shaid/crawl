@@ -269,7 +269,7 @@ from .palette import (
     ehb_palette,
     load_palette_json,
 )
-from .atlas import pack_atlas, frames_to_json, Frame
+from .atlas import pack_atlas, pack_atlas_indexed, frames_to_json, Frame
 from .paths import (
     ROOT,
     asset_root,
@@ -279,6 +279,8 @@ from .paths import (
     write_atlas,
     write_json,
     write_png,
+    write_indexed_png,
+    write_indexed_png_mask,
     write_wav,
     write_manifest,
     write_platform_index,
@@ -385,8 +387,9 @@ __all__ = [
     'read_level_tileset_indices', 'tileset_levels', 'tileset_ramps',
     'read_dungeon_palette_for_tileset', 'TILESET_FILES',
     'read_named_palette', 'ehb_palette', 'load_palette_json',
-    'pack_atlas', 'frames_to_json', 'Frame',
+    'pack_atlas', 'pack_atlas_indexed', 'frames_to_json', 'Frame',
     'ROOT', 'asset_root', 'asset_dir', 'cache_dir', 'data_dir',
-    'write_atlas', 'write_json', 'write_png', 'write_wav', 'write_manifest', 'set_groups_file',
+    'write_atlas', 'write_json', 'write_png', 'write_indexed_png', 'write_indexed_png_mask',
+    'write_wav', 'write_manifest', 'set_groups_file',
     'write_platform_index', 'manifest_entry',
 ]

@@ -70,6 +70,45 @@ def write_png(path, rgba):
     return path
 
 
+def write_indexed_png(path, indices, palette_rgb, transparent_index=None):
+    """Write a palette-indexed ("P" mode) PNG.
+
+    `indices` is an (h, w) uint8 array of palette indices. `palette_rgb` is
+    a flat `[r, g, b, r, g, b, ...]` list/array (as `palette.ehb_palette`
+    returns) -- up to 256 entries; PIL pads a shorter table itself.
+    `transparent_index`, if given, is written as a single-entry PNG `tRNS`
+    chunk (index 0 is a real opaque colour by default, matching the walker
+    plan's `{transparentIndex: null}` convention for dungeon tilesets, where
+    transparency comes from a *separate* mask plane instead --
+    see `write_indexed_png_mask`).
+
+    Mirrors `@seer/pipeline`'s `writeIndexedPNG` (`packages/pipeline/src/
+    io.ts`) for the Python side of the pipeline, which had no equivalent
+    before this.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.ascontiguousarray(indices, dtype=np.uint8)
+    img = Image.fromarray(arr, 'P')
+    pal = list(palette_rgb) + [0] * (768 - len(palette_rgb))
+    img.putpalette(pal[:768])
+    if transparent_index is not None:
+        img.info['transparency'] = bytes([transparent_index])
+    img.save(path)
+    return path
+
+
+def write_indexed_png_mask(path, mask):
+    """Write an opacity mask (0/1 per pixel) as a plain grayscale PNG (0 or
+    255), the separate-mask-plane convention the dungeon tileset export
+    uses instead of PNG alpha (see `write_indexed_png`)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.where(np.asarray(mask) > 0, 255, 0).astype(np.uint8)
+    Image.fromarray(arr, 'L').save(path)
+    return path
+
+
 def write_wav(path, pcm_bytes, sample_rate=8000, sample_width=1, channels=1):
     """Wrap headerless raw PCM in a standard WAV container (browser-playable).
 

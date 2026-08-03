@@ -9442,6 +9442,127 @@ Cross-references: "bcdfs — Map / Dungeon Format" → "Structure bytecode" /
 
 ---
 
+### `@seer/dungeon` walker exports (Phase C, confirmed)
+
+Real, verified exporters replacing `docs/blackcrypt/walker-plan.md`'s M1
+hand-authored files, per that plan's Phase C. All three scripts are
+committed under `scripts/`; none of their JSON/PNG output is committed
+(gitignored build output, per repo convention).
+
+#### `scripts/export_dungeon_levels.py` → `dungeon/levels.json`
+
+Densifies all 13 sparse `bcdfs` maps to flat 64×64 `DungeonLevelFile` units
+(`wallFlags`/`type`/`sublevel`/`objectHandle` planes), using
+`bcdfs.read_dungeon_world` (new; see below). Per-map `tileset`/`paletteRamp`
+come straight from `bclib.palette.read_level_tileset_indices`/
+`read_level_ramp_indices` — **confirmed this pass that both tables are
+indexed by *map number* (1–13), not the global 28-level number**, despite
+the "level" naming inherited from the game's own code: the `$1E5C(A4)`
+dispatch variable's range checks (`<=4`, `==5`, `6..11`, `>=12`) match the
+map-file↔tileset-disk-layout table exactly (maps 1–4 & 12–13 on GAMEDISK2
+with `bcdfx`; maps 5–11 on GAMEDISK3 with `bcdfy`/`bcdfz`), not the 28-level
+numbering. (An earlier draft of this section briefly mis-stated maps 3/4 as
+`bcdfz`/ramp 2 by reading the "levels 6-11" prose literally as global level
+numbers instead of map numbers — caught by re-deriving the table
+programmatically from `bclib.palette`'s own functions instead of by hand,
+and confirmed against the per-map validated table below.)
+
+**Validated, 13/13 maps:**
+
+| Map | File | Tileset | Ramp | Sub-levels |
+|-----|------|---------|------|------------|
+| 1 | bcdfb | bcdfx | 0 | 1, 2 |
+| 2 | bcdfc | bcdfx | 0 | 3, 4, 5 |
+| 3 | bcdfd | bcdfx | 0 | 6, 7, 8, 9 |
+| 4 | bcdfe | bcdfx | 0 | 10, 11, 12 |
+| 5 | bcdff | bcdfy | 1 | 13 |
+| 6 | bcdfg | bcdfz | 2 | 14, 15 |
+| 7 | bcdfh | bcdfz | 2 | 16, 17, 18, 19 |
+| 8 | bcdfi | bcdfz | 2 | 20 |
+| 9 | bcdfj | bcdfz | 2 | 21, 22 |
+| 10 | bcdfk | bcdfz | 2 | 23 |
+| 11 | bcdfl | bcdfz | 2 | 24, 25, 26 |
+| 12 | bcdfm | bcdfx | 3 | 27 |
+| 13 | bcdfn | bcdfx | 3 | 28 |
+
+**`bcdfs.read_dungeon_world` (new public function in `scripts/bclib/bcdfs.py`)**
+walks entities keyed `(row, col, slot)` rather than a bare per-map slot
+number. This was forced by a genuine, previously-undiscovered latent
+property of the shipped data, found while writing this exporter: a raw
+on-disk "unique"/slot number is only guaranteed distinct *within the
+same-square chain that names it*, not across a whole map. **Map 4 (`bcdfe`)
+has 4 top-level chain-head slot numbers (42, 54, 55, 57) that collide with
+an unrelated square elsewhere in the same map**, and container/monster
+sub-chain head fields (`+0x0A`/`+0x0C`) collide even more often (7 hits on
+the first map tested) because — confirmed empirically this pass, matching
+a code comment already in `bcdfs.py` that had not previously been load-
+bearing — those fields are **not** real slot references at all, only a
+nonzero/zero gate; the loader allocates a fresh runtime slot for sub-chain
+contents exactly the way it does for a monster's second (stat-continuation)
+record, whose own placeholder field (`+0x10`, "always `0x0000`" per the
+Monster bytecode table) already established the same pattern. Practical
+consequence: `bcdfs.load_world` (used unchanged by `automap_tiles.py`,
+re-verified below) keeps its pre-existing, harmless last-write-wins
+behaviour on those 4 map-4 collisions; a from-cold export must not, so
+`read_dungeon_world` scopes every entity key by its originating `(row,
+col)` instead of a bare slot, and does not attempt to key sub-chain
+contents at all (walked byte-for-byte for correct stream positioning, but
+not independently returned — see the function's own docstring for the
+full argument). A monster's second record is folded directly onto the
+first's `raw` bytes rather than invented a key for it.
+
+**Refactor verification (`scripts/automap_tiles.py`'s `load_world` promoted
+to `bcdfs.load_world`):** the full tile census and all 22 valid
+(map, level)-nibble ASCII-map renders are byte-for-byte identical before and
+after the refactor (diffed against the pre-refactor script).
+
+#### `scripts/export_dungeon_slots.py` → `dungeon/slots.json`
+
+Re-reads the raw blit-descriptor bytes directly — front-wall table at S_1
+`+0x22CE2` (9×20 B) and side-wall table at `+0x22E4A` (8×28 B) — rather than
+trusting the M1 hand transcription. **Result: 17/17 slots re-verified with
+zero deviation** against the hand-authored file (all `destX`/`destY`/
+`frame` values agree exactly); the script would have printed a loud
+`MISMATCH` line per disagreeing field had one existed. The side descriptors'
+three self-validating invariants (`bytesPerPlane == (w/8)*h`; `BLTSIZE ==
+(h<<6)|(w/16+1)`; `modulo + blitBytes == 40`) all pass on all 8 records, and
+every descriptor's `src` offset is cross-checked against
+`bcdfxyz.SUB_IMAGES`'s independently-authored offset table (also zero
+deviation) — two structurally independent sources agreeing byte-for-byte.
+
+#### `scripts/export_dungeon_tileset_indexed.py` → indexed tileset assets
+
+Emits `textures/dungeon-<x|y|z>-indexed.png` (8-bit palette-indexed, the raw
+0–63 EHB index domain, `{transparentIndex: null}`), a matching
+`-indexed-mask.png` opacity plane, and **every** accent ramp each tileset
+serves (`palettes/dungeon-<name>-ramp<N>.json`) rather than only the
+already-shipped primary-ramp bake (`textures/dungeon-<name>.png`, which is
+wrong for `bcdfx` on levels 12–13 — see "Dungeon accent-ramp selection").
+**Verified byte-exact against the existing, already-confirmed RGBA atlas**:
+reconstructing 5 sampled frames (`wall0-face`, `ceiling`, `floor`,
+`sidewall-depth0-near`, `alcove-a`) from the indexed PNG + ramp-0 palette
+JSON reproduces the RGBA atlas with **0 mismatches across 52,787 opaque
+pixels**, and the separate mask plane agrees with the RGBA atlas's own
+alpha channel with **0 mismatches** on both a masked (`sidewall-depth0-near`,
+2,240 px) and an opaque (`wall0-face`, 21,648 px) frame. New shared helpers:
+`bclib.atlas.pack_atlas_indexed` and `bclib.paths.write_indexed_png`/
+`write_indexed_png_mask` (Python-side equivalents of `@seer/pipeline`'s
+`writeIndexedPNG`, which had no prior Python counterpart). The 1-plane
+door-clip-stencil sub-image (no colour data) is intentionally excluded —
+83/84 (or 46/47 for `bcdfy`) sub-images per tileset, not the full count.
+Wiring the walker's *runtime* to pick a ramp is out of scope for this pass
+(`walker-plan.md` M4); this only produces the verified data for it.
+
+#### `scripts/verify_dungeon_export.py`
+
+Validates `levels.json`/`slots.json` against `@seer/dungeon/schema`'s real
+TypeScript runtime validators (shelled out via `npx tsx`, not a hand-ported
+reimplementation of the validation rules) and checks every unit's planes
+densify to exactly 4,096 elements. `python3 scripts/verify_dungeon_export.py`
+reports `OVERALL: PASS`.
+
+---
+
 ## Executable Data Tables
 
 Disassembly (IRA) of the game overlays revealed several runtime data tables

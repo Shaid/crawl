@@ -276,12 +276,22 @@ specific game is compiled into the package.
 
 ---
 
-## Phase C — crawl-side exporters
+## Phase C — crawl-side exporters — **DONE**
 
 Both in **Python**, under `scripts/`, where the verified parsers already live
 (tilesets, monsters and screens are Python today; only portraits go through the
-TypeScript pipeline). Output to `public/assets/blackcrypt/amiga/dungeon/`;
-`scripts/render_all.py` gains the calls and manifest entries.
+TypeScript pipeline). Output to `public/assets/blackcrypt/amiga/dungeon/`.
+
+> **Status:** `scripts/export_dungeon_levels.py`, `scripts/export_dungeon_slots.py`
+> and `scripts/export_dungeon_tileset_indexed.py` are real, independently-run
+> scripts (matching the existing pattern of `extract_monsters.py`/
+> `extract_clipper.py`, not folded into `render_all.py`'s single body, which
+> already documents several asset types it deliberately excludes). Not wired
+> into the `npm run extract-all` chain — run them directly. Full verification
+> evidence, including the `bcdfs.read_dungeon_world` collision discovery and
+> the slots.json re-verification result, is in
+> `amiga/data-structure.md` § "`@seer/dungeon` walker exports (Phase C,
+> confirmed)".
 
 1. **Refactor first** — promote `automap_tiles.py:72-140`'s `load_world()` into
    `scripts/bclib/bcdfs.py` as public API returning `(squares, records)`, and have
@@ -418,8 +428,8 @@ The package must be portable by someone else without reading its source.
 |---|---|---|
 | **A** | engine-2d camera interface + input split + `Game` delta/camera-agnostic | engine-2d tests pass; middilgard migrated; crawl/sorcery untouched |
 | **M0** | `@seer/dungeon` skeleton, four schemas, validators | Validators accept fixtures, reject a bad `schemaVersion`; `npm test` green |
-| **M1** | **Static corridor, zero new RE** — surface, bank, composite, palette, both presenters, fed by the doc's numeric tables | Browser shows a correct 208×140 corridor **and** a Node test asserts the `Uint8Array`. Do not proceed on a "close enough" render — the fault space is ~200 lines of blit/mirror/clip maths |
-| **M2** | Exporters C1–C3; `CellQuery`, `FlatGridLevel`, `Pose`, `buildViewList` | A pose renders consistently with `automap_tiles.py`'s ASCII map for the same cell; a sweep over 13 maps × sampled cells × 4 facings gives zero exceptions, zero out-of-atlas frame refs, zero out-of-surface writes |
+| **M1** | ~~**Static corridor, zero new RE**~~ **DONE** — surface, bank, composite, palette, both presenters, fed by the doc's numeric tables | Browser shows a correct 208×140 corridor **and** a Node test asserts the `Uint8Array`. Do not proceed on a "close enough" render — the fault space is ~200 lines of blit/mirror/clip maths |
+| **M2** | ~~Exporters C1–C3; `CellQuery`, `FlatGridLevel`, `Pose`, `buildViewList`~~ **DONE** — `scripts/export_dungeon_levels.py`/`export_dungeon_slots.py`/`export_dungeon_tileset_indexed.py`; `@seer/dungeon`'s `model/{CellQuery,FlatGridLevel,Pose,Direction}.ts`, `view/{ViewSpec,DrawItem,buildViewList}.ts`, `raster/composite.ts`'s `compositeDrawList` | A pose renders consistently with `automap_tiles.py`'s ASCII map for the same cell (confirmed: 3 real poses' `buildViewList` item counts — 3, 3, 1 — match hand-derived expectations from the same `wallFlags` bits automap itself reads); a sweep over 13 maps × 50 sampled cells × 4 facings (2,600 poses, `packages/dungeon/src/__tests__/sweep.test.ts`) gives zero exceptions, zero out-of-atlas frame refs, zero out-of-surface writes |
 | **M3** | Movement, collision, bindings, automap | A circuit of a corridor returns to the start pose; no pose crosses a cell the automap shows as walled; automap cone matches the view; rebinding works from config |
 | **M4** | Interaction + animation: hotspot picking, entity state patches, `AnimRef` clock, indexed art with all ramps | Clicking an alcove/plaque/switch fires `onInteract` with the right code; levels 12–13 render with ramp 3; torches animate without a 60 Hz full redraw |
 | **M5** | Props needing new extraction (below); actors layer | Doors, stairs, pillars, pits, alcoves, plaques, buttons appear at correct positions |

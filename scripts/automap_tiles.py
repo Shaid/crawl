@@ -75,66 +75,15 @@ def load_world(raw=None):
     `records[m][slot]` is a 20-byte object record, keyed by the runtime slot
     index — the square's `unique` for the head of a same-square chain, and
     each record's own word `+0x12` for the rest.
+
+    Thin wrapper over `bcdfs.load_world` (the walk itself was promoted there
+    so `scripts/export_dungeon_levels.py` can share it instead of this module
+    keeping a private copy) — defaults to reading the real `bcdfs` file when
+    no raw bytes are given, exactly as before.
     """
     if raw is None:
         raw = open(BCDFS, 'rb').read()
-    offsets = bcdfs.read_map_offsets(raw)
-    squares = [dict() for _ in range(bcdfs.MAP_COUNT)]
-    records = [dict() for _ in range(bcdfs.MAP_COUNT)]
-
-    for m in range(bcdfs.MAP_COUNT):
-        sq_out, rec_out = squares[m], records[m]
-        cur = bcdfs._Cursor(raw, offsets[m] + bcdfs.OFFSET_TABLE_BYTES)
-        cur.take(4)
-        last_row = bcdfs._signed(cur.take(1)[0])
-
-        def actions(rec):
-            nxt = first = rec[0x0D]
-            looped = False
-            while nxt != 0 and not looped:
-                nxt = cur.take(8)[7]
-                looped = nxt == first
-
-        def sub_chain(parent, is_monster):
-            if bcdfs._word(parent, 0x0A if is_monster else 0x0C) == 0:
-                return
-            while True:
-                rec = bytes(cur.take(bcdfs.RECORD_BYTES))
-                mon = bool(rec[0] & 0x80)
-                if mon:
-                    cur.take(bcdfs.RECORD_BYTES)
-                if rec[5] in bcdfs.CONTAINER_TYPES or mon:
-                    sub_chain(rec, mon)
-                if bcdfs._word(rec, 0x12) == 0:
-                    break
-
-        def entity_chain(slot):
-            while True:
-                rec = bytes(cur.take(bcdfs.RECORD_BYTES))
-                if slot:
-                    rec_out[slot] = rec
-                mon = bool(rec[0] & 0x80)
-                if mon:
-                    second = cur.take(bcdfs.RECORD_BYTES)
-                    if second[0x13] != 0:
-                        cur.take(4)
-                if rec[5] in bcdfs.CONTAINER_TYPES or mon:
-                    sub_chain(rec, mon)
-                elif rec[5] in bcdfs.ACTION_TYPES:
-                    actions(rec)
-                slot = bcdfs._word(rec, 0x12)
-                if slot == 0:
-                    break
-
-        for row in range(0, last_row + 1):
-            first_col = bcdfs._signed(cur.take(1)[0])
-            last_col = bcdfs._signed(cur.take(1)[0])
-            for col in range(first_col, last_col + 1):
-                v = struct.unpack('>I', bytes(cur.take(4)))[0]
-                sq_out[(row, col)] = v
-                if v & 0xFFF:
-                    entity_chain(v & 0xFFF)
-    return squares, records
+    return bcdfs.load_world(raw)
 
 
 def apply_facing_delta(x, y, facing):
