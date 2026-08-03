@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@seer/core": "file:../seer/packages/core",
+    "@seer/dungeon": "file:../seer/packages/dungeon",
     "@seer/engine-2d": "file:../seer/packages/engine-2d",
     "@seer/iff": "file:../seer/packages/iff",
     "@seer/pipeline": "file:../seer/packages/pipeline",
