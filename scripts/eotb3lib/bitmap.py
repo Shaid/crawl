@@ -6,13 +6,37 @@ cross-checked against ThirdEye's apps/thirdeye/graphics/bitmap.cpp/.hpp
 docs/eotb3/dosvga/data-structure.md for the byte tables.
 
 1. "Old format" row/span RLE (GFF BMP/BMA cutscene frames -- INTRO/DARK/
-   FINALE/LICH.GFF):
+   FINALE/LICH.GFF; also used directly, un-wrapped, inside Dungeon Hack's
+   HACK.RES/OPEN.RES for full-screen event art and wall/decoration LOD
+   sprite sets -- see docs/dungeonhack/dosvga/data-structure.md):
      u16 fileSize-ish / unused
      u16 unknown1
      u16 numSubBitmaps      @ offset 4
-     u16 offsetTable[numSubBitmaps]   4 B stride, only the first 2 B of each
-                                       4-B slot is the sub-bitmap's file offset
-                                       (table starts @ offset 6)
+     u32 offsetTable[numSubBitmaps]   4 B stride, full u32 LE file offset
+                                       (table starts @ offset 6). EOB3's
+                                       EYE.RES never has a resource bigger
+                                       than 64KB using this format, so the
+                                       field's top 16 bits always read 0
+                                       there and an earlier draft of this
+                                       decoder mis-documented/mis-read it as
+                                       u16 -- confirmed wrong against
+                                       Dungeon Hack's "Drawbridge" resource
+                                       (130544 B, 6 sub-frames, entries 3-5
+                                       need offsets > 65535); the corrected
+                                       u32 read produces byte-identical
+                                       results to the old u16 read for every
+                                       EOB3 file (regression-checked) and
+                                       additionally decodes DH's large
+                                       resources correctly. Independently
+                                       confirmed field-for-field against
+                                       Mirek Luza's DAESOP decompiler
+                                       (`convert.c`'s
+                                       `getNewBitmapForOldBitmap()`, which
+                                       explicitly reads all 4 bytes of each
+                                       offset-table entry as well as the
+                                       4-byte total-size field at offset 0)
+                                       -- see
+                                       docs/dungeonhack/dosvga/data-structure.md.
      per sub-bitmap, at its offset:
          u16 width, u16 height, then a scanline stream:
              byte y (0xFF = end of image)
@@ -116,7 +140,7 @@ def decode_all_subbitmaps(blob: bytes, off: int = 0) -> list:
     num_sub = struct.unpack_from("<H", blob, off + 4)[0]
     out = []
     for i in range(num_sub):
-        sub_off = struct.unpack_from("<H", blob, off + 6 + i * 4)[0]
+        sub_off = struct.unpack_from("<I", blob, off + 6 + i * 4)[0]
         width, height = struct.unpack_from("<HH", blob, sub_off)
         pixels, next_pos = decode_old_format_scanlines(blob, sub_off + 4, width, height)
         out.append({"width": width, "height": height, "pixels": pixels, "next_pos": next_pos})
