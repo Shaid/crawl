@@ -1,0 +1,167 @@
+[
+  {
+    "name": "sprites/armour",
+    "sprites": 19,
+    "hasPalette": false,
+    "png": "sprites/armour.png"
+  },
+  {
+    "name": "sprites/automap",
+    "sprites": 27,
+    "hasPalette": false,
+    "png": "sprites/automap.png"
+  },
+  {
+    "name": "sprites/bcspeed",
+    "sprites": 73,
+    "hasPalette": false,
+    "png": "sprites/bcspeed.png"
+  },
+  {
+    "name": "sprites/chargen-font-a",
+    "sprites": 64,
+    "hasPalette": false,
+    "png": "sprites/chargen-font-a.png"
+  },
+  {
+    "name": "sprites/chargen-font-b",
+    "sprites": 59,
+    "hasPalette": false,
+    "png": "sprites/chargen-font-b.png"
+  },
+  {
+    "name": "sprites/chargen-font-cg",
+    "sprites": 59,
+    "hasPalette": false,
+    "png": "sprites/chargen-font-cg.png"
+  },
+  {
+    "name": "sprites/ending-font",
+    "sprites": 59,
+    "hasPalette": false,
+    "png": "sprites/ending-font.png"
+  },
+  {
+    "name": "sprites/ending-panels",
+    "sprites": 10,
+    "hasPalette": false,
+    "png": "sprites/ending-panels.png"
+  },
+  {
+    "name": "sprites/fire-animation",
+    "sprites": 15,
+    "hasPalette": false,
+    "png": "sprites/fire-animation.png"
+  },
+  {
+    "name": "sprites/floor-items",
+    "sprites": 147,
+    "hasPalette": false,
+    "png": "sprites/floor-items.png",
+    "groupsFile": "data/floor-item-names.json"
+  },
+  {
+    "name": "sprites/font-big",
+    "sprites": 59,
+    "hasPalette": false,
+    "png": "sprites/font-big.png"
+  },
+  {
+    "name": "sprites/font-micro",
+    "sprites": 59,
+    "hasPalette": false,
+    "png": "sprites/font-micro.png"
+  },
+  {
+    "name": "sprites/font-mono",
+    "sprites": 64,
+    "hasPalette": false,
+    "png": "sprites/font-mono.png"
+  },
+  {
+    "name": "sprites/font-mono2",
+    "sprites": 136,
+    "hasPalette": false,
+    "png": "sprites/font-mono2.png"
+  },
+  {
+    "name": "sprites/items",
+    "sprites": 180,
+    "hasPalette": false,
+    "png": "sprites/items.png",
+    "groupsFile": "data/item-icon-groups.json"
+  },
+  {
+    "name": "sprites/keys",
+    "sprites": 29,
+    "hasPalette": false,
+    "png": "sprites/keys.png"
+  },
+  {
+    "name": "sprites/monsters",
+    "sprites": 204,
+    "hasPalette": false,
+    "png": "sprites/monsters.png",
+    "groupsFile": "data/monster-names.json"
+  },
+  {
+    "name": "sprites/paperdoll",
+    "sprites": 7,
+    "hasPalette": false,
+    "png": "sprites/paperdoll.png"
+  },
+  {
+    "name": "sprites/portraits",
+    "sprites": 36,
+    "hasPalette": true,
+    "png": "sprites/portraits.png"
+  },
+  {
+    "name": "sprites/throwing-items",
+    "sprites": 12,
+    "hasPalette": false,
+    "png": "sprites/throwing-items.png"
+  },
+  {
+    "name": "sprites/ui",
+    "sprites": 23,
+    "hasPalette": false,
+    "png": "sprites/ui.png"
+  },
+  {
+    "name": "sprites/ui-panel",
+    "sprites": 15,
+    "hasPalette": false,
+    "png": "sprites/ui-panel.png"
+  },
+  {
+    "name": "sprites/ui-side-panel",
+    "sprites": 7,
+    "hasPalette": false,
+    "png": "sprites/ui-side-panel.png"
+  },
+  {
+    "name": "sprites/wall-decorations",
+    "sprites": 117,
+    "hasPalette": false,
+    "png": "sprites/wall-decorations.png"
+  },
+  {
+    "name": "textures/dungeon-bcdfx",
+    "sprites": 84,
+    "hasPalette": false,
+    "png": "textures/dungeon-bcdfx.png"
+  },
+  {
+    "name": "textures/dungeon-bcdfy",
+    "sprites": 47,
+    "hasPalette": false,
+    "png": "textures/dungeon-bcdfy.png"
+  },
+  {
+    "name": "textures/dungeon-bcdfz",
+    "sprites": 84,
+    "hasPalette": false,
+    "png": "textures/dungeon-bcdfz.png"
+  }
+]

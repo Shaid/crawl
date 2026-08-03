@@ -1,0 +1,132 @@
+[
+  {
+    "map": 1,
+    "file": "bcdfb",
+    "streamEnd": 49067,
+    "graphicsBytes": 1932,
+    "sfxBytes": 9914,
+    "raw": "audio/level01-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 2,
+    "file": "bcdfc",
+    "streamEnd": 50227,
+    "graphicsBytes": 1932,
+    "sfxBytes": 16746,
+    "raw": "audio/level02-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 3,
+    "file": "bcdfd",
+    "streamEnd": 45169,
+    "graphicsBytes": 1932,
+    "sfxBytes": 16208,
+    "raw": "audio/level03-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 4,
+    "file": "bcdfe",
+    "streamEnd": 46086,
+    "graphicsBytes": 1932,
+    "sfxBytes": 17298,
+    "raw": "audio/level04-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 5,
+    "file": "bcdff",
+    "streamEnd": 37539,
+    "graphicsBytes": 1932,
+    "sfxBytes": 9374,
+    "raw": "audio/level05-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 6,
+    "file": "bcdfg",
+    "streamEnd": 53844,
+    "graphicsBytes": 1932,
+    "sfxBytes": 12194,
+    "raw": "audio/level06-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 7,
+    "file": "bcdfh",
+    "streamEnd": 44861,
+    "graphicsBytes": 1932,
+    "sfxBytes": 11948,
+    "raw": "audio/level07-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 8,
+    "file": "bcdfi",
+    "streamEnd": 41072,
+    "graphicsBytes": 1932,
+    "sfxBytes": 9880,
+    "raw": "audio/level08-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 9,
+    "file": "bcdfj",
+    "streamEnd": 45983,
+    "graphicsBytes": 1932,
+    "sfxBytes": 13188,
+    "raw": "audio/level09-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 10,
+    "file": "bcdfk",
+    "streamEnd": 41067,
+    "graphicsBytes": 1932,
+    "sfxBytes": 7302,
+    "raw": "audio/level10-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 11,
+    "file": "bcdfl",
+    "streamEnd": 57450,
+    "graphicsBytes": 1932,
+    "sfxBytes": 12578,
+    "raw": "audio/level11-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 12,
+    "file": "bcdfm",
+    "streamEnd": 39041,
+    "graphicsBytes": 1932,
+    "sfxBytes": 7770,
+    "raw": "audio/level12-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  },
+  {
+    "map": 13,
+    "file": "bcdfn",
+    "streamEnd": 34916,
+    "graphicsBytes": 1932,
+    "sfxBytes": 11572,
+    "raw": "audio/level13-sfx.raw",
+    "format": "pcm_s8",
+    "note": "samples stored back to back; boundary table not yet located"
+  }
+]

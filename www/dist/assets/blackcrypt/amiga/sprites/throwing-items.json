@@ -1,0 +1,90 @@
+{
+  "frames": [
+    {
+      "name": "arrow_near_facing0",
+      "x": 1,
+      "y": 1,
+      "w": 16,
+      "h": 11
+    },
+    {
+      "name": "arrow_near_facing1",
+      "x": 18,
+      "y": 1,
+      "w": 16,
+      "h": 11
+    },
+    {
+      "name": "arrow_mid_facing0",
+      "x": 35,
+      "y": 1,
+      "w": 16,
+      "h": 8
+    },
+    {
+      "name": "arrow_mid_facing1",
+      "x": 52,
+      "y": 1,
+      "w": 16,
+      "h": 8
+    },
+    {
+      "name": "arrow_far_facing0",
+      "x": 103,
+      "y": 1,
+      "w": 16,
+      "h": 5
+    },
+    {
+      "name": "arrow_far_facing1",
+      "x": 120,
+      "y": 1,
+      "w": 16,
+      "h": 5
+    },
+    {
+      "name": "dagger_near_facing0",
+      "x": 69,
+      "y": 1,
+      "w": 16,
+      "h": 7
+    },
+    {
+      "name": "dagger_near_facing1",
+      "x": 86,
+      "y": 1,
+      "w": 16,
+      "h": 7
+    },
+    {
+      "name": "dagger_mid_facing0",
+      "x": 137,
+      "y": 1,
+      "w": 16,
+      "h": 5
+    },
+    {
+      "name": "dagger_mid_facing1",
+      "x": 154,
+      "y": 1,
+      "w": 16,
+      "h": 5
+    },
+    {
+      "name": "dagger_far_facing0",
+      "x": 171,
+      "y": 1,
+      "w": 16,
+      "h": 3
+    },
+    {
+      "name": "dagger_far_facing1",
+      "x": 1,
+      "y": 13,
+      "w": 16,
+      "h": 3
+    }
+  ],
+  "width": 192,
+  "height": 17
+}

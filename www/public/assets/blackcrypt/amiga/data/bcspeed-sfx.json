@@ -1,0 +1,109 @@
+{
+  "bankStart": 28493,
+  "bankEnd": 57339,
+  "samples": [
+    {
+      "index": 0,
+      "file": "audio/bcspeed-sfx-00.raw",
+      "bcdfaOffset": 28493,
+      "bytes": 4456,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        181,
+        194
+      ]
+    },
+    {
+      "index": 1,
+      "file": "audio/bcspeed-sfx-01.raw",
+      "bcdfaOffset": 32949,
+      "bytes": 2186,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        182,
+        191
+      ]
+    },
+    {
+      "index": 2,
+      "file": "audio/bcspeed-sfx-02.raw",
+      "bcdfaOffset": 35135,
+      "bytes": 9020,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        183
+      ]
+    },
+    {
+      "index": 3,
+      "file": "audio/bcspeed-sfx-03.raw",
+      "bcdfaOffset": 44155,
+      "bytes": 2748,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        184
+      ]
+    },
+    {
+      "index": 4,
+      "file": "audio/bcspeed-sfx-04.raw",
+      "bcdfaOffset": 46903,
+      "bytes": 1750,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        185
+      ]
+    },
+    {
+      "index": 5,
+      "file": "audio/bcspeed-sfx-05.raw",
+      "bcdfaOffset": 48653,
+      "bytes": 598,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        186
+      ]
+    },
+    {
+      "index": 6,
+      "file": "audio/bcspeed-sfx-06.raw",
+      "bcdfaOffset": 49251,
+      "bytes": 878,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        187
+      ]
+    },
+    {
+      "index": 7,
+      "file": "audio/bcspeed-sfx-07.raw",
+      "bcdfaOffset": 50129,
+      "bytes": 3974,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        188
+      ]
+    },
+    {
+      "index": 8,
+      "file": "audio/bcspeed-sfx-08.raw",
+      "bcdfaOffset": 54103,
+      "bytes": 1040,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        189
+      ]
+    },
+    {
+      "index": 9,
+      "file": "audio/bcspeed-sfx-09.raw",
+      "bcdfaOffset": 55143,
+      "bytes": 2196,
+      "format": "pcm_s8",
+      "dosClipperEntries": [
+        190,
+        192
+      ]
+    }
+  ]
+}

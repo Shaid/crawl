@@ -1,0 +1,499 @@
+{
+  "source": "data/item-names.json (bcdfs record walk, gfxNumber -> name and itemType) joined against sprites/items.json by icon index; itemType labels from bclib.ITEM_TYPE_NAMES",
+  "frameLabels": {
+    "item000": "STATUE / ILLUSIONARY WALLS / EMERALD KEY / HEART KEY / SQUARE KEY / RED KEY / FORK KEY / BOX KEY / GOLD KEY / IRON KEY / RECTANGLE KEY / NIGHT KEY / STRONGHOLD KEY / DRAGON KEY / NETHER KEY / OCTA KEY / SILVER KEY / POSSESSOR KEY / DARKNESS KEY / SOUL KEY / Z KEY / O KEY / STONE KEY / PIN KEY / BLACK PEARL KEY / WHITE PEARL KEY / GOLD OCTA KEY / MIRROR KEY / EYE KEY / GREENGOLD KEY / RUBY KEY / MONSTER GENERATOR",
+    "item009": "THROWING DAGGER / THROWING DAGGER +2 / THROWING DAGGER +1 / THROWING DAGGER +5",
+    "item010": "MACE",
+    "item011": "LONG SWORD / LONG SWORD +1 / HOPEBLADE / CAVALIER",
+    "item012": "BOW / BOW +1",
+    "item013": "QUIVER",
+    "item015": "ARROW / ARROW +1",
+    "item016": "HAMMER",
+    "item017": "AXE OF STONE",
+    "item018": "PRAYERS OF ORLIN / MANUAL OF PIETY / BOOK OF RETRIBUTION / TOME OF LIFE",
+    "item019": "FORCE OF THE ELEMENTS / MANUAL OF THE PLANES / WISDOM OF THE DRUIDS / BOOK OF FIRE",
+    "item020": "NECROMANCER'S GUIDE / CULT OF MAGIC / WIZARD WORD  / LABRIM OF DARKMAGIC",
+    "item021": "DEATH GEM",
+    "item022": "SCROLL / OLD SCROLL / BLOODY SCROLL / OLD MANUSCRIPT / TATTERED SCROLL / TORN SCROLL / OLD PARCHMENT / DUSTY SCROLL / HISTORY OF THE ARCHDRUID / DUSTY MANUSCRIPT / MANUSCRIPT / SCROLL OF TEMIN / SCROLL OF RUNETEK / SCROLL OF OAK RAVEN / SCROLL OF DVERGAR / SCROLL OF ORBS / NETHER SCROLL / SCROLL OF KAOLIC / RAGGED SCROLL / PARCHMENT / DEMON SCROLL / FADED SCROLL / SINGED SCROLL",
+    "item023": "LEATHER LEGGINGS / LEATHER LEGGINGS +1",
+    "item024": "CHEESE",
+    "item026": "APPLE",
+    "item028": "MEAT",
+    "item030": "BACKPACK",
+    "item032": "HOLDING BAG / BAG / BAG OF KELSON",
+    "item034": "LEATHER BOOTS",
+    "item035": "POTION OF CURE POISON",
+    "item036": "POTION OF WATER BREATHING",
+    "item037": "HELMET / HELM",
+    "item039": "TOWER SHIELD / TOWER SHIELD +1 / GOD SHIELD",
+    "item040": "HOLY SHIELD",
+    "item041": "MIRROR SHIELD",
+    "item042": "RAVEN SHIELD",
+    "item043": "BELT",
+    "item044": "BROWN SHIRT / YELLOW SHIRT",
+    "item045": "TABLET OF DVERGAR",
+    "item046": "TABLET OF RUNETEK",
+    "item047": "TABLET OF OAKRAVEN",
+    "item050": "BROWN PANTS",
+    "item051": "YELLOW PANTS",
+    "item052": "HORN OF PLENTY",
+    "item053": "POTION OF HEALING",
+    "item054": "POTION OF STRENGTH",
+    "item055": "WOODEN SHIELD",
+    "item056": "CHAIN LEGGINGS / CHAIN MAIL LEGGINGS +1",
+    "item057": "POTION OF CURE DISEASE",
+    "item058": "POTION OF INVINCIBILITY",
+    "item059": "POTION OF EXTRA HEALING",
+    "item060": "RING OF WATER BREATHING",
+    "item061": "RING OF LOCATION / RING OF DEMAJEN",
+    "item062": "RING OF HEALTH",
+    "item063": "RING OF PROTECTION / RING OF PROTECTION +2",
+    "item064": "HORN OF DESTRUCTION",
+    "item065": "CROWN OF LIONHEART",
+    "item066": "CROWN OF SERPENT",
+    "item067": "AMULET OF POWER",
+    "item068": "STONE MACE",
+    "item069": "FIRE WAND",
+    "item071": "WOODEN MACE / WOODEN MACE +4",
+    "item072": "LYTEBOOTS / ELVEN BOOTS",
+    "item073": "BOOTS OF STEALTH",
+    "item074": "HELMET  / KNIGHTHELM",
+    "item075": "IDOL OF TEMIN",
+    "item076": "BLACK HORN",
+    "item078": "HELM OF THE TRITON",
+    "item079": "AMULET OF PIETY",
+    "item080": "GAUNTLETS OF DEXTERITY / GAUNTLETS",
+    "item083": "GAUNTLETS OF THE TITANS",
+    "item086": "GAUNTLETS OF TEMIN",
+    "item089": "BRACERS OF PROTECTION",
+    "item092": "BRACERS OF MIGHT",
+    "item095": "BRACERS OF AGILITY",
+    "item098": "STORM WAND",
+    "item100": "SHIELD OF PROTECTION +2",
+    "item101": "SLAYER BOW",
+    "item102": "MASK OF TRUE SIGHT",
+    "item103": "EYES OF TRUE SIGHT",
+    "item104": "PLATE LEGGINGS / PLATE LEGGINGS +1",
+    "item105": "AXE / BATTLE AXE +2",
+    "item106": "RING LEGGINGS",
+    "item107": "PLATE BOOTS",
+    "item108": "SUN KEY",
+    "item109": "MOON KEY",
+    "item110": "DEMON DICER",
+    "item111": "EVILS BANE / DARKFURY +10",
+    "item112": "GUARDIAN",
+    "item113": "HOLY SYMBOL / SYMBOL OF PIETY",
+    "item114": "OGRE BLADE",
+    "item115": "RING OF AIR ELEMENTAL",
+    "item116": "AMULET OF PROTECTION / AMULET OF MARIK",
+    "item117": "MAGE BANE / HELM OF BRILLIANCE",
+    "item118": "RING OF MAGIC RESISTANCE",
+    "item119": "SKULL / GORE SKULL / SKULL OF DVERGAR / SKULL OF RUNETEK / SKULL OF OAKRAVEN / SKULL OF KAOLIC",
+    "item120": "STORM SHIELD",
+    "item121": "DISPLACER SHIELD",
+    "item122": "NIGHT SHIELD",
+    "item123": "BELT OF SUSTENANCE",
+    "item124": "AMULET OF COMPREHENSION",
+    "item125": "LEATHER ARMOR / LEATHER ARMOR +2 / LEATHER ARMOR +3 / CHAIN MAIL ARMOR / CHAIN MAIL ARMOR +1 / PLATE ARMOR / PLATE MAIL+3 / RING ARMOR / ICE MAIL  / SHADOW MAIL  / DRAGON BANE  / DRAGON KING ARMOR  / BLACKJACK / ROBES OF SUNDAR / ROBES OF THE ELDERS / ROBE OF THE FOREST",
+    "item126": "CHEST / CHEST OF TEMIN",
+    "item127": "FIGURINE OF DEFLECTION",
+    "item128": "FLAIL",
+    "item129": "COFFER / WANDCOFFER / COFFER ",
+    "item131": "SCROLL OF DISPELLING / SCROLL OF CURE POISON / SCROLL OF LIFE / STONE TO FLESH SCROLL / GLYPH SCROLL / POSSESSION SCROLL / TELEPORT SCROLL / SCROLL OF DETECTION / QUAKE SCROLL / SCROLL OF HEALING / REMOVE TRAP SCROLL / GLYPH SCROLL ",
+    "item133": "WATER SKIN",
+    "item136": "WIZARD BLADE",
+    "item137": "CROWN OF DETECTION / CROWN OF WISDOM",
+    "item138": "CROWN OF STONE",
+    "item139": "SKULL CROWN",
+    "item140": "PEARL",
+    "item141": "ORB OF PLANES / ORB OF LIFE",
+    "item142": "BELT OF THE TROLL",
+    "item143": "BELT OF STRENGTH / BELT OF MIGHT",
+    "item144": "PROTECTOR",
+    "item145": "ROD OF CHAOS",
+    "item147": "DOOM HAMMER",
+    "item149": "SMITE STAFF",
+    "item151": "DARK STAFF",
+    "item153": "DRAGON ROD",
+    "item155": "ROD OF RESURRECTION",
+    "item157": "FROST RAZER",
+    "item159": "WAND OF DISPELLING / WAND OF ESTOROTH",
+    "item161": "WOUND HEALER / FROST WAND",
+    "item163": "SIGHT GIVER",
+    "item165": "SYMBOL OF PLAGUE",
+    "item167": "VORTEX",
+    "item169": "FORCEHAMMER",
+    "item171": "SOULFREEZER",
+    "item173": "STAFF / NETHER STAFF / STAFF +2",
+    "item174": "TABLET OF KAOLIC"
+  },
+  "groups": [
+    {
+      "name": "Type 0",
+      "frames": [
+        "item111",
+        "item136",
+        "item147",
+        "item157"
+      ]
+    },
+    {
+      "name": "weapon (type 1)",
+      "frames": [
+        "item010",
+        "item016",
+        "item017",
+        "item071",
+        "item105",
+        "item128",
+        "item163",
+        "item173"
+      ]
+    },
+    {
+      "name": "weapon-special (type 2)",
+      "frames": [
+        "item011",
+        "item068",
+        "item110",
+        "item111",
+        "item114",
+        "item167",
+        "item169"
+      ]
+    },
+    {
+      "name": "spell-scroll (type 4)",
+      "frames": [
+        "item131"
+      ]
+    },
+    {
+      "name": "potion (type 5)",
+      "frames": [
+        "item035",
+        "item036",
+        "item053",
+        "item054",
+        "item057",
+        "item058",
+        "item059",
+        "item133"
+      ]
+    },
+    {
+      "name": "key (type 6)",
+      "frames": [
+        "item000"
+      ]
+    },
+    {
+      "name": "helm (type 7)",
+      "frames": [
+        "item037",
+        "item074",
+        "item078",
+        "item117"
+      ]
+    },
+    {
+      "name": "shield (type 8)",
+      "frames": [
+        "item039",
+        "item040",
+        "item042",
+        "item055",
+        "item100",
+        "item113",
+        "item120",
+        "item121",
+        "item122",
+        "item127"
+      ]
+    },
+    {
+      "name": "armor (type 9)",
+      "frames": [
+        "item125"
+      ]
+    },
+    {
+      "name": "leggings (type 10)",
+      "frames": [
+        "item023",
+        "item056",
+        "item104",
+        "item106"
+      ]
+    },
+    {
+      "name": "boots (type 11)",
+      "frames": [
+        "item034",
+        "item072",
+        "item073",
+        "item107"
+      ]
+    },
+    {
+      "name": "spellbook (type 12)",
+      "frames": [
+        "item018",
+        "item019",
+        "item020"
+      ]
+    },
+    {
+      "name": "food (type 14)",
+      "frames": [
+        "item024",
+        "item026",
+        "item028"
+      ]
+    },
+    {
+      "name": "Type 16",
+      "frames": [
+        "item000"
+      ]
+    },
+    {
+      "name": "container (type 19)",
+      "frames": [
+        "item013",
+        "item030",
+        "item032"
+      ]
+    },
+    {
+      "name": "ring (type 21)",
+      "frames": [
+        "item060",
+        "item061",
+        "item062",
+        "item063",
+        "item115",
+        "item118"
+      ]
+    },
+    {
+      "name": "scroll (type 24)",
+      "frames": [
+        "item022"
+      ]
+    },
+    {
+      "name": "belt (type 25)",
+      "frames": [
+        "item043",
+        "item123",
+        "item142",
+        "item143"
+      ]
+    },
+    {
+      "name": "amulet (type 26)",
+      "frames": [
+        "item067",
+        "item079",
+        "item112",
+        "item116",
+        "item124"
+      ]
+    },
+    {
+      "name": "shirt (type 27)",
+      "frames": [
+        "item044"
+      ]
+    },
+    {
+      "name": "pants (type 28)",
+      "frames": [
+        "item050",
+        "item051"
+      ]
+    },
+    {
+      "name": "chest (type 35)",
+      "frames": [
+        "item126",
+        "item129"
+      ]
+    },
+    {
+      "name": "bow (type 36)",
+      "frames": [
+        "item012",
+        "item101"
+      ]
+    },
+    {
+      "name": "arrow (type 37)",
+      "frames": [
+        "item015"
+      ]
+    },
+    {
+      "name": "death-gem (type 38)",
+      "frames": [
+        "item021"
+      ]
+    },
+    {
+      "name": "other (type 39)",
+      "frames": [
+        "item119",
+        "item141"
+      ]
+    },
+    {
+      "name": "Type 40",
+      "frames": [
+        "item009"
+      ]
+    },
+    {
+      "name": "spellcaster (type 41)",
+      "frames": [
+        "item041",
+        "item052",
+        "item064",
+        "item069",
+        "item076",
+        "item098",
+        "item113",
+        "item119",
+        "item141",
+        "item144",
+        "item145",
+        "item149",
+        "item151",
+        "item153",
+        "item155",
+        "item159",
+        "item161",
+        "item165",
+        "item171"
+      ]
+    },
+    {
+      "name": "bracers (type 42)",
+      "frames": [
+        "item080",
+        "item083",
+        "item086",
+        "item089",
+        "item092",
+        "item095"
+      ]
+    },
+    {
+      "name": "panel-item (type 43)",
+      "frames": [
+        "item103",
+        "item108",
+        "item109",
+        "item139",
+        "item140"
+      ]
+    },
+    {
+      "name": "idol (type 44)",
+      "frames": [
+        "item075"
+      ]
+    },
+    {
+      "name": "crown (type 45)",
+      "frames": [
+        "item065",
+        "item066",
+        "item102",
+        "item137",
+        "item138"
+      ]
+    },
+    {
+      "name": "Type 46",
+      "frames": [
+        "item000"
+      ]
+    },
+    {
+      "name": "Type 47",
+      "frames": [
+        "item000"
+      ]
+    },
+    {
+      "name": "tablet (type 48)",
+      "frames": [
+        "item045",
+        "item046",
+        "item047",
+        "item174"
+      ]
+    },
+    {
+      "name": "Unplaced icons (no map instance found)",
+      "frames": [
+        "item001",
+        "item002",
+        "item003",
+        "item004",
+        "item005",
+        "item006",
+        "item007",
+        "item008",
+        "item014",
+        "item025",
+        "item027",
+        "item029",
+        "item031",
+        "item033",
+        "item038",
+        "item048",
+        "item049",
+        "item070",
+        "item077",
+        "item081",
+        "item082",
+        "item084",
+        "item085",
+        "item087",
+        "item088",
+        "item090",
+        "item091",
+        "item093",
+        "item094",
+        "item096",
+        "item097",
+        "item099",
+        "item130",
+        "item132",
+        "item134",
+        "item135",
+        "item146",
+        "item148",
+        "item150",
+        "item152",
+        "item154",
+        "item156",
+        "item158",
+        "item160",
+        "item162",
+        "item164",
+        "item166",
+        "item168",
+        "item170",
+        "item172",
+        "item175",
+        "item176",
+        "item177",
+        "item178",
+        "item179"
+      ]
+    }
+  ]
+}

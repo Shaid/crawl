@@ -1,0 +1,397 @@
+{
+  "source": "DOS/Windows clipper.clp 'Start Floor Items'/'End Floor Items' marker block (directory entries 652-798), cross-referenced by exact per-depth width/height match plus per-pixel silhouette agreement (35,869/35,872 opaque-vs-transparent pixels, 99.992%) -- see scripts/verify_floor_item_dos_names.py",
+  "groups": [
+    {
+      "name": "Hammer",
+      "frames": [
+        "floor00-d0",
+        "floor00-d1",
+        "floor00-d2"
+      ]
+    },
+    {
+      "name": "Belt",
+      "frames": [
+        "floor01-d0",
+        "floor01-d1",
+        "floor01-d2"
+      ]
+    },
+    {
+      "name": "Apple",
+      "frames": [
+        "floor02-d0",
+        "floor02-d1",
+        "floor02-d2"
+      ]
+    },
+    {
+      "name": "Backpack",
+      "frames": [
+        "floor03-d0",
+        "floor03-d1",
+        "floor03-d2"
+      ]
+    },
+    {
+      "name": "Quiver",
+      "frames": [
+        "floor04-d0",
+        "floor04-d1",
+        "floor04-d2"
+      ]
+    },
+    {
+      "name": "Gold Key",
+      "frames": [
+        "floor05-d0",
+        "floor05-d1",
+        "floor05-d2"
+      ]
+    },
+    {
+      "name": "Silver Key",
+      "frames": [
+        "floor06-d0",
+        "floor06-d1",
+        "floor06-d2"
+      ]
+    },
+    {
+      "name": "Death Gem",
+      "frames": [
+        "floor07-d0",
+        "floor07-d1",
+        "floor07-d2"
+      ]
+    },
+    {
+      "name": "Dagger",
+      "frames": [
+        "floor08-d0",
+        "floor08-d1",
+        "floor08-d2"
+      ]
+    },
+    {
+      "name": "Cheese",
+      "frames": [
+        "floor09-d0",
+        "floor09-d1",
+        "floor09-d2"
+      ]
+    },
+    {
+      "name": "Sword",
+      "frames": [
+        "floor10-d0",
+        "floor10-d1",
+        "floor10-d2"
+      ]
+    },
+    {
+      "name": "Bag",
+      "frames": [
+        "floor11-d0",
+        "floor11-d1",
+        "floor11-d2"
+      ]
+    },
+    {
+      "name": "Scroll",
+      "frames": [
+        "floor12-d0",
+        "floor12-d1",
+        "floor12-d2"
+      ]
+    },
+    {
+      "name": "Amulet",
+      "frames": [
+        "floor13-d0",
+        "floor13-d1",
+        "floor13-d2"
+      ]
+    },
+    {
+      "name": "White Clothes",
+      "frames": [
+        "floor14-d0",
+        "floor14-d1",
+        "floor14-d2"
+      ]
+    },
+    {
+      "name": "Brown Clothes",
+      "frames": [
+        "floor15-d0",
+        "floor15-d1",
+        "floor15-d2"
+      ]
+    },
+    {
+      "name": "Spell Book",
+      "frames": [
+        "floor16-d0",
+        "floor16-d1",
+        "floor16-d2"
+      ]
+    },
+    {
+      "name": "Horn",
+      "frames": [
+        "floor17-d0",
+        "floor17-d1",
+        "floor17-d2"
+      ]
+    },
+    {
+      "name": "Bow",
+      "frames": [
+        "floor18-d0",
+        "floor18-d1",
+        "floor18-d2"
+      ]
+    },
+    {
+      "name": "Arrow",
+      "frames": [
+        "floor19-d0",
+        "floor19-d1",
+        "floor19-d2"
+      ]
+    },
+    {
+      "name": "Potion",
+      "frames": [
+        "floor20-d0",
+        "floor20-d1",
+        "floor20-d2"
+      ]
+    },
+    {
+      "name": "Helmet",
+      "frames": [
+        "floor21-d0",
+        "floor21-d1",
+        "floor21-d2"
+      ]
+    },
+    {
+      "name": "Wand",
+      "frames": [
+        "floor22-d0",
+        "floor22-d1",
+        "floor22-d2"
+      ]
+    },
+    {
+      "name": "Ring",
+      "frames": [
+        "floor23-d0",
+        "floor23-d1",
+        "floor23-d2"
+      ]
+    },
+    {
+      "name": "Crown",
+      "frames": [
+        "floor24-d0",
+        "floor24-d1",
+        "floor24-d2"
+      ]
+    },
+    {
+      "name": "Bracers",
+      "frames": [
+        "floor25-d0",
+        "floor25-d1",
+        "floor25-d2"
+      ]
+    },
+    {
+      "name": "Gauntlets",
+      "frames": [
+        "floor26-d0",
+        "floor26-d1",
+        "floor26-d2"
+      ]
+    },
+    {
+      "name": "Meat",
+      "frames": [
+        "floor27-d0",
+        "floor27-d1",
+        "floor27-d2"
+      ]
+    },
+    {
+      "name": "Water Skin",
+      "frames": [
+        "floor28-d0",
+        "floor28-d1",
+        "floor28-d2"
+      ]
+    },
+    {
+      "name": "Blue Eyes",
+      "frames": [
+        "floor29-d0",
+        "floor29-d1",
+        "floor29-d2"
+      ]
+    },
+    {
+      "name": "Holy Symbol",
+      "frames": [
+        "floor30-d0",
+        "floor30-d1",
+        "floor30-d2"
+      ]
+    },
+    {
+      "name": "Coffer",
+      "frames": [
+        "floor31-d0",
+        "floor31-d1",
+        "floor31-d2"
+      ]
+    },
+    {
+      "name": "Chain Mail",
+      "frames": [
+        "floor32-d0",
+        "floor32-d1",
+        "floor32-d2"
+      ]
+    },
+    {
+      "name": "Sun Key",
+      "frames": [
+        "floor33-d0",
+        "floor33-d1",
+        "floor33-d2"
+      ]
+    },
+    {
+      "name": "Figurein of Deflection",
+      "frames": [
+        "floor34-d0",
+        "floor34-d1",
+        "floor34-d2"
+      ]
+    },
+    {
+      "name": "Skull",
+      "frames": [
+        "floor35-d0",
+        "floor35-d1",
+        "floor35-d2"
+      ]
+    },
+    {
+      "name": "Mace",
+      "frames": [
+        "floor36-d0",
+        "floor36-d1",
+        "floor36-d2"
+      ]
+    },
+    {
+      "name": "Rod",
+      "frames": [
+        "floor37-d0",
+        "floor37-d1",
+        "floor37-d2"
+      ]
+    },
+    {
+      "name": "Idol of Temin",
+      "frames": [
+        "floor38-d0",
+        "floor38-d1",
+        "floor38-d2"
+      ]
+    },
+    {
+      "name": "Tall Shield",
+      "frames": [
+        "floor39-d0",
+        "floor39-d1",
+        "floor39-d2"
+      ]
+    },
+    {
+      "name": "Round Shield",
+      "frames": [
+        "floor40-d0",
+        "floor40-d1",
+        "floor40-d2"
+      ]
+    },
+    {
+      "name": "Axe",
+      "frames": [
+        "floor41-d0",
+        "floor41-d1",
+        "floor41-d2"
+      ]
+    },
+    {
+      "name": "Chest Plate Armor",
+      "frames": [
+        "floor42-d0",
+        "floor42-d1",
+        "floor42-d2"
+      ]
+    },
+    {
+      "name": "Boot Plate Armor",
+      "frames": [
+        "floor43-d0",
+        "floor43-d1",
+        "floor43-d2"
+      ]
+    },
+    {
+      "name": "Big Chest",
+      "frames": [
+        "floor44-d0",
+        "floor44-d1",
+        "floor44-d2"
+      ]
+    },
+    {
+      "name": "Clawpiller Mask",
+      "frames": [
+        "floor45-d0",
+        "floor45-d1",
+        "floor45-d2"
+      ]
+    },
+    {
+      "name": "Orb",
+      "frames": [
+        "floor46-d0",
+        "floor46-d1",
+        "floor46-d2"
+      ]
+    },
+    {
+      "name": "Leather Boots",
+      "frames": [
+        "floor47-d0",
+        "floor47-d1",
+        "floor47-d2"
+      ]
+    },
+    {
+      "name": "Stone Tablet",
+      "frames": [
+        "floor48-d0",
+        "floor48-d1",
+        "floor48-d2"
+      ]
+    }
+  ]
+}

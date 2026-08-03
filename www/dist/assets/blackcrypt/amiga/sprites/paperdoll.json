@@ -1,0 +1,55 @@
+{
+  "frames": [
+    {
+      "name": "paperdoll0",
+      "x": 1,
+      "y": 1,
+      "w": 36,
+      "h": 29
+    },
+    {
+      "name": "paperdoll1",
+      "x": 38,
+      "y": 1,
+      "w": 36,
+      "h": 29
+    },
+    {
+      "name": "paperdoll2",
+      "x": 75,
+      "y": 1,
+      "w": 36,
+      "h": 29
+    },
+    {
+      "name": "paperdoll3",
+      "x": 112,
+      "y": 1,
+      "w": 36,
+      "h": 29
+    },
+    {
+      "name": "paperdoll4",
+      "x": 149,
+      "y": 1,
+      "w": 36,
+      "h": 25
+    },
+    {
+      "name": "paperdoll5",
+      "x": 186,
+      "y": 1,
+      "w": 36,
+      "h": 25
+    },
+    {
+      "name": "paperdoll6",
+      "x": 1,
+      "y": 31,
+      "w": 36,
+      "h": 25
+    }
+  ],
+  "width": 252,
+  "height": 57
+}

@@ -1,0 +1,508 @@
+{
+  "source": "Clustering \u2014 map 1: DOS clipper.clp's own developer-authored entry names ('Rock Eye 1 N ... A 1', 'Two Head 1 S ... A 0'), 7 entries per creature, matching the Amiga store's 7 + 7 sprites exactly. Maps 2-13: automated same-file offset-order segmentation \u2014 a new cluster starts where a sprite's bytes-per-plane (bpr, proportional to rendered area) exceeds 1.4x the max bpr of the 2 preceding entries (a size-ladder discontinuity: a fresh 'near' pose following a 'far' pose), with one hardcoded merge on map 9. Cluster count now equals the bcdfb-n header's graphics-ID count for 13/13 maps. Cluster -> graphics-ID binding: cluster i is header ID i (+4/+6/+8, which are stored in sprite-store order, NOT sorted \u2014 bcdfj is c4,bf and bcdfl is be,c6,bd); independently corroborated by the 214-byte secondary table, whose trailing 3 x 12 pair-blocks track each cluster's per-tier width/height and whose third block is all-zero exactly on bcdfl, whose third ID (0xbd) owns no monster record. Names \u2014 resolved against the official Black Crypt Manual & Clue Book plus bcdfu's ending epilogue, via the map<->dungeon-level mapping in docs/blackcrypt/amiga/data-structure.md: Two Head/the Ogre (carries the game's only EMERALD KEY, which the epilogue says is taken from 'THE OGRE'), Rock Eye, Dragonlich (summoned by the 3 Idols of Temin on level 10), Possessor Demon (level 14/15; only movement-type-5 record, carries the only SOUL KEY), Ram Demon (only key-holder on level 17), Ram Lord (level 20; its 4 carried items are clue book L20 note 2's list byte for byte), The Great Waterlord (level 23; RING OF LOCATION + key), Medusa (only unique monster on level 24), Statue (gfx 0xbd is the Statue structure gfxNumber, not a creature) and Estoroth Paingiver (level 28 final boss). No per-graphics-ID creature name table exists anywhere in bcdft/bcdft-S2/bcdfs \u2014 the remaining clusters are geometry-only placeholders ('Map N Creature X') carrying their confirmed graphics ID and dungeon levels.",
+  "groups": [
+    {
+      "index": 0,
+      "name": "Two Head (the Ogre)",
+      "gfxId": "0xb2",
+      "dungeonLevels": [
+        1,
+        2
+      ],
+      "frames": [
+        "m1_off0_96x129",
+        "m1_off10836_96x124",
+        "m1_off21252_96x126",
+        "m1_off31836_64x79",
+        "m1_off36260_64x81",
+        "m1_off40796_48x52",
+        "m1_off42980_48x53"
+      ]
+    },
+    {
+      "index": 1,
+      "name": "Rock Eye",
+      "gfxId": "0xb3",
+      "dungeonLevels": [
+        1,
+        2
+      ],
+      "frames": [
+        "m1_off45206_64x71",
+        "m1_off49182_96x83",
+        "m1_off56154_64x55",
+        "m1_off59234_64x55",
+        "m1_off62314_64x55",
+        "m1_off65394_32x32",
+        "m1_off66290_16x17"
+      ]
+    },
+    {
+      "index": 2,
+      "name": "Map 2 Creature A",
+      "gfxId": "0x4f",
+      "dungeonLevels": [
+        3,
+        4,
+        5
+      ],
+      "frames": [
+        "m2_off0_80x73",
+        "m2_off5110_64x79",
+        "m2_off9534_96x80",
+        "m2_off16254_48x52",
+        "m2_off18438_64x52",
+        "m2_off21350_32x33",
+        "m2_off22274_48x33"
+      ]
+    },
+    {
+      "index": 3,
+      "name": "Map 2 Creature B",
+      "gfxId": "0xb0",
+      "dungeonLevels": [
+        3,
+        4,
+        5
+      ],
+      "frames": [
+        "m2_off23660_96x75",
+        "m2_off29960_80x46",
+        "m2_off33180_48x23",
+        "m2_off34146_32x14"
+      ]
+    },
+    {
+      "index": 4,
+      "name": "Map 2 Creature C",
+      "gfxId": "0xb1",
+      "dungeonLevels": [
+        3,
+        4,
+        5
+      ],
+      "frames": [
+        "m2_off34538_80x98",
+        "m2_off41398_80x67",
+        "m2_off46088_96x69",
+        "m2_off51884_80x70",
+        "m2_off56784_48x43",
+        "m2_off58590_64x43",
+        "m2_off60998_48x46",
+        "m2_off62930_32x26",
+        "m2_off63658_48x28",
+        "m2_off64834_32x29"
+      ]
+    },
+    {
+      "index": 5,
+      "name": "Map 3 Creature A",
+      "gfxId": "0x4d",
+      "dungeonLevels": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "frames": [
+        "m3_off0_80x106",
+        "m3_off7420_80x93",
+        "m3_off13930_80x90",
+        "m3_off20230_80x93",
+        "m3_off26740_48x59",
+        "m3_off29218_48x57",
+        "m3_off31612_48x61",
+        "m3_off34174_32x38",
+        "m3_off35238_32x37",
+        "m3_off36274_32x38"
+      ]
+    },
+    {
+      "index": 6,
+      "name": "Map 3 Creature B",
+      "gfxId": "0x4e",
+      "dungeonLevels": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "frames": [
+        "m3_off37338_48x57",
+        "m3_off39732_48x47",
+        "m3_off41706_48x48",
+        "m3_off43722_48x48",
+        "m3_off45738_32x33",
+        "m3_off46662_32x34",
+        "m3_off47614_32x34",
+        "m3_off48566_32x25",
+        "m3_off49266_32x24",
+        "m3_off49938_32x24"
+      ]
+    },
+    {
+      "index": 7,
+      "name": "Map 3 Creature C",
+      "gfxId": "0xc7",
+      "dungeonLevels": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "frames": [
+        "m3_off50610_32x114",
+        "m3_off53802_64x31",
+        "m3_off55538_32x16",
+        "m3_off55986_16x8"
+      ]
+    },
+    {
+      "index": 8,
+      "name": "Map 4 Creature A",
+      "gfxId": "0x4b",
+      "dungeonLevels": [
+        10,
+        11,
+        12
+      ],
+      "frames": [
+        "m4_off0_128x92",
+        "m4_off10304_112x83",
+        "m4_off18438_128x84",
+        "m4_off27846_64x46",
+        "m4_off30422_80x50",
+        "m4_off33922_48x32",
+        "m4_off35266_48x33"
+      ]
+    },
+    {
+      "index": 9,
+      "name": "Map 4 Creature B",
+      "gfxId": "0x4c",
+      "dungeonLevels": [
+        10,
+        11,
+        12
+      ],
+      "frames": [
+        "m4_off36652_64x45",
+        "m4_off39172_64x44",
+        "m4_off41636_64x46",
+        "m4_off44212_48x27",
+        "m4_off45346_48x29",
+        "m4_off46564_32x17",
+        "m4_off47040_32x18"
+      ]
+    },
+    {
+      "index": 10,
+      "name": "Dragonlich",
+      "gfxId": "0x50",
+      "dungeonLevels": [
+        10,
+        11,
+        12
+      ],
+      "frames": [
+        "m4_off47544_160x90",
+        "m4_off60144_112x104"
+      ]
+    },
+    {
+      "index": 11,
+      "name": "Map 5 Creature A",
+      "gfxId": "0xba",
+      "dungeonLevels": [
+        13
+      ],
+      "frames": [
+        "m5_off0_64x108",
+        "m5_off6048_64x111",
+        "m5_off12264_64x109",
+        "m5_off18368_64x112",
+        "m5_off24640_48x71",
+        "m5_off27622_48x70",
+        "m5_off30562_48x73",
+        "m5_off33628_32x49",
+        "m5_off35000_32x49",
+        "m5_off36372_32x50"
+      ]
+    },
+    {
+      "index": 12,
+      "name": "Map 5 Creature B",
+      "gfxId": "0xc3",
+      "dungeonLevels": [
+        13
+      ],
+      "frames": [
+        "m5_off37772_80x35",
+        "m5_off40222_64x38",
+        "m5_off42350_64x43",
+        "m5_off44758_64x38",
+        "m5_off46886_48x23",
+        "m5_off47852_48x28",
+        "m5_off49028_48x23",
+        "m5_off49994_32x12",
+        "m5_off50330_32x14",
+        "m5_off50722_32x12"
+      ]
+    },
+    {
+      "index": 13,
+      "name": "Possessor Demon (variant)",
+      "gfxId": "0xb7",
+      "dungeonLevels": [
+        14,
+        15
+      ],
+      "frames": [
+        "m6_off0_80x110",
+        "m6_off7700_48x118",
+        "m6_off12656_64x113",
+        "m6_off18984_48x114",
+        "m6_off23772_32x75",
+        "m6_off25872_32x73",
+        "m6_off27916_32x72",
+        "m6_off29932_32x48",
+        "m6_off31276_32x47",
+        "m6_off32592_32x47"
+      ]
+    },
+    {
+      "index": 14,
+      "name": "Possessor Demon",
+      "gfxId": "0xb8",
+      "dungeonLevels": [
+        14,
+        15
+      ],
+      "frames": [
+        "m6_off33908_80x110",
+        "m6_off41608_48x118",
+        "m6_off46564_64x113",
+        "m6_off52892_48x114",
+        "m6_off57680_32x75",
+        "m6_off59780_32x73",
+        "m6_off61824_32x72",
+        "m6_off63840_32x48",
+        "m6_off65184_32x47",
+        "m6_off66500_32x47"
+      ]
+    },
+    {
+      "index": 15,
+      "name": "Ram Demon",
+      "gfxId": "0xb5",
+      "dungeonLevels": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "frames": [
+        "m7_off0_64x110",
+        "m7_off6160_64x102",
+        "m7_off11872_64x109",
+        "m7_off17976_64x106",
+        "m7_off23912_48x66",
+        "m7_off26684_32x70",
+        "m7_off28644_48x67",
+        "m7_off31458_32x43",
+        "m7_off32662_32x44",
+        "m7_off33894_32x43"
+      ]
+    },
+    {
+      "index": 16,
+      "name": "Map 7 Creature B",
+      "gfxId": "0xb9",
+      "dungeonLevels": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "frames": [
+        "m7_off35098_192x103"
+      ]
+    },
+    {
+      "index": 17,
+      "name": "Ram Lord",
+      "gfxId": "0xb6",
+      "dungeonLevels": [
+        20
+      ],
+      "frames": [
+        "m8_off0_80x131",
+        "m8_off9170_80x121",
+        "m8_off17640_64x129",
+        "m8_off24864_80x126",
+        "m8_off33684_48x78",
+        "m8_off36960_48x83",
+        "m8_off40446_48x81",
+        "m8_off43848_32x50",
+        "m8_off45248_32x54",
+        "m8_off46760_32x51"
+      ]
+    },
+    {
+      "index": 18,
+      "name": "Map 9 Creature A",
+      "gfxId": "0xc4",
+      "dungeonLevels": [
+        21,
+        22
+      ],
+      "frames": [
+        "m9_off0_80x93",
+        "m9_off6510_80x102",
+        "m9_off13650_80x102",
+        "m9_off20790_80x102",
+        "m9_off27930_48x66",
+        "m9_off30702_48x66",
+        "m9_off33474_48x66",
+        "m9_off36246_32x42",
+        "m9_off37422_32x43",
+        "m9_off38626_32x43"
+      ]
+    },
+    {
+      "index": 19,
+      "name": "Map 9 Creature B",
+      "gfxId": "0xbf",
+      "dungeonLevels": [
+        21,
+        22
+      ],
+      "frames": [
+        "m9_off39830_48x68",
+        "m9_off42686_48x74",
+        "m9_off45794_96x77",
+        "m9_off52262_48x74",
+        "m9_off55370_32x48",
+        "m9_off56714_48x45",
+        "m9_off58604_32x48",
+        "m9_off59948_16x25",
+        "m9_off60298_32x26",
+        "m9_off61026_16x25"
+      ]
+    },
+    {
+      "index": 20,
+      "name": "The Great Waterlord",
+      "gfxId": "0xbc",
+      "dungeonLevels": [
+        23
+      ],
+      "frames": [
+        "m10_off0_80x111",
+        "m10_off7770_80x112",
+        "m10_off15610_96x116",
+        "m10_off25354_80x111",
+        "m10_off33124_48x72",
+        "m10_off36148_64x75",
+        "m10_off40348_48x71",
+        "m10_off43330_32x46",
+        "m10_off44618_48x48",
+        "m10_off46634_32x46"
+      ]
+    },
+    {
+      "index": 21,
+      "name": "Medusa",
+      "gfxId": "0xbe",
+      "dungeonLevels": [
+        24,
+        25,
+        26
+      ],
+      "frames": [
+        "m11_off0_112x112",
+        "m11_off10976_80x84",
+        "m11_off16856_112x84",
+        "m11_off25088_80x84",
+        "m11_off30968_48x55",
+        "m11_off33278_80x55",
+        "m11_off37128_48x54",
+        "m11_off39396_32x35",
+        "m11_off40376_48x35",
+        "m11_off41846_32x34"
+      ]
+    },
+    {
+      "index": 22,
+      "name": "Map 11 Creature B",
+      "gfxId": "0xc6",
+      "dungeonLevels": [
+        24,
+        25,
+        26
+      ],
+      "frames": [
+        "m11_off42798_48x92",
+        "m11_off46662_48x92",
+        "m11_off50526_32x49",
+        "m11_off51898_16x31"
+      ]
+    },
+    {
+      "index": 23,
+      "name": "Statue (petrified adventurer)",
+      "gfxId": "0xbd",
+      "dungeonLevels": [
+        24,
+        25,
+        26
+      ],
+      "frames": [
+        "m11_off52332_64x100",
+        "m11_off57932_64x100",
+        "m11_off63532_64x100"
+      ]
+    },
+    {
+      "index": 24,
+      "name": "Map 12 Creature A",
+      "gfxId": "0xb4",
+      "dungeonLevels": [
+        27
+      ],
+      "frames": [
+        "m12_off0_80x131",
+        "m12_off9170_64x129",
+        "m12_off16394_64x129",
+        "m12_off23618_64x128",
+        "m12_off30786_48x84",
+        "m12_off34314_48x84",
+        "m12_off37842_48x83",
+        "m12_off41328_32x54",
+        "m12_off42840_32x54",
+        "m12_off44352_32x53"
+      ]
+    },
+    {
+      "index": 25,
+      "name": "Estoroth Paingiver",
+      "gfxId": "0xc5",
+      "dungeonLevels": [
+        28
+      ],
+      "frames": [
+        "m13_off0_144x128",
+        "m13_off16128_64x119",
+        "m13_off22792_48x129",
+        "m13_off28210_64x127",
+        "m13_off35322_64x127",
+        "m13_off42434_32x83",
+        "m13_off44758_32x82",
+        "m13_off47054_32x81",
+        "m13_off49322_32x54",
+        "m13_off50834_32x52",
+        "m13_off52290_32x53"
+      ]
+    }
+  ]
+}

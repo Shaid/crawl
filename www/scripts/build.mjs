@@ -6,8 +6,9 @@
 //   2. Generate the Starlight sidebar (generated/sidebar.mjs) from the curated
 //      page manifest (src/content/docs/blackcrypt/_sidebar.json).
 //
-// The repo's docs/ and public/assets stay the single source of truth; this
-// script only wires them into the site. Run with:  node scripts/build.mjs
+// Locally, extracted assets are copied from the repo's public/assets directory.
+// In CI, the committed www/public build assets are reused instead. Run with:
+//   node scripts/build.mjs
 
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -25,9 +26,15 @@ const OUT_SIDEBAR = join(OUT_DIR, 'sidebar.mjs');
 
 // --- 1. Copy assets ---------------------------------------------------------
 mkdirSync(join(root, 'public', 'assets'), { recursive: true });
-rmSync(ASSET_DST, { recursive: true, force: true });
-cpSync(ASSET_SRC, ASSET_DST, { recursive: true });
-console.log(`Copied assets: ${ASSET_SRC} -> ${ASSET_DST}`);
+if (existsSync(ASSET_SRC)) {
+	rmSync(ASSET_DST, { recursive: true, force: true });
+	cpSync(ASSET_SRC, ASSET_DST, { recursive: true });
+	console.log(`Copied assets: ${ASSET_SRC} -> ${ASSET_DST}`);
+} else if (existsSync(ASSET_DST)) {
+	console.log(`Using committed site assets in ${ASSET_DST}`);
+} else {
+	throw new Error(`Missing extracted assets and committed site assets: ${ASSET_SRC}`);
+}
 
 // Reuse the committed browser fonts in CI. Regenerate them locally only when
 // either artifact is absent, so the deployment does not need Python/fontTools.
@@ -50,23 +57,37 @@ if (fontFiles.every((file) => existsSync(join(fontDir, file)))) {
 	if (fontResult.status !== 0) throw new Error('Could not generate the Black Crypt webfont');
 }
 
-const tilesetResult = spawnSync(
-	'node',
-	[join(root, 'scripts', 'generate_tileset_views.mjs'), join(ASSET_DST, 'amiga', 'textures')],
-	{ stdio: 'inherit' },
+const textureDir = join(ASSET_DST, 'amiga', 'textures');
+const tileViewFiles = ['bcdfx', 'bcdfy', 'bcdfz'].map((name) =>
+	join(textureDir, `dungeon-${name}-view.png`),
 );
-if (tilesetResult.status !== 0) throw new Error('Could not generate composited tileset views');
+if (existsSync(join(textureDir, 'dungeon-bcdfx.json'))) {
+	const tilesetResult = spawnSync(
+		'node',
+		[join(root, 'scripts', 'generate_tileset_views.mjs'), textureDir],
+		{ stdio: 'inherit' },
+	);
+	if (tilesetResult.status !== 0) throw new Error('Could not generate composited tileset views');
+} else if (tileViewFiles.every(existsSync)) {
+	console.log(`Using committed composited tileset views in ${textureDir}`);
+} else {
+	throw new Error(`Missing tileset source and committed views: ${textureDir}`);
+}
 
-const faviconResult = spawnSync(
-	'node',
-	[
-		join(root, 'scripts', 'generate_favicon.mjs'),
-		join(ASSET_DST, 'amiga', 'sprites'),
-		join(root, 'public', 'favicon.png'),
-	],
-	{ stdio: 'inherit' },
-);
-if (faviconResult.status !== 0) throw new Error('Could not generate the Raven Shield favicon');
+const faviconPath = join(root, 'public', 'favicon.png');
+const itemSpriteDir = join(ASSET_DST, 'amiga', 'sprites');
+if (existsSync(join(itemSpriteDir, 'items.json'))) {
+	const faviconResult = spawnSync(
+		'node',
+		[join(root, 'scripts', 'generate_favicon.mjs'), itemSpriteDir, faviconPath],
+		{ stdio: 'inherit' },
+	);
+	if (faviconResult.status !== 0) throw new Error('Could not generate the Raven Shield favicon');
+} else if (existsSync(faviconPath)) {
+	console.log(`Using committed favicon: ${faviconPath}`);
+} else {
+	throw new Error(`Missing item sprites and committed favicon: ${itemSpriteDir}`);
+}
 
 // --- 2. Generate sidebar ----------------------------------------------------
 

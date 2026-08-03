@@ -1,0 +1,55 @@
+{
+  "frames": [
+    {
+      "name": "stone-panel",
+      "x": 1,
+      "y": 1,
+      "w": 112,
+      "h": 141
+    },
+    {
+      "name": "panel-clear-strip",
+      "x": 325,
+      "y": 1,
+      "w": 112,
+      "h": 23
+    },
+    {
+      "name": "scroll-top",
+      "x": 1,
+      "y": 143,
+      "w": 112,
+      "h": 11
+    },
+    {
+      "name": "scroll-piece",
+      "x": 114,
+      "y": 143,
+      "w": 112,
+      "h": 1
+    },
+    {
+      "name": "scroll-panel",
+      "x": 114,
+      "y": 1,
+      "w": 112,
+      "h": 95
+    },
+    {
+      "name": "treasure-chest-0",
+      "x": 227,
+      "y": 1,
+      "w": 48,
+      "h": 24
+    },
+    {
+      "name": "treasure-chest-1",
+      "x": 276,
+      "y": 1,
+      "w": 48,
+      "h": 24
+    }
+  ],
+  "width": 512,
+  "height": 155
+}
