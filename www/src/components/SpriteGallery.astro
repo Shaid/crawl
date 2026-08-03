@@ -52,6 +52,42 @@ if (names === 'items') {
 	}
 }
 
+const frameKey = (n: number) => `item${String(n).padStart(3, '0')}`;
+
+// 16 confirmed dim/activated pairs in the item-icon bank: a named
+// artifact/wand/weapon icon immediately followed, in the bank, by an
+// unlit-icon-shaped "glowing" twin that the catalog never names on its
+// own (no placed map record ever references it directly -- it's a second
+// render state for the same object, not a separate item). Confirmed by
+// eye: same weapon silhouette, differing only by an added glow/particle
+// overlay. Shown as one card that swaps to the glowing state on hover
+// instead of two separate, confusingly-unlabelled cards.
+const HOVER_PAIRS: Record<string, string> =
+	names === 'items'
+		? {
+				...Object.fromEntries(
+					Array.from({ length: 14 }, (_, n) => 145 + n * 2).map((dim) => [
+						frameKey(dim),
+						frameKey(dim + 1),
+					]),
+				),
+				[frameKey(69)]: frameKey(70), // FIRE WAND
+				[frameKey(98)]: frameKey(99), // STORM WAND
+			}
+		: {};
+
+// The water skin is a three-state item (full / half / empty) rather than a
+// dim/activated pair, so it doesn't fit HOVER_PAIRS -- it's a small click
+// easter egg instead: each click pours out one step, and it stays empty
+// once it is. Deliberately undocumented in the UI; it's meant to be found.
+const CLICK_CHAINS: Record<string, string[]> =
+	names === 'items' ? { [frameKey(133)]: [frameKey(133), frameKey(134), frameKey(135)] } : {};
+
+const hiddenFrameNames = new Set([
+	...Object.values(HOVER_PAIRS),
+	...Object.values(CLICK_CHAINS).flatMap((chain) => chain.slice(1)),
+]);
+
 const galleryId = `sprite-gallery-${manifest}`;
 const searchId = `${galleryId}-search`;
 ---
@@ -64,6 +100,18 @@ const searchId = `${galleryId}-search`;
 
 <div id={galleryId} class="sprite-gallery" data-sprite-gallery={manifest}>
 	{spriteManifest.frames.map((frame, index) => {
+		// The non-first half of a hover pair or click chain isn't its own
+		// card -- it's folded into its named twin below.
+		if (hiddenFrameNames.has(frame.name)) return null;
+
+		const hoverName = HOVER_PAIRS[frame.name];
+		const hoverFrame = hoverName ? spriteManifest.frames.find((f) => f.name === hoverName) : undefined;
+
+		const chainNames = CLICK_CHAINS[frame.name];
+		const chainFrames = chainNames
+			?.map((name) => spriteManifest.frames.find((f) => f.name === name))
+			.filter((f): f is SpriteFrame => f !== undefined);
+
 		const frameInfo = labels.get(frame.name);
 		const frameLabel = frameInfo?.visible ?? frame.name;
 		const hoverLabel = frameInfo?.hover;
@@ -71,16 +119,42 @@ const searchId = `${galleryId}-search`;
 		const width = Math.max(1, Math.round(frame.w * scale));
 		const height = Math.max(1, Math.round(frame.h * scale));
 		const searchText = `${frameLabel} ${frame.name} ${index + 1}`.toLowerCase();
+		const bgSize = `${Math.round(spriteManifest.width * scale)}px ${Math.round(spriteManifest.height * scale)}px`;
+		const posStr = (f: SpriteFrame) => `-${Math.round(f.x * scale)}px -${Math.round(f.y * scale)}px`;
 		return (
 			<article class="sprite-card" data-sprite-card={manifest} data-search={searchText}>
-				<div
-					class="sprite-stage"
-					style={`width:${width}px;height:${height}px;background-image:url('${imagePath}');background-size:${Math.round(spriteManifest.width * scale)}px ${Math.round(spriteManifest.height * scale)}px;background-position:-${Math.round(frame.x * scale)}px -${Math.round(frame.y * scale)}px;`}
-					role="img"
-					aria-label={frameLabel}
-				></div>
+				<div class="sprite-stage" style={`width:${width}px;height:${height}px;`}>
+					{chainFrames && chainFrames.length > 1 ? (
+						<div
+							class="sprite-layer sprite-layer-click"
+							data-click-positions={chainFrames.map(posStr).join(';')}
+							data-click-index="0"
+							style={`background-image:url('${imagePath}');background-size:${bgSize};background-position:${posStr(chainFrames[0])};`}
+							role="img"
+							aria-label={frameLabel}
+							tabindex="0"
+						></div>
+					) : hoverFrame ? (
+						<div
+							class="sprite-layer sprite-layer-swap"
+							style={`background-image:url('${imagePath}');background-size:${bgSize};background-position:${posStr(frame)};--hover-pos:${posStr(hoverFrame)};`}
+							role="img"
+							aria-label={frameLabel}
+						></div>
+					) : (
+						<div
+							class="sprite-layer"
+							style={`background-image:url('${imagePath}');background-size:${bgSize};background-position:${posStr(frame)};`}
+							role="img"
+							aria-label={frameLabel}
+						></div>
+					)}
+				</div>
 				<strong title={hoverLabel}>{frameLabel}</strong>
-				<small>#{String(index + 1).padStart(3, '0')} · {frame.w}×{frame.h}</small>
+				<small>
+					#{String(index + 1).padStart(3, '0')} · {frame.w}×{frame.h}
+					{hoverFrame && <span class="activated-hint"> · hover to activate</span>}
+				</small>
 			</article>
 		);
 	})}
@@ -93,6 +167,27 @@ const searchId = `${galleryId}-search`;
 		const query = event.target.value.trim().toLowerCase();
 		for (const card of cards) card.hidden = query !== '' && !card.dataset.search.includes(query);
 	});
+
+	// Click-to-cycle easter eggs (e.g. the water skin): each click advances
+	// to the next state and latches on the last one.
+	const clickables = document.querySelectorAll(
+		`[data-sprite-gallery="${manifest}"] [data-click-positions]`,
+	);
+	for (const el of clickables) {
+		const positions = el.dataset.clickPositions.split(';');
+		const advance = () => {
+			const next = Math.min(Number(el.dataset.clickIndex) + 1, positions.length - 1);
+			el.dataset.clickIndex = String(next);
+			el.style.backgroundPosition = positions[next];
+		};
+		el.addEventListener('click', advance);
+		el.addEventListener('keydown', (event) => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				advance();
+			}
+		});
+	}
 </script>
 
 <style>
@@ -138,9 +233,27 @@ const searchId = `${galleryId}-search`;
 		display: none;
 	}
 	.sprite-stage {
+		position: relative;
+		margin: auto;
+	}
+	.sprite-layer {
+		position: absolute;
+		inset: 0;
 		background-repeat: no-repeat;
 		image-rendering: pixelated;
-		margin: auto;
+	}
+	/* Hover swaps the icon outright (one image, repositioned), rather than
+	   crossfading a second image on top of it. */
+	.sprite-card:hover .sprite-layer-swap,
+	.sprite-card:focus-within .sprite-layer-swap {
+		background-position: var(--hover-pos) !important;
+	}
+	.sprite-layer-click {
+		cursor: pointer;
+	}
+	.sprite-layer-click:focus-visible {
+		outline: 2px solid var(--sl-color-accent);
+		outline-offset: 2px;
 	}
 	.sprite-card strong {
 		font-size: 0.78rem;
@@ -151,5 +264,9 @@ const searchId = `${galleryId}-search`;
 	.sprite-card small {
 		color: var(--sl-color-gray-3);
 		font-size: 0.7rem;
+	}
+	.activated-hint {
+		color: var(--sl-color-accent-high, var(--sl-color-gray-2));
+		font-style: italic;
 	}
 </style>
