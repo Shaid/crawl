@@ -13,3 +13,7 @@ dist/
 *.pyc
 __pycache__/
 *.uss
+
+# Local AI tool caches/config (opencode CLI, openground MCP)
+.opencode/
+.openground/
