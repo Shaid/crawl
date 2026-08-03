@@ -85,14 +85,19 @@ far case does *not* consult the mirror flag, confirmed in the disassembly).
 two descriptor pools per distance: `+0x217D2`/`+0x217EE` (near,
 unpressed/pressed) and `+0x2180A`/`+0x21826` (far, unpressed/pressed).
 
-**Art source is NOT extracted.** The descriptors' `slot` field resolves to
-graphics-kernel slot `$00`, which `data-structure.md`'s own "Still open"
-table already flags as a third, unidentified pixel buffer (not present in
-the `bcdfx`/`bcdfy`/`bcdfz` tileset inventory, not a hole in the floor-item
-bank). This script decodes and verifies the *geometry* only; no slot is
-emitted into `slots.json` for floor-plate/trap since there is no atlas frame
-to reference. Tracked as `blackcrypt-floorplate-art-source` in
-`docs/blackcrypt/TODO.md`.
+**Art source resolved this pass (`blackcrypt-floorplate-art-source`).**
+Graphics-kernel slot `$00` is `bcdfa`'s own RLE stream at file offset 0 --
+the "Adventure Screen" UI panel bank (`data-structure.md` "bcdfa -- UI Panel
+Bank"), already extracted as `sprites/ui-panel.json`. Its own record table
+already named the exact 4 records the floor-plate descriptors' `src` fields
+point at (18764/18820/18876/18904): `pressure_plate_1_up`/`_1_down`
+(16x4, **near**) and `pressure_plate_2_up`/`_2_down` (16x2, **far**), each
+already matched 100.000% against DOS `clipper.clp` entries 79/81/80/82. A
+prior pass's "Still open" characterization never cross-referenced this
+already-solved section of the same doc against the floor-plate renderer's
+own `src` values -- `read_floorplate` below now does exactly that,
+byte-exact, 4/4, and raises rather than silently mis-binding if a future
+`ui-panel.json` re-extraction ever renames/moves a frame.
 
 ## Floor-item placement (kind 8/9 & 0-3 default, `+0x218FA`/`+0x21C84`)
 
@@ -159,14 +164,32 @@ FLOORPLATE_NEAR_PRESSED = 0x217EE       # 1 x 28B
 FLOORPLATE_FAR_UNPRESSED = 0x2180A      # 1 x 28B
 FLOORPLATE_FAR_PRESSED = 0x21826        # 1 x 28B
 
+# `blackcrypt-floorplate-art-source` -- resolved. Slot $00 is `bcdfa`'s own
+# RLE stream at file offset 0 (the "Adventure Screen" UI panel bank, see
+# data-structure.md "bcdfa -- UI Panel Bank"), already extracted as
+# sprites/ui-panel.json. Its 4 named "Pressure Plate" records are exactly
+# the 4 floor-plate descriptors' src offsets (18764/18820/18876/18904),
+# confirmed byte-exact below.
+UI_PANEL_BANK_ID = 'ui-panel'
+UI_PANEL_ATLAS_PATH = ROOT / 'public' / 'assets' / 'blackcrypt' / 'amiga' / 'sprites' / 'ui-panel.json'
+FLOORPLATE_FRAMES = {
+    'near-unpressed': ('pressure_plate_1_up', 18764, 16, 4),
+    'near-pressed': ('pressure_plate_1_down', 18820, 16, 4),
+    'far-unpressed': ('pressure_plate_2_up', 18876, 16, 2),
+    'far-pressed': ('pressure_plate_2_down', 18904, 16, 2),
+}
+
 FLOORITEM_ANCHOR = 0x21992   # 9 x 4B
 FLOORITEM_REGISTRATION = 0x27774  # 49 x 3 x 4B
 FLOORITEM_SCATTER = 0x220CC  # 9 x 4B
+FLOORITEM_GFX_TABLE_PATH = ROOT / 'public' / 'assets' / 'blackcrypt' / 'amiga' / 'data' / 'floor-item-gfx-table.json'
 
 BANK_ID = 'dungeon-bcdfx'
 BANK = {'id': BANK_ID, 'atlas': 'textures/dungeon-bcdfx.json', 'image': 'textures/dungeon-bcdfx.png'}
 DECOR_BANK_ID = 'wall-decorations'
 DECOR_BANK = {'id': DECOR_BANK_ID, 'atlas': 'sprites/wall-decorations.json', 'image': 'sprites/wall-decorations.png'}
+FLOORITEM_BANK_ID = 'dungeon-floor-items'
+FLOORITEM_BANK = {'id': FLOORITEM_BANK_ID, 'atlas': 'sprites/floor-items.json', 'image': 'sprites/floor-items.png'}
 
 
 # ---------------------------------------------------------------------------
@@ -199,40 +222,62 @@ def read_pool_descriptor(s1, byte_offset):
     width = (bpr_m1 + 1) * 8
     height = rows_m1 + 1
     return {'slot': slot, 'src': src, 'width': width, 'height': height,
+            'srcAdvance': src_adv, 'extraSrcOffset': extra_src,
             'destOffsetWithinPlane': dst_off}
 
 
-class ClippedDescriptor(Exception):
-    """Raised for a pool descriptor that legitimately resolves to a known
-    (slot, src) sub-image but a *narrower* width than that sub-image's full
-    geometry -- an angled (non-dead-ahead) alcove/plaque view, which the
-    18-byte format's `srcAdvance`/`extraSrcOffset` fields crop horizontally.
-    Cropping needs the crop origin (which edge), not yet derived this pass
-    -- see the module docstring and `blackcrypt-prop-clipped-descriptors` in
-    docs/blackcrypt/TODO.md. Callers skip (don't emit) these rather than
-    guess the crop origin."""
+def _resolve_crop(desc, full_w, full_h, label):
+    """`blackcrypt-prop-clipped-descriptors` (docs/blackcrypt/TODO.md) --
+    resolved. 8 of 36+36+18 pool descriptors are narrower than their
+    `(slot, src)` sibling's full geometry: an angled (non-dead-ahead)
+    alcove/plaque/stairs view that crops the art horizontally. Comparing all
+    8 against their full-width siblings (byte-for-byte, this pass) shows
+    `extraSrcOffset` (in *bytes*, i.e. `x8` for pixels, matching this
+    18-byte format's own bytesPerRow-based width field) is always exactly
+    one of two values: `0` (keep the art's own *left* edge, crop the right)
+    or `fullWidthBytes - clippedWidthBytes` (keep the *right* edge, crop the
+    left) -- never a middle offset, and `srcAdvance` always equals that same
+    byte delta (the per-row skip needed to stay aligned to the full image's
+    real row stride once fewer bytes are read per row). This is not a
+    special crop convention needing new render logic -- it is a plain
+    horizontal pixel-rect crop of the *already-decoded* full sub-image
+    (`bcdfxyz.SUB_IMAGES`/`GENERATED_MIRRORS` already resolve pixel data,
+    not raw planes), so it's expressed the same way any other partial-frame
+    draw already is: `PieceDraw.srcX`/`srcW` (both already-supported,
+    already-consumed-by-the-compositor fields -- `raster/composite.ts`'s
+    `drawPieceDraw` has read `draw.srcX ?? rect.x` since M1). Returns
+    `(srcX, srcW, srcH)` in pixels, or `None` if not clipped (dest geometry
+    matches the sibling's own full size exactly).
+    """
+    if (full_w, full_h) == (desc['width'], desc['height']):
+        return None
+    if full_h != desc['height'] or desc['width'] >= full_w:
+        raise ValueError(f'{label}: geometry {desc["width"]}x{desc["height"]} disagrees with '
+                          f'full sibling {full_w}x{full_h} (not a recognized horizontal crop)')
+    extra_px = desc['extraSrcOffset'] * 8
+    delta_px = full_w - desc['width']
+    if extra_px not in (0, delta_px):
+        raise ValueError(f'{label}: extraSrcOffset {extra_px}px is neither 0 nor the full/clip '
+                          f'delta {delta_px}px -- not an edge-aligned crop, cannot resolve')
+    if desc['srcAdvance'] * 8 != delta_px:
+        raise ValueError(f'{label}: srcAdvance {desc["srcAdvance"]*8}px != full/clip delta '
+                          f'{delta_px}px -- row stride would desync from the full image')
+    return extra_px, desc['width'], full_h
 
 
-def resolve_pool_frame(desc, sub_images):
+def resolve_pool_frame(desc, sub_images, label=''):
+    """Returns `(name, mirrorX, crop)` -- `crop` is `None` for a full-width
+    descriptor, or `(srcX, srcW, srcH)` pixels for a clipped one (see
+    `_resolve_crop`)."""
     key = (desc['slot'], desc['src'])
     if key in sub_images:
         name, w, h = sub_images[key]
-        if (w, h) != (desc['width'], desc['height']):
-            if desc['height'] == h and desc['width'] < w:
-                raise ClippedDescriptor(f'{key}: {desc["width"]}x{desc["height"]} is a '
-                                         f'horizontal crop of the full {w}x{h} "{name}"')
-            raise ValueError(f'pool descriptor {key}: geometry {desc["width"]}x{desc["height"]} '
-                              f'disagrees with SUB_IMAGES {w}x{h}')
-        return name, False
+        crop = _resolve_crop(desc, w, h, f'{label} {key} "{name}"')
+        return name, False, crop
     if key in GENERATED_MIRRORS:
         name, w, h = GENERATED_MIRRORS[key]
-        if (w, h) != (desc['width'], desc['height']):
-            if desc['height'] == h and desc['width'] < w:
-                raise ClippedDescriptor(f'{key}: {desc["width"]}x{desc["height"]} is a '
-                                         f'horizontal crop of the full {w}x{h} mirrored "{name}"')
-            raise ValueError(f'mirror descriptor {key}: geometry {desc["width"]}x{desc["height"]} '
-                              f'disagrees with GENERATED_MIRRORS {w}x{h}')
-        return name, True
+        crop = _resolve_crop(desc, w, h, f'{label} {key} mirrored "{name}"')
+        return name, True, crop
     raise ValueError(f'pool descriptor at slot {desc["slot"]:#x} src {desc["src"]} '
                       f'has no named sub-image or known generated mirror')
 
@@ -242,9 +287,10 @@ def resolve_pool_frame(desc, sub_images):
 # ---------------------------------------------------------------------------
 
 def read_alcove_plaque_index(s1, table_off, sub_images, label):
-    """Returns dict {(depth, lateral, dir): (frame, mirrorX)} for nonzero
-    entries; verifies every dest position lands inside the 208x140 viewport
-    once resolved through the destOffsetWithinPlane field."""
+    """Returns dict {(depth, lateral, dir): {...}} for nonzero entries;
+    verifies every dest position lands inside the 208x140 viewport once
+    resolved through the destOffsetWithinPlane field. Clipped (angled-view)
+    entries are included with a `crop` key -- see `_resolve_crop`."""
     out = {}
     n_nonzero = 0
     n_clipped = 0
@@ -257,11 +303,9 @@ def read_alcove_plaque_index(s1, table_off, sub_images, label):
                     continue
                 n_nonzero += 1
                 desc = read_pool_descriptor(s1, value)
-                try:
-                    frame, mirror = resolve_pool_frame(desc, sub_images)
-                except ClippedDescriptor:
+                frame, mirror, crop = resolve_pool_frame(desc, sub_images, f'{label} ({depth},{lat_idx-1},{dir_})')
+                if crop is not None:
                     n_clipped += 1
-                    continue
                 dest = desc['destOffsetWithinPlane']
                 y, x = dest // 40, (dest % 40) * 8
                 if not (0 <= x < VIEWPORT_W and 0 <= y < VIEWPORT_H):
@@ -269,11 +313,10 @@ def read_alcove_plaque_index(s1, table_off, sub_images, label):
                                       f'outside {VIEWPORT_W}x{VIEWPORT_H} viewport')
                 out[(depth, lat_idx - 1, dir_)] = {
                     'frame': frame, 'mirrorX': mirror, 'destX': x, 'destY': y,
-                    'w': desc['width'], 'h': desc['height'],
+                    'w': desc['width'], 'h': desc['height'], 'crop': crop,
                 }
-    print(f'  {label}: {n_nonzero}/36 nonzero index entries -- {len(out)} full-width (emitted), '
-          f'{n_clipped} horizontally-clipped angled views (verified resolvable, not emitted; '
-          f'see ClippedDescriptor)')
+    print(f'  {label}: {n_nonzero}/36 nonzero index entries -- {len(out)} resolved and emitted '
+          f'({n_clipped} of those horizontally-clipped angled views, wired via srcX/srcW)')
     return out
 
 
@@ -293,11 +336,9 @@ def read_stairs_index(s1, sub_images):
                 continue
             for flight, add in (('a', 0), ('b', STAIRS_FLIGHT_B_ADD)):
                 desc = read_pool_descriptor(s1, base_value + add)
-                try:
-                    frame, mirror = resolve_pool_frame(desc, sub_images)
-                except ClippedDescriptor:
+                frame, mirror, crop = resolve_pool_frame(desc, sub_images, f'stairs ({depth},{lat_idx-1},{flight})')
+                if crop is not None:
                     n_clipped += 1
-                    continue
                 dest = desc['destOffsetWithinPlane']
                 y, x = dest // 40, (dest % 40) * 8
                 if not (0 <= x < VIEWPORT_W and 0 <= y < VIEWPORT_H):
@@ -305,10 +346,10 @@ def read_stairs_index(s1, sub_images):
                                       f'outside viewport')
                 out[(depth, lat_idx - 1, flight)] = {
                     'frame': frame, 'mirrorX': mirror, 'destX': x, 'destY': y,
-                    'w': desc['width'], 'h': desc['height'],
+                    'w': desc['width'], 'h': desc['height'], 'crop': crop,
                 }
                 n += 1
-    print(f'  stairs: {n} full-width (emitted) + {n_clipped} clipped (verified, not emitted) '
+    print(f'  stairs: {n} resolved and emitted ({n_clipped} of those horizontally-clipped, wired via srcX/srcW) '
           f'of 18 (9 positions x 2 flights)')
     return out
 
@@ -456,8 +497,30 @@ def read_floorplate(s1):
     if n_ok != 4:
         raise ValueError(f'floor plate: only {n_ok}/4 descriptors pass invariants: {descs}')
     slots_seen = {d['slot'] for d in descs.values()}
-    print(f'  floor plate: 4/4 descriptor invariants pass; slot(s) {[hex(s) for s in slots_seen]} '
-          f'-- ART SOURCE NOT EXTRACTED (see docstring / TODO blackcrypt-floorplate-art-source)')
+    if slots_seen != {0}:
+        raise ValueError(f'floor plate: expected all 4 descriptors in slot 0x0, got {slots_seen}')
+
+    # `blackcrypt-floorplate-art-source` -- resolved: cross-check each
+    # descriptor's own (src, w, h) against the expected UI-panel record and
+    # against the already-extracted atlas's own frame rect. Any mismatch
+    # (wrong src, wrong geometry, or a future ui-panel.json re-extraction
+    # that renamed/moved a frame) raises rather than silently mis-binding art.
+    ui_panel_atlas = json.loads(UI_PANEL_ATLAS_PATH.read_text())
+    ui_panel_frames = {f['name']: f for f in ui_panel_atlas['frames']}
+    for key, desc in descs.items():
+        frame_name, expect_src, expect_w, expect_h = FLOORPLATE_FRAMES[key]
+        if desc['src'] != expect_src or (desc['w'], desc['h']) != (expect_w, expect_h):
+            raise ValueError(f'floor plate {key}: descriptor (src={desc["src"]}, w={desc["w"]}, '
+                              f'h={desc["h"]}) disagrees with expected {frame_name} '
+                              f'(src={expect_src}, w={expect_w}, h={expect_h})')
+        rect = ui_panel_frames.get(frame_name)
+        if rect is None or (rect['w'], rect['h']) != (expect_w, expect_h):
+            raise ValueError(f'floor plate {key}: ui-panel.json has no matching frame '
+                              f'"{frame_name}" ({expect_w}x{expect_h})')
+        desc['frame'] = frame_name
+    print(f'  floor plate: 4/4 descriptor invariants pass, all in slot 0x0 -- ART SOURCE RESOLVED: '
+          f'{[FLOORPLATE_FRAMES[k][0] for k in descs]} (bcdfa UI panel bank, '
+          f'public/assets/blackcrypt/amiga/sprites/ui-panel.json), 4/4 byte-exact against src/geometry')
     print(f'  floor plate: 13 near positions (direct + mirrored), 11 far positions decoded')
 
     def in_viewport(pairs):
@@ -509,34 +572,60 @@ def read_floor_item_tables(s1):
 # slots.json emission
 # ---------------------------------------------------------------------------
 
-def build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_pool):
+#: `@seer/dungeon`'s `schema/slots.ts` `FrameTemplate` shape -- door-lock's
+#: art is per-map (`sprites/wall-decorations.json`, frame
+#: `m{mapId}_decor{gfxIndex}_{near|mid|far}`), so its slot frame can't be a
+#: literal string the way alcove/plaque/stairs/door-switch's are.
+#: `buildViewList`'s `resolveDoorLockFrame` substitutes all three
+#: placeholders from the pose's own `LevelUnit.id` and the entity's
+#: `gfxNumber` at render time -- see `blackcrypt-doorlock-rendering` in
+#: docs/blackcrypt/TODO.md.
+DOOR_LOCK_FRAME_TEMPLATE = 'm{mapId}_decor{gfxIndex}_{depthLabel}'
+DOOR_LOCK_HOTSPOT_CODE = 0x6B
+
+
+def _crop_fields(crop):
+    """`blackcrypt-prop-clipped-descriptors` -- resolved crop window (see
+    `_resolve_crop`) as the `PieceDraw` fields that already express a
+    partial-frame draw (`srcX`/`srcY`/`srcW`/`srcH`, supported since M1).
+    Empty dict for an un-clipped (`crop is None`) draw."""
+    if crop is None:
+        return {}
+    src_x, src_w, src_h = crop
+    return {'srcX': src_x, 'srcY': 0, 'srcW': src_w, 'srcH': src_h}
+
+
+def build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_pool, door_lock_pos):
     slots = {}
 
     for (depth, lateral, dir_), d in alcove.items():
         key = f'prop:alcove:{lateral}:{depth}:{dir_}'
         slots[key] = {'draws': [{
             'bank': BANK_ID, 'frame': d['frame'], 'destX': d['destX'], 'destY': d['destY'],
-            'mirrorX': d['mirrorX'], 'blend': 'replace',
+            'mirrorX': d['mirrorX'], 'blend': 'replace', **_crop_fields(d['crop']),
             'origin': f'bcdft S_1+{ALCOVE_INDEX:#x} (alcove index table, depth={depth} '
-                      f'lateral={lateral} dir={dir_}) -> shared pool +{POOL_BASE:#x}',
+                      f'lateral={lateral} dir={dir_}) -> shared pool +{POOL_BASE:#x}'
+                      + (' (horizontally-clipped angled view, see _resolve_crop)' if d['crop'] else ''),
         }]}
 
     for (depth, lateral, dir_), d in plaque.items():
         key = f'prop:plaque:{lateral}:{depth}:{dir_}'
         slots[key] = {'draws': [{
             'bank': BANK_ID, 'frame': d['frame'], 'destX': d['destX'], 'destY': d['destY'],
-            'mirrorX': d['mirrorX'], 'blend': 'replace',
+            'mirrorX': d['mirrorX'], 'blend': 'replace', **_crop_fields(d['crop']),
             'origin': f'bcdft S_1+{PLAQUE_INDEX:#x} (plaque index table, depth={depth} '
-                      f'lateral={lateral} dir={dir_}) -> shared pool +{POOL_BASE:#x}',
+                      f'lateral={lateral} dir={dir_}) -> shared pool +{POOL_BASE:#x}'
+                      + (' (horizontally-clipped angled view, see _resolve_crop)' if d['crop'] else ''),
         }]}
 
     for (depth, lateral, flight), d in stairs_pos.items():
         key = f'prop:stairs-{flight}:{lateral}:{depth}'
         slots[key] = {'draws': [{
             'bank': BANK_ID, 'frame': d['frame'], 'destX': d['destX'], 'destY': d['destY'],
-            'blend': 'replace',
+            'blend': 'replace', **_crop_fields(d['crop']),
             'origin': f'bcdft S_1+{STAIRS_INDEX:#x} (stairs index table, depth={depth} '
-                      f'lateral={lateral} flight={flight}) -> shared pool +{POOL_BASE:#x}',
+                      f'lateral={lateral} flight={flight}) -> shared pool +{POOL_BASE:#x}'
+                      + (' (horizontally-clipped angled view, see _resolve_crop)' if d['crop'] else ''),
         }]}
 
     # Door switch (pull chain): only side=1 ($51A=0, direct) is reachable --
@@ -555,7 +644,46 @@ def build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_po
                       f'confirmed kind-3 off-by-one (data-structure.md)',
         }]}
 
+    # Door lock: same "only side=1 (party right), $51A=0 (direct) is
+    # reachable" position table as door switch, but the frame is a
+    # FrameTemplate -- resolved at buildViewList time against the pose's own
+    # LevelUnit.id and the entity's gfxNumber, not baked in here.
+    for (depth, lateral), pos in door_lock_pos['side1-direct'].items():
+        if pos is None:
+            continue
+        x, y = pos
+        key = f'prop:door-lock:{lateral}:{depth}'
+        slots[key] = {'draws': [{
+            'bank': DECOR_BANK_ID, 'frame': {'template': DOOR_LOCK_FRAME_TEMPLATE},
+            'destX': x, 'destY': y, 'blend': 'mask',
+            'hotspot': {'code': DOOR_LOCK_HOTSPOT_CODE},
+            'origin': f'bcdft S_1+{DOOR_LOCK_SIDE1:#x} (door lock position table, side=1 '
+                      f'direct, depth={depth} lateral={lateral}); art resolved at render time '
+                      f'via the FrameTemplate (per-map wall-decorations bank) -- only reachable '
+                      f'side per the confirmed kind-3 off-by-one (data-structure.md)',
+        }]}
+
     return slots
+
+
+def build_floor_item_placement(floor_item):
+    """`@seer/dungeon`'s `FloorItemPlacement` shape (`schema/slots.ts`) --
+    the runtime table `buildViewList`'s `resolveFloorItem` reads directly,
+    merged into `slots.json` itself (not just `props.json`) since it's
+    consumed at render time, unlike the rest of `props.json`'s
+    verification-only tables. `blackcrypt-floor-item-placement`
+    (docs/blackcrypt/TODO.md)."""
+    gfx_table = json.loads(FLOORITEM_GFX_TABLE_PATH.read_text())
+    anchor = {f'{depth}:{lateral}': [x, y] for (depth, lateral), (x, y) in floor_item['anchor'].items()}
+    registration = {f'{group}:{depth}': [x, y] for (group, depth), xy in floor_item['registration'].items()
+                    if xy is not None for (x, y) in [xy]}
+    return {
+        'bank': FLOORITEM_BANK_ID,
+        'gfxToGroup': gfx_table['groups'],
+        'noneGroup': gfx_table['none'],
+        'anchor': anchor,
+        'registration': registration,
+    }
 
 
 def build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item):
@@ -589,13 +717,19 @@ def build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item):
                     'entity gfxNumber and the level unit id.',
         },
         'floorPlate': {
-            'note': 'Geometry confirmed; art source (graphics-kernel slot $00) not yet '
-                    'extracted -- see docs/blackcrypt/TODO.md blackcrypt-floorplate-art-source.',
+            'note': 'Geometry confirmed; art source resolved this pass -- bcdfa UI panel '
+                    'bank (sprites/ui-panel.json), frames pressure_plate_{1,2}_{up,down}. '
+                    'Not yet wired into buildViewList (the 13-near/11-far fixed sub-tile '
+                    'grid positions need their own placement-index derivation, beyond this '
+                    'pass\'s scope) -- see docs/blackcrypt/TODO.md blackcrypt-floorplate-art-source.',
+            'bank': UI_PANEL_BANK_ID,
             **floor_plate,
         },
         'floorItem': {
-            'note': 'Anchor/registration/scatter tables confirmed; not yet wired into '
-                    'buildViewList -- see docs/blackcrypt/TODO.md blackcrypt-floor-item-placement.',
+            'note': 'Anchor/registration/scatter tables confirmed and wired into '
+                    'buildViewList (schema/slots.ts FloorItemPlacement) -- see '
+                    'docs/blackcrypt/amiga/data-structure.md, floor-item placement section. '
+                    'This section is retained for verification/documentation purposes.',
             'anchor': [{'depth': d, 'lateral': l, 'x': xy[0], 'y': xy[1]}
                        for (d, l), xy in floor_item['anchor'].items()],
             'registration': [{'group': g, 'depth': d, 'x': xy[0], 'y': xy[1]}
@@ -605,13 +739,20 @@ def build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item):
     }
 
 
-def merge_slots(existing_path, new_slots):
+def merge_slots(existing_path, new_slots, extra_banks, floor_item_placement=None):
     doc = json.loads(existing_path.read_text()) if existing_path.exists() else None
     if doc is None:
         raise SystemExit(f'{existing_path} does not exist -- run export_dungeon_slots.py first')
     before = len(doc['slots'])
     doc['slots'].update(new_slots)
     after = len(doc['slots'])
+    known_ids = {b['id'] for b in doc['banks']}
+    for bank in extra_banks:
+        if bank['id'] not in known_ids:
+            doc['banks'].append(bank)
+            known_ids.add(bank['id'])
+    if floor_item_placement is not None:
+        doc['floorItem'] = floor_item_placement
     return doc, before, after
 
 
@@ -640,10 +781,17 @@ def main():
     print('Floor item placement tables:')
     floor_item = read_floor_item_tables(s1)
 
-    new_slots = build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_pool)
-    doc, before, after = merge_slots(SLOTS_PATH, new_slots)
+    floor_item_placement = build_floor_item_placement(floor_item)
+
+    new_slots = build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_pool, door_lock_pos)
+    doc, before, after = merge_slots(
+        SLOTS_PATH, new_slots, extra_banks=[DECOR_BANK, FLOORITEM_BANK],
+        floor_item_placement=floor_item_placement,
+    )
     paths.write_json(SLOTS_PATH, doc, pretty=True)
-    print(f'\n  slots.json: {before} -> {after} slots ({after - before} new prop slots merged in)')
+    print(f'\n  slots.json: {before} -> {after} slots ({after - before} new prop slots merged in), '
+          f'floorItem placement table written ({len(floor_item_placement["anchor"])} anchor, '
+          f'{len(floor_item_placement["registration"])} registration entries)')
 
     props_doc = build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item)
     paths.write_json(PROPS_PATH, props_doc, pretty=True)

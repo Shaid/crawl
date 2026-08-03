@@ -6183,6 +6183,84 @@ exactly when bit 29 changes, `$48F != 0` ⟺ the party stands on a bit-29
 square (**hypothesis**, up to a per-level constant — the other 10 call sites
 toggle unconditionally and could in principle desynchronise the phase).
 
+##### `walker-mirror-flag-polarity` (docs/blackcrypt/TODO.md) — resolved this pass, with a real caveat
+
+Disassembled all 10 of the other `JSR $A4982.l` sites (radare2 on the
+decompressed S_1 blob, `arch=m68k baddr=0x0`) plus a fresh data-driven cross
+check against the real `bcdfs` corpus. Two findings:
+
+**1. `+0x02E7E` is provably dead code, not "level entry".** It sits inside
+`fcn.00002d46` (this is `DrawViewport`'s own preamble, *before* the Phase-1
+sight-line walk at `+0x02E92` — not a separate function), gated
+`TST.W $8(A5) / BNE.B $2E84` (skip the toggle) where `$8(A5)` is this
+function's own first stack argument. An exhaustive static census of every
+`JSR`/`BSR` in the whole S_1 image targeting `+0x02D46` (both PC-relative and
+absolute-long encodings, scanned byte-by-byte over the entire file) finds
+**exactly 21 real call sites, zero more** — matching radare2's own
+`axt`-equivalent xref count — and **every single one pushes the literal
+immediate `#1`** before the call (`MOVE.W #1,-(A7)`), never `#0`. Since the
+guard is `BNE` (branch away when the argument is *non-zero*), all 21 real
+callers permanently take the skip branch: `+0x02E7E`'s `JSR $A4982.l` can
+never execute in the shipped binary. (The earlier "level entry" label was a
+guess from the byte-pattern census that found this instruction, not from
+tracing its callers — this pass is the first to actually walk them.)
+
+**2. The other 9 sites are real, reachable, and confirmed unconditional
+w.r.t. bit 29** — each has its own local gate (an argument, `TST.W $1E5E(A4)`
+an "already notified" flag, a `case` value in `MoveParty`'s `d2` dispatch,
+an animation-phase compare against `$1E60(A4)`) but **none of the 9 ever
+tests bit 29 or the map-square longword at all**. `+0x06C36`/`+0x0C3EA`/
+`+0x0CA5C`/`+0x0CD16` are teleport/pit position-set handlers (`$1742`/`$1740`
+overwritten from registers, then an unconditional toggle); `+0x16DEA` is the
+most striking — inside `MoveParty`'s `d2==2` case it temporarily sets
+`$1742`/`$1740` to a target, runs two subroutine calls, fires the toggle,
+then **restores the original position** — so the toggle fires with the
+party's real position never having changed at all. `+0x10632`/`+0x10792`
+live in `fcn.0001038e`, called from exactly one site (`+0xE47E`, one arm of
+a large spell/command dispatch table, `fcn.0000e190`) — a specific
+in-game command effect, not a level-transition path.
+
+**Data-driven cross-check against the real `bcdfs` corpus (maps 2–5, the
+only maps with any bit-29 squares) settles the practical question the TODO
+asked.** Every teleport/pit *structure* (type `0x12` sub-kind 0/1, type
+`0x14`) across all four maps sits **at least 2 squares away** from the
+nearest bit-29 square (`scripts/bclib/bcdfs.read_dungeon_world`, Manhattan
+distance, 17/11/18/0 structures checked per map, zero exceptions). More
+decisively, every scripted teleport **action** (`bcdfs` opcode `0x15`
+"Teleportation" and `0x1E` "Teleport + dungeon colour change", decoded via
+their own 8-byte `[opcode][clicks][col][row][runs][delay][value][next]`
+layout — `docs/blackcrypt/amiga/data-structure.md` "Action bytecode") has
+**both its owning structure's square and its target square outside every
+bit-29 region, 35/35 with zero exceptions** (4 on map 2, 7 on map 3, 2 on
+map 4, 22 on map 5). Bit 29 itself forms large **contiguous geographic
+regions** (a 77-square block on map 3, an 18-square block on map 4), not
+scattered single flags — consistent with it marking a whole mirrored
+"wing" entered/exited only by ordinary walking, never by teleport.
+
+**Conclusion — the correspondence does *not* hold in general, and this is
+now demonstrated rather than hypothesised.** Every one of the 35 confirmed
+teleport actions fires from a bit29=0 square to a bit29=0 square, yet its
+`JSR $A4982.l` unconditionally flips `$48F` anyway (`BCHG` cannot tell the
+difference) — so `$48F` goes from correctly `0` to incorrectly `1`
+immediately after **any** of these 35 real, in-game events, and stays wrong
+until another toggle (a further teleport, or an actual bit-29 walk
+crossing) happens to flip it back. The walk path's own bit-29-diff gate is
+exact and provably correct in isolation; it is the *only* one of the 11
+sites that is. A faithful implementation therefore cannot shortcut `$48F`
+to "read bit 29 from the map" — it would need to simulate the real 1-bit
+toggle state machine (seed 0, XOR on bit-29 differing along the walk path,
+XOR unconditionally on the 9 confirmed-reachable non-walk sites). That full
+simulation is **not implemented this pass** — the 9 non-walk trigger
+conditions are spell/command/teleport-action events with no representation
+in the current `EntityRecord`/action-chain schema (a materially larger
+modelling task, see `docs/blackcrypt/plan.md`'s schema notes), and the
+front-wall fix above (`walker-front-wall-handedness`) already renders the
+99.3%-default (`$48F==0`) case correctly, which is what every real pose in
+`props.test.ts`/`sweep.test.ts` exercises. The 100 bit-29 squares (0.71% of
+the dungeon, maps 2–5 only) remain rendered in the same (default, unmirrored
+relative-to-them) state a walker would show for any other square — a small,
+now-precisely-scoped, pre-existing gap, not a new regression.
+
 ##### What the two tables actually differ in — confirmed byte-exact
 
 `+0x2304A` is definitively the horizontal-mirror blitter: its inner loop
@@ -6214,18 +6292,26 @@ pixel-for-pixel gives 53.86 % / 55.98 % / 58.94 % agreement for wall0 /
 wall1 / wall2 against the flipped partner — noise level for 6-bit indexed
 art, not a match. The flag genuinely selects different pixels.
 
-> **Consequence for `slots.json` — a real handedness bug.**
-> `scripts/export_dungeon_slots.py` reads `FRONT_TABLE_OFFSET = 0x22CE2`
+> **Consequence for `slots.json` — a real handedness bug, fixed this pass
+> (`walker-front-wall-handedness`, `docs/blackcrypt/TODO.md`).**
+> `scripts/export_dungeon_slots.py` read `FRONT_TABLE_OFFSET = 0x22CE2`
 > (the **flag ≠ 0** branch, drawn unmirrored) but
 > `SIDE_TABLE_OFFSET = 0x22E4A` (the **flag = 0** branch). The exported
-> view therefore mixes the two mirror states: its front-wall row is
+> view therefore mixed the two mirror states: its front-wall row was
 > horizontally reflected relative to its own side walls. Since flag = 0 is
-> the default for 99.3 % of squares, the **side walls are right and the
-> front-wall row is wrong**. The default-state front row is
-> `+0x22D96` drawn mirrored — equivalently, in `slots.json` terms:
-> `front:-1:d` ← frame `wallD-right` with `mirrorX: true`, `front:0:d` ←
-> `wallD-face` with `mirrorX: true`, `front:1:d` ← `wallD-left` with
-> `mirrorX: true`, destinations unchanged.
+> the default for 99.3 % of squares, the **side walls were right and the
+> front-wall row was wrong**. Fixed by reading the default-state front row —
+> `+0x22D96` drawn mirrored — instead: `FRONT_TABLE_OFFSET = 0x22D96` plus
+> `mirrorX: true` on every front draw (`front:-1:d` now resolves to frame
+> `wallD-right` mirrored, `front:0:d` to `wallD-face` mirrored, `front:1:d`
+> to `wallD-left` mirrored; destinations unchanged). Verified: the M1
+> golden-framebuffer test (`packages/dungeon/src/__tests__/
+> corridor.golden.test.ts`) was regenerated from the fixed `slots.json` and
+> visually re-confirmed (mortared stone walls, symmetric, no gaps, no
+> bleed) before its new golden bytes were accepted; a byte-diff against the
+> pre-fix golden shows exactly **9,827 of 64,000 bytes** differ, entirely
+> within the front-wall region (`y ∈ [6,126]`) — ceiling, floor and side
+> walls are byte-identical, confirming the fix touched only what it should.
 
 #### `DrawSquareRecord` (S_1 `+0x220F0`) — the per-square corridor renderer, confirmed
 
@@ -7123,7 +7209,7 @@ screenshot oracle was set up"), not evidence against the layout. Classified
 | ~~The remaining kind handlers `+0x00224C` (kinds 4/12), `+0x02806` (8/9), `+0x02627A` (10), `+0x02A0E` (0–3)~~ | **SOLVED — all four traced; see "Kinds 0–3", "Kinds 4 and 12", "Kinds 8 and 9", "Kind 10" above.** All 14 jump-table entries now have a decoded body. Kind 10 is byte-exact (consumes slot `$B8` whole, 6,528/6,528). Kinds 4/12, 8/9 and 0–3 resolve to 13 named per-structure renderers whose art bindings are byte-exact against the already-documented slot layouts (see "Which routine draws which bank"). Residual sub-cases below. |
 | ~~The object-type switch on `objRec[+4] & 0xF0` at S_1 `+0x033D2`~~ | **SOLVED, and the premise was wrong — the nibble is the square's N/E/S/W wall bitmask, not an object class.** All 11 arms decoded and mapped onto the Structure/Item type tables; whole-corpus census shows 12 distinct values, 11 handled, `0xF0` = monsters (intercepted earlier), and the 4 unhandled values occur zero times. See "The Phase-1 object switch at S_1 `+0x033D2`" above. |
 | Where the `+0x22244` runtime structure-descriptor array is populated | Not traced. Presumably filled from `bcdfs` structure bytecode at level load. A literal-address search under the **corrected** base (`$A229C`) also returns 0 hits, so it is reached PC-relatively, not through a stored pointer. **A second consumer is now known:** the type-`0x2F` (statue) renderer `+0x227B4` reaches it through the same `+0x2201C`/`+0x22042` helpers as `DrawSquareRecord`. |
-| Which container fills graphics-kernel slot `$00` | The floor-plate/trap renderer `+0x21732` blits from slot `$00` at `src` 18,764–18,932 (16×4 and 16×2, 7-plane masked, contiguous). Slot `$00` is not in the `bcdfx`/`bcdfy`/`bcdfz` tileset inventory, and the range is *not* a hole in the floor-item bank (slot `$30` is fully covered 0…31,388 with zero gaps), so it is a third, still-unidentified pixel buffer. |
+| ~~Which container fills graphics-kernel slot `$00`~~ | **SOLVED — `blackcrypt-floorplate-art-source` (`docs/blackcrypt/TODO.md`), resolved by cross-referencing a section of this same file that a prior pass never connected to the open item.** Slot `$00` is confirmed elsewhere in this document as `bcdfa`'s RLE stream at file offset `0x00000` — the "Adventure Screen" UI panel bank (see "bcdfa — UI Panel Bank", 18,932 B, terminates exactly at `0x036FD`) — and its own record table already names the exact 4 records the floor-plate renderer blits from: `src` 18,764/18,820/18,876/18,904 = **`Pressure Plate 1 Up`/`Pressure Plate 1 Down`/`Pressure Plate 2 Up`/`Pressure Plate 2 Down`**, each already matched **100.000%** against DOS `clipper.clp` entries 79/81/80/82. Re-verified this pass by reading the floor-plate descriptors' own `src` fields directly (`+0x217D2`/`+0x217EE`/`+0x2180A`/`+0x21826` → `18764`/`18820`/`18876`/`18904`, `w×h` `16×4`/`16×4`/`16×2`/`16×2`, `flags=0x0000` on all four — the standard 7-plane masked draw) against `public/assets/blackcrypt/amiga/sprites/ui-panel.json`'s already-extracted frame rects (`pressure_plate_1_up`/`_1_down`/`_2_up`/`_2_down`, same geometry) — 4/4 exact matches, zero deviation. "Pressure Plate 1" (16×4, larger) is the **near** pair (unpressed/pressed), "Pressure Plate 2" (16×2, smaller) is the **far** pair — consistent with the documented near/far perspective-scaling convention used everywhere else in this renderer family. No new art extraction needed — `sprites/ui-panel.png` already has the pixels; only the cross-reference was missing. |
 | Slot `$C8`'s "special panel" body at `+6,060` | `+0x25340(D0 != 0)` reads 4,320 B starting 4,320 B past the documented end of chunk 10. Same over-allocation pattern as the alcove/plaque mirror buffers, but the code that fills it was not found this pass. |
 | `$51A(A5)` — the door-family position variant | Read by the door frame (`+0x25CAE`), door leaf (`+0x2613E`), door lock (`+0x25DA0`) and door switch (`+0x25F9E`/`+0x26100`); when nonzero each adds `+0x24` to its position table, which uniformly changes the sprite's `y` to 40 at every depth. Almost certainly "this doorway square also carries a door frame, so raise the fitting" — **not verified**, and no write site was searched for. |
 | ~~Kinds 0–3: the `dir == 3` (`+0x25E12` / `+0x26070`) position tables look unreachable~~ | **SOLVED — they are genuinely unreachable, and the reason is an off-by-one in the engine's own `kind → side` dispatch, not a gap in the reachability argument.** `kind == 3` is structurally impossible for types `0x22`/`0x0F` from *either* through-corridor facing, and the physically-left wall arrives as `kind == 0`, which `+0x02A0E` discards. The old row's arithmetic was also wrong: `kind == 2` is *not* forced — `kind ∈ {0, 2}` in an exact 50/50 split. See "Kind 3 and the left-wall position tables" above for the full derivation, the 504-combination sweep and the in-game fixture. |
@@ -9791,36 +9877,137 @@ verified (anchor 9/9, registration 147/147, scatter 9/9); not wired into
 
 | Class | Invariant | Result |
 |---|---|---|
-| Alcove | pool descriptor resolves to a named `bcdfxyz.SUB_IMAGES` entry (or a known loader-generated mirror), dest inside 208×140 viewport | **11/11 resolve** (9 full-width emitted, 2 clipped verified-not-emitted); 0 out-of-viewport |
-| Plaque | same | **11/11 resolve**, same 9+2 split |
-| Stairs | same, ×2 flights (9 positions × flight A/B) | **14/18 resolve** (10 emitted + 4 clipped); 4 index entries are 0 (no stairs at that depth/lateral) |
+| Alcove | pool descriptor resolves to a named `bcdfxyz.SUB_IMAGES` entry (or a known loader-generated mirror), dest inside 208×140 viewport | **11/11 resolve and emitted** (9 full-width, 2 clipped — crop origin resolved this pass, see below); 0 out-of-viewport |
+| Plaque | same | **11/11 resolve and emitted**, same 9+2 split |
+| Stairs | same, ×2 flights (9 positions × flight A/B) | **14/18 resolve and emitted** (10 full-width + 4 clipped); 4 index entries are 0 (no stairs at that depth/lateral) |
 | Door lock | `bytesPerPlane`/`BLTSIZE`/`modulo` invariants (28-byte descriptor); geometry matches per-level decor block's own `SIZES` | **9/9 pass** |
 | Door switch | same three invariants; resolves to a named `SUB_IMAGES` entry | **3/3 pass** |
 | Floor plate/trap | same three invariants (×4 pool descriptors); all positions in-viewport | **4/4 pass**; art source still open |
 | Floor-item anchor/registration/scatter | table fully decoded at its documented address/stride | **9/9, 147/147, 9/9** |
 
-**`@seer/dungeon` wiring** (`buildViewList.ts`): alcove, plaque, stairs and
-door-switch render as static, view-geometry-keyed `prop:*` slots — exactly
-like the walls, since (as with the walls) the pixels never depend on which
-specific structure record it is, only on `(depth, lateral, ...)`. Gating,
-all re-derived from disassembly: alcove/plaque need a single-wall square
-(`wallMask`'s high nibble exactly one bit) and `dir = (wallDir - facing -
-1) & 3` (`+0x02806`'s own formula); stairs is free-standing, flight chosen
-from the entity's own sub-kind word (`raw[0x10:0x12]`); door-switch is
-wall-mounted but (per the confirmed kind-3 off-by-one) only ever drawn on
-the wall `rightOf(facing)`, tested via `raw[0x07]`'s bit for that wall
-rather than `wallMask`. Door-lock, floor-plate and floor-item are decoded
-and verified but not wired — see "Still open" below and
-`docs/blackcrypt/TODO.md`.
+**`@seer/dungeon` wiring** (`buildViewList.ts`): alcove, plaque, stairs,
+door-switch and (this pass) **door-lock** render as static, view-geometry-keyed
+`prop:*` slots — exactly like the walls, since (as with the walls) the pixels
+never depend on which specific structure record it is, only on `(depth,
+lateral, ...)`. Gating, all re-derived from disassembly: alcove/plaque need
+a single-wall square (`wallMask`'s high nibble exactly one bit) and
+`dir = (wallDir - facing - 1) & 3` (`+0x02806`'s own formula); stairs is
+free-standing, flight chosen from the entity's own sub-kind word
+(`raw[0x10:0x12]`); door-switch and door-lock are wall-mounted but (per the
+confirmed kind-3 off-by-one) only ever drawn on the wall `rightOf(facing)`,
+tested via `raw[0x07]`'s bit for that wall rather than `wallMask`.
+
+**`blackcrypt-doorlock-rendering` — resolved this pass.** Door-lock's art is
+per-map (`sprites/wall-decorations.json`, frame
+`m{mapId}_decor{gfxIndex}_{near|mid|far}`), needing the pose's own
+`LevelUnit.id` — not known until render time — inside the frame name. Added a
+third `FrameRef` shape to `@seer/dungeon`'s `schema/slots.ts` alongside the
+existing plain-string and `AnimRef` (M4) shapes:
+`FrameTemplate = { template: string }`, a `{name}`-placeholder string.
+`slots.json`'s `prop:door-lock:<lateral>:<depth>` entries (position only,
+from the existing side1-direct table) carry
+`frame: { template: 'm{mapId}_decor{gfxIndex}_{depthLabel}' }`;
+`buildViewList.ts`'s `resolveDoorLockFrame` substitutes `{mapId}` from
+`pose.level`, `{gfxIndex}` from the entity's own `gfxNumber` (`EntityRecord.gfx`,
+`0x51`/`0x52`/`0x53` → `0`/`1`/`2`) and `{depthLabel}` from the geometric depth
+(`0`/`1`/`2` → `near`/`mid`/`far`, `read_door_lock`'s own fixed mapping) —
+all three are known at `buildViewList` time, so a `DrawItem.frame` is always
+a resolved plain string, never a template object. `raster/anim.ts`'s
+`resolveFrameName` (the compositor's single frame-resolution entry point)
+throws if it ever receives an unresolved template, since neither
+`compositeSlotTable` nor `compositeDrawList` has the pose/entity context a
+template needs — a deliberate fail-fast boundary, not a silent fallback.
+Verified: `packages/dungeon/src/__tests__/props.test.ts`'s new door-lock case
+(real map-1 `bcdfs` cell, row 9 col 5, gfxNumber `0x53` → gfxIndex 2) asserts
+every emitted item's resolved frame matches `m1_decor2_(near|mid|far)`
+*and* that frame exists in the real `wall-decorations` atlas, across all 4
+facings — not just "renders without throwing".
+
+**`blackcrypt-floor-item-placement` — resolved this pass.** Floor-item needs
+a *third* axis beyond `(depth, lateral)` — the entity's own `gfxNumber`
+resolved through the floor-graphics group table — so it doesn't fit the
+fixed `prop:*` static-slot shape without enumerating all `3×3×49 = 441`
+`(depth, lateral, group)` combinations. Instead, `schema/slots.ts` gained a
+small `FloorItemPlacement` table (`bank`, `gfxToGroup[gfxNumber] → group`,
+`anchor["<depth>:<lateral>"] → [x,y]`, `registration["<group>:<depth>"] →
+[x,y]`), merged into `slots.json` itself (not just `props.json`, which
+stays the verification-oriented dump) by
+`scripts/export_dungeon_props.py`'s new `build_floor_item_placement`, reading
+the already-exported `data/floor-item-gfx-table.json` directly.
+`buildViewList.ts`'s `resolveFloorItem` reproduces `+0x218FA`'s own formula
+byte-for-byte: `dest = anchor(depth, lateral) − registration(group, depth)`,
+returning `null` (render nothing) exactly when the game's own gate would —
+absent `floorItem` table, out-of-range/`noneGroup` `gfxNumber`, or a missing
+anchor/registration entry. Gating is deliberately **not** a full replica of
+`+0x218FA`'s own `dir == 0` (party-facing) single-wall-square test — items
+sit on any square shape, and the anchor table itself has no wall-mask
+dependency, so `frontWallMaxDepth` is the only gate applied (a documented
+simplification, not a decode gap). Two more documented simplifications: the
+runtime scatter jitter (`+0x220CC`, several same-square items normally
+nudged apart) is **not** modelled, since it cycles a persistent global
+counter (`$498(A5)`) the walker has no equivalent state for — items dropped
+on the same square may render exactly stacked instead; and the wall-mounted
+`+0x21C84` variant (kind 0-3's default) isn't replicated either, only the
+`+0x218FA` free-standing path. Verified:
+`packages/dungeon/src/__tests__/props.test.ts`'s new floor-item case (real
+map-1 cell, row 6 col 16, gfxNumber `0x77` → group 26) asserts the resolved
+frame matches `floor26-d[0-2]` and exists in the real `sprites/
+floor-items.json` atlas, across all 4 facings. A side effect worth noting:
+two of the four already-wired classes' own real test cells (row 2 col 35
+alcove; row 5 col 55 door-switch) turned out to *also* carry a plain floor
+item on the same same-square chain — real, on-disk co-occurrence, not a
+fixture error — which required `buildViewList.hotspots.test.ts`'s
+blanket "every item at this cell" assertions to filter by entity type first.
+
+**`blackcrypt-prop-clipped-descriptors` — resolved this pass.** All 8
+clipped alcove(2)/plaque(2)/stairs(4) pool descriptors were byte-compared
+against their full-width siblings
+(`scripts/export_dungeon_props.py`'s `_resolve_crop`). Every one fits the
+identical pattern: `extraSrcOffset` (the `+0x0E` field, in bytes — `×8` for
+pixels) is always exactly **one of two values** — `0` (keep the art's own
+left edge) or `fullWidthBytes − clippedWidthBytes` (keep the right edge) —
+never a middle offset, and `srcAdvance` (`+0x0A`) always equals that same
+byte delta (the per-row skip that keeps each subsequent row aligned to the
+*full* image's real row stride, since only part of each row is read). This
+means the "crop" is nothing more exotic than a plain horizontal pixel-rect
+window into the already-decoded full sub-image — exactly what
+`PieceDraw.srcX`/`srcW`/`srcH` already express (supported by the compositor
+since M1; no `@seer/dungeon` code changes were needed, only the Python
+exporter). Concretely, in every one of the 8 cases the object sits at the
+far edge of the 208-px viewport (`destX == 0` or `destX + width == 208`)
+and the crop keeps whichever half of the art is the one still on-screen —
+e.g. alcove depth-1 `lateral -1`: `destX=0`, `srcX=40px` (keep the right 24
+of 64px); `lateral +1`: `destX=184` (`184+24=208`), `srcX=0` (keep the left
+24). `resolve_pool_frame` now returns `(name, mirrorX, crop)` unconditionally
+(the `ClippedDescriptor` exception is gone) and raises `ValueError` instead
+if a future descriptor's offset is ever *not* one of the two edge-aligned
+cases, so a genuinely novel crop shape fails loudly rather than silently
+guessing. Verified: the invariant holds 8/8 with zero exceptions;
+`packages/dungeon/src/__tests__/props.test.ts`'s new
+`blackcrypt-prop-clipped-descriptors` case asserts all 8 clipped slots'
+resolved `srcX`/`srcW`/`srcH` stay inside their full-sibling frame's own
+bounds and `destX` stays inside the 208×140 viewport; a manual composite
+render of all 8 (all 4 pairs at once, `staticSlots` for context) was
+visually confirmed ungarbled, with clean art at the viewport edges and no
+seam artefacts. `slots.json` now emits **36/36** alcove+plaque+stairs
+descriptors (was 28/36 — the 8 clipped ones previously rendered nothing).
+
+**`blackcrypt-floorplate-art-source` — resolved this pass.** See "3D Viewport
+Compositing" → "Still open" (the "Which container fills graphics-kernel slot
+`$00`" row, now struck through) for the full derivation: slot `$00` is
+`bcdfa`'s own UI panel bank, and its 4 `Pressure Plate 1/2 Up/Down` records
+(already extracted, already 100.000%-matched against DOS) are byte-exactly
+the floor-plate renderer's 4 descriptors. `scripts/export_dungeon_props.py`'s
+`read_floorplate` now resolves and cross-checks all 4 frame names. Not fully
+wired into `buildViewList` — see `blackcrypt-floorplate-placement-wiring`
+below for the one remaining gap (the 13-near/11-far sub-tile position-index
+formula).
 
 ##### Still open (M5)
 
 | Item | Best current result |
 |---|---|
-| Door-lock rendering | Position table + pool fully decoded and verified (9/9); not wired into `buildViewList` — its art is per-map (`wall-decorations` bank, frame `m{mapId}_decor{gfxIndex}_{near\|mid\|far}`), needing the pose's own `LevelUnit.id` threaded into the frame name at render time rather than a static atlas frame, which the current `Slot`/`PieceDraw` model doesn't support without a template mechanism |
-| Floor-plate/trap art source | Geometry (13/13/11 grid positions, 4/4 descriptor invariants) confirmed; pixel source is graphics-kernel slot `$00`, not present in the `bcdfx`/`bcdfy`/`bcdfz` tileset inventory and not a hole in the floor-item bank — genuinely unidentified (pre-existing open item, re-confirmed this pass, not solved) |
-| Floor-item placement | Anchor/registration/scatter tables (9/9, 147/147, 9/9) fully decoded; not wired into `buildViewList` — needs the entity's own `gfxNumber` threaded through gfx→group (`+0x26FDE`) → sprite frame (`floor{group:02d}-d{depth}`) → registration offset, more machinery than the other four classes needed |
-| Alcove/Plaque/Stairs clipped (angled) descriptors | 2+2+4=8 pool descriptors resolve to a known `(slot, src)` sub-image at a **narrower** width than that sub-image's full geometry (an angled, non-dead-ahead view horizontally cropping the art via the 18-byte format's `srcAdvance`/`extraSrcOffset` fields) — verified resolvable (not a decode error) but the crop *origin* (which edge) wasn't derived this pass, so these 8 combinations render nothing rather than a guessed-wrong crop |
+| Floor-plate/trap placement wiring (`blackcrypt-floorplate-placement-wiring`) | Geometry (13/13/11 grid positions, 4/4 descriptor invariants) and art (`pressure_plate_{1,2}_{up,down}`, `sprites/ui-panel.json`) are both confirmed. Not wired into `buildViewList`: which of the 13 ("near") or 11 ("far") fixed sub-tile grid positions a given floor-plate entity's on-square position resolves to wasn't derived this pass — lowest-priority remaining M5 gap |
 
 ---
 

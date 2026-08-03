@@ -432,7 +432,7 @@ The package must be portable by someone else without reading its source.
 | **M2** | ~~Exporters C1–C3; `CellQuery`, `FlatGridLevel`, `Pose`, `buildViewList`~~ **DONE** — `scripts/export_dungeon_levels.py`/`export_dungeon_slots.py`/`export_dungeon_tileset_indexed.py`; `@seer/dungeon`'s `model/{CellQuery,FlatGridLevel,Pose,Direction}.ts`, `view/{ViewSpec,DrawItem,buildViewList}.ts`, `raster/composite.ts`'s `compositeDrawList` | A pose renders consistently with `automap_tiles.py`'s ASCII map for the same cell (confirmed: 3 real poses' `buildViewList` item counts — 3, 3, 1 — match hand-derived expectations from the same `wallFlags` bits automap itself reads); a sweep over 13 maps × 50 sampled cells × 4 facings (2,600 poses, `packages/dungeon/src/__tests__/sweep.test.ts`) gives zero exceptions, zero out-of-atlas frame refs, zero out-of-surface writes |
 | **M3** | ~~Movement, collision, bindings, automap~~ **DONE** — `schema/bindings.ts` (positional defaults), `input/WalkerController.ts`, `model/collision.ts` (edge-checked, fail-closed), `automap/{AutomapState,AutomapRenderer}.ts`, `debug/Minimap.ts` | A circuit of a corridor returns to the start pose (confirmed: a real 4-cell open loop found in map 1, walked, returns to the exact starting pose); no pose crosses a cell the automap shows as walled; automap cone matches the view (screenshotted); rebinding works from config |
 | **M4** | Interaction + animation: hotspot picking, entity state patches, `AnimRef` clock — **not started**. Indexed art with all ramps is **already done** (Phase C's `export_dungeon_tileset_indexed.py`), just not yet consumed per-pose by the presenters | Clicking an alcove/plaque/switch fires `onInteract` with the right code; levels 12–13 render with ramp 3; torches animate without a 60 Hz full redraw |
-| **M5** | Props: **4 of 7 classes DONE** (alcove, plaque, stairs, door-switch — wired into `slots.json`/`buildViewList` against disassembly-re-derived placement tables) — see `TODO.md` for the 3 remaining (`blackcrypt-doorlock-rendering`, `blackcrypt-floorplate-art-source`, `blackcrypt-floor-item-placement`) and 2 new findings (`walker-front-wall-handedness`, `walker-mirror-flag-polarity`, both from resolving the mirror-flag write site via `re-codebreaker`). Actors layer not started | Doors, stairs, pillars, pits, alcoves, plaques, buttons appear at correct positions |
+| **M5** | Props: **6 of 7 classes DONE** (alcove, plaque, stairs, door-switch, door-lock, floor-item — wired into `slots.json`/`buildViewList`; alcove/plaque/stairs' 8 angled-view descriptors now included via `srcX`/`srcW` crops). Only floor-plate/trap is undrawn — its art is identified (`sprites/ui-panel.json`'s Pressure Plate frames) but the per-square sub-tile position-index formula isn't derived yet (`blackcrypt-floorplate-placement-wiring` in `TODO.md`, lowest priority). `walker-front-wall-handedness` (front row was drawn in the wrong mirror state relative to the side walls) is **fixed**, M1's golden framebuffer regenerated and visually re-confirmed. `walker-mirror-flag-polarity` is **resolved** (the `$48F` flag does not correspond to bit-29 in general — demonstrated, not just hypothesised; simulating it fully is deferred, needs action-chain schema modelling). Actors layer not started | Doors, stairs, pillars, pits, alcoves, plaques, buttons appear at correct positions |
 | **M6** | Generalise to Wizardry 6; porting guide | W6 renders with **zero Black-Crypt-specific paths** in the package (grep `blackcrypt`, `bcdf`, `wallFlags`, `0x1000` outside `__tests__/`); BC golden tests still pass |
 
 ---
@@ -482,6 +482,32 @@ M5 and suitable for a `re-codebreaker`.
 > **not applied this pass** — a real, pre-existing handedness bug in the
 > front-wall row, orthogonal to props, that needs its own regression pass over
 > the M1 golden-framebuffer test.
+
+> **Correction (2026-08-03, later pass): the front-wall fix is applied, and
+> door-lock/floor-item/the 8 clipped descriptors are now wired.**
+> `walker-front-wall-handedness` is fixed (`export_dungeon_slots.py` now
+> reads `+0x22D96` mirrored); the M1 golden framebuffer was regenerated and
+> visually re-confirmed (symmetric corridor, no gaps/bleed), with a byte-diff
+> against the pre-fix golden showing exactly 9,827/64,000 bytes differ, all
+> within the front-wall region. Door-lock renders via a new `FrameTemplate`
+> `PieceDraw.frame` shape (`schema/slots.ts`) that `buildViewList`'s
+> `resolveDoorLockFrame` substitutes from the pose's `LevelUnit.id` and the
+> entity's `gfxNumber` — never reaches the compositor unresolved.
+> Floor-item renders via a small `FloorItemPlacement` arithmetic table
+> (`anchor(depth,lateral) − registration(group,depth)`, `group` from
+> `gfxToGroup[gfxNumber]`) rather than enumerating 441 static slots. The 8
+> clipped alcove/plaque/stairs descriptors resolve via `PieceDraw.srcX`/
+> `srcW` (already-existing fields, no new compositor code) — `extraSrcOffset`
+> is always edge-aligned (`0` or the full/clip width delta), confirmed 8/8.
+> `blackcrypt-floorplate-art-source` is also resolved (slot `$00` is `bcdfa`'s
+> own UI panel bank, its 4 "Pressure Plate" records byte-exact against the
+> floor-plate descriptors) — only the per-square sub-tile position-index
+> formula remains open (`blackcrypt-floorplate-placement-wiring`,
+> lowest priority). `walker-mirror-flag-polarity` is resolved: the
+> correspondence does **not** hold in general (demonstrated against the real
+> `bcdfs` corpus, not just argued from code), though full toggle-state-machine
+> simulation is deferred. See `docs/blackcrypt/TODO.md` and
+> `amiga/data-structure.md`'s M5 sections for full evidence.
 
 ---
 

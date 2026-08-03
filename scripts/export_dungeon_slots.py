@@ -5,13 +5,26 @@ M1 (`docs/blackcrypt/walker-plan.md`) hand-transcribed this file from the
 confirmed placement tables in `docs/blackcrypt/amiga/data-structure.md`
 (front walls: `:5208-5224`; side walls: `:5377-5389`). This script instead
 **re-reads the raw blit descriptors** the game itself uses -- the 9x20-byte
-front-wall/ceiling/floor table at decompressed `bcdft` S_1 `+0x22CE2`, and
+front-wall/ceiling/floor table at decompressed `bcdft` S_1 `+0x22D96`, and
 the 8x28-byte side-wall table at `+0x22E4A` -- and derives every value from
 those bytes, cross-checked against `bclib.bcdfxyz.SUB_IMAGES`'s
 independently-authored src-offset -> frame-name table. If a re-read value
 ever disagrees with the M1 hand-authored file, this script prints the
 disagreement loudly and exits non-zero rather than silently overwriting it
 -- see `main()`'s comparison step.
+
+**`walker-front-wall-handedness` fix (docs/blackcrypt/TODO.md), applied this
+pass.** The front-wall table lives at two addresses gated on the `$48F(A5)`
+mirror flag: `+0x22CE2` (`flag != 0`, drawn direct by `+0x2300A`) and
+`+0x22D96` (`flag == 0`, drawn **mirrored** by `+0x2304A`). `flag == 0` is
+the default for 99.3% of squares, and the side-wall table below was already
+read from *its* `flag == 0` branch (`+0x22E4A`) -- so the front-wall table
+must be read from its own `flag == 0` branch (`+0x22D96`) too, with
+`mirrorX: true` on every front draw, or the two rows disagree on handedness.
+Byte-exact evidence (destinations identical between the two front tables,
+only left/right `src` offsets swapped) is in `data-structure.md`'s "3D
+Viewport Compositing" -> "`ViewpointChanged`" -> "What the two tables
+actually differ in".
 
 ## The two descriptor formats (both `data-structure.md`-confirmed)
 
@@ -62,7 +75,18 @@ ROOT = Path(__file__).resolve().parents[1]
 S1_PATH = ROOT / 'data' / 'blackcrypt' / 'extracted' / 'bcdft_decompressed.bin'
 SLOTS_PATH = ROOT / 'public' / 'assets' / 'blackcrypt' / 'amiga' / 'dungeon' / 'slots.json'
 
-FRONT_TABLE_OFFSET = 0x22CE2
+## `walker-front-wall-handedness` (docs/blackcrypt/TODO.md) -- FIXED this pass.
+## `$48F(A5)` (the mirror-flag toggle, see `ViewpointChanged` S_1 `+0x2492A`)
+## is 0 for 99.3% of squares, and the `flag == 0` branch draws the front-wall
+## row from `+0x22D96` **mirrored** (`+0x2304A`'s horizontal-mirror blitter),
+## not from `+0x22CE2` direct. The side-wall table below is already read from
+## its own `flag == 0` branch (`+0x22E4A`), so reading front walls from
+## `+0x22D96`/mirrored instead of `+0x22CE2`/direct makes both rows agree on
+## the same (default, flag==0) mirror state -- see data-structure.md's
+## "3D Viewport Compositing" -> "ViewpointChanged" -> "What the two tables
+## actually differ in" for the byte-exact evidence (destinations identical,
+## only left/right src offsets swapped between the two tables).
+FRONT_TABLE_OFFSET = 0x22D96
 FRONT_RECORD_BYTES = 20
 FRONT_RECORD_COUNT = 9
 
@@ -162,9 +186,10 @@ def build_slots(front, side):
         key = f'front:{lateral}:{depth}'
         slots[key] = {'draws': [{
             'bank': BANK_ID, 'frame': d['name'], 'destX': d['destX'], 'destY': d['destY'],
-            'blend': 'replace',
+            'mirrorX': True, 'blend': 'replace',
             'origin': f'bcdft S_1+{FRONT_TABLE_OFFSET + d["index"] * FRONT_RECORD_BYTES:#x} '
-                      f'(front-wall descriptor {d["index"]}), re-read this pass',
+                      f'(front-wall descriptor {d["index"]}, the $48F==0/default-flag branch, '
+                      f'drawn mirrored per +0x2304A -- walker-front-wall-handedness fix)',
         }]}
     # Side descriptors alternate left/right per depth (index parity), and
     # the atlas frame name keeps saying near/far -- see module docstring.
