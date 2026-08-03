@@ -9,7 +9,7 @@
 // The repo's docs/ and public/assets stay the single source of truth; this
 // script only wires them into the site. Run with:  node scripts/build.mjs
 
-import { cpSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,19 +29,26 @@ rmSync(ASSET_DST, { recursive: true, force: true });
 cpSync(ASSET_SRC, ASSET_DST, { recursive: true });
 console.log(`Copied assets: ${ASSET_SRC} -> ${ASSET_DST}`);
 
-// Generate a browser font from the confirmed 8x8 in-game bitmap font.
-const fontResult = spawnSync(
-	'python3',
-	[
-		join(root, 'scripts', 'generate_pixel_font.py'),
-		'--source-root',
-		repo,
-		'--output',
-		join(root, 'public', 'fonts'),
-	],
-	{ stdio: 'inherit' },
-);
-if (fontResult.status !== 0) throw new Error('Could not generate the Black Crypt webfont');
+// Reuse the committed browser fonts in CI. Regenerate them locally only when
+// either artifact is absent, so the deployment does not need Python/fontTools.
+const fontDir = join(root, 'public', 'fonts');
+const fontFiles = ['black-crypt-big.ttf', 'black-crypt-big.woff2'];
+if (fontFiles.every((file) => existsSync(join(fontDir, file)))) {
+	console.log(`Using committed webfonts in ${fontDir}`);
+} else {
+	const fontResult = spawnSync(
+		'python3',
+		[
+			join(root, 'scripts', 'generate_pixel_font.py'),
+			'--source-root',
+			repo,
+			'--output',
+			fontDir,
+		],
+		{ stdio: 'inherit' },
+	);
+	if (fontResult.status !== 0) throw new Error('Could not generate the Black Crypt webfont');
+}
 
 const tilesetResult = spawnSync(
 	'node',

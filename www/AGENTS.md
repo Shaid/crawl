@@ -15,8 +15,9 @@ reverse-engineering notes. Two things are **generated**, never edited by hand:
 
 - `public/assets/blackcrypt/` — copied from the repo's `public/assets/blackcrypt`
   by `scripts/build.mjs`, so the site is self-contained.
-- `public/fonts/` — generated from the extracted `font-big` bitmap atlas by
-  `scripts/generate_pixel_font.py`.
+- `public/fonts/` — committed WOFF2/TTF outputs generated from the extracted
+  `font-big` bitmap atlas. `scripts/build.mjs` only regenerates them when an
+  artifact is missing, so CI does not need Python/fontTools.
 - `generated/sidebar.mjs` — the Starlight sidebar, generated from
   `src/content/docs/blackcrypt/_sidebar.json`.
 
