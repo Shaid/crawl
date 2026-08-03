@@ -221,6 +221,12 @@ def main():
         'yAxisDown': False,
         'units': units,
         'entities': all_entities,
+        # Names the per-cell plane holding a cell's same-square entity-chain
+        # head slot (0 = none) -- see `@seer/dungeon`'s
+        # `DungeonLevelFile.entityHandlePlane` doc comment. Lets
+        # `CellQuery.entitiesAt(x, y)` walk the chain generically instead of
+        # a consumer re-deriving the "objectHandle" plane name/convention.
+        'entityHandlePlane': 'objectHandle',
         'provenance': {
             'source': 'data/blackcrypt/amiga/bcdfs',
             'spec': 'docs/blackcrypt/amiga/data-structure.md#bcdfs--mapdungeon-format',

@@ -450,12 +450,38 @@ Contained because **M1–M4 need none of it**. It is a bounded pass over
 `bcdft_decompressed.bin` with all addresses and strides known — scheduled before
 M5 and suitable for a `re-codebreaker`.
 
-**Mirroring in v1: always use the direct tables.** The `$48F(A5)` write site has
-never been found (all six references are `TST.B` reads; a candidate write was
-investigated and rejected as a disassembly artefact). *When* the game mirrors is
-genuinely unknown, so rendering direct-only is correct for at least one facing and
-is honestly documentable — guessing the trigger would produce a walker that looks
-plausible and is wrong.
+> **Correction (2026-08-03): "always use the direct tables" is wrong, and the
+> `$48F(A5)` write site is now confirmed.** It is `BCHG #2,$48F(A0)` at S_1
+> `+0x2492E` (the candidate previously dismissed as a disassembly artefact —
+> the instruction before it loads the graphics frame pointer into `A0`, which
+> both fixes the boundary and aliases `A0` to `A5`). The flag is a pure toggle
+> starting at 0, and on the walk path it flips only when the map square's bit
+> `0x20000000` changes — it is **not** facing-derived, so there is no
+> "opposite-facing view" to render here. `$48F = 0` is the default for 99.3 %
+> of squares, and the `$48F = 0` front-wall branch is `+0x22D96` drawn
+> **mirrored**, not `+0x22CE2` drawn direct. v1 therefore renders its
+> front-wall row in the wrong handedness relative to its own side walls (which
+> already come from the `$48F = 0` table `+0x22E4A`). Full derivation, byte
+> evidence and the exact `slots.json` fix:
+> `amiga/data-structure.md` § "3D Viewport Compositing" →
+> "`ViewpointChanged` (S_1 `+0x2492A`)".
+
+> **M5 status (2026-08-03): all seven placement tables decoded and verified.**
+> `scripts/export_dungeon_props.py` transcribes alcove/plaque/stairs/door-lock/
+> door-switch/floor-plate/floor-item, all invariant checks passing (see
+> `amiga/data-structure.md` § "`scripts/export_dungeon_props.py` → M5 prop
+> placement tables"). **Four of seven render**: alcove, plaque, stairs and
+> door-switch are wired into `buildViewList`/`slots.json` as `prop:*` slots and
+> covered by `packages/dungeon/src/__tests__/props.test.ts` against real
+> `bcdfs` cells. The other three are decoded+verified but not wired — door-lock
+> needs a per-map art template the current static `Slot` model doesn't support,
+> floor-plate's pixel source (graphics-kernel slot `$00`) is still
+> unidentified, and floor-item placement needs the entity's own `gfxNumber`
+> threaded through three more tables. See `docs/blackcrypt/TODO.md` for the
+> per-item rows. The mirror-flag fix above (`walker-front-wall-handedness`) is
+> **not applied this pass** — a real, pre-existing handedness bug in the
+> front-wall row, orthogonal to props, that needs its own regression pass over
+> the M1 golden-framebuffer test.
 
 ---
 

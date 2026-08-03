@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dungeon Walker — M1 corridor</title>
+  <title>Dungeon Walker — M3</title>
   <link rel="stylesheet" href="walker.css" />
 </head>
 <body>
@@ -11,9 +11,23 @@
     <header id="toolbar">
       <span id="title">Dungeon Walker</span>
       <span id="status">loading…</span>
+      <span id="confidence"></span>
+      <span id="help">WASD/arrows move · Q/E turn · Space interact · Tab automap zoom</span>
     </header>
-    <div id="canvas-wrap">
-      <canvas id="surface" width="320" height="200"></canvas>
+    <div id="body">
+      <div id="canvas-wrap">
+        <canvas id="surface" width="320" height="200"></canvas>
+      </div>
+      <aside id="sidebar">
+        <section class="panel">
+          <h2>Minimap</h2>
+          <canvas id="minimap"></canvas>
+        </section>
+        <section class="panel">
+          <h2>Automap</h2>
+          <canvas id="automap"></canvas>
+        </section>
+      </aside>
     </div>
   </div>
   <script type="module" src="walker.ts"></script>

@@ -6073,12 +6073,159 @@ graphics kernel (`+0x21750`, `+0x22C8E`, `+0x22CC2`, `+0x230B6`, `+0x230FE`,
 descriptor table over the *direct* one — this is almost certainly how a
 single authored wall-art direction is flipped for the opposite-facing view,
 the same mechanism already documented per-descriptor (`flags bit 10 =
-horizontal mirror`) but applied here as one flag for the whole row. **The
-write site was not found this pass** (searched literal `$48F` writes across
-the whole image; a `BCHG.B #2,$48F(A0)` hit at `+0x2492E` did not survive
-re-inspection — that address falls inside a misaligned data run in a linear
-disassembly and disappears once decoded from its real instruction boundary,
-so it is **not** treated as a finding here).
+horizontal mirror`) but applied here as one flag for the whole row.
+
+> **Correction (2026-08-03, re-codebreaker) — the write site exists, it is
+> the `BCHG` at `+0x2492E` that two earlier passes rejected, and the flag is
+> *not* facing-derived.**
+>
+> Both earlier rejections turned on the same wrong premise: that `+0x2492E`
+> sits inside a misaligned data run. It does not. The instruction *before*
+> it, at `+0x2492A`, is `MOVEA.L $2099E(pc),A0` — a load of the graphics
+> kernel's own globals-frame pointer, the very same slot the `A5` helper at
+> `+0x2030E` reads. A PC-relative displacement that resolves exactly onto
+> the frame-pointer slot is an alignment anchor no misaligned data run can
+> fake, and it makes `A0` an alias of `A5` for the next three instructions.
+> The premise that "every `$xx(A5)` reference in `+0x1D000…+0x27000` uses
+> the `A5` helper" was the trap: the frame pointer is loaded **54** times
+> across the image — 26 into `A0`, 5 into `A1`, 22 into `A5` — so a write
+> through `A0` was always in scope and was never a data artefact.
+
+##### `ViewpointChanged` (S_1 `+0x2492A` … `+0x24948`) — the write site, confirmed
+
+```asm
+2492A  MOVEA.L $2099E(pc),A0        ; A0 = the graphics-kernel globals frame (== A5)
+2492E  BCHG    #2,$48F(A0)          ; ← the ONLY write to $48F anywhere: a pure TOGGLE
+24934  MOVE.B  #1,$523(A0)          ; "viewpoint moved" one-shot, consumed at +0x1EA32
+2493A  MOVE.W  $496(A0),D0
+2493E  SUBQ.W  #2,D0
+24940  BPL.B   $24944
+24942  MOVEQ   #$10,D0              ; wrap 16 → 14 → … → 0 → 16
+24944  MOVE.W  D0,$496(A0)          ; ambient animation phase, copied to $494(A5) at +0x24AAE
+24948  RTS
+```
+
+**Why `A0` here is provably the `A5` frame** — three independent
+cross-confirmations, each a field written through `A0` in this function and
+read through `A5` elsewhere in the graphics kernel:
+
+| Field | Written via `A0` | Read/cleared via `A5` |
+|-------|------------------|------------------------|
+| `$496` | `+0x2493A`, `+0x24944` | `CLR.W $496(A5)` `+0x20372`; `MOVE.W $496(A5),$494(A5)` `+0x24AAE` |
+| `$523` | `+0x24934` | `CLR.B $523(A5)` `+0x1DF4E`; `TST.B`/`CLR.B` `+0x1EA32`/`+0x1EA38` |
+| `$48F` | `+0x2492E` | the 7 `TST.B $48F(A5)` read sites |
+
+**Initial value = 0, confirmed twice.** The frame is
+`AllocMem($52C, MEMF_CLEAR)` at `+0x1DAE4`–`+0x1DB04` (`MOVE.L #$52C,D0` /
+`MOVE.L #$10000,D1` / `JSR -$C6(A6)`, result stored to the slot at
+`+0x2099E`), and the graphics-kernel init additionally does
+`CLR.W $48E(A5)` at `+0x20342`, whose word clears bytes `$48E` **and**
+`$48F`.
+
+**Root-based negative — no other write exists** (this is a proof by
+addressing root, not a shape search; cf.
+`negative-from-addressing-root-not-shapes.md`):
+
+1. The frame pointer is only ever obtained from the slot at `+0x2099E`.
+   Exhaustive scan of every `(d16,PC)` addressing mode in the image: **54**
+   loads resolve there (`A0`×26, `A1`×5, `A5`×22, plus the allocator's own
+   `LEA` at `+0x1DAFE`). Zero absolute (`.l`) references to the slot's
+   runtime address exist anywhere in the file.
+2. Any `d16(An)` access to byte `$48F` must carry the literal extension
+   word `048F`. Census: **8** even-aligned occurrences — 7 `TST.B` reads,
+   1 the `BCHG` above. Any wider access covering `$48F` must carry `048E`
+   (word) or `048C` (long). Census: `048C` **0** occurrences; `048E` **2**,
+   one being the init `CLR.W $48E(A5)`, the other (`+0x1E6BA`) inside a
+   data table that begins immediately after the `RTS` at `+0x1E6A6`.
+3. Re-basing: every `LEA (d16,A5),An` in the image (23 sites) was
+   enumerated and the residual displacement that would reach `$48F`
+   computed for each — `$3DF`, `$413`, `$379`, `$357`, `$3FB` have **zero**
+   even-aligned occurrences anywhere in the file, `$337`'s 4 hits are all
+   inside the `+0x1E310` data table, and none of `$21`'s 18 hits is a
+   `d16(An)` write.
+
+##### The runtime condition — map-square bit `0x20000000`, **not** facing
+
+`+0x2492A` is called by exactly **11** `JSR $A4982.l` sites, all in game
+logic: `+0x02E7E`, `+0x06C36`, `+0x0C3EA`, `+0x0CA5C`, `+0x0CD16`,
+`+0x10632`, `+0x10792`, `+0x16DEA`, `+0x16EB0`, `+0x16EE8`, `+0x16F54`.
+Every one is a "the party's viewpoint moved to a new square" event and every
+one is immediately followed by a viewport redraw.
+
+The **ordinary walk path** is `MoveParty` at S_1 `+0x16CC4`
+(`$1744(A4)` = facing, + the relative-direction argument at `$8(A5)`,
+masked to 0-3; `JSR $8030C.l` advances `$1742`/`$1740` by one square through
+pointers — which is why a `MOVE.W Dn,$1742(A4)` census does not see it).
+Its success tail at `+0x16F0A` gates the toggle:
+
+```asm
+16F0A  ; old square (D4=row, D3=col) longword & $20000000   → D0
+16F28  ; new square ($1740, $1742)   longword & $20000000   → D1
+16F4A  CMP.L   D1,D0
+16F4C  BEQ.B   $16F70          ; bit unchanged → redraw only, NO toggle
+16F4E  TST.W   $1754(A4)
+16F52  BNE.B   $16F70
+16F54  JSR     $A4982.l        ; ← toggle
+```
+
+So on a normal step the flag flips **only when map-cell bit 29
+(`0x20000000`) differs between the square left and the square entered**.
+`0x20000000` has exactly **two** consumers in the whole S_1 image — the two
+`ANDI.L` instructions above; there is no third reader.
+
+Bit 29 is bit 1 of the on-disk square's **type nibble** (the same nibble
+whose bit 30 is the already-documented "spell-failed" flag and whose bit 31
+drives the `$1E60(A4)` accent ramp). Measured across all 13 maps via
+`bclib.bcdfs.walk_all`: type nibble values `{0, 1, 2, 4, 8, 9}`, and bit 29
+is set on **100 of 14,168 squares (0.71%)**, confined to maps 2 (3), 3 (77),
+4 (18) and 5 (2). Since the flag starts at 0 and the walk path toggles it
+exactly when bit 29 changes, `$48F != 0` ⟺ the party stands on a bit-29
+square (**hypothesis**, up to a per-level constant — the other 10 call sites
+toggle unconditionally and could in principle desynchronise the phase).
+
+##### What the two tables actually differ in — confirmed byte-exact
+
+`+0x2304A` is definitively the horizontal-mirror blitter: its inner loop
+(`+0x23074`–`+0x23096`) writes `-(A3)` (right-to-left) and passes every byte
+through the table at `+0x279C0`, which is **256/256 exact `bit_reverse(index)`**.
+
+Front-wall table pairs (9 × 20 B, record index = `depth*3 + (lateral+1)`,
+`lateral -1` = party's left):
+
+| Records | `+0x22CE2` (flag ≠ 0) | `+0x22D96` (flag = 0) |
+|---------|------------------------|------------------------|
+| 0 / 3 / 6 (left) | src `wallN-left` | src `wallN-right` |
+| 1 / 4 / 7 (centre) | src `wallN-face` | src `wallN-face` (byte-identical) |
+| 2 / 5 / 8 (right) | src `wallN-right` | src `wallN-left` |
+
+— i.e. the two tables are the same records with the left/right **source**
+offsets swapped and identical destinations; combined with the draw routine
+(`+0x2300A` direct vs `+0x2304A` mirrored) the two states are exact
+horizontal reflections of one another across the 208-px viewport (the
+destination spans are symmetric about x = 104: 0-16 / 16-192 / 192-208).
+The side-wall tables agree: `+0x22F2A` is `+0x22E4A` with each depth's
+left/right source swapped **and** `flags` word `+0x16` set to `0x0400`
+(the documented bit-10 horizontal-mirror bit) in all 8 records, clear in
+all 8 of `+0x22E4A`.
+
+**The two states are not visually equivalent.** `wallN-left` is not the
+mirror of `wallN-right`: decoding both from slot `$B0` and comparing
+pixel-for-pixel gives 53.86 % / 55.98 % / 58.94 % agreement for wall0 /
+wall1 / wall2 against the flipped partner — noise level for 6-bit indexed
+art, not a match. The flag genuinely selects different pixels.
+
+> **Consequence for `slots.json` — a real handedness bug.**
+> `scripts/export_dungeon_slots.py` reads `FRONT_TABLE_OFFSET = 0x22CE2`
+> (the **flag ≠ 0** branch, drawn unmirrored) but
+> `SIDE_TABLE_OFFSET = 0x22E4A` (the **flag = 0** branch). The exported
+> view therefore mixes the two mirror states: its front-wall row is
+> horizontally reflected relative to its own side walls. Since flag = 0 is
+> the default for 99.3 % of squares, the **side walls are right and the
+> front-wall row is wrong**. The default-state front row is
+> `+0x22D96` drawn mirrored — equivalently, in `slots.json` terms:
+> `front:-1:d` ← frame `wallD-right` with `mirrorX: true`, `front:0:d` ←
+> `wallD-face` with `mirrorX: true`, `front:1:d` ← `wallD-left` with
+> `mirrorX: true`, destinations unchanged.
 
 #### `DrawSquareRecord` (S_1 `+0x220F0`) — the per-square corridor renderer, confirmed
 
@@ -6981,7 +7128,7 @@ screenshot oracle was set up"), not evidence against the layout. Classified
 | `$51A(A5)` — the door-family position variant | Read by the door frame (`+0x25CAE`), door leaf (`+0x2613E`), door lock (`+0x25DA0`) and door switch (`+0x25F9E`/`+0x26100`); when nonzero each adds `+0x24` to its position table, which uniformly changes the sprite's `y` to 40 at every depth. Almost certainly "this doorway square also carries a door frame, so raise the fitting" — **not verified**, and no write site was searched for. |
 | ~~Kinds 0–3: the `dir == 3` (`+0x25E12` / `+0x26070`) position tables look unreachable~~ | **SOLVED — they are genuinely unreachable, and the reason is an off-by-one in the engine's own `kind → side` dispatch, not a gap in the reachability argument.** `kind == 3` is structurally impossible for types `0x22`/`0x0F` from *either* through-corridor facing, and the physically-left wall arrives as `kind == 0`, which `+0x02A0E` discards. The old row's arithmetic was also wrong: `kind == 2` is *not* forced — `kind ∈ {0, 2}` in an exact 50/50 split. See "Kind 3 and the left-wall position tables" above for the full derivation, the 504-combination sweep and the in-game fixture. |
 | ~~`DrawDoorAtDepth`'s `$02(a2)` — depth, or party-relative direction?~~ | **SOLVED — party-relative direction.** See the corrected blockquote above "Kind 11" — an exhaustive whole-image caller scan found exactly one caller (`DispatchSquareObject` `+0x027B6`), which always passes the rebased direction `D3`, never a depth. |
-| `A5+$48F` mirror-flag write site | Still not found. Re-checked this pass over a resynced recursive-descent disassembly: all 6 references (`+0x21750`, `+0x22C8E`, `+0x22CC2`, `+0x230B6`, `+0x230FE`, `+0x250AE`) are `TST.B` reads; no write site anywhere in the decoded stream. `DrawViewport` does not touch it, so it is set outside the viewport pipeline. |
+| ~~`A5+$48F` mirror-flag write site~~ | **SOLVED — `BCHG #2,$48F(A0)` at S_1 `+0x2492E`, the candidate two prior passes rejected.** `A0` is loaded from the frame-pointer slot at `+0x2492A`, which both proves the instruction boundary and aliases `A0` to `A5`. The flag is a **pure toggle**, initial value 0 (`AllocMem(…,MEMF_CLEAR)` + `CLR.W $48E(A5)`), flipped by 11 "viewpoint moved" call sites; on the ordinary walk path it fires only when map-square bit `0x20000000` differs between the square left and the square entered. **Refuted premise: the flag is not facing-derived.** Root-based negative now backs the "only one write" claim (54 frame-pointer loads enumerated, all `048C`/`048E`/`048F` displacements censused, all 23 `LEA (d16,A5),An` re-basings checked). See "`ViewpointChanged` (S_1 `+0x2492A`)" above. |
 | A genuine 4-entry facing-indexed (`0=N,1=E,2=S,3=W`-shaped) jump table *does* exist, at S_1 `+0x1EB2A` | **Traced and it is not the wall/floor render dispatch.** It's driven by comparing a cached facing byte `$4DE(A5)` against a live one `$4DF(A5)` (`+0x1EA18`) and, on change, jumps through 4 `BRA.W` trampolines to handlers at `+0x1EB3A/1EB50/1EB56/1EB5C`, each of which writes a run of `WAIT`/colour words into a *different* copper list (`$4E2(A5)`) with a per-handler step size — a **per-facing ambient torchlight colour-gradient effect**, not viewport compositing. This *is* a real, disassembly-confirmed direction dispatch in the graphics kernel — it just isn't the one the old (already-retracted) `AGENTS.md` "Direction Dispatch" note was describing, and it should not be re-chased as the wall-selection loop. |
 
 ---
@@ -9560,6 +9707,120 @@ TypeScript runtime validators (shelled out via `npx tsx`, not a hand-ported
 reimplementation of the validation rules) and checks every unit's planes
 densify to exactly 4,096 elements. `python3 scripts/verify_dungeon_export.py`
 reports `OVERALL: PASS`.
+
+#### `scripts/export_dungeon_props.py` → M5 prop placement tables (confirmed)
+
+Fresh disassembly this pass (not transcribed from `walker-plan.md`'s summary
+prose, which undercounts/mislabels a couple of these — corrected below) of
+all seven non-wall structure classes' placement/geometry tables the walker
+plan flagged as located-but-untranscribed. Full field-level derivation,
+register traces and the exact byte layout of every table are in the
+script's own module docstring (`scripts/export_dungeon_props.py` — this
+section is the summary; that docstring is the primary source). All
+addresses are decompressed `bcdft` S_1 offsets.
+
+**The shared 18-byte descriptor pool (`+0x1D9E6`).** Alcove (`+0x24F60`),
+Plaque (`+0x250C0`) and Stairs (`+0x251FE`) turn out to be three different
+*index* tables into the **same** pool of 18-byte descriptors — all three
+renderers do `LEA 0x1d9e6(pc),a0` before adding their own index table's
+fetched byte offset. `walker-plan.md`'s "stairs uses a third record format"
+was a false distinction: it is byte-for-byte the already-documented 18-byte
+"opaque 6-plane copier" shape (`+0x24F0A`).
+
+| Class | Index table | Formula | Entries | Result |
+|---|---|---|---|---|
+| Alcove (`0x16`) | `+0x24F90`, 36 words | `depth*24 + (lateral+1)*8 + dir*2`; `depth∈{0,1,2}`, `lateral∈{-1,0,1}`, `dir∈{0,1,2,3}` | 3×3×4=36 | **11/36 nonzero** — matches the already-documented "11/11 descriptors" exactly. 9 full-width (emitted), 2 horizontally-clipped angled views (verified resolvable against `bcdfxyz.SUB_IMAGES`, not emitted — see "Still open") |
+| Plaque (`0x20`/`0x21`) | `+0x250F0`, 36 words | identical formula, same pool | 3×3×4=36 | **11/36 nonzero**, 9 emitted + 2 clipped, same shape as alcove |
+| Stairs (`0x12` sub 2/3) | `+0x25232`, 9 words | `depth*6 + (lateral+1)*2`; flight B = fetched value **+ 0x7E** (126 = 7×18, i.e. flight B's pool records sit exactly 7 records after flight A's — not a second table) | 3×3=9, ×2 flights=18 | **14/18** full-width (10 emitted + 4 clipped) — matches the already-documented "14/14 descriptors" |
+
+**Door lock (`0x22`) / door switch (`0x0F`, drawn as the Pull Chain)** — a
+different, self-contained 9-entry×4-byte `(destX, destY)` i16 word-pair
+position table, `byteOffset = (depth-1)*12 + (lateral+1)*4`, `depth∈{1,2,3}`
+(local 0-2), `lateral∈{-1,0,1}`; `destY < 0` (`0xFFFF` on disk) is the game's
+own "nothing here" sentinel (confirmed: `TST.W`/`BMI` on exactly that field,
+nothing else). Two independent doublings: `side` (0 → `+0x25E12`/`+0x26070`;
+1 → `+0x25E5A`/`+0x260B8`, exactly `0x48`=72 B later) and the still-open
+`$51A(A5)` variant (+0x24=36 B further into the same side's block, confirmed
+this pass to uniformly force `destY=40` — matching the existing "$51A(A5)"
+row in "Still open"). **Only `side=1` is ever reachable** — "Kind 3 and the
+left-wall position tables" above already proved this for the whole
+kind-0-3 dispatch; the `(158,52)`/`(34,52)` values this pass re-read at
+`depth-local=0,lateral=0` for door lock match that section's own citation
+exactly, an independent confirmation of both the table address and the
+kind-3 finding. Door lock's own 28-byte descriptor pool (`+0x25EA2`, index
+`(gfx-0x51)*0x54 + (depth-1)*0x1C`) still passes all three self-validating
+invariants **9/9**, resolving to the per-map `bcdfb`-`bcdfn` wall-decoration
+block (`m{mapId}_decor{gfxIndex}_{near|mid|far}` in the already-extracted
+`sprites/wall-decorations.json`) — confirmed by re-checking geometry
+(16×20/16×15/16×11) against `extract_bcdfbn_decor.py`'s own `SIZES` table.
+Door switch's pool (`+0x26000`, `depth*0x1C`, 3 local depths reachable)
+resolves to `pull-chain-1/2/3` (src 532/882/1148) — `pull-chain-0` (src 0,
+the longest chain) is never indexed by this local-depth range, structurally
+the same "table sized bigger than what's reachable" pattern as `kind==3`.
+
+**Floor plate / trap (`0x1E`)** — the *same* single 28-byte descriptor
+redrawn at up to 13 ("near", local depth 0) or 11 ("far", depth≠0) fixed
+grid positions: **unsigned-byte** (not signed — 3 near-table values read
+negative as `i8`, e.g. `-128/-123/-114`, and land exactly at plausible
+in-viewport `u8` values `128/133/142`) `(x, y)` pairs at `+0x21788` (near,
+direct), `+0x217A2` (near, `$48F(A5)`-mirrored — confirmed, the code
+re-checks the mirror flag here) and `+0x217BC` (far, **no** mirror check —
+the far case always draws the same table regardless of facing, a genuine
+asymmetry with the near case). `pressed` selects between two descriptor
+pools per distance (`+0x217D2`/`+0x217EE` near, `+0x2180A`/`+0x21826` far).
+**4/4 descriptor invariants pass and all 13+13+11 positions land inside the
+208×140 viewport** — but the descriptors' `slot` field resolves to
+graphics-kernel slot `$00`, already flagged in "Still open" above as a
+third, unidentified pixel buffer. Geometry confirmed; **no art**, so no
+slot is emitted (`blackcrypt-floorplate-art-source` below).
+
+**Floor-item placement** (the generic kind-8/9/0-3-default renderer,
+`+0x218FA`/`+0x21C84`) needs three more tables beyond the already-extracted
+147×10-byte sprite-geometry table (`+0x271B6`) and its `+0x26FDE`
+gfx→group selector (already `data/floor-item-gfx-table.json`): a 9-entry
+`(depth,lateral)` **anchor** table (`+0x21992`, same 4-byte word-pair shape
+as the door lock/switch tables, no "none" check in the consumer), a
+49-group×3-depth **registration** table (`+0x27774`, `group*12 + depth*4`,
+**147/147 valid** — the item's own on-screen offset, *subtracted* from the
+anchor), and a 9-entry **scatter** table (`+0x220CC`, applied only at
+`depth==0`, cycling a global counter `$498(A5)` 8→0). All three decoded and
+verified (anchor 9/9, registration 147/147, scatter 9/9); not wired into
+`buildViewList` this pass (`blackcrypt-floor-item-placement` below).
+
+**Verification summary — invariant pass/fail per class:**
+
+| Class | Invariant | Result |
+|---|---|---|
+| Alcove | pool descriptor resolves to a named `bcdfxyz.SUB_IMAGES` entry (or a known loader-generated mirror), dest inside 208×140 viewport | **11/11 resolve** (9 full-width emitted, 2 clipped verified-not-emitted); 0 out-of-viewport |
+| Plaque | same | **11/11 resolve**, same 9+2 split |
+| Stairs | same, ×2 flights (9 positions × flight A/B) | **14/18 resolve** (10 emitted + 4 clipped); 4 index entries are 0 (no stairs at that depth/lateral) |
+| Door lock | `bytesPerPlane`/`BLTSIZE`/`modulo` invariants (28-byte descriptor); geometry matches per-level decor block's own `SIZES` | **9/9 pass** |
+| Door switch | same three invariants; resolves to a named `SUB_IMAGES` entry | **3/3 pass** |
+| Floor plate/trap | same three invariants (×4 pool descriptors); all positions in-viewport | **4/4 pass**; art source still open |
+| Floor-item anchor/registration/scatter | table fully decoded at its documented address/stride | **9/9, 147/147, 9/9** |
+
+**`@seer/dungeon` wiring** (`buildViewList.ts`): alcove, plaque, stairs and
+door-switch render as static, view-geometry-keyed `prop:*` slots — exactly
+like the walls, since (as with the walls) the pixels never depend on which
+specific structure record it is, only on `(depth, lateral, ...)`. Gating,
+all re-derived from disassembly: alcove/plaque need a single-wall square
+(`wallMask`'s high nibble exactly one bit) and `dir = (wallDir - facing -
+1) & 3` (`+0x02806`'s own formula); stairs is free-standing, flight chosen
+from the entity's own sub-kind word (`raw[0x10:0x12]`); door-switch is
+wall-mounted but (per the confirmed kind-3 off-by-one) only ever drawn on
+the wall `rightOf(facing)`, tested via `raw[0x07]`'s bit for that wall
+rather than `wallMask`. Door-lock, floor-plate and floor-item are decoded
+and verified but not wired — see "Still open" below and
+`docs/blackcrypt/TODO.md`.
+
+##### Still open (M5)
+
+| Item | Best current result |
+|---|---|
+| Door-lock rendering | Position table + pool fully decoded and verified (9/9); not wired into `buildViewList` — its art is per-map (`wall-decorations` bank, frame `m{mapId}_decor{gfxIndex}_{near\|mid\|far}`), needing the pose's own `LevelUnit.id` threaded into the frame name at render time rather than a static atlas frame, which the current `Slot`/`PieceDraw` model doesn't support without a template mechanism |
+| Floor-plate/trap art source | Geometry (13/13/11 grid positions, 4/4 descriptor invariants) confirmed; pixel source is graphics-kernel slot `$00`, not present in the `bcdfx`/`bcdfy`/`bcdfz` tileset inventory and not a hole in the floor-item bank — genuinely unidentified (pre-existing open item, re-confirmed this pass, not solved) |
+| Floor-item placement | Anchor/registration/scatter tables (9/9, 147/147, 9/9) fully decoded; not wired into `buildViewList` — needs the entity's own `gfxNumber` threaded through gfx→group (`+0x26FDE`) → sprite frame (`floor{group:02d}-d{depth}`) → registration offset, more machinery than the other four classes needed |
+| Alcove/Plaque/Stairs clipped (angled) descriptors | 2+2+4=8 pool descriptors resolve to a known `(slot, src)` sub-image at a **narrower** width than that sub-image's full geometry (an angled, non-dead-ahead view horizontally cropping the art via the 18-byte format's `srcAdvance`/`extraSrcOffset` fields) — verified resolvable (not a decode error) but the crop *origin* (which edge) wasn't derived this pass, so these 8 combinations render nothing rather than a guessed-wrong crop |
 
 ---
 
