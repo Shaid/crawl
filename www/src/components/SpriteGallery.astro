@@ -73,15 +73,28 @@ const HOVER_PAIRS: Record<string, string> =
 				),
 				[frameKey(69)]: frameKey(70), // FIRE WAND
 				[frameKey(98)]: frameKey(99), // STORM WAND
+				[frameKey(131)]: frameKey(132), // SCROLL OF DISPELLING
 			}
 		: {};
 
 // The water skin is a three-state item (full / half / empty) rather than a
 // dim/activated pair, so it doesn't fit HOVER_PAIRS -- it's a small click
-// easter egg instead: each click pours out one step, and it stays empty
-// once it is. Deliberately undocumented in the UI; it's meant to be found.
+// easter egg instead: each click advances one step and latches on the last
+// one. Deliberately undocumented in the UI; it's meant to be found. A
+// handful of two-state consumables/containers get the same treatment.
 const CLICK_CHAINS: Record<string, string[]> =
-	names === 'items' ? { [frameKey(133)]: [frameKey(133), frameKey(134), frameKey(135)] } : {};
+	names === 'items'
+		? {
+				[frameKey(133)]: [frameKey(133), frameKey(134), frameKey(135)], // WATER SKIN
+				[frameKey(13)]: [frameKey(13), frameKey(14)], // QUIVER
+				[frameKey(24)]: [frameKey(24), frameKey(25)], // CHEESE
+				[frameKey(26)]: [frameKey(26), frameKey(27)], // APPLE
+				[frameKey(28)]: [frameKey(28), frameKey(29)], // MEAT
+				[frameKey(30)]: [frameKey(30), frameKey(31)], // BACKPACK
+				[frameKey(32)]: [frameKey(32), frameKey(33)], // HOLDING BAG
+				[frameKey(129)]: [frameKey(129), frameKey(130)], // COFFER
+			}
+		: {};
 
 const hiddenFrameNames = new Set([
 	...Object.values(HOVER_PAIRS),
