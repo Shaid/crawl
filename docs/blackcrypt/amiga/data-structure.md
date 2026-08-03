@@ -4,7 +4,12 @@
 
 Black Crypt (1992, Raven Software / Electronic Arts) is a first-person dungeon
 crawler for the Amiga. It uses the Amiga's EHB (Extra Half-Brite) display mode
-(6 bitplanes, 64 colors) and supports anaglyph 3D glasses.
+(6 bitplanes, 64 colors).
+
+> **Correction —** this section previously also claimed the game "supports
+> anaglyph 3D glasses." No evidence for that claim has ever been found in the
+> disassembly, the extracted data, or any consulted source — it appears to
+> have been an unfounded detail with no basis, and has been removed.
 
 The game files are stored in a flat directory of 26 files named `bcdfa`–`bcdfz`,
 alongside the main executable `BlackCrypt` and a small `configuration.dat`.
