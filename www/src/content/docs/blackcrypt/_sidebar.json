@@ -1,0 +1,71 @@
+[
+	{
+		"label": "Black Crypt",
+		"items": [
+			{ "label": "Home", "slug": "blackcrypt" },
+			{ "label": "Status & Open Work", "slug": "blackcrypt/status" }
+		]
+	},
+	{
+		"label": "The Game",
+		"items": [
+			{ "label": "Overview", "slug": "blackcrypt/game/overview" },
+			{ "label": "File Inventory", "slug": "blackcrypt/game/file-inventory" },
+			{ "label": "Disk Layout", "slug": "blackcrypt/game/disk-layout" }
+		]
+	},
+	{
+		"label": "Graphics Foundations",
+		"items": [
+			{ "label": "Display & Bitplanes", "slug": "blackcrypt/graphics/display" },
+			{ "label": "Blitter & Minterms", "slug": "blackcrypt/graphics/blitter" },
+			{ "label": "Palettes & Accent Ramps", "slug": "blackcrypt/graphics/palettes" }
+		]
+	},
+	{
+		"label": "File Formats",
+		"items": [
+			{ "label": "bcdfa — The Big Container", "slug": "blackcrypt/files/bcdfa" },
+			{ "label": "bcdfb–bcdfn — Monster Sprites", "slug": "blackcrypt/files/bcdfb-n" },
+			{ "label": "bcdfx/bcdfy/bcdfz — Tilesets", "slug": "blackcrypt/files/bcdfxyz" },
+			{ "label": "bcdfs — Map / Dungeon Data", "slug": "blackcrypt/files/bcdfs" },
+			{ "label": "bcdft — Data Carrier (LZ77)", "slug": "blackcrypt/files/bcdft" },
+			{ "label": "bcdfv — Ending Sequence", "slug": "blackcrypt/files/bcdfv" },
+			{ "label": "bcdfr — Full-Screen Images", "slug": "blackcrypt/files/bcdfr" },
+			{ "label": "bcdfo — Portraits & UI", "slug": "blackcrypt/files/bcdfo" },
+			{ "label": "bcdfq — Intro & Music", "slug": "blackcrypt/files/bcdfq" },
+			{ "label": "bcdfu — RLE & Epilogue", "slug": "blackcrypt/files/bcdfu" },
+			{ "label": "bcdfp — Game Logic", "slug": "blackcrypt/files/bcdfp" }
+		]
+	},
+	{
+		"label": "Sound & Music",
+		"items": [
+			{ "label": "8SVX Samples", "slug": "blackcrypt/sound/8svx" },
+			{ "label": "OctaMED Modules", "slug": "blackcrypt/sound/octamed" }
+		]
+	},
+	{
+		"label": "DOS Version",
+		"items": [
+			{ "label": "Overview", "slug": "blackcrypt/dos/overview" },
+			{ "label": "clipper.clp Archive", "slug": "blackcrypt/dos/clipper" },
+			{ "label": "Cross-Platform Comparison", "slug": "blackcrypt/dos/comparison" }
+		]
+	},
+	{
+		"label": "Extracted Assets",
+		"items": [
+			{ "label": "Screens", "slug": "blackcrypt/assets/screens" },
+			{ "label": "Sprites", "slug": "blackcrypt/assets/sprites" },
+			{ "label": "Monster Gallery", "slug": "blackcrypt/assets/monster-gallery" },
+			{ "label": "Item Gallery", "slug": "blackcrypt/assets/item-gallery" },
+			{ "label": "Floor Item Gallery", "slug": "blackcrypt/assets/floor-item-gallery" },
+			{ "label": "Spell Effects Gallery", "slug": "blackcrypt/assets/effect-gallery" },
+			{ "label": "Portrait Gallery", "slug": "blackcrypt/assets/portrait-gallery" },
+			{ "label": "Other Sprite Galleries", "slug": "blackcrypt/assets/other-sprite-galleries" },
+			{ "label": "Dungeon Textures", "slug": "blackcrypt/assets/textures" },
+			{ "label": "Palettes", "slug": "blackcrypt/assets/palettes" }
+		]
+	}
+]

@@ -1,0 +1,17 @@
+@font-face {
+	font-family: 'Black Crypt Big';
+	src: url('/fonts/black-crypt-big.woff2') format('woff2'),
+		url('/fonts/black-crypt-big.ttf') format('truetype');
+	font-display: block;
+}
+
+.pixel-wordmark {
+	color: #8cff3f;
+	font-family: 'Black Crypt Big', monospace;
+	font-size: clamp(1.5rem, 5vw, 3rem);
+	letter-spacing: 0.12em;
+	line-height: 1;
+	margin: 1.5rem 0;
+	text-align: center;
+	text-shadow: 0 0 0.8rem rgb(140 255 63 / 35%);
+}

@@ -1,0 +1,152 @@
+---
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+interface SpriteFrame {
+	name: string;
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
+interface SpriteManifest {
+	width: number;
+	height: number;
+	frames: SpriteFrame[];
+}
+
+interface Props {
+	manifest: string;
+	names?: 'monsters' | 'items';
+	label?: string;
+}
+
+const { manifest, names, label = 'sprite' } = Astro.props;
+const assetRoot = resolve(process.cwd(), '..', 'public', 'assets', 'blackcrypt', 'amiga');
+const manifestPath = resolve(assetRoot, 'sprites', `${manifest}.json`);
+const spriteManifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as SpriteManifest;
+const imagePath = `/assets/blackcrypt/amiga/sprites/${manifest}.png`;
+
+const labels = new Map<string, { visible: string; hover?: string }>();
+if (names === 'monsters') {
+	const monsterData = JSON.parse(
+		readFileSync(resolve(assetRoot, 'data', 'monster-names.json'), 'utf8'),
+	) as { groups: Array<{ name: string; frames: string[] }> };
+	for (const group of monsterData.groups) {
+		for (const frame of group.frames) labels.set(frame, { visible: group.name });
+	}
+}
+if (names === 'items') {
+	const itemData = JSON.parse(
+		readFileSync(resolve(assetRoot, 'data', 'item-names.json'), 'utf8'),
+	) as { catalog: Array<{ iconIndex: number; names: string[] }> };
+	for (const item of itemData.catalog) {
+		labels.set(`item${String(item.iconIndex).padStart(3, '0')}`, {
+			visible: item.names[0] ?? `item${String(item.iconIndex).padStart(3, '0')}`,
+			hover: item.names.slice(1).join(' / ') || undefined,
+		});
+	}
+}
+
+const galleryId = `sprite-gallery-${manifest}`;
+const searchId = `${galleryId}-search`;
+---
+
+<div class="gallery-toolbar">
+	<label for={searchId}>Filter {label}s</label>
+	<input id={searchId} data-sprite-search={manifest} type="search" placeholder={`Search ${label}s`} />
+	<span>{spriteManifest.frames.length} frames</span>
+</div>
+
+<div id={galleryId} class="sprite-gallery" data-sprite-gallery={manifest}>
+	{spriteManifest.frames.map((frame, index) => {
+		const frameInfo = labels.get(frame.name);
+		const frameLabel = frameInfo?.visible ?? frame.name;
+		const hoverLabel = frameInfo?.hover;
+		const scale = Math.min(3, 160 / frame.w, 160 / frame.h);
+		const width = Math.max(1, Math.round(frame.w * scale));
+		const height = Math.max(1, Math.round(frame.h * scale));
+		const searchText = `${frameLabel} ${frame.name} ${index + 1}`.toLowerCase();
+		return (
+			<article class="sprite-card" data-sprite-card={manifest} data-search={searchText}>
+				<div
+					class="sprite-stage"
+					style={`width:${width}px;height:${height}px;background-image:url('${imagePath}');background-size:${Math.round(spriteManifest.width * scale)}px ${Math.round(spriteManifest.height * scale)}px;background-position:-${Math.round(frame.x * scale)}px -${Math.round(frame.y * scale)}px;`}
+					role="img"
+					aria-label={frameLabel}
+				></div>
+				<strong title={hoverLabel}>{frameLabel}</strong>
+				<small>#{String(index + 1).padStart(3, '0')} · {frame.w}×{frame.h}</small>
+			</article>
+		);
+	})}
+</div>
+
+<script define:vars={{ manifest }}>
+	const input = document.querySelector(`[data-sprite-search="${manifest}"]`);
+	const cards = [...document.querySelectorAll(`[data-sprite-card="${manifest}"]`)];
+	input?.addEventListener('input', (event) => {
+		const query = event.target.value.trim().toLowerCase();
+		for (const card of cards) card.hidden = query !== '' && !card.dataset.search.includes(query);
+	});
+</script>
+
+<style>
+	.gallery-toolbar {
+		align-items: center;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin: 1.5rem 0 1rem;
+	}
+	.gallery-toolbar label {
+		font-weight: 600;
+	}
+	.gallery-toolbar input {
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.35rem;
+		font: inherit;
+		min-width: min(20rem, 100%);
+		padding: 0.45rem 0.65rem;
+	}
+	.gallery-toolbar span {
+		color: var(--sl-color-gray-3);
+		font-size: 0.9rem;
+	}
+	.sprite-gallery {
+		display: grid;
+		gap: 0.8rem;
+		grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+	}
+	.sprite-card {
+		align-items: center;
+		background: var(--sl-color-gray-6);
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.45rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		min-height: 9rem;
+		padding: 0.75rem 0.45rem;
+		text-align: center;
+	}
+	.sprite-card[hidden] {
+		display: none;
+	}
+	.sprite-stage {
+		background-repeat: no-repeat;
+		image-rendering: pixelated;
+		margin: auto;
+	}
+	.sprite-card strong {
+		font-size: 0.78rem;
+		line-height: 1.15;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+	}
+	.sprite-card small {
+		color: var(--sl-color-gray-3);
+		font-size: 0.7rem;
+	}
+</style>

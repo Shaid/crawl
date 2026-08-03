@@ -1,0 +1,73 @@
+---
+title: Black Crypt — Data Formats
+description: A human-readable guide to the internal file formats of Black Crypt (1992).
+template: splash
+hero:
+  tagline: A reverse-engineering field guide to the data formats of Black Crypt, the 1992 Amiga dungeon crawler from Raven Software / Electronic Arts.
+  actions:
+    - text: Start reading
+      link: /blackcrypt/game/overview/
+      icon: right-arrow
+    - text: See the extracted assets
+      link: /blackcrypt/assets/screens/
+      icon: external
+    - text: Open work
+      link: /blackcrypt/status/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+This site is a curated, human-readable companion to the raw reverse-engineering
+notes in the repo's `docs/blackcrypt/`. It documents how the game stores its
+graphics, maps, sound, music and code — the `bcdf*` file formats, the Amiga's
+EHB display mode, the palette system, and how the Windows port differs.
+
+Everything here is derived from byte-level analysis of the original game files,
+cross-checked against emulator savestates and the DOS port. Where a format is
+fully solved, this site says so and links to the evidence.
+
+<CardGrid>
+	<Card title="The game" icon="rocket">
+		How the 26 `bcdfa`–`bcdfz` files fit together, what ships on each disk, and
+		how the game loads them.
+		[Start here](/blackcrypt/game/overview/)
+	</Card>
+	<Card title="Graphics foundations" icon="image">
+		The Amiga's EHB display mode, planar bitplanes, the blitter and its
+		minterms, and the palette system.
+		[Read more](/blackcrypt/graphics/display/)
+	</Card>
+	<Card title="File formats" icon="document">
+		Every file format, one page each — from the big `bcdfa` container to the
+		map data in `bcdfs`.
+		[Read more](/blackcrypt/files/bcdfa/)
+	</Card>
+	<Card title="Extracted assets" icon="image">
+		Galleries of the sprites, screens, textures and palettes pulled out of the
+		game files.
+		[View assets](/blackcrypt/assets/screens/)
+	</Card>
+	<Card title="DOS version" icon="rocket">
+		The Windows VGA port's `clipper.clp` resource archive and how it maps to
+		the Amiga files.
+		[Read more](/blackcrypt/dos/overview/)
+	</Card>
+	<Card title="Status" icon="open-book">
+		What's solved, what's still open, and where to read the full evidence.
+		[See status](/blackcrypt/status/)
+	</Card>
+</CardGrid>
+
+## Source of truth
+
+The raw, exhaustive notes live in the repository:
+
+- `docs/blackcrypt/amiga/data-structure.md` — the Amiga formats (the primary source)
+- `docs/blackcrypt/dos/data-structure.md` — the Windows VGA formats
+- `docs/blackcrypt/TODO.md` — the single status surface for open work
+
+These pages are a curated summary. When they disagree with the raw notes, the
+raw notes win — they carry the full evidence, paths-tried tables, and
+corrections.

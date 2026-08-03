@@ -1,0 +1,147 @@
+---
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+interface SpriteFrame {
+	name: string;
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
+interface MonsterGroup {
+	name: string;
+	dungeonLevels: number[];
+	frames: string[];
+}
+
+const assetRoot = resolve(process.cwd(), '..', 'public', 'assets', 'blackcrypt', 'amiga');
+const manifest = JSON.parse(
+	readFileSync(resolve(assetRoot, 'sprites', 'monsters.json'), 'utf8'),
+) as { width: number; height: number; frames: SpriteFrame[] };
+const names = JSON.parse(
+	readFileSync(resolve(assetRoot, 'data', 'monster-names.json'), 'utf8'),
+) as { groups: MonsterGroup[] };
+const frames = new Map(manifest.frames.map((frame) => [frame.name, frame]));
+const imagePath = '/assets/blackcrypt/amiga/sprites/monsters.png';
+---
+
+<div class="gallery-toolbar">
+	<label for="monster-zoom-search">Filter monsters</label>
+	<input id="monster-zoom-search" data-monster-search type="search" placeholder="Search monsters" />
+	<span>{names.groups.length} monster groups · hover to pause</span>
+</div>
+
+<div class="monster-gallery" data-monster-gallery>
+	{names.groups.map((group) => {
+		const groupFrames = group.frames.map((name) => frames.get(name)).filter(Boolean) as SpriteFrame[];
+		const maxWidth = Math.max(...groupFrames.map((frame) => frame.w));
+		const maxHeight = Math.max(...groupFrames.map((frame) => frame.h));
+		const scale = Math.min(1.25, 180 / maxWidth, 180 / maxHeight);
+		const stageWidth = Math.round(maxWidth * scale);
+		const stageHeight = Math.round(maxHeight * scale);
+		const searchText = `${group.name} ${group.dungeonLevels.join(' ')}`.toLowerCase();
+		return (
+			<article class="monster-card" data-monster-card data-search={searchText}>
+				<div class="monster-stage" style={`width:${stageWidth}px;height:${stageHeight}px;`}>
+					{groupFrames.map((frame, index) => {
+						const width = Math.round(frame.w * scale);
+						const height = Math.round(frame.h * scale);
+						return (
+							<div
+								class:list={["zoom-frame", index === 0 && "active"]}
+								data-monster-frame
+								style={`width:${width}px;height:${height}px;left:${Math.round((stageWidth - width) / 2)}px;top:${Math.round((stageHeight - height) / 2)}px;background-image:url('${imagePath}');background-size:${Math.round(manifest.width * scale)}px ${Math.round(manifest.height * scale)}px;background-position:-${Math.round(frame.x * scale)}px -${Math.round(frame.y * scale)}px;`}
+								role="img"
+								aria-label={`${group.name}, zoom ${index + 1}`}
+							></div>
+						);
+					})}
+				</div>
+				<strong>{group.name}</strong>
+				<small>Levels {group.dungeonLevels.join(', ')} · {groupFrames.length} zoom frames</small>
+			</article>
+		);
+	})}
+</div>
+
+<script>
+	const gallery = document.querySelector('[data-monster-gallery]');
+	const search = document.querySelector('[data-monster-search]');
+
+	if (gallery) {
+		for (const card of gallery.querySelectorAll('[data-monster-card]')) {
+			const frames = [...card.querySelectorAll('[data-monster-frame]')];
+			let index = 0;
+			let timer = window.setInterval(() => {
+				frames[index].classList.remove('active');
+				index = (index + 1) % frames.length;
+				frames[index].classList.add('active');
+			}, 900);
+			card.addEventListener('mouseenter', () => window.clearInterval(timer));
+			card.addEventListener('mouseleave', () => {
+				timer = window.setInterval(() => {
+					frames[index].classList.remove('active');
+					index = (index + 1) % frames.length;
+					frames[index].classList.add('active');
+				}, 900);
+			});
+		}
+	}
+
+	search?.addEventListener('input', (event) => {
+		const query = event.target.value.trim().toLowerCase();
+		for (const card of gallery?.querySelectorAll('[data-monster-card]') ?? []) {
+			card.hidden = query !== '' && !card.dataset.search.includes(query);
+		}
+	});
+</script>
+
+<style>
+	.gallery-toolbar {
+		align-items: center;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin: 1.5rem 0 1rem;
+	}
+	.gallery-toolbar label { font-weight: 600; }
+	.gallery-toolbar input {
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.35rem;
+		font: inherit;
+		min-width: min(20rem, 100%);
+		padding: 0.45rem 0.65rem;
+	}
+	.gallery-toolbar span { color: var(--sl-color-gray-3); font-size: 0.9rem; }
+	.monster-gallery {
+		display: grid;
+		gap: 0.8rem;
+		grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+	}
+	.monster-card {
+		align-items: center;
+		background: var(--sl-color-gray-6);
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.45rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		min-height: 12rem;
+		padding: 0.75rem;
+		text-align: center;
+	}
+	.monster-card[hidden] { display: none; }
+	.monster-stage { position: relative; }
+	.zoom-frame {
+		background-repeat: no-repeat;
+		image-rendering: pixelated;
+		opacity: 0;
+		position: absolute;
+		transition: opacity 120ms linear;
+	}
+	.zoom-frame.active { opacity: 1; }
+	.monster-card strong { line-height: 1.15; }
+	.monster-card small { color: var(--sl-color-gray-3); font-size: 0.75rem; }
+</style>

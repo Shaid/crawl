@@ -1,0 +1,37 @@
+---
+title: Black Crypt Data Formats
+template: splash
+hero:
+  tagline: A reverse-engineering field guide to Black Crypt, the 1992 Amiga dungeon crawler from Raven Software and Electronic Arts.
+  actions:
+    - text: Enter the documentation
+      link: /blackcrypt/
+      icon: right-arrow
+    - text: Browse the asset galleries
+      link: /blackcrypt/assets/sprites/
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+The documentation site for the Black Crypt reverse-engineering project.
+
+<p class="pixel-wordmark">BLACK CRYPT</p>
+
+![Black Crypt title screen](/assets/blackcrypt/amiga/screens/title.png)
+
+<CardGrid>
+	<Card title="Read the formats" icon="document">
+		Understand the Amiga file inventory, graphics formats, maps, palettes,
+		sound and code overlays.
+		[Open the guide](/blackcrypt/)
+	</Card>
+	<Card title="See the extracted game" icon="image">
+		Browse individual monsters, item icons, floor items, spell effects,
+		portraits and more.
+		[Open the galleries](/blackcrypt/assets/sprites/)
+	</Card>
+</CardGrid>
+
+The exhaustive source notes remain in `docs/blackcrypt/`; this site presents a
+more approachable version of that research.
