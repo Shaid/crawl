@@ -6,8 +6,6 @@ build/
 # Node/web (unrelated to RE)
 node_modules/
 dist/
-!www/dist/
-!www/dist/**
 
 # Misc
 *.pyc
