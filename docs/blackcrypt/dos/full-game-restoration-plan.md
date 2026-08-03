@@ -416,10 +416,25 @@ Phase 4, and 1C (does it run under Wine at all) is still untested.
 
 ---
 
-## Phase 2 — Data conversion (`bcdfs` → `maindung.gam`)
+## Phase 2 — Data conversion (`bcdfs` → `maindung.gam`) — **DONE**
 
 Endianness is *not* the whole story — this is where the original framing
 most underestimated the work.
+
+> **Status: complete and verified, 2026-08-03.** `scripts/bclib/maindung.py`
+> converts Amiga `bcdfs` to the DOS encoding; `scripts/verify_maindung.py`
+> confirms **zero deviation across all 15,099 bytes** of the round-trip
+> against the real shipped `maindung.gam`, and the full 13-map conversion is
+> exactly **171,005 B**. The §2.2 oracle gap and the §2.3 "not mechanical"
+> items below are all resolved — see the correction block in
+> `docs/blackcrypt/dos/data-structure.md` § "Record byte-swap is not a
+> blanket word-swap" for the full derivation, evidence, and per-item
+> confidence levels. Headline finding: the "boundaries depend on itemType"
+> framing below was wrong — the real rule is a single itemType-*independent*
+> positional composition, and the only thing that actually varies is
+> whether the record is a monster. The subsections below are kept as the
+> historical record of what this phase set out to answer; do not read them
+> as current status.
 
 ### 2.1 What's already verified
 
@@ -559,7 +574,7 @@ original assumption.
 | Phase | Concrete success criterion |
 |---|---|
 | 1 | ✅ 1A: named parser (`fcn.00425350`), named driver (`fcn.00426880`), verdict *parameterized*, verified at 1,530/1,530 squares + 45/45 actions + zero-deviation padding invariant. 1B still open: gfxNumber→bracket resolver with all 166 item gfxNumbers accounted for |
-| 2 | Converter reproduces the shipped `maindung.gam` byte-for-byte, 15,099/15,099, from `bcdfs` map 1 alone; full 13-map output is exactly 171,005 B |
+| 2 | ✅ **Done.** Converter reproduces the shipped `maindung.gam` byte-for-byte, 15,099/15,099, from `bcdfs` map 1 alone; full 13-map output is exactly 171,005 B. `scripts/bclib/maindung.py` + `scripts/verify_maindung.py` |
 | 3 | Rebuilt `clipper.clp` still boots the demo unchanged (all 816 original entries resolve identically); a deliberately-injected sprite (e.g. a Ram Demon placed into map 1) renders correctly |
 | 3 (instrumented, if 1C succeeds) | Under Wine, the `0x4699ac` message log shows zero `** Could not find Clip '%s' **` lines while walking a converted map |
 | 4 | Take map 1's staircase at (col 49, row 23) — its destination-map byte is already `2` — and arrive in map 2 at (27, 20) without the "TEST LEVEL" message, then walk back up |
@@ -581,7 +596,7 @@ cheaper first — 1A's outcome means neither blocks the other.
 | 1B gfxNumber resolver | Hours–1 day | High | `game-re`, radare2 |
 | 1C Wine viability | Hours | Unknown | `wine`, `winedbg`, scratch copy of game dir |
 | 1D art scoping | Hours | High | `game-re`, existing `bclib` |
-| 2 converter | Days | **High** — byte-exact oracle exists | Python, `bclib`, `game-re` |
+| ~~2 converter~~ | **Done** (one session) | **Verified — zero deviation, 15,099/15,099 B** | Python, `bclib`, `game-re`, radare2 |
 | 3 resource injection | Days–weeks (19 clusters + 2 tilesets) | Medium-high | Python, existing extraction pipeline |
 | 4 code patch | **Hours** — one ~20 B thunk + a 5 B `jmp` | **High** — all callees identified and verified | radare2, Python patcher |
 
@@ -602,7 +617,8 @@ Phase 2/3 use before the first run.
 ## Files most critical for implementation
 
 - `scripts/bclib/bcdfs.py` — verified Amiga map walker; Phase 2's
-  converter is its mirror
+  converter (`scripts/bclib/maindung.py`, done, see `scripts/
+  verify_maindung.py`) is its mirror
 - `data/blackcrypt/dosvga/crypt.exe` — Phases 1 and 4 target;
   `fcn.00423b50` (stub), `fcn.00423b60` (`MoveParty`), `fcn.00401fa0`
   (loader), `fcn.00402650` (name resolver), creature table at

@@ -133,13 +133,21 @@ def _word(rec, off):
     return struct.unpack_from('>H', rec, off)[0]
 
 
-def walk_map(raw, offsets, index, on_record=None, on_square=None):
+def walk_map(raw, offsets, index, on_record=None, on_square=None,
+             on_monster2=None, on_monster2ext=None):
     """Walk one map, returning the stream position just past its last row.
 
     `on_record(map_index, row, col, file_offset, record_bytes)` is called for
     every 20-byte item/structure record (for a monster, only its *first*
     record — the second is its stat continuation).
-    `on_square(map_index, row, col, square_bytes)` is called for every square.
+    `on_square(map_index, row, col, file_offset, square_bytes)` is called for
+    every square.
+    `on_monster2(map_index, row, col, file_offset, record_bytes)` is called
+    for a monster's *second* (stat-continuation) 20-byte record — the one
+    `on_record` never sees. `on_monster2ext(map_index, row, col, file_offset,
+    ext_bytes)` is called for the optional trailing 4 bytes read when that
+    second record's byte `+0x13` is non-zero (never observed in the shipped
+    maps, but the loader supports it — see `+0x18B16`-`+0x18B42`).
     """
     start = offsets[index]
     cur = _Cursor(raw, start + OFFSET_TABLE_BYTES)
@@ -171,7 +179,13 @@ def walk_map(raw, offsets, index, on_record=None, on_square=None):
                 on_record(index, state['row'], state['col'], off, rec)
             mon = bool(rec[0] & 0x80)
             if mon:
-                cur.take(RECORD_BYTES)
+                off2 = cur.pos
+                second = cur.take(RECORD_BYTES)
+                if on_monster2:
+                    on_monster2(index, state['row'], state['col'], off2, second)
+                # NB: unlike entity_chain below, the original (verified) walk
+                # never checked this second record's byte +0x13 for a sub-chain
+                # monster — preserved as-is rather than "fixed" here.
             if rec[5] in CONTAINER_TYPES or mon:
                 sub_chain(rec, mon)
             if _word(rec, 0x12) == 0:
@@ -185,9 +199,15 @@ def walk_map(raw, offsets, index, on_record=None, on_square=None):
                 on_record(index, state['row'], state['col'], off, rec)
             mon = bool(rec[0] & 0x80)
             if mon:
+                off2 = cur.pos
                 second = cur.take(RECORD_BYTES)
+                if on_monster2:
+                    on_monster2(index, state['row'], state['col'], off2, second)
                 if second[0x13] != 0:
-                    cur.take(4)
+                    off2ext = cur.pos
+                    ext = cur.take(4)
+                    if on_monster2ext:
+                        on_monster2ext(index, state['row'], state['col'], off2ext, ext)
             if rec[5] in CONTAINER_TYPES or mon:
                 sub_chain(rec, mon)
             elif rec[5] in ACTION_TYPES:
@@ -199,6 +219,7 @@ def walk_map(raw, offsets, index, on_record=None, on_square=None):
         first_col = _signed(cur.take(1)[0])
         last_col = _signed(cur.take(1)[0])
         for col in range(first_col, last_col + 1):
+            sq_off = cur.pos
             sq = cur.take(4)
             if (sq[0] & 0x0F) != 0x0F or (sq[1] & 0xF0) != 0xF0:
                 raise ValueError(
@@ -206,7 +227,7 @@ def walk_map(raw, offsets, index, on_record=None, on_square=None):
                     f'(row {row}, col {col}, bytes {sq.hex()})')
             state['row'], state['col'] = row, col
             if on_square:
-                on_square(index, row, col, sq)
+                on_square(index, row, col, sq_off, sq)
             if ((sq[2] & 0x0F) << 8) | sq[3]:
                 entity_chain()
 
@@ -221,7 +242,8 @@ def walk_map(raw, offsets, index, on_record=None, on_square=None):
 MAP_TAIL_PADDING = 3948
 
 
-def walk_all(raw, on_record=None, on_square=None, verify=True):
+def walk_all(raw, on_record=None, on_square=None, on_monster2=None,
+             on_monster2ext=None, verify=True):
     """Walk all 13 maps. Returns the list of end positions.
 
     With `verify` (the default) the tail-padding invariant is asserted for
@@ -231,7 +253,8 @@ def walk_all(raw, on_record=None, on_square=None, verify=True):
     offsets = read_map_offsets(raw)
     ends = []
     for m in range(MAP_COUNT):
-        end = walk_map(raw, offsets, m, on_record=on_record, on_square=on_square)
+        end = walk_map(raw, offsets, m, on_record=on_record, on_square=on_square,
+                        on_monster2=on_monster2, on_monster2ext=on_monster2ext)
         ends.append(end)
         if verify and m + 1 < MAP_COUNT:
             gap = offsets[m + 1] - end

@@ -463,6 +463,134 @@ oracle from map 1 alone; 9 kinds — `0x00`, `0x0B` Boots, `0x1A` Amulet,
 `0x1B` Shirt, `0x1C` Pants, `0x27` Other/Skull, `0x2B` Panel Item, `0x2C`
 Idol, `0x2F` Statue — never appear in map 1 and have no oracle yet).
 
+> **Correction — "field boundaries depend on `itemType`" was the right
+> observation from the wrong lens; the real rule is itemType-*independent*,
+> and a working converter now exists (`scripts/bclib/maindung.py`, verified
+> below).** Reframing "which itemType maps to which boundary" as "which
+> single boundary pattern is consistent with every observed itemType"
+> collapses the problem: an exhaustive search over every way to partition
+> the 13-byte itemType-specific span (`+0x07..+0x13`) into runs of 1 or 2
+> bytes, checked against every map-1 example of each type, finds that
+> composition **`(1,2,2,2,2,2,2)`** — one unswapped byte at `+0x07`, then
+> six swapped 16-bit words at `+0x08/0x0A/0x0C/0x0E/0x10/0x12` — is
+> consistent with **all 39** itemType values observed in map 1 with zero
+> counterexamples, and is the *unique* fit for the 5 types with enough
+> instances to fully disambiguate it (`0x04` Spell Scroll n=7, `0x05`
+> Potion n=6, `0x12` Stairs/Teleport n=16, `0x13` Container n=7, `0x23`
+> Chest n=3). No type excludes it. This is exactly what a mechanical,
+> semantics-oblivious porting tool would produce: it re-encodes the record
+> shape, not the record's meaning.
+>
+> The only thing that genuinely varies is whether the record is a
+> **monster** (byte `+0x00` bit `0x80` on the Amiga source), not what its
+> itemType is:
+>
+> | Offset | Item/structure record | Monster *first* record |
+> |---|---|---|
+> | `+0x00/+0x01` | word, swapped (gfxNumber) | word, swapped (gfxNumber / monster marker) |
+> | `+0x02/+0x03` | word, swapped (name reference) | **two independent bytes, not swapped** (hit-chance, door/attack-speed nibbles) |
+> | `+0x04`..`+0x06` | 3 unswapped bytes | 3 unswapped bytes (`0xF0` marker, move-speed nibbles, attack-method) |
+> | `+0x07`..`+0x13` | composition `(1,2,2,2,2,2,2)` | **same** composition `(1,2,2,2,2,2,2)` |
+>
+> Confirmed globally: applying `(1,2,2,2,2,2,2)` plus the swapped `+0x00/+0x01`
+> and *unconditionally*-swapped `+0x02/+0x03` to all 211 map-1 records leaves
+> exactly 14 mismatches — and all 14 are monster records, whose *only* wrong
+> bytes are `+0x02/+0x03`. That one conditional (swap `+0x02/+0x03` unless
+> the record is a monster) is the entire correction needed; nothing about
+> `+0x07..+0x13` depends on itemType at all.
+>
+> **Spot-confirmed against `crypt.exe` for one of the 9 map-1-absent
+> kinds** — Panel Item `0x2B`. `fcn.0041c220` (the container/panel item-fill
+> handler) at `0x41c452` does `cmp bl, 0x2b` against the live record array's
+> itemType byte (`[eax+0x46bd6d]`, i.e. live-array offset `+0x05` — same
+> relative position as on-disk, confirming the common prefix is unaffected
+> by itemType), then at `0x41c458` does `cmp word [eax+0x46bd74], cx` — a
+> **word**-width compare at live-array offset `+0x0C` (`0x46bd74 −
+> 0x46bd68`), matching the universal composition's word boundary there
+> exactly. The same block also touches `+0x07` (`[...+0x46bd6f]`) and
+> `+0x08` (`[...+0x46bd70]`) as, respectively, a byte and a word — again
+> matching the rule.
+>
+> **The other 8 kinds were not each individually traced** — a byte-width
+> justification beyond the universal-composition argument above was sought
+> for all 9, but 8 of them (`0x00`, `0x0B` Boots, `0x1A` Amulet, `0x1B`
+> Shirt, `0x1C` Pants, `0x27` Other/Skull, `0x2C` Idol, `0x2F` Statue) never
+> appear as the operand of a `cmp` against the itemType byte anywhere in
+> `crypt.exe` (checked via an xref census on every access to the live
+> record array's itemType byte, `[reg+0x46bd6d]` — 53 xrefs total; the
+> literal comparison constants that *do* appear are `0x06`, `0x0C`,
+> `0x12`, `0x14`, `0x16`, `0x18`, `0x25`, `0x26`, `0x2B`, `0x2C`, `0x2E`,
+> `0x30` — none of the other 8 gap kinds). That absence is itself evidence,
+> not a gap: `0x0B`/`0x1A`/`0x1B`/
+> `0x1C` share the exact same named-field list as the already-traced
+> equip-family types (`0x07` Helm, `0x08` Shield, `0x09` Armor, `0x0A`
+> Leggings, `0x15` Ring, `0x19` Belt, `0x2A` Bracers, `0x2D` Crown — all
+> `charges, weight, size, AC, effect, value`), and the "CANNOT WEAR ITEM"
+> equip-compatibility check (`fcn.0041c940`, called from the general
+> "wear item" dispatch `fcn.0041c5f0`) validates wearability through a
+> **generic, itemType-oblivious class/slot compatibility table**
+> (`0x434b78`, indexed by class and slot, not by itemType) rather than a
+> per-type branch — there is no code path left over that *could* apply a
+> different field layout to Boots/Amulet/Shirt/Pants than to their already-
+> confirmed siblings, because it is the same code. `0x2C` (Idol) is
+> explicitly excluded from wearability by that same function
+> (`cmp byte [...+0x46bd6d], 0x2c` at `0x41c966`) rather than given its own
+> field-reading path. `0x00`, `0x27` and `0x2F` were not found in any
+> itemType-keyed branch at all in the time spent looking; their swap
+> boundaries rest on the universal-composition argument alone.
+>
+> | itemType | Evidence | Confidence |
+> |---|---|---|
+> | `0x2B` Panel Item | Direct `crypt.exe` trace, `fcn.0041c220` @ `0x41c452`/`0x41c458` (above) | Confirmed |
+> | `0x0B`/`0x1A`/`0x1B`/`0x1C` (Boots/Amulet/Shirt/Pants) | Same field list + same generic table-driven code path as 8 already-confirmed equip siblings; no itemType-specific branch exists for any of them | High |
+> | `0x00`, `0x27`, `0x2C`, `0x2F` | Universal-composition argument only (unique fit for 5 other types, consistent with all 39); no itemType-keyed code found | Medium-high — consistent with everything else observed, not independently code-traced |
+>
+> A monster's **second** (stat-continuation) record — never exposed by
+> `bcdfs.py`'s `on_record` hook, so not part of the original 225-mismatch
+> count at all — is a *different* layout with no name/gfx prefix: bytes
+> `+0x00..+0x03` unswapped (always `0` in the shipped data, so unverifiable
+> either way), three swapped words at `+0x04/+0x06/+0x08`, ten unswapped
+> bytes at `+0x0A..+0x13`. Found the same way (exhaustive composition
+> search) and hand-verified against all 14 of map 1's monster pairs, e.g.
+> `00 00 00 00 00 01 00 28 00 19 00 04 00 04 ff 00 00 00 00 00` (Amiga) →
+> `00 00 00 00 01 00 28 00 19 00 00 04 00 04 ff 00 00 00 00 00` (DOS): the
+> `0x0001` constant at `+0x04/0x05`, XP gain at `+0x06/0x07`, attack
+> strength at `+0x08/0x09` all swap; everything from `+0x0A` on (a `0xFF`
+> marker, a `0x04` marker, more zero bytes) does not. The optional 4-byte
+> monster extension (read when the second record's `+0x13` is non-zero)
+> never fires in any of the 13 shipped maps (0/265 monster pairs) — its DOS
+> encoding is genuinely undetermined, and `maindung.convert()` raises
+> rather than guessing if it's ever encountered.
+>
+> **The `bcdft` name-reference word (`+0x02`, non-monster records) needs no
+> remap beyond the ordinary word swap.** The concern was that DOS's own
+> string storage might not share Amiga `bcdft`'s layout, requiring a table
+> remap. It doesn't: `crypt.exe` (file offset `0x37A28`) embeds the exact
+> same string block byte-for-byte — `data[0x37A28:0x37A28+15] ==
+> b'WAR HAMMER\x00MEAT\x00'`, matching decompressed `bcdft` S_1 `+0x1C4E2`
+> verbatim, offset for offset (`"GAUNTLETS"` sits at relative offset `+34`
+> in both). So the reference number itself is already correct after the
+> standard word byte-swap; nothing project-wide needs re-mapping, and all
+> ~685 references convert automatically as part of the ordinary record
+> transform.
+>
+> **The converter: `scripts/bclib/maindung.py`.** Mirrors `bcdfs.py`'s
+> walker (imports it; does not reimplement traversal) and rewrites each
+> span into DOS encoding per the rules above. Verified
+> (`scripts/verify_maindung.py`):
+>
+> | Check | Result |
+> |---|---|
+> | Byte-exact round-trip vs. the real `maindung.gam` (all 15,099 B, after trimming the full output to what the demo itself contains — its own offset-table slots 2-12 are deliberately zeroed, see the "exactly one map" correction above) | **15,099/15,099 bytes match, zero deviation** |
+> | Full 13-map conversion size | **171,005 B**, matching `bcdfs`'s own size exactly |
+> | Monster-extension guard | 0/265 monster pairs trigger it, confirming `convert()`'s "raise rather than guess" branch is unreachable on real data |
+> | Action-chain opcode range, all 13 maps (668 actions total, not just map 1's 45) | Every opcode falls in `0x00-0x22`, inside the documented 36-entry `0x00-0x23` table; the whole file parses end to end under `bcdfs.walk_all()`'s built-in tail-padding invariant with zero errors — the strongest generalization check available without a maps 2-13 DOS oracle, since a wrong action-chain assumption would desynchronise the walk immediately (as it does for unsigned row headers on maps 11-13) |
+> | "Unique" IDs (per-map 12-bit square field) | Confirmed needing no renumbering — the converter never touches ID values, only byte order, and the round-trip is still byte-exact |
+>
+> Converted output is derived game data, gitignored (`build/` is already
+> covered by `.gitignore`); nothing under `build/cache/blackcrypt/maindung/`
+> is committed, only the scripts that produce it.
+
 ---
 
 ## crypt.exe — Windows Executable
