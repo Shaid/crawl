@@ -102,6 +102,22 @@ function bounds(effect: EffectEntry) {
 // card -- a handful of indices in the confirmed-unattributed residue (31,
 // 32, 34) or edge cases simulate to nothing visible.
 const effects = sim.effects.filter((e) => e.ticks.some((t) => t.length > 0));
+
+const effectStages = effects.map((effect) => {
+	const b = bounds(effect);
+	const scale = Math.min(MAX_SCALE, MAX_STAGE / b.w, MAX_STAGE / b.h);
+	// The tick with the most simultaneous particles -- the closest thing this
+	// per-tick particle simulation has to a single "representative" frame,
+	// shown as a still image when motion is reduced (and as the initial
+	// pre-hydration frame either way).
+	const peakTick = effect.ticks.reduce((best, t, i) => (t.length > effect.ticks[best].length ? i : best), 0);
+	return { effect, bounds: b, scale, stageW: Math.round(b.w * scale), stageH: Math.round(b.h * scale), peakTick };
+});
+
+// Every card's animation area shares one slot size (the largest stage needed
+// by any effect), so cards are equal height and names/captions align across
+// a grid row regardless of how far an individual effect's particles travel.
+const slotSize = Math.max(1, ...effectStages.flatMap((e) => [e.stageW, e.stageH]));
 ---
 
 <div class="gallery-toolbar">
@@ -111,23 +127,20 @@ const effects = sim.effects.filter((e) => e.ticks.some((t) => t.length > 0));
 </div>
 
 <div class="effect-gallery" data-effect-gallery>
-	{effects.map((effect) => {
-		const { minX, minY, w, h } = bounds(effect);
-		const scale = Math.min(MAX_SCALE, MAX_STAGE / w, MAX_STAGE / h);
-		const stageW = Math.round(w * scale);
-		const stageH = Math.round(h * scale);
+	{effectStages.map(({ effect, bounds: b, scale, stageW, stageH, peakTick }) => {
 		const name = NAMED.get(effect.index) ?? `Effect ${effect.index}`;
 		const searchText = `${name} ${effect.index}`.toLowerCase();
 		return (
 			<article class="effect-card" data-effect-card data-search={searchText}>
+				<div class="effect-frame-slot" style={`width:${slotSize}px;height:${slotSize}px;`}>
 				<div class="effect-stage" style={`width:${stageW}px;height:${stageH}px;`} data-effect-stage>
 					{effect.ticks.map((tick, tickIndex) => (
-						<div class:list={['effect-tick', tickIndex === 0 && 'active']} data-effect-tick>
+						<div class:list={['effect-tick', tickIndex === peakTick && 'active']} data-effect-tick data-still-index={peakTick}>
 							{tick.map((p) => {
 								const frame = spriteFrames.get(`gfk${String(p.gfkRecord).padStart(2, '0')}_f${p.gfkFrame}`);
 								if (!frame) return null;
-								const left = Math.round((p.x - minX) * scale);
-								const top = Math.round((p.y - minY) * scale);
+								const left = Math.round((p.x - b.minX) * scale);
+								const top = Math.round((p.y - b.minY) * scale);
 								return (
 									<div
 										class="effect-particle"
@@ -138,6 +151,7 @@ const effects = sim.effects.filter((e) => e.ticks.some((t) => t.length > 0));
 						</div>
 					))}
 				</div>
+				</div>
 				<strong>{name}</strong>
 				<small>#{effect.index} · {effect.groupCount} group{effect.groupCount === 1 ? '' : 's'} · {effect.tickCount} ticks</small>
 			</article>
@@ -146,21 +160,28 @@ const effects = sim.effects.filter((e) => e.ticks.some((t) => t.length > 0));
 </div>
 
 <script>
-	for (const card of document.querySelectorAll<HTMLElement>('[data-effect-card]')) {
-		const ticks = [...card.querySelectorAll<HTMLElement>('[data-effect-tick]')];
-		if (ticks.length < 2) continue;
-		let index = 0;
-		const advance = () => {
-			ticks[index].classList.remove('active');
-			index = (index + 1) % ticks.length;
-			ticks[index].classList.add('active');
-		};
-		let timer = window.setInterval(advance, 120);
-		card.addEventListener('mouseenter', () => window.clearInterval(timer));
-		card.addEventListener('mouseleave', () => {
-			timer = window.setInterval(advance, 120);
-		});
+	const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+	if (!reduceMotion) {
+		for (const card of document.querySelectorAll<HTMLElement>('[data-effect-card]')) {
+			const ticks = [...card.querySelectorAll<HTMLElement>('[data-effect-tick]')];
+			if (ticks.length < 2) continue;
+			let index = Number(ticks[0]?.dataset.stillIndex ?? 0);
+			const advance = () => {
+				ticks[index].classList.remove('active');
+				index = (index + 1) % ticks.length;
+				ticks[index].classList.add('active');
+			};
+			let timer = window.setInterval(advance, 120);
+			card.addEventListener('mouseenter', () => window.clearInterval(timer));
+			card.addEventListener('mouseleave', () => {
+				timer = window.setInterval(advance, 120);
+			});
+		}
 	}
+	// When reduced motion is preferred, every card is left on its build-time
+	// -chosen "peak" tick (already marked .active server-side) as a still
+	// image -- no timers are started at all.
 
 	const gallery = document.querySelector('[data-effect-gallery]');
 	const search = document.querySelector<HTMLInputElement>('[data-effect-search]');
@@ -207,6 +228,11 @@ const effects = sim.effects.filter((e) => e.ticks.some((t) => t.length > 0));
 		text-align: center;
 	}
 	.effect-card[hidden] { display: none; }
+	.effect-frame-slot {
+		align-items: center;
+		display: flex;
+		justify-content: center;
+	}
 	.effect-stage { position: relative; margin: auto; }
 	.effect-tick { position: absolute; inset: 0; opacity: 0; }
 	.effect-tick.active { opacity: 1; }

@@ -90,6 +90,18 @@ const hiddenFrameNames = new Set([
 
 const galleryId = `sprite-gallery-${manifest}`;
 const searchId = `${galleryId}-search`;
+
+// Every card's image area shares one slot size (the largest stage needed by
+// any visible frame in this manifest), so cards are equal height and
+// names/captions align across a grid row -- otherwise a manifest whose
+// frames vary a lot in size (e.g. floor-items, which shrink at each of its
+// 3 view depths) leaves shorter cards with a ragged caption position.
+const slotSize = Math.max(
+	1,
+	...spriteManifest.frames
+		.filter((frame) => !hiddenFrameNames.has(frame.name))
+		.map((frame) => Math.min(3, 160 / frame.w, 160 / frame.h) * Math.max(frame.w, frame.h)),
+);
 ---
 
 <div class="gallery-toolbar">
@@ -123,6 +135,7 @@ const searchId = `${galleryId}-search`;
 		const posStr = (f: SpriteFrame) => `-${Math.round(f.x * scale)}px -${Math.round(f.y * scale)}px`;
 		return (
 			<article class="sprite-card" data-sprite-card={manifest} data-search={searchText}>
+				<div class="sprite-frame-slot" style={`width:${slotSize}px;height:${slotSize}px;`}>
 				<div class="sprite-stage" style={`width:${width}px;height:${height}px;`}>
 					{chainFrames && chainFrames.length > 1 ? (
 						<div
@@ -149,6 +162,7 @@ const searchId = `${galleryId}-search`;
 							aria-label={frameLabel}
 						></div>
 					)}
+				</div>
 				</div>
 				<strong title={hoverLabel}>{frameLabel}</strong>
 				<small>
@@ -231,6 +245,11 @@ const searchId = `${galleryId}-search`;
 	}
 	.sprite-card[hidden] {
 		display: none;
+	}
+	.sprite-frame-slot {
+		align-items: center;
+		display: flex;
+		justify-content: center;
 	}
 	.sprite-stage {
 		position: relative;

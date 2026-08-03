@@ -28,6 +28,27 @@ const names = JSON.parse(
 ) as { groups: MonsterGroup[] };
 const frames = new Map(manifest.frames.map((frame) => [frame.name, frame]));
 const imagePath = '/assets/blackcrypt/amiga/sprites/monsters.png';
+
+const groupStages = names.groups.map((group) => {
+	const groupFrames = group.frames.map((name) => frames.get(name)).filter(Boolean) as SpriteFrame[];
+	const maxWidth = Math.max(...groupFrames.map((frame) => frame.w));
+	const maxHeight = Math.max(...groupFrames.map((frame) => frame.h));
+	const scale = Math.min(1.25, 180 / maxWidth, 180 / maxHeight);
+	// The frame with the largest on-screen area, for a still (reduced-motion
+	// or pre-hydration) view -- more representative of the creature than an
+	// arbitrary "frame 0", which is often its smallest/farthest zoom step.
+	const largestIndex = groupFrames.reduce(
+		(best, frame, i) => (frame.w * frame.h > groupFrames[best].w * groupFrames[best].h ? i : best),
+		0,
+	);
+	return { group, groupFrames, scale, stageWidth: Math.round(maxWidth * scale), stageHeight: Math.round(maxHeight * scale), largestIndex };
+});
+
+// Every card's image area shares this one slot size (the largest stage
+// needed by any creature), so cards are equal height and names/captions
+// align across a grid row regardless of how big an individual creature's
+// sprite is.
+const slotSize = Math.max(...groupStages.flatMap((g) => [g.stageWidth, g.stageHeight]));
 ---
 
 <div class="gallery-toolbar">
@@ -37,30 +58,27 @@ const imagePath = '/assets/blackcrypt/amiga/sprites/monsters.png';
 </div>
 
 <div class="monster-gallery" data-monster-gallery>
-	{names.groups.map((group) => {
-		const groupFrames = group.frames.map((name) => frames.get(name)).filter(Boolean) as SpriteFrame[];
-		const maxWidth = Math.max(...groupFrames.map((frame) => frame.w));
-		const maxHeight = Math.max(...groupFrames.map((frame) => frame.h));
-		const scale = Math.min(1.25, 180 / maxWidth, 180 / maxHeight);
-		const stageWidth = Math.round(maxWidth * scale);
-		const stageHeight = Math.round(maxHeight * scale);
+	{groupStages.map(({ group, groupFrames, scale, stageWidth, stageHeight, largestIndex }) => {
 		const searchText = `${group.name} ${group.dungeonLevels.join(' ')}`.toLowerCase();
 		return (
 			<article class="monster-card" data-monster-card data-search={searchText}>
-				<div class="monster-stage" style={`width:${stageWidth}px;height:${stageHeight}px;`}>
-					{groupFrames.map((frame, index) => {
-						const width = Math.round(frame.w * scale);
-						const height = Math.round(frame.h * scale);
-						return (
-							<div
-								class:list={["zoom-frame", index === 0 && "active"]}
-								data-monster-frame
-								style={`width:${width}px;height:${height}px;left:${Math.round((stageWidth - width) / 2)}px;top:${Math.round((stageHeight - height) / 2)}px;background-image:url('${imagePath}');background-size:${Math.round(manifest.width * scale)}px ${Math.round(manifest.height * scale)}px;background-position:-${Math.round(frame.x * scale)}px -${Math.round(frame.y * scale)}px;`}
-								role="img"
-								aria-label={`${group.name}, zoom ${index + 1}`}
-							></div>
-						);
-					})}
+				<div class="monster-frame-slot" style={`width:${slotSize}px;height:${slotSize}px;`}>
+					<div class="monster-stage" style={`width:${stageWidth}px;height:${stageHeight}px;`}>
+						{groupFrames.map((frame, index) => {
+							const width = Math.round(frame.w * scale);
+							const height = Math.round(frame.h * scale);
+							return (
+								<div
+									class:list={["zoom-frame", index === largestIndex && "active"]}
+									data-monster-frame
+									data-still-index={largestIndex}
+									style={`width:${width}px;height:${height}px;left:${Math.round((stageWidth - width) / 2)}px;top:${Math.round((stageHeight - height) / 2)}px;background-image:url('${imagePath}');background-size:${Math.round(manifest.width * scale)}px ${Math.round(manifest.height * scale)}px;background-position:-${Math.round(frame.x * scale)}px -${Math.round(frame.y * scale)}px;`}
+									role="img"
+									aria-label={`${group.name}, zoom ${index + 1}`}
+								></div>
+							);
+						})}
+					</div>
 				</div>
 				<strong>{group.name}</strong>
 				<small>Levels {group.dungeonLevels.join(', ')} · {groupFrames.length} zoom frames</small>
@@ -73,25 +91,27 @@ const imagePath = '/assets/blackcrypt/amiga/sprites/monsters.png';
 	const gallery = document.querySelector('[data-monster-gallery]');
 	const search = document.querySelector('[data-monster-search]');
 
-	if (gallery) {
+	const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+	if (gallery && !reduceMotion) {
 		for (const card of gallery.querySelectorAll('[data-monster-card]')) {
 			const frames = [...card.querySelectorAll('[data-monster-frame]')];
-			let index = 0;
-			let timer = window.setInterval(() => {
+			let index = Number(frames[0]?.dataset.stillIndex ?? 0);
+			const advance = () => {
 				frames[index].classList.remove('active');
 				index = (index + 1) % frames.length;
 				frames[index].classList.add('active');
-			}, 900);
+			};
+			let timer = window.setInterval(advance, 900);
 			card.addEventListener('mouseenter', () => window.clearInterval(timer));
 			card.addEventListener('mouseleave', () => {
-				timer = window.setInterval(() => {
-					frames[index].classList.remove('active');
-					index = (index + 1) % frames.length;
-					frames[index].classList.add('active');
-				}, 900);
+				timer = window.setInterval(advance, 900);
 			});
 		}
 	}
+	// When reduced motion is preferred, every card is left on its
+	// build-time-chosen "largest frame" (already marked .active server-side)
+	// as a still image -- no timers are started at all.
 
 	search?.addEventListener('input', (event) => {
 		const query = event.target.value.trim().toLowerCase();
@@ -136,6 +156,11 @@ const imagePath = '/assets/blackcrypt/amiga/sprites/monsters.png';
 		text-align: center;
 	}
 	.monster-card[hidden] { display: none; }
+	.monster-frame-slot {
+		align-items: center;
+		display: flex;
+		justify-content: center;
+	}
 	.monster-stage { position: relative; }
 	.zoom-frame {
 		background-repeat: no-repeat;

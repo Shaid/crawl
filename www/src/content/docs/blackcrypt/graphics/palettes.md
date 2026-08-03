@@ -18,14 +18,18 @@ indices (26–31) are the **accent ramp**.
 
 | File | Offset | idx 19 | idx 26–31 | Character |
 |------|--------|--------|-----------|-----------|
-| `bcdfp` | `0x004194` | `033b`→`0020` | `0b30 0c40 0d51 0e62 0f73 0f84` | orange / fire |
-| `bcdfq` | `0x0002c6` | `033b` | `0b60 0c70 0c80 0d90 0eb0 0fc0` | gold |
-| `bcdfu` | `0x0003ec` | `033b` | `0432 0542 0653 0764 0875 0986` | brown |
-| `bcdfu` | `0x00042c` | `033b` | `0223 0334 0445 0647 0858 0968` | blue-grey |
-| `bcdfu` | `0x00046c` | `033b` | `0332 0443 0654 0987 0ba8 0eeb` | **stone / olive** |
-| `bcdfu` | `0x0004ac` | `033b` | `0222 0333 0444 0555 0666 0777` | neutral grey |
-| `bcdfu` | `0x0004ec` | `033b` | `0234 0345 0456 0678 089a 09ab` | blue |
-| `bcdft` (decompressed) | `0x01e886` | `0fd0` | `0332 0443 0654 0987 0ba8 0eeb` | stone / olive |
+| `bcdfp` | `0x004194` | `033b`→`0020` | <span class="sw" style="background:rgb(187,51,0)"></span>`0b30` <span class="sw" style="background:rgb(204,68,0)"></span>`0c40` <span class="sw" style="background:rgb(221,85,17)"></span>`0d51` <span class="sw" style="background:rgb(238,102,34)"></span>`0e62` <span class="sw" style="background:rgb(255,119,51)"></span>`0f73` <span class="sw" style="background:rgb(255,136,68)"></span>`0f84` | orange / fire |
+| `bcdfq` | `0x0002c6` | `033b` | <span class="sw" style="background:rgb(187,102,0)"></span>`0b60` <span class="sw" style="background:rgb(204,119,0)"></span>`0c70` <span class="sw" style="background:rgb(204,136,0)"></span>`0c80` <span class="sw" style="background:rgb(221,153,0)"></span>`0d90` <span class="sw" style="background:rgb(238,187,0)"></span>`0eb0` <span class="sw" style="background:rgb(255,204,0)"></span>`0fc0` | gold |
+| `bcdfu` | `0x0003ec` | `033b` | <span class="sw" style="background:rgb(68,51,34)"></span>`0432` <span class="sw" style="background:rgb(85,68,34)"></span>`0542` <span class="sw" style="background:rgb(102,85,51)"></span>`0653` <span class="sw" style="background:rgb(119,102,68)"></span>`0764` <span class="sw" style="background:rgb(136,119,85)"></span>`0875` <span class="sw" style="background:rgb(153,136,102)"></span>`0986` | brown |
+| `bcdfu` | `0x00042c` | `033b` | <span class="sw" style="background:rgb(34,34,51)"></span>`0223` <span class="sw" style="background:rgb(51,51,68)"></span>`0334` <span class="sw" style="background:rgb(68,68,85)"></span>`0445` <span class="sw" style="background:rgb(102,68,119)"></span>`0647` <span class="sw" style="background:rgb(136,85,136)"></span>`0858` <span class="sw" style="background:rgb(153,102,136)"></span>`0968` | blue-grey |
+| `bcdfu` | `0x00046c` | `033b` | <span class="sw" style="background:rgb(51,51,34)"></span>`0332` <span class="sw" style="background:rgb(68,68,51)"></span>`0443` <span class="sw" style="background:rgb(102,85,68)"></span>`0654` <span class="sw" style="background:rgb(153,136,119)"></span>`0987` <span class="sw" style="background:rgb(187,170,136)"></span>`0ba8` <span class="sw" style="background:rgb(238,238,187)"></span>`0eeb` | **stone / olive** |
+| `bcdfu` | `0x0004ac` | `033b` | <span class="sw" style="background:rgb(34,34,34)"></span>`0222` <span class="sw" style="background:rgb(51,51,51)"></span>`0333` <span class="sw" style="background:rgb(68,68,68)"></span>`0444` <span class="sw" style="background:rgb(85,85,85)"></span>`0555` <span class="sw" style="background:rgb(102,102,102)"></span>`0666` <span class="sw" style="background:rgb(119,119,119)"></span>`0777` | neutral grey |
+| `bcdfu` | `0x0004ec` | `033b` | <span class="sw" style="background:rgb(34,51,68)"></span>`0234` <span class="sw" style="background:rgb(51,68,85)"></span>`0345` <span class="sw" style="background:rgb(68,85,102)"></span>`0456` <span class="sw" style="background:rgb(102,119,136)"></span>`0678` <span class="sw" style="background:rgb(136,153,170)"></span>`089a` <span class="sw" style="background:rgb(153,170,187)"></span>`09ab` | blue |
+| `bcdft` (decompressed) | `0x01e886` | `0fd0` | <span class="sw" style="background:rgb(51,51,34)"></span>`0332` <span class="sw" style="background:rgb(68,68,51)"></span>`0443` <span class="sw" style="background:rgb(102,85,68)"></span>`0654` <span class="sw" style="background:rgb(153,136,119)"></span>`0987` <span class="sw" style="background:rgb(187,170,136)"></span>`0ba8` <span class="sw" style="background:rgb(238,238,187)"></span>`0eeb` | stone / olive |
+
+<style>
+.sw { display:inline-block; width:0.8em; height:0.8em; border-radius:2px; vertical-align:-0.1em; margin-right:0.15em; border:1px solid rgba(128,128,128,.45); }
+</style>
 
 ## The accent ramp varies per dungeon level
 
@@ -63,22 +67,22 @@ the stone/olive ramp. The full verified table (12-bit → RGB, ×17 per nibble):
 
 | Idx | 12-bit | RGB | | Idx | 12-bit | RGB |
 |-----|--------|-----|-|-----|--------|-----|
-| 0 | `0x000` | 0,0,0 | | 16 | `0x720` | 119,34,0 |
-| 1 | `0xC86` | 204,136,102 | | 17 | `0x952` | 153,85,34 |
-| 2 | `0xF00` | 255,0,0 | | 18 | `0xA53` | 170,85,51 |
-| 3 | `0xB00` | 187,0,0 | | 19 | `0x020` | *(varies)* |
-| 4 | `0xD80` | 221,136,0 | | 20 | `0x222` | 34,34,34 |
-| 5 | `0xFE0` | 255,238,0 | | 21 | `0x444` | 68,68,68 |
-| 6 | `0x0F0` | 0,255,0 | | 22 | `0x666` | 102,102,102 |
-| 7 | `0x0B0` | 0,187,0 | | 23 | `0x999` | 153,153,153 |
-| 8 | `0x040` | 0,68,0 | | 24 | `0xCCC` | 204,204,204 |
-| 9 | `0x0DD` | 0,221,221 | | 25 | `0xFFF` | 255,255,255 |
-| 10 | `0x00F` | 0,0,255 | | 26 | `0x332` | **accent 1** |
-| 11 | `0x07C` | 0,119,204 | | 27 | `0x443` | **accent 2** |
-| 12 | `0xFD9` | 255,221,153 | | 28 | `0x654` | **accent 3** |
-| 13 | `0xEB8` | 238,187,136 | | 29 | `0x987` | **accent 4** |
-| 14 | `0xF0F` | 255,0,255 | | 30 | `0xBA8` | **accent 5** |
-| 15 | `0xE09` | 238,0,153 | | 31 | `0xEEB` | **accent 6** |
+| 0 | `0x000` | <span class="sw" style="background:rgb(0,0,0)"></span>0,0,0 | | 16 | `0x720` | <span class="sw" style="background:rgb(119,34,0)"></span>119,34,0 |
+| 1 | `0xC86` | <span class="sw" style="background:rgb(204,136,102)"></span>204,136,102 | | 17 | `0x952` | <span class="sw" style="background:rgb(153,85,34)"></span>153,85,34 |
+| 2 | `0xF00` | <span class="sw" style="background:rgb(255,0,0)"></span>255,0,0 | | 18 | `0xA53` | <span class="sw" style="background:rgb(170,85,51)"></span>170,85,51 |
+| 3 | `0xB00` | <span class="sw" style="background:rgb(187,0,0)"></span>187,0,0 | | 19 | `0x020` | *(varies)* |
+| 4 | `0xD80` | <span class="sw" style="background:rgb(221,136,0)"></span>221,136,0 | | 20 | `0x222` | <span class="sw" style="background:rgb(34,34,34)"></span>34,34,34 |
+| 5 | `0xFE0` | <span class="sw" style="background:rgb(255,238,0)"></span>255,238,0 | | 21 | `0x444` | <span class="sw" style="background:rgb(68,68,68)"></span>68,68,68 |
+| 6 | `0x0F0` | <span class="sw" style="background:rgb(0,255,0)"></span>0,255,0 | | 22 | `0x666` | <span class="sw" style="background:rgb(102,102,102)"></span>102,102,102 |
+| 7 | `0x0B0` | <span class="sw" style="background:rgb(0,187,0)"></span>0,187,0 | | 23 | `0x999` | <span class="sw" style="background:rgb(153,153,153)"></span>153,153,153 |
+| 8 | `0x040` | <span class="sw" style="background:rgb(0,68,0)"></span>0,68,0 | | 24 | `0xCCC` | <span class="sw" style="background:rgb(204,204,204)"></span>204,204,204 |
+| 9 | `0x0DD` | <span class="sw" style="background:rgb(0,221,221)"></span>0,221,221 | | 25 | `0xFFF` | <span class="sw" style="background:rgb(255,255,255)"></span>255,255,255 |
+| 10 | `0x00F` | <span class="sw" style="background:rgb(0,0,255)"></span>0,0,255 | | 26 | `0x332` | <span class="sw" style="background:rgb(51,51,34)"></span>**accent 1** |
+| 11 | `0x07C` | <span class="sw" style="background:rgb(0,119,204)"></span>0,119,204 | | 27 | `0x443` | <span class="sw" style="background:rgb(68,68,51)"></span>**accent 2** |
+| 12 | `0xFD9` | <span class="sw" style="background:rgb(255,221,153)"></span>255,221,153 | | 28 | `0x654` | <span class="sw" style="background:rgb(102,85,68)"></span>**accent 3** |
+| 13 | `0xEB8` | <span class="sw" style="background:rgb(238,187,136)"></span>238,187,136 | | 29 | `0x987` | <span class="sw" style="background:rgb(153,136,119)"></span>**accent 4** |
+| 14 | `0xF0F` | <span class="sw" style="background:rgb(255,0,255)"></span>255,0,255 | | 30 | `0xBA8` | <span class="sw" style="background:rgb(187,170,136)"></span>**accent 5** |
+| 15 | `0xE09` | <span class="sw" style="background:rgb(238,0,153)"></span>238,0,153 | | 31 | `0xEEB` | <span class="sw" style="background:rgb(238,238,187)"></span>**accent 6** |
 
 Only maps that actually use indices 26–31 are sensitive to the ramp choice:
 map 7 (47% of pixels), map 8 (31%), map 6 (3%), map 11 (0.5%), map 4 (0.3%).
