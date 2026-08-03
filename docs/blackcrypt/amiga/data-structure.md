@@ -7236,6 +7236,21 @@ in `bcdfq` (see Palette section):
   monsters and portraits — see the Palette section; there is no separate
   "dungeon" palette)
 
+> **Not disassembly-confirmed — a visually-eyeballed composite position,
+> useful for a reimplementation's title screen.** No on-screen dest-position
+> for overlaying chunk 3 (the "Black Crypt" logo banner, 320x44) onto chunk 2
+> (the title screen, 320x200) is documented anywhere in this file — the four
+> chunks read as discrete screens in an intro sequence, not necessarily one
+> composited frame, and no code trace has settled the question either way.
+> Sharing a palette (both chunks read `+0x0286`) is suggestive but not
+> conclusive. Compositing them by eye for the project's docs site
+> (`www/scripts/generate_hero.mjs`), the banner reads best at `(left=0,
+> top=147)` — flush above the burned-in copyright text band (which starts
+> around row 182) and clear of the castle/gargoyle art above it. Treat this
+> as "looks right for an illustration", not a confirmed in-game screen
+> layout — if a future pass finds the real compositing code (or determines
+> there isn't one), update or remove this note.
+
 ### bcdfo — Character Portraits + UI Elements — **SOLVED**
 
 | Property         | Value                                      |

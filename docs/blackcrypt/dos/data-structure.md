@@ -407,10 +407,25 @@ with the only difference being CPU endianness (little-endian on Windows vs big-e
 on Amiga).
 
 **Confirmed identical:**
-- Offset table: Map 1 = `0x00000000`, Map 2 = `0x00003AC7`
-- Maps 3–13 have offset 0 in the Windows file (demo only has 2 maps)
+- Offset table: 13 slots, same layout as the Amiga's 13-map table
 - Map 1 header: `00 00 00 00 1d 00 39` — byte-identical between platforms
 - Square data: stored as native-endian 32-bit values
+
+> **Correction — the demo ships exactly one map, not two.** The offset
+> table entry for "map 2" (`0x00003AC7`) is a dangling leftover copied
+> verbatim from the full game's table — it is numerically identical to the
+> Amiga `bcdfs` map-2 offset, but no map-2 data exists in the file: `Map
+> 1's body ends at 11,099; + 3,948 B tail padding = 15,047 = 0x3AC7`, which
+> is exactly the map-2 offset, and `15,099 (file size) − 15,047 = 52` —
+> the file simply stops 52 bytes after that offset, the length of one
+> zeroed offset-table block. `crypt.exe`'s own embedded text — "Demo
+> contains only the first dungeon map (two playable levels)" — is accurate
+> once read correctly: **map 1** on its own already spans **two**
+> manual-numbered dungeon *levels* (1 and 2), per this project's
+> map↔dungeon-level correspondence established on the Amiga side (see
+> `amiga/data-structure.md` § "Map ↔ dungeon-level mapping"). "Two
+> playable levels" describes map 1's own content, not "maps 1 and 2."
+> Maps 3–13 all have offset `0x00000000` and are genuinely absent.
 
 ### Square Format (4 bytes, same as Amiga)
 
@@ -427,6 +442,27 @@ A square `0x00001FF1` is stored as:
 - Amiga (big-endian): `00 00 1F F1`
 - Windows (little-endian): `F1 1F 00 00`
 
+### Record byte-swap is not a blanket word-swap — **confirmed, field-dependent**
+
+Cross-checking every byte span of the Amiga's map-1 walk (`scripts/bclib/bcdfs.py`)
+against the demo's `maindung.gam` at the same file offsets: **1,530/1,530
+squares** are an exact 4-byte reversal (mechanical), and the 5-byte map
+header, all row headers, and all 45 action records (8 B each) are
+**byte-identical, no swap at all**. The only mismatches are in the 20-byte
+item/monster/structure records (225 of them in map 1), and the swap is a
+**per-field 16-bit swap whose field boundaries depend on the record's
+`itemType` byte** (`+0x05`) — not a fixed pattern applicable to every
+record kind. Example, a monster record: `80 b3 | 02 75 | f0 84 …` (Amiga)
+→ `b3 80 | 02 75 | f0 84 …` (DOS) — only `+0x00/+0x01` swaps (it's a
+`word`); `+0x02/+0x03` do not, because those are two separate bytes on
+both platforms. **Consequence: on DOS the monster marker `0x80` lives at
+byte `+0x01` of the record, not `+0x00`.** See
+`docs/blackcrypt/dos/full-game-restoration-plan.md` § "Phase 2" for the
+full per-itemType field map (39 of 48 record kinds have a byte-exact
+oracle from map 1 alone; 9 kinds — `0x00`, `0x0B` Boots, `0x1A` Amulet,
+`0x1B` Shirt, `0x1C` Pants, `0x27` Other/Skull, `0x2B` Panel Item, `0x2C`
+Idol, `0x2F` Statue — never appear in map 1 and have no oracle yet).
+
 ---
 
 ## crypt.exe — Windows Executable
@@ -440,10 +476,126 @@ Contains embedded text by Rick Johnson describing the port:
   Ben Gokey, Rick Johnson), released March 20, 1992
 - Windows port started October 21, 1995 using DirectX (GameSDK)
 - Requires DirectX 3.0+, runs on Windows 95/98/NT 4.0
-- Demo contains only the first dungeon map (two playable levels)
+- Demo contains only the first dungeon map (two playable levels) — see the
+  correction above; this describes map 1's own two dungeon levels, not
+  "maps 1 and 2"
 
 References `clipper.clp` for resource loading and `MainDung.gam` for
 dungeon data. Character files use `char%d.dat` pattern (same as Amiga).
+
+### First disassembly pass — confirmed: a full-game build with only data trimmed
+
+`crypt.exe` had never been disassembled in this project until a planning
+pass for a possible demo→full-game restoration (see
+`docs/blackcrypt/dos/full-game-restoration-plan.md` for the complete
+writeup and the actual restoration plan). Headline findings, each cited to
+an address:
+
+- **The map-switch routine is absent from the binary, not gated by data.**
+  `fcn.00401fa0` (the `MainDung.gam` loader) reads up to 220,000 B into
+  the dungeon buffer and copies all **13** offset-table slots — both
+  full-game-sized. But `0x43c424` (the in-memory offset table) has
+  exactly two cross-references in the whole binary — the loader filling
+  it, and the save serializer copying it verbatim — and **nothing ever
+  indexes it by map number**. `fcn.00423b50`, a 12-byte stub reached from
+  both level-transition call sites (`MoveParty` and a second dispatch
+  case), takes the destination map, discards it, and prints "YOU HAVE
+  REACHED THE END OF THE TEST LEVEL". Injecting maps 3–13 into
+  `maindung.gam` alone changes nothing — the data loads, but nothing ever
+  reads past map 1.
+
+  > **Correction — only the *call* was removed, not the routine.** The
+  > `0x43c424` xref census above is accurate but was pointed at the wrong
+  > global: `0x43c424` holds the *file's* offset table purely so it can
+  > be written into `char%hu.dat`. The **runtime** table is a separate
+  > copy at **`0x4738b4`** (indexed 1..13, slots `0x4738b8`–`0x4738e8`),
+  > rebuilt from the save file by `fcn.00426390` at `0x426787`, and it is
+  > indexed by map number in two places:
+  >
+  > | Function | Role | Where it indexes the table |
+  > |---|---|---|
+  > | `fcn.00425350` | `LoadDungeon` — parses one map from `tempdung.gam` into the live arrays | `0x425371` (seek), `0x42539b` (length) |
+  > | `fcn.004258d0` | `SaveDungeon` — re-serializes the live arrays back over that map's bytes | `0x425c23` |
+  > | `fcn.00426880` | `SwitchMap(fromMap, toMap)` — composes the two, reselects the tileset group, loads per-map resources | drives both via `word[0x47481a]` |
+  >
+  > Both are parameterized entirely by `word[0x47481a]` (current map,
+  > 1-based); neither contains an inlined map-1 constant. Map 1 works
+  > because `offsetTable[1] == 0` — data, not code. `SwitchMap` still has
+  > a live caller (`fcn.00426390` at `0x426867`, as `SwitchMap(-1,
+  > curMap)`), so the demo executes the full map-switch path on every
+  > game load. The deleted thing is the 12-byte body of `fcn.00423b50`,
+  > which used to call `SwitchMap`. Restoring it is ~20 bytes of x86.
+  > Full trace, calling conventions and verification:
+  > `full-game-restoration-plan.md` § "1A".
+
+- **`fcn.00425350` is the byte-exact DOS counterpart of the Amiga map
+  walker** (`scripts/bclib/bcdfs.py`'s `walk_map`), with its sub-readers
+  `fcn.00425120` (container/monster sub-chain) and `fcn.00425250`
+  (action chain). Every structural constant matches the confirmed Amiga
+  loader: container types `0x13`/`0x23`, action types
+  `0x0F 0x16 0x1D 0x1E 0x1F 0x21`, sub-chain heads at word `+0x0A`
+  (monster) / `+0x0C` (container), monster continuation as a second
+  20-byte record with `+0x13` nonzero ⇒ 4 more bytes, chain-next at word
+  `+0x12`, 8-byte action records whose `+0x07` is the next action id.
+  The **only** divergence is endianness-induced: the first action's id is
+  byte `+0x0C` on DOS vs `+0x0D` on Amiga — the two halves of the same
+  word `+0x0C`. Transcribing it and walking `maindung.gam` blind
+  reproduces **1,530/1,530 squares**, **45/45 action records**, and the
+  tail-padding invariant with zero deviation (DOS `4,000` = Amiga's
+  confirmed `3,948` + the 52-byte block DOS offsets are pre-shifted
+  past). Live arrays: 64×64 squares at `0x46f8b4` (empty = `0x0FF00000`),
+  **700** × 20-byte records at `0x46bd68`, 256 × 8-byte action slots at
+  `0x4738f0`; all three zeroed by `fcn.0041b9a0` and re-initialised by
+  `fcn.00411350`.
+
+- **Type-`0x12` (Stairs / Teleport / Spinner) record field map —
+  confirmed.** Read by `fcn.00410d10` (`ResolveTargetSquare`) and
+  `fcn.00410f60` (`FindRecordAt(x, y, itemType)`):
+
+  | Offset | Size | Field | Consumer |
+  |---|---|---|---|
+  | `+0x00` | 1 | gfxNumber — `0x40`/`0x41` teleport, `0x43` stairs up, `0x44` stairs down, `0x1E` spinner | render |
+  | `+0x01` | 1 | bit 7 = monster marker (DOS position; Amiga `+0x00`) | `0x410d5e` |
+  | `+0x05` | 1 | itemType = `0x12` | `0x410fa5` |
+  | `+0x07` | 1 | **destination map** (0 = same map) | `MoveParty` `0x423ce3`, teleport case `0x41b39e` |
+  | `+0x08` | 2 | destination facing | `0x410dee` / `0x410e70` |
+  | `+0x0C` | 2 | **destination X** | `0x410dd5` / `0x410e3f` |
+  | `+0x0E` | 2 | **destination Y** | `0x410de1` / `0x410e49` |
+  | `+0x10` | 2 | sub-kind — `0`/`1` teleport, `2` stairs up, `3` stairs down, `4` spinner | `0x410dc2` / `0x410e35` |
+
+  `+0x10`'s values reproduce the Amiga's already-confirmed sub-kind
+  table exactly, and map 1's staircase pair verifies `+0x0C`/`+0x0E`
+  reciprocally: the down-stairs at (5, 18) sends the party to (37, 27),
+  adjacent to the up-stairs at (37, 28), which sends them back to
+  (5, 19), adjacent to the down-stairs. Spinners carry destination
+  (0, 0) and do not move the party — matching the Amiga finding that
+  code 4 applies only a facing rotation. **Map 1 contains exactly one
+  cross-map transition:** the stairs at (col 49, row 23),
+  `maindung.gam+0x0272D`, destination map **2** at (27, 20) — this is
+  the record that triggers the "TEST LEVEL" message today, and the
+  natural first test for the Phase 4 patch.
+- **Missing `clipper.clp` resources fail gracefully and self-report.**
+  Entries resolve by name string via a linear scan (`fcn.00402650`), not
+  numeric ID. A miss logs `"** Could not find Clip '%s' **"` to an
+  in-memory message log (`0x4699ac`) and returns `-1`; 181 call sites all
+  check for that sentinel and skip the draw. No crash, no OOB read.
+- **The binary is sized for the full game.** The dungeon read buffer
+  (220,000 B) and offset table (13 slots) are both full-size; the
+  in-memory `clipper.clp` directory is constructed for **2000** entries
+  against the demo archive's 816; the creature sprite-name table
+  (`0x430800`–`0x431b00`) lists all **26** creatures from the full 13-map
+  roster (Estoroth, Lich Dragon, Medusa, Ram Demon/Lord, Possessor,
+  Water Lord, …) though `clipper.clp` only has art for 2 of them (Two
+  Head, Rock Eye); and `clipper.clp`'s `Start/End Level Specifics`
+  bracket exists but is empty — a hole where per-map resources were
+  removed.
+- **Game logic is intact.** `fcn.00410d10` (`ResolveTargetSquare`) returns
+  the same result codes documented on the Amiga side; `fcn.00423b60`
+  (`MoveParty`) is a structural 1:1 with its Amiga counterpart. Spellbook,
+  chargen, automap, save/restore, throwing items, all 180 item icons, all
+  49 floor-item groups, all 29 keys + 87 keyholes are present. The smaller
+  executable size vs. the Amiga's executable+overlays is compiler output,
+  not a missing subsystem.
 
 ---
 
@@ -476,8 +628,11 @@ file structure.
 | All resources   | bcdfa–bcdfz        | ~3.5 MB     | clipper.clp      | 1,151,267 B   |
 | Executable      | BlackCrypt + overlays | ~600 KB  | crypt.exe        | 253,952 B     |
 
-The Windows demo contains only 2 maps (vs 13 in the full game), explaining the
-small `maindung.gam` size.
+The Windows demo contains only **1** map (vs 13 in the full game — see the
+correction under "maindung.gam" above), explaining the small `maindung.gam`
+size. `crypt.exe`'s dungeon buffer and offset table are both full-game-sized
+regardless (see "crypt.exe" below) — the file is small because the *data*
+was trimmed, not because the engine only supports one map.
 
 ---
 
