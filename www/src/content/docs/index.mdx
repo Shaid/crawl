@@ -2,6 +2,8 @@
 title: Black Crypt Data Formats
 template: splash
 hero:
+  image:
+    html: <img src="/hero-title.png" alt="Black Crypt — the game's title screen, composited with its logo banner" width="320" height="200" style="width:100%;max-width:640px;height:auto;image-rendering:pixelated;border-radius:0.35rem;" />
   tagline: A reverse-engineering field guide to Black Crypt, the 1992 Amiga dungeon crawler from Raven Software and Electronic Arts.
   actions:
     - text: Enter the documentation
@@ -15,10 +17,6 @@ hero:
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
 The documentation site for the Black Crypt reverse-engineering project.
-
-<p class="pixel-wordmark">BLACK CRYPT</p>
-
-![Black Crypt title screen](/assets/blackcrypt/amiga/screens/title.png)
 
 <CardGrid>
 	<Card title="Read the formats" icon="document">
@@ -35,3 +33,19 @@ The documentation site for the Black Crypt reverse-engineering project.
 
 The exhaustive source notes remain in `docs/blackcrypt/`; this site presents a
 more approachable version of that research.
+
+<style>
+	{`
+	.hero-title {
+		margin-top: 1rem;
+		margin-bottom: 2rem;
+	}
+	.hero-title img {
+		display: block;
+		width: 100%;
+		height: auto;
+		image-rendering: pixelated;
+		border-radius: 0.35rem;
+	}
+	`}
+</style>

@@ -92,6 +92,21 @@ if (existsSync(join(itemSpriteDir, 'items.json'))) {
 	throw new Error(`Missing item sprites and committed favicon: ${itemSpriteDir}`);
 }
 
+const heroPath = join(root, 'public', 'hero-title.png');
+const screenDir = join(ASSET_DST, 'amiga', 'screens');
+if (existsSync(join(screenDir, 'title.png')) && existsSync(join(screenDir, 'logo.png'))) {
+	const heroResult = spawnSync(
+		'node',
+		[join(root, 'scripts', 'generate_hero.mjs'), join(ASSET_DST, 'amiga'), heroPath],
+		{ stdio: 'inherit' },
+	);
+	if (heroResult.status !== 0) throw new Error('Could not generate the homepage hero composite');
+} else if (existsSync(heroPath)) {
+	console.log(`Using committed hero composite: ${heroPath}`);
+} else {
+	throw new Error(`Missing title/logo screens and committed hero composite: ${screenDir}`);
+}
+
 // --- 2. Generate sidebar ----------------------------------------------------
 
 const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
