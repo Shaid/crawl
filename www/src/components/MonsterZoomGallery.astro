@@ -1,5 +1,5 @@
 ---
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 interface SpriteFrame {
@@ -16,7 +16,10 @@ interface MonsterGroup {
 	frames: string[];
 }
 
-const assetRoot = resolve(process.cwd(), '..', 'public', 'assets', 'blackcrypt', 'amiga');
+const repoAssetRoot = resolve(process.cwd(), '..', 'public', 'assets', 'blackcrypt', 'amiga');
+const assetRoot = existsSync(repoAssetRoot)
+	? repoAssetRoot
+	: resolve(process.cwd(), 'public', 'assets', 'blackcrypt', 'amiga');
 const manifest = JSON.parse(
 	readFileSync(resolve(assetRoot, 'sprites', 'monsters.json'), 'utf8'),
 ) as { width: number; height: number; frames: SpriteFrame[] };

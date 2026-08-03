@@ -1,5 +1,5 @@
 ---
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 interface SpriteFrame {
@@ -23,7 +23,10 @@ interface Props {
 }
 
 const { manifest, names, label = 'sprite' } = Astro.props;
-const assetRoot = resolve(process.cwd(), '..', 'public', 'assets', 'blackcrypt', 'amiga');
+const repoAssetRoot = resolve(process.cwd(), '..', 'public', 'assets', 'blackcrypt', 'amiga');
+const assetRoot = existsSync(repoAssetRoot)
+	? repoAssetRoot
+	: resolve(process.cwd(), 'public', 'assets', 'blackcrypt', 'amiga');
 const manifestPath = resolve(assetRoot, 'sprites', `${manifest}.json`);
 const spriteManifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as SpriteManifest;
 const imagePath = `/assets/blackcrypt/amiga/sprites/${manifest}.png`;
