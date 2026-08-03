@@ -58,9 +58,12 @@ if (fontFiles.every((file) => existsSync(join(fontDir, file)))) {
 }
 
 const textureDir = join(ASSET_DST, 'amiga', 'textures');
-const tileViewFiles = ['bcdfx', 'bcdfy', 'bcdfz'].map((name) =>
-	join(textureDir, `dungeon-${name}-view.png`),
-);
+// At least one variant per tileset (bcdfx/bcdfz get 5: fountain, door,
+// plaque, alcove, empty; bcdfy's smaller sub-image set only supports
+// door + empty) -- "every variant" isn't a fixed list since availability
+// depends on which decoration sub-images that tileset actually ships.
+const hasAnyTileView = (name) =>
+	existsSync(join(textureDir, `dungeon-${name}-view-empty.png`));
 if (existsSync(join(textureDir, 'dungeon-bcdfx.json'))) {
 	const tilesetResult = spawnSync(
 		'node',
@@ -68,7 +71,7 @@ if (existsSync(join(textureDir, 'dungeon-bcdfx.json'))) {
 		{ stdio: 'inherit' },
 	);
 	if (tilesetResult.status !== 0) throw new Error('Could not generate composited tileset views');
-} else if (tileViewFiles.every(existsSync)) {
+} else if (['bcdfx', 'bcdfy', 'bcdfz'].every(hasAnyTileView)) {
 	console.log(`Using committed composited tileset views in ${textureDir}`);
 } else {
 	throw new Error(`Missing tileset source and committed views: ${textureDir}`);

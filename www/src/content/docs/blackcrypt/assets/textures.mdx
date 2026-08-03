@@ -1,0 +1,47 @@
+---
+title: Dungeon Textures
+description: The three dungeon tilesets, rendered as composite viewports.
+---
+
+import DungeonViewCycle from '../../../../components/DungeonViewCycle.astro';
+
+# Dungeon Textures
+
+The three dungeon tilesets (`bcdfx`, `bcdfy`, `bcdfz`), rendered as composite
+208×140 first-person viewport mockups from the game's own blit descriptors and
+confirmed on-screen dest-positions. Served from
+`/assets/blackcrypt/amiga/textures/`.
+
+Each tileset is shown at its accent ramp, cycling through a few faux dungeon
+scenes built from the tileset's own decoration sub-images (hover to pause).
+These are composited illustrations built from the real extracted art, not
+frames captured from the game itself:
+
+<div style="display:flex; flex-wrap:wrap; gap:1.5rem; align-items:flex-start;">
+	<DungeonViewCycle tileset="bcdfx" caption="bcdfx — levels 1–4 & 12–13 (tan / grey)" />
+	<DungeonViewCycle tileset="bcdfy" caption="bcdfy — level 5 (violet)" />
+	<DungeonViewCycle tileset="bcdfz" caption="bcdfz — levels 6–11 (bone / cream)" />
+</div>
+
+The [raw atlas PNGs](/blackcrypt/files/bcdfxyz/) remain available in the
+repository's extracted assets for inspecting individual sub-images.
+
+## Reading the tilesets
+
+Each tileset is a bare concatenation of chunks whose directory lives in the
+executable, not the file. The 84 named sub-images (47 for `bcdfy`) include side
+walls, front walls, ceiling, floor, doors, pits, pillars, alcoves, plaques,
+stairs, pull chains, panels, fountains and wall buttons. See
+[bcdfx/bcdfy/bcdfz](/blackcrypt/files/bcdfxyz/).
+
+## About the composited views
+
+These mockups draw from the confirmed dest-position table in the raw notes
+(`docs/blackcrypt/amiga/data-structure.md` § "3D Viewport Compositing" →
+"Screenshot corroboration") plus empirical alignment against real emulator
+screenshots. They favour an open-corridor composition — side walls receding
+on both sides toward a decorated far wall — since that's what actual play
+screenshots show; a wall directly ahead (the game's `wall0` art) only occurs
+one square from a dead end and mostly fills the frame, which makes for a much
+less legible illustration. Treat these as "looks right", not a byte-exact
+reproduction of any specific in-game frame.
