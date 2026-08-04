@@ -1,6 +1,7 @@
 # Plan: can the Black Crypt Windows demo be completed from Amiga data?
 
-**Status: Phase 1A resolved — GO. 1B/1C/1D still open.** This
+**Status: Phase 1A resolved — GO. 1B resolved — no new item art needed.
+1C/1D still open.** This
 doc records both the plan and the disassembly findings that shaped it — the
 planning pass for this project involved actually opening `crypt.exe` in
 radare2 for the first time, since nothing in this project had looked at the
@@ -338,6 +339,113 @@ open question is the gfxNumber → bracket-index resolver (can't be a raw
 index, since `0xEA > 180`). If this resolves cleanly, **no item art needs
 injecting at all** — a large scope reduction.
 
+> **RESOLVED, 2026-08-04 — inventory/key icon resolver found, traced, and
+> verified: no new item art needs injecting.** The item-side counterpart
+> to `fcn.00406d50` is a **static LUT + arithmetic pair**, not a by-name
+> string search (`fcn.00402650` never runs per-record for items — it only
+> runs once, at startup, to locate the *bracket* boundaries).
+>
+> **The `gfxNumber → icon-index` table.** `fcn.00403550(gfxNumber,
+> enchantOffset)` — the general item-icon draw routine, called (directly
+> or via the zero-offset wrapper `fcn.004033c0`) from **14** distinct
+> sites across the binary (`fcn.0040bbe0`, `fcn.00410598`,
+> `fcn.00410bc0`, `fcn.0041abc0`, `fcn.0041cf50` ×2, `fcn.0041d570`,
+> `fcn.0041f220` ×2, `fcn.004201f0` ×2, `fcn.00421480`, `fcn.0041c220` —
+> inventory, panel/container fill, examine, and message-box contexts) —
+> does:
+> ```
+> iconIndex = word[gfxNumber*2 + 0x431b16]      ; 235-entry word table, gfxNumber 0..234
+> if (iconIndex == 0xFFFF) -> no icon (fallback surface, no crash)
+> directoryIndex = word[0x46b806] + iconIndex + enchantOffset  ; 0x46b806 = "Start Items" bracket index + 1
+> <index the runtime 68-byte clipper directory at 0x43c7a0 + directoryIndex*68, blit>
+> ```
+> `word[0x46b806]` is set once at startup in `fcn.0040bbe0` @ `0x40bf37`,
+> immediately after `fcn.00402650(0x0, 0, count, 0x43c7a0)` resolves the
+> string `"Start Items"` to its directory index — i.e. the *only* by-name
+> lookup for items is finding the bracket's start, exactly the structure
+> pattern already documented in § "0.3". `0x431b16` is the DOS-native
+> analogue of the Amiga `bcdft` S_1 `+0x26EF2` table already confirmed in
+> `amiga/data-structure.md` § "`gfxNumber` → icon index" — same role
+> (`gfxNumber → icon-index`, sentinel = "no icon"), same domain
+> (`gfxNumber` 0..234/235, `0xEA` = 234 is the real corpus max), only the
+> width (word, not byte) and the sentinel value (`0xFFFF`, not `0`)
+> differ.
+>
+> **The key resolver.** `fcn.004033d0(gfxNumber)`, reached from
+> `fcn.00410bc0` only when the record's `itemType` byte is `0x06` (Key):
+> ```asm
+> 0x4034bd  mov ebp, word [0x43c46e]     ; "Start Keys" bracket index + 1
+> 0x4034c1  add eax, 0xffffff38          ; gfxNumber + (-200) = gfxNumber - 200
+> ```
+> i.e. `directoryIndex = word[0x43c46e] + (gfxNumber − 200)` — the exact
+> DOS counterpart of the Amiga key rule already confirmed in
+> `amiga/data-structure.md` (`keyIndex = gfxNumber − 200`, line ~2059),
+> down to using the identical constant. `word[0x43c46e]` is set the same
+> way as `0x46b806`, off the `"Start Keys"` string, in the same
+> `fcn.0040bbe0` prologue.
+>
+> **Verification.**
+>
+> 1. **Cross-platform numeric match against the independently-derived
+>    Amiga LUT.** `public/assets/blackcrypt/amiga/data/item-names.json`'s
+>    `catalog` (169 entries, built from the *Amiga* `bcdft` S_1 `+0x26EF2`
+>    table via a completely separate derivation) was diffed against a
+>    dump of DOS `0x431b16`: **139/139 exact numeric matches** on every
+>    catalog entry with a real icon (`iconIndex != 0`), and the remaining
+>    **30/30** catalog entries (27 keys, gfx 200-227; Statue gfx `0xBD`;
+>    Illusionary Walls gfx `0xC1`; Monster Generator gfx `0xE8`) all read
+>    `0` on the Amiga side (Amiga's "no `Start Items` icon" sentinel) and
+>    `0xFFFF` on the DOS side (DOS's own sentinel) — same semantic
+>    verdict, different platform's sentinel convention. **169/169 (100%)
+>    agreement**, zero real discrepancies.
+> 2. **Full game-wide corpus coverage.** Walking all 13 maps with
+>    `scripts/bclib/bcdfs.py` (`STRUCTURE_TYPES` excluded) reproduces the
+>    task's own **166** figure exactly: 139 non-key item `gfxNumber`s +
+>    27 key `gfxNumber`s = 166, split 42 (map 1) / 124 (maps 2-13) —
+>    matching the prompt's numbers to the record. **All 139 non-key items
+>    resolve to a non-`0xFFFF` entry in `0x431b16` — 0 misses.** All 27
+>    keys are covered by the confirmed `gfxNumber − 200` arithmetic
+>    (`200..227`, `0x43c46e`-based), independent of the `0x431b16` table
+>    entirely.
+> 3. **Structural cross-check against the real, shipped `clipper.clp`.**
+>    Parsing the demo's own directory: `"Start Items"` is entry **446**,
+>    `"End Items"` is entry **622** — exactly **175** entries in between,
+>    every one **type 2 (image), 24×24, 576 B**. `word[0x46b806] =
+>    idx(Start Items) + 1 = 447`. `iconIndex 0` → directory entry `447`
+>    (the *first* real item image); `iconIndex 174` (the table's own
+>    maximum, confirmed above) → directory entry `621` (the *last* one,
+>    immediately before `"End Items"`). Zero off-by-one in either
+>    direction — the icon-index domain the table produces exactly spans
+>    the bracket's real entry count.
+>
+> **Verdict: Phase 3 needs zero new item icon art.** Every one of the 166
+> `gfxNumber`s used anywhere in the full 13-map game — including all 124
+> that only appear in maps 2-13, never in the demo — resolves through
+> code and data **already present, unmodified, in `crypt.exe` and the
+> demo's own shipped `clipper.clp`**, to a real, already-drawn 24×24
+> image or key icon. This is a stronger result than the structure-art
+> finding in the same section: there, 5 of the game's structure
+> `gfxNumber`s still need new art; here, the count is 0. Combined with
+> structure art (5 new needed) and the separately-confirmed
+> `Start Floor Items` bank-size match (49 groups × 3 depths, not
+> individually re-traced this pass — the floor-drop rendering path uses a
+> different, group/depth-indexed table at `0x43272a` reached through
+> `fcn.00405620`, which appears to be the DOS counterpart of the Amiga
+> `+0x26FDE` floor-group table but was not exhaustively verified; flagged
+> as a small residual unknown, not a blocker, since the bank *size* match
+> already gives strong indirect confidence), **Phase 3 shrinks to just
+> the 19 creature clusters and 2 tilesets already scoped in § "1D"** —
+> item/key art needs no injection at all.
+>
+> Function/address summary for future reference: `fcn.00403550` (item
+> icon resolver, general), `fcn.004033c0` (its zero-offset wrapper, 13
+> call sites), `fcn.004033d0` (key icon resolver), `fcn.00410bc0`
+> (itemType dispatcher: `0x05` Potion / `0x06` Key / `0x0E` Food get a
+> variant offset, everything else goes through the zero-offset wrapper),
+> `0x431b16` (gfxNumber→iconIndex table, 235 words), `0x46b806` /
+> `0x43c46e` (bracket-base globals for Start Items / Start Keys,
+> populated by `fcn.0040bbe0`).
+
 ### 1C. Does it run under Wine? — **partially answered: yes, but unusable as-is**
 
 **Status, 2026-08-04 (user, manual test):** it launches and reaches gameplay
@@ -411,8 +519,9 @@ won't run it legibly, the project is slower, not dead.
   are the tilesets; ids `4..9` are unaccounted for and worth a look
   before Phase 3 assigns anything.
 
-**Owners:** `game-re` agent for 1B/1C/1D. **1A is closed** — see its
-section above (resolved by `re-codebreaker`, 2026-08-03).
+**Owners:** `game-re` agent for 1C/1D. **1A and 1B are closed** — see
+their sections above (1A resolved by `re-codebreaker`, 2026-08-03; 1B
+resolved by `game-re` static analysis, 2026-08-04).
 
 ---
 
@@ -595,7 +704,7 @@ original assumption.
 
 | Phase | Concrete success criterion |
 |---|---|
-| 1 | ✅ 1A: named parser (`fcn.00425350`), named driver (`fcn.00426880`), verdict *parameterized*, verified at 1,530/1,530 squares + 45/45 actions + zero-deviation padding invariant. 1B still open: gfxNumber→bracket resolver with all 166 item gfxNumbers accounted for |
+| 1 | ✅ 1A: named parser (`fcn.00425350`), named driver (`fcn.00426880`), verdict *parameterized*, verified at 1,530/1,530 squares + 45/45 actions + zero-deviation padding invariant. ✅ 1B: gfxNumber→bracket resolver found (`fcn.00403550`/`fcn.004033d0` + table `0x431b16`), all 166 item gfxNumbers accounted for — 139/139 match the independent Amiga LUT, 27/27 keys covered by the confirmed `gfxNumber−200` rule, 0 misses |
 | 2 | ✅ **Done.** Converter reproduces the shipped `maindung.gam` byte-for-byte, 15,099/15,099, from `bcdfs` map 1 alone; full 13-map output is exactly 171,005 B. `scripts/bclib/maindung.py` + `scripts/verify_maindung.py` |
 | 3 | Rebuilt `clipper.clp` still boots the demo unchanged (all 816 original entries resolve identically); a deliberately-injected sprite (e.g. a Ram Demon placed into map 1) renders correctly |
 | 3 (instrumented, if 1C succeeds) | Under Wine, the `0x4699ac` message log shows zero `** Could not find Clip '%s' **` lines while walking a converted map |
@@ -615,8 +724,8 @@ cheaper first — 1A's outcome means neither blocks the other.
 | Phase | Effort | Confidence | Tooling |
 |---|---|---|---|
 | ~~1A map-switch trace~~ | **Done** (one session) | **Resolved — go** | `re-codebreaker`, radare2 |
-| 1B gfxNumber resolver | Hours–1 day | High | `game-re`, radare2 |
-| 1C Wine viability | Hours | Unknown | `wine`, `winedbg`, scratch copy of game dir |
+| ~~1B gfxNumber resolver~~ | **Done** (one session) | **Resolved — no new item art needed** | `game-re`, radare2 |
+| 1C Wine viability | Hours | Partially answered (launches, presentation broken) | `wine`, `winedbg`, scratch copy of game dir |
 | 1D art scoping | Hours | High | `game-re`, existing `bclib` |
 | ~~2 converter~~ | **Done** (one session) | **Verified — zero deviation, 15,099/15,099 B** | Python, `bclib`, `game-re`, radare2 |
 | 3 resource injection | Days–weeks (19 clusters + 2 tilesets) | Medium-high | Python, existing extraction pipeline |
