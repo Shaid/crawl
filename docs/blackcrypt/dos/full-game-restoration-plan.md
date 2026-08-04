@@ -338,9 +338,32 @@ open question is the gfxNumber → bracket-index resolver (can't be a raw
 index, since `0xEA > 180`). If this resolves cleanly, **no item art needs
 injecting at all** — a large scope reduction.
 
-### 1C. Does it run under Wine? — enabling, not blocking
+### 1C. Does it run under Wine? — **partially answered: yes, but unusable as-is**
 
-Untested deliberately. The game writes `TempDung.gam`, `orig%d.gam`,
+**Status, 2026-08-04 (user, manual test):** it launches and reaches gameplay
+— the DirectDraw surface is not a hard blocker. But the presentation is
+broken: it comes up in a full-screen *blocking* window with the real
+320×200-class viewport rendered tiny in one corner of the screen ("320×256
+smooshed"), not filling the display. That's consistent with DirectDraw
+falling back to a stretched/letterboxed emulation path rather than a true
+palettized primary surface — plausible causes, not yet root-caused:
+`winecfg`'s DirectDraw renderer setting (`gdi` vs `opengl` vs `vulkan`),
+forcing an explicit virtual-desktop resolution matching the game's native
+mode instead of the desktop's, or a scaling/DPI setting Wine applies by
+default that the original DirectDraw blit path doesn't expect.
+
+**Still open, now narrower:** get the window to actually fill at native
+resolution (try `wine explorer /desktop=bc,320x200`, or
+`winecfg` → Graphics → force a virtual desktop at the game's own
+resolution, or `WINEDEBUG=+ddraw` to see what surface size/format it
+actually negotiates) — this is a display-config problem, not a
+compatibility-of-the-executable problem, so it doesn't change 1C's
+"enabling, not blocking" status. Once legible, resume the original
+plan below: read the message log at `0x4699ac` live as a Phase 3 oracle.
+
+Untested-and-still-open below this line is the original plan text.
+
+The game writes `TempDung.gam`, `orig%d.gam`,
 `char%d.dat` into its working directory — **run it from a scratch copy
 outside the repo, never against `data/blackcrypt/dosvga/` directly.**
 
@@ -348,11 +371,10 @@ outside the repo, never against `data/blackcrypt/dosvga/` directly.**
 DirectDraw/DirectSound title on Wine is plausible but unconfirmed — it
 needs a palettized 320×200 primary surface. Order of investigation:
 
-1. Does it reach the title screen at all? (`wine crypt.exe`,
-   `WINEDEBUG=+ddraw,+dsound`)
-2. If DirectDraw fails: try a virtual desktop
-   (`wine explorer /desktop=bc,640x480`) and 8-bit colour depth.
-3. If it runs: read the message log at `0x4699ac` live (via `winedbg` or
+1. ~~Does it reach the title screen at all?~~ **Yes — confirmed 2026-08-04.**
+2. Presentation is broken (see above) — try a virtual desktop pinned to
+   the game's native resolution, or force the DirectDraw renderer backend.
+3. If legible: read the message log at `0x4699ac` live (via `winedbg` or
    `/proc/<pid>/mem`) — that surfaces every `** Could not find Clip '%s'
    **` and `*** BAD MONSTER AT COLUMN %hd LEVEL %hd ***` by name, for
    free, as an oracle for Phase 3.
@@ -360,7 +382,7 @@ needs a palettized 320×200 primary surface. Order of investigation:
 This is the DOS-side analogue of the Amiberry MCP oracle used on the Amiga
 side, but **not a prerequisite** — every §0 finding came from static
 analysis, and Phase 2 has a byte-exact static oracle (§2.1 below). If Wine
-won't run it, the project is slower, not dead.
+won't run it legibly, the project is slower, not dead.
 
 ### 1D. Scope the art conversion — sizing, not blocking
 
