@@ -1607,6 +1607,20 @@ byte-comparable layout, such that a real Amiga mid-game save could be
 converted into a working DOS save (or vice versa) — the save-data analogue
 of Phase 2's `bcdfs`↔`maindung.gam` converter?
 
+> **Correction — a real Amiga save corpus was obtained after all, later in
+> the same session, without ever needing Amiberry.** The Amiberry blocker
+> below is accurate as far as it goes (no emulator tool was ever called),
+> but it turned out to be moot: the project owner supplied a real archive
+> of **80 genuine `CHARACTERSA`/`B`/`C`/`D`/`E` save files** from an actual
+> playthrough (`data/blackcrypt/saves.7z`, gitignored, never committed —
+> see "Update — real Amiga save corpus obtained" at the end of this phase
+> for the full analysis). That section **supersedes essentially every
+> "unverified"/"hypothesis" qualifier below** with byte-exact, multi-file
+> cross-validated confirmation — read this section for the original
+> disassembly-only pass (still accurate as far as it went, and still the
+> right account of *how* the structure was first derived), then read the
+> update for what real data confirmed, corrected, and left open.
+
 ### Blocker — no live Amiga save was obtained this session
 
 Getting a *real* Amiga save required booting the game in Amiberry (the 3
@@ -1817,3 +1831,208 @@ was created — no Amiberry tool was called at all). `data/blackcrypt/`
 and `build/cache/blackcrypt/` are unmodified; the only files touched are
 this document and read-only analysis of `crypt.exe` /
 `bcdft_decompressed.bin`, neither of which was written to.
+
+---
+
+### Update — real Amiga save corpus obtained (no emulator needed)
+
+The project owner supplied `data/blackcrypt/saves.7z` (79,988 B, gitignored
+— **never commit this archive or its extracted contents**), a real archive
+from an actual Amiga playthrough. Extracted to scratch (`7z x`, never into
+`data/`): **80 real `CHARACTERSA`–`E` files**, sizes 3,340–7,652 B, spanning
+a single continuous playthrough's dungeon-level directories (`levels/05`
+through `levels/28`, `levels/tmp*` autosaves, `levels/final`) plus several
+independent early/fresh-party saves in sibling directories (`1/`, `3/`,
+`4/`, `5/`, `6/` — `6/` is a byte-identical duplicate of `2/BlackCrypt/`'s
+tree). This let every claim below be checked against up to 80 independent
+real files instead of zero, closing most of what the disassembly-only pass
+above had to leave as "traced but never run".
+
+**Everything here is verified with `hashlib`/`struct`-level Python against
+the real bytes — evidence is stated as counts out of the full corpus, not
+"looks right".**
+
+#### 1. The leading 120-byte zero header — confirmed, 80/80
+
+Every one of the 80 real saves starts with exactly the same 120 zero
+bytes the disassembly-only DOS analysis predicted (`0x00`–`0x77`), byte-
+identical to `char1.dat`'s own leading zero run. Zero exceptions.
+
+#### 2. The following 90-byte block — position-confirmed, but it's *real state*, not a compiled constant
+
+The DOS-only pass called `crypt.exe`'s `0x4303e8` table (copied verbatim
+into every DOS save) a "static template… not per-character/per-save data".
+That's **corrected**: on the Amiga side, this 90-byte block (`0x78`–`0xD1`,
+still position-identical to DOS) is **not** constant across real saves —
+diffing the freshest save (`1/CHARACTERSA`) against a deep, 23-levels-later
+save from the *same playthrough* (`levels/28/CHARACTERSA`) shows the block
+changed. What *is* still constant, confirmed 45/45 two-byte units, both
+files: the **shape** — three 15-word sub-blocks, each opening with marker
+bytes `01 01` and closing with an `0xFF` terminator, each holding a
+`(id, count)`-shaped sequence — and, critically, **which of the 15 units in
+each sub-block are true 16-bit words (byte-swapped between platforms) vs.
+which are two independent bytes (identical raw bytes on both platforms,
+unaffected by endianness)**. Position-by-position diff against real
+`char1.dat` bytes at the same offsets:
+
+```
+unit:  0    1    2    3    4    5    6    7    8    9   10   11   12   13   14
+kind: SAME SAME SWAP SAME SWAP SWAP SAME SWAP SWAP SAME SWAP SWAP SAME SWAP SWAP
+```
+repeating identically for all 3 sub-blocks, DOS vs. real Amiga alike. This
+is a second, independent, real-data confirmation of Phase 2's core finding
+— **the byte-swap is per-field, not blanket** — now demonstrated on the
+save-file format too, not just the dungeon-map format. Best current
+reading: a party-wide item/spell master-list table (sequential ids 2–5,
+3–8, etc.) that starts in "creation order" for a brand-new party (which is
+why the DOS demo's fresh characters and this session's freshest Amiga save
+both show it in clean ascending order) and gets reordered by real
+inventory/spellbook activity — a **hypothesis**, not fully decoded, but the
+*shape* and *swap rule* are now confirmed data, not guesses.
+
+#### 3. The 168-byte character struct — confirmed field-for-field for the Fighter class, including one exact unswapped byte-array match
+
+Comparing DOS's real `char1.dat` Fighter (168 B from name) against the
+freshest real Amiga save's Fighter (168 B from name, `1/CHARACTERSA`),
+field by field, byte-position-identical on both platforms:
+
+| Field (relative to name) | DOS (real) | Amiga (real) | Verdict |
+|---|---|---|---|
+| `+0x00` | `"FIGHTER\0"` + zero pad to 24 B | `"FIGHTER\0"` + zero pad to 24 B | identical layout |
+| `+0x18`, stride `0x0A`×4 | sequential ids `1,2,3,4` | real ids `5,2,1,3` (out of order — a *played* fighter's items, not a fresh kit) | **same field, same position, different real values** — exactly what a shared layout with different play histories should produce |
+| `+0x46`–`+0x4B` | `01 FF FF FF FF FF` | `01 FF FF FF FF FF` | identical raw bytes |
+| `+0x4C`/`+0x4E` (word pair) | `0x0014`/`0x0014` (LE) | `0x0014`/`0x0014` (BE) | same value, correctly per-field-swapped |
+| `+0x50`/`+0x52` (word pair) | `0x1384` = 4996 (LE) | `0x1388` = 5000 (BE) | same *kind* of stat (paired, equal to itself — a current==max pattern), plausible-but-different real values |
+| `+0x54` (word) | `0x270e` = 9998 (LE) | `0x2710` = **10000** (BE) | same field, round-number-consistent real values |
+| `+0x5E`–`+0x6D` (16 B) | `08 08 0e 06 08 0a 0c 00 00 00 00 00 0e 06 08 0a` | **byte-for-byte identical** | a class-constant (Fighter equipment-slot-type array) — single bytes, so endianness is moot, and it matches **exactly** |
+
+This is a real, quantitative, cross-platform, cross-file confirmation of
+the 168-byte struct's field layout — not just its size. The one exact
+byte-array match (`+0x5E`) is decisive: two files from two different
+platforms, two different real characters, from two different actual games,
+producing **identical bytes** at the same offset is only explained by a
+shared class-constant table at a shared struct offset.
+
+#### 4. Per-character record *total* size — real, large, and now correctly scoped as an open gap (not a small oversight)
+
+Real Amiga records are far bigger than the disassembly-only pass's ≤328 B
+ceiling predicted: name-to-name stride in the freshest save is **844 B**
+per character (vs. DOS's fixed 270 B), and the *within-playthrough* growth
+pattern is itself diagnostic — walking `levels/05` → `levels/28` (same 4
+characters, same playthrough), the **Fighter's own record size never
+changes** while Cleric/Magic User/Druid's grow steadily. That is exactly
+the signature of a **known-spells list** dominating the tail (fighters
+don't learn spells in this game; the three casters do) — a strong,
+evidence-backed hypothesis for *what* the extra data is, even though its
+internal byte format was not decoded this session. This is real progress
+over the disassembly-only pass (which had no way to distinguish "my loop
+trace under-counted" from "there's a genuinely unbounded structure I
+hadn't found") but is **still open** — flagged, not glossed over.
+
+#### 5. The 13-slot, 52-byte map-offset table — triple-confirmed, zero deviation across the entire real corpus
+
+Searching every one of the 80 real saves for the 8-byte anchor pattern
+`00 00 00 00 00 00 3A C7` (slot 0 = 0, slot 1 = `0x3AC7` = 15,047) finds it
+in **80/80 files, 100%**, and in every file the full 13-slot table decodes
+to the **exact same 13 values**, byte-for-byte:
+
+```
+(0, 15047, 34766, 54155, 73694, 89339, 104662, 119907,
+ 125098, 138953, 143834, 158919, 165686)
+```
+
+Zero deviation across a fresh level-1 save, mid-game saves, and an
+end-of-game save. `15,047 = 0x3AC7` is not a coincidence — it is **the
+exact "map 2 dangling pointer" value this same document already derived
+independently in §0.1** from the DOS demo's own truncated `maindung.gam`.
+Finding the identical value, at the identical relative structural position
+(52 bytes + a trailing field before EOF, see below), in 80 completely
+independent real Amiga save files from a real playthrough closes this
+anchor beyond reasonable doubt: **both platforms' map-offset tables encode
+the same real byte offsets into the same underlying 13-map layout**, per-
+field swapped (LE on DOS, BE on Amiga) exactly like every other confirmed
+field in this document.
+
+#### 6. New: the "current map" scalar, pinned and validated against real progression
+
+Diffing the 64 bytes immediately preceding the offset table across the
+full `levels/05`→`levels/28` progression (same playthrough) finds exactly
+one byte, at a fixed offset (`table_start − 33`), that moves
+**monotonically 1 → 13** in lockstep with real directory/level progress —
+confirmed across all 25 progression saves plus every early/fresh save
+(all read `1`) with zero exceptions (e.g. `levels/05`→`2`, `levels/13`→`5`,
+`levels/20`→`8`, `levels/28`→`13`). This is the Amiga on-disk counterpart
+of DOS's `word[0x47481a]` (current map) and this project's already-
+documented `$1E5C(A4)` — now confirmed, not just plausibly-named, by a
+clean monotonic real-data signal.
+
+#### 7. Correction: the "terminator" is a real pending-event *count* field, not a blind zero-write
+
+The disassembly-only pass read `mov word[cursor], 0` as a blind
+terminator, because the only real sample available (`char1.dat`) has zero
+pending events. Real saves refute that: the word immediately after the
+52-byte table equals the **pending scheduled-event count**, and the file
+ends exactly `52 + 2 + (12 × count)` bytes from the table's start in
+**every one of the 80 real files** — e.g. `levels/final` has count `2`
+(24 extra bytes), `levels/20` has count `6` (72 extra bytes), `levels/14`
+has count `8` (96 extra bytes), and the 60-odd files with count `0` land
+exactly on `52 + 2 = 54` bytes from EOF. This confirms the disassembly's
+predicted ordering (offset table, then the pending-events list, then a
+trailing field) exactly — it just mis-read what the trailing field means,
+which real data now corrects.
+
+#### Updated verdict
+
+**The party/global portion of the save format (header, map-offset table,
+current-map scalar, pending-event-count + list) is now confirmed
+cross-platform-compatible at the byte/field level — a converter for this
+slice is buildable today, following Phase 2's per-field-swap precedent
+exactly, no further oracle needed.** The 168-byte character-core struct is
+confirmed compatible for every field checked, including one exact,
+platform-independent byte-array match. **The one real remaining gap is the
+per-character variable-length tail** (spell lists / inventory, contributing
+the bulk of the 270 B vs. 844+ B size gap) — now correctly scoped as a
+substantial, well-motivated (very likely a known-spells list, per the
+class-correlated growth pattern) but undecoded sub-format, rather than an
+unknown "maybe it's just bigger than expected" gap. Closing it is Phase
+2-shaped work — walk the real corpus's per-character tails the way
+`scripts/bclib/bcdfs.py` walks dungeon records — and does not need
+Amiberry or any further oracle; the 80-file corpus already in hand is
+sufficient to do it in a follow-up session.
+
+No file under `data/blackcrypt/saves.7z` or its extracted contents was
+committed or written into `data/blackcrypt/` — all analysis ran against
+the scratch extraction. No `mcp__amiberry__*` tool was called.
+
+### Live cross-check, 2026-08-04: dropping a real Amiga save into an unconverted DOS slot
+
+Independent of the corpus analysis above, the project owner ran the
+patched `crypt.exe` (Phase 4 + 5) under Wine with two real, **unconverted**
+Amiga `CHARACTERSA` files simply renamed into two unused DOS save slots
+(`char2.dat` ← `2/BlackCrypt/CHARACTERSA`, 7,596 B; `char3.dat` ←
+`1/CHARACTERSA`, 3,692 B — no transform applied, a deliberate "does it just
+work" test). Result: the smaller/earlier save's slot returned cleanly to
+the load-game menu (no crash — consistent with `fcn.00426390`, the load-path
+counterpart of the save serializer above, reading *something* it treats as
+invalid/empty rather than garbage-but-plausible); the larger/deeper save's
+slot crashed with a page fault writing to address `0x00000024`.
+
+The crash backtrace (`data/blackcrypt/wine-test/backtrace.txt`) lands
+exactly where this finding predicts: frame 2 is `crypt+0x2537f` = VA
+`0x42537f` = **`fcn.00425350` (`LoadDungeon`) + 0x2f** — i.e. 47 bytes into
+the same parser this plan's §"1A" already fully documents, reached via
+`fcn.00426390`'s restore-game path (`SwitchMap(-1, curMap)` →
+`LoadDungeon(1)`, §"1A"'s own diagram). Frame 1, `crypt+0x28c36`, is where
+the actual write fault occurs — a garbage pointer/index, consistent with
+`fcn.00426390` having populated the runtime map-offset table (`0x4738b4`)
+and/or `curMap` (`word[0x47481a]`) from real Amiga-format bytes
+misinterpreted under the DOS field layout this section derived, then
+handing that garbage straight to `LoadDungeon` without validation.
+
+This is real, independent, empirical confirmation of the write-up above's
+core finding — **raw byte reuse across platforms doesn't work, exactly as
+the field-level comparison predicted** — obtained without needing to build
+the converter first. It also newly implicates `fcn.00426390` as worth
+tracing in the same detail `fcn.00401b80` (the DOS serializer) got above, if
+a future session wants to build the load-side (not just save-side) half of
+a cross-platform converter.
