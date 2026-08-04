@@ -2148,3 +2148,200 @@ the converter first. It also newly implicates `fcn.00426390` as worth
 tracing in the same detail `fcn.00401b80` (the DOS serializer) got above, if
 a future session wants to build the load-side (not just save-side) half of
 a cross-platform converter.
+
+---
+
+## Phase 7 — title screen credit — **DONE**
+
+Separate from the six phases above, and in the same spirit as Phase 5: the
+demo's title screen overlays a short credit line, `"PC CRYPT V1.0 BY RICK
+JOHNSON!"`, on top of its logo art. This phase traces exactly how that line
+is drawn and adds a second one, about this repo's own restoration work,
+without touching the game's own art, the real Raven Software credits, or
+Rick Johnson's own credit.
+
+### 7.1 The mechanism
+
+`fcn.0040b970` (called once, from the resource-directory build routine
+`fcn.0040bbe0` at `0x40c1f5`) is the entire pre-game title sequence: four
+full-screen `320x200` `clipper.clp` bitmaps shown in a row, each resolved
+by name (`fcn.00402650`) and blitted, then made visible either by
+`fcn.00403d20()` or, for one screen only, `fcn.00408120(0, 320, 200)`
+(traced by disassembly: it Locks two directory-indexed surfaces and
+byte-copies 200 rows across 4 bands — a real, full 320x200 present, not a
+partial one). Decoding the four bitmaps (`scripts/extract_clipper.py`,
+ad hoc render) identifies what each screen actually is:
+
+| Order | Clip name | Wait | Content |
+|---|---|---|---|
+| 1 | `"Title 4"` | 350 ticks | The real Raven Software credits (DESIGN/GRAPHICS/MUSIC/PROGRAMMING/SOUND, real names) |
+| 2 | `"Title 1"` | 100 ticks | The gargoyle-temple background, **no** "BLACK CRYPT" wordmark yet |
+| 3 | `"Title 2"` | 400 ticks | The same background **with** the wordmark — this is where the existing Rick Johnson credit is drawn |
+| 4 | `"Title 3"` | until keypress | The game's premise blurb + item icons, plus a runtime-built string (blank in this demo build's static bytes) |
+
+**The existing credit** is drawn by `fcn.0040c9b0(stringPtr, styleArg,
+widthArg)`, called once during Title 2's block (`0x40ba9a`-`0x40baa3`,
+args `(str.PC_CRYPT_..., 1, 0x24)`) *before* Title 2's own background
+blit — safe, because (per the trace below) the credit renders at a row the
+background blit never touches.
+
+`fcn.0040c9b0` (392 B, traced instruction-by-instruction, not guessed):
+
+- Computes `strlen` via `repne scasb`, then the glyph loop's starting X as
+  `esi = (40 - strlen) * 4` — the standard centering formula for a 320 px
+  wide, 8-px-per-glyph line (`(320 - strlen*8) / 2`, refactored). This is a
+  **real, code-derived width constraint**: the line only stays on-screen
+  for `strlen <= 40`. The existing credit is 31 chars (9 of that 40-char
+  budget spare, `(40-31)*4 = 36 px` start offset) — confirming the task's
+  own framing that a static centered line has much less headroom than a
+  scrolling marquee would.
+- Per character, glyph index = `charCode - 0x20`, bounds-checked
+  (`0x40ca90`: `cmp ax, word[edx*4+0x43c7b0]; jg <skip, don't draw>`)
+  against the **`"Scroll Font 1"`** clipper entry's own declared height
+  field. Confirmed directly from `clipper.clp`: entry 128, `"Scroll Font
+  1"`, type 2, `8x472` px → `472/8 = 59` glyph slots → valid chars are
+  exactly `0x20` (space) through `0x5A` (`'Z'`) — space, digits, most
+  ASCII punctuation, and uppercase A-Z, **no lowercase**. This matches the
+  existing credit's own ALL-CAPS style exactly and is why "Scroll Font"'s
+  name is misleading for this call site: nothing here actually scrolls or
+  animates — it's a single static line, drawn once, held for the rest of
+  Title 2's on-screen duration. (The font strip is presumably also used
+  for a genuinely scrolling end-game credits sequence elsewhere in the
+  full game, not exercised by this demo build — out of scope here.)
+- Every character blits an 8x8 slice of the font strip to a **hardcoded
+  destination row, `y = 0xdd` (221)** — a literal inside `fcn.0040c9b0`'s
+  own body (`push 0xdd` at `0x40cad2`), identical for every caller, *not*
+  a parameter. Confirmed via the file's established `(this, x, y, srcSurf,
+  srcRect, flags)` Blit calling convention (cross-checked against the
+  known-correct Title-N background blit, which uses `x=0, y=0` for a
+  full-screen backdrop). Since `y` is compiled in, a *second* credit
+  sharing Title 2's own row would need either patching `fcn.0040c9b0`
+  itself (touching the one existing, proven-working credit) or a full
+  near-duplicate of a 392-byte function — both worse than using one of the
+  three other title screens, which have nothing drawn at that row at all.
+
+### 7.2 Feasibility — slack space, checked fresh
+
+Same standard as Phase 4/5: searched for large all-zero runs, then
+required each candidate to have **zero** dwords anywhere in the whole
+253,952-byte file decoding as a pointer into it — a fresh file-wide scan
+for *this* patch, not inherited from Phase 4/5's own findings, since those
+two patches already consumed part of the same shared cave.
+
+- **Code**: the same `.text` cave Phase 4/5 use (`0x42DEB3`-`0x42E000`,
+  333 B) has **237 B free** after Phase 4's 22-byte thunk and Phase 5's
+  74-byte DlgProc+thunk (`0x2DEB3`+22+74 = `0x2DF13` onward) — freshly
+  confirmed all-zero in the real, unmodified `crypt.exe`, not assumed.
+  This patch's cave is 47 B, comfortably inside with 190 B to spare.
+- **String data**: `.rdata`'s unused tail, `0x42F2D9`-`0x430000`
+  (3,367 B), of which Phase 5 uses the first 695 B. This patch places its
+  string at `0x42F600` — 112 B clear of Phase 5's own end, 2,560 B still
+  free afterward.
+- A fresh file-wide dword scan for pointers into either target region (the
+  47-byte cave slice, the 40-byte string slice) found **zero** hits in
+  both, run independently of and in addition to the all-zero check.
+
+**Composability, checked, not assumed:** this patch's hook, cave and
+string windows are fully disjoint from both `patch_crypt_exe.py` (Phase 4:
+`fcn.00423b50` + `0x2DEB3`-`0x2DEC9`) and
+`patch_crypt_exe_add_restoration_note.py` (Phase 5: `0x41361B` +
+`0x2DEC9`-`0x2DF13` + `0x2F2D9`-`0x42F590`), so it applies cleanly to a
+stock `crypt.exe`, one already patched by Phase 4 alone, or one patched by
+both Phase 4 and Phase 5. **One real ordering constraint exists, inherited
+from Phase 5's own precondition, not introduced by this patch:** Phase 5's
+pre-flight check requires its entire 311-byte cave remainder to read
+all-zero — which includes the 47 bytes this patch writes — so if this
+patch runs *before* Phase 5, Phase 5's own guard will (correctly) refuse
+to run afterward. Confirmed empirically, not just reasoned about: applying
+this patch to a stock file, then attempting Phase 5 on the result, fails
+cleanly with Phase 5's own "cave remainder is not all-zero" error, no
+corruption. **Apply Phase 5 before this patch if both are wanted.**
+
+### 7.3 The patch
+
+`fcn.0040b970`'s Title 1 block ends with
+`fcn.0040aaf0(3, 1); wait-100-ticks`. The `call fcn.0040aaf0` at `0x40ba6a`
+(5 B: `e8 81 f0 ff ff`, confirmed by direct byte read against the real
+file, not assumed) is stolen and replaced with a 5-byte `jmp rel32` to a
+47-byte cave (`0x42DF13`) that:
+
+1. Re-executes the exact stolen call (`call 0x40aaf0`) — its args were
+   already pushed by the two instructions immediately before the hook and
+   are untouched by the jump.
+2. Draws the new credit exactly the way Title 2's own credit is drawn:
+   `fcn.0040c9b0(newStr, 1, 0x24)` — identical `arg2`/`arg3` to the
+   proven-working call, differing only in the string pointer.
+3. Presents it with the same routine already proven to make a
+   `fcn.0040c9b0`-drawn credit visible: `fcn.00408120(0, 320, 200)`, Title
+   2's own "make visible" call. Title 1 normally uses the plainer
+   `fcn.00403d20()` instead, which is left completely untouched and still
+   runs immediately before the hook fires — so Title 1's picture displays
+   exactly as before for one instant, then the new credit is drawn and an
+   extra, harmless present makes it visible too.
+4. Jumps back to `0x40ba6f` (`push 1`, the original next instruction —
+   Title 1's own 100-tick wait loop), resuming unmodified code.
+
+Both `fcn.0040c9b0` and `fcn.00408120` end in a bare `ret` (confirmed by
+disassembly of both functions' epilogues, not assumed) — cdecl, caller
+cleans the stack — so the cave explicitly balances its own two calls with
+`add esp, 0xc` each, rather than relying on the surrounding function's own
+deferred/batched stack cleanup (which exists only for the original,
+untouched instructions and must not be disturbed).
+
+**Deliverable:** `scripts/patch_crypt_exe_add_title_credit.py`, matching
+`patch_crypt_exe.py`/`patch_crypt_exe_add_restoration_note.py`'s exact
+shape (module-level byte constants with `assert` cross-checks on every
+`push`/`jmp`/`call` operand, a `patch()`/`_self_check()` pair, refuses
+in-place patching, refuses to overwrite `--output` without `--force`).
+All bytes assembled with `rasm2 -a x86 -b32 -s <addr> '<insn>'`, never
+hand-computed.
+
+### 7.4 Verification performed
+
+Against the real, unmodified `data/blackcrypt/dosvga/crypt.exe`, patched
+only into scratch copies (the real file was never written to — confirmed:
+its md5sum is unchanged across every run below):
+
+| Check | Result |
+|---|---|
+| Round-trip `r2` disassembly of the hook | `jmp 0x42df13`, falling through at the resume address to the original, unmodified `push 1` |
+| Round-trip `r2` disassembly of the cave | All 12 intended instructions decode back exactly as written: `call 0x40aaf0`, `push 0x24`, `push 1`, `push str.FAN_RESTORATION_AT_CRAWL.SHAID.NET` (r2 auto-recognised and printed the embedded string), `call 0x40c9b0`, `add esp,0xc`, `push 0xc8`, `push 0x140`, `push 0`, `call 0x408120`, `add esp,0xc`, `jmp 0x40ba6f` |
+| String bytes | `FAN RESTORATION AT CRAWL.SHAID.NET\0` at file+`0x2f600`, byte-exact |
+| Full-file byte diff, patched-alone vs. original | Exactly **78** changed bytes, all inside the three declared windows (5 hook + 47 cave, several of whose bytes coincidentally equal the pre-existing `0x00` + 34 string bytes); **0** differences anywhere else in the 253,952-byte file |
+| Composability: stock → this patch alone | Succeeds, self-check passes |
+| Composability: Phase 4 → Phase 5 → this patch | Succeeds, self-check passes at every step |
+| Composability: Phase 4 → this patch (Phase 5 skipped) | Succeeds, self-check passes |
+| Composability: this patch → Phase 5 (wrong order) | **Fails cleanly**, Phase 5's own pre-flight guard reports "cave remainder is not all-zero", no corruption — confirms the documented ordering constraint empirically rather than just by inspection |
+| Pre-flight guards actually fire | Confirmed the patcher refuses in-place patching, refuses to overwrite an existing output without `--force`, and refuses a `crypt.exe` whose hook/cave/string-region bytes don't match the expected stock shape |
+
+This meets the same bar as every other "confirmed" claim in this plan: a
+byte-exact structural check (the full-file diff) plus an independent
+disassembly pass (not just the patcher's own self-check), not a spot-check
+or a "looks right".
+
+**Not done, same scope boundary as Phase 4/5:** live Wine/screenshot
+confirmation that the second credit line actually renders on screen. The
+credit's placement is *derived from*, not merely modeled after, the one
+credit line already known to render correctly in the shipped game — same
+row (`y=0xdd`), same draw routine (`fcn.0040c9b0`, byte-identical
+`arg2`/`arg3`), same present routine (`fcn.00408120`, identical
+arguments), same font, same centering formula, same character-set
+constraint. Static, byte-exact verification is this project's established
+bar for code patches (Phase 4/5 shipped on that same basis, and §1C's
+still-open DirectDraw/Wine presentation issue remains the blocker for any
+live capture, unchanged by this phase).
+
+### 7.5 The drafted text
+
+`"FAN RESTORATION AT CRAWL.SHAID.NET"` — 34 characters, all-caps,
+space/letters/period only (every character class already proven safe by
+the existing, shipped "PC CRYPT V1.0 BY RICK JOHNSON!" credit, which also
+uses space, letters and a period). Centered start offset
+`(40-34)*4 = 24 px` from each edge — comfortable margin, well clear of the
+`strlen<=40` overflow bound derived above. Deliberately terse (a
+title-screen credit line has no room for prose) and deliberately *not*
+claiming official status, Rick Johnson's authorship, or Raven/Activision
+affiliation — "fan restoration" reads as exactly what it is, the same
+posture Phase 5's dialog page already takes at greater length.
+`crawl.shaid.net` is this project's own real, already-deployed docs site,
+the same URL Phase 5 uses.
