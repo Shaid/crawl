@@ -2,7 +2,8 @@
 
 **Status: Phase 1A resolved — GO. 1B resolved — no new item art needed.
 Phase 4 resolved — DONE (`scripts/patch_crypt_exe.py`, byte-exact verified).
-1C/1D still open.** This
+1D resolved — art scoping done, exact Phase 3 payload manifest below.
+1C still open.** This
 doc records both the plan and the disassembly findings that shaped it — the
 planning pass for this project involved actually opening `crypt.exe` in
 radare2 for the first time, since nothing in this project had looked at the
@@ -495,15 +496,12 @@ won't run it legibly, the project is slower, not dead.
 
 ### 1D. Scope the art conversion — sizing, not blocking
 
-- **Creatures:** 24 distinct graphics IDs game-wide, demo has 2 → **19
-  new clusters** needed (Amiga total: 204 sprites across `bcdfb`–`bcdfn`).
-  Required `clipper.clp` entry names are dictated by the exe's own
-  creature table ("Ram Demon 3 S", "Estoroth A 1", …) — no naming
-  decisions needed.
-- **Tilesets:** the Amiga has three (`bcdfx` levels 1–4+12–13, `bcdfy`
-  level 5, `bcdfz` levels 6–11); the demo ships the `bcdfx` equivalent
-  only. **2 more tilesets** (~84 and ~47 sub-images) plus 4 more palette
-  accent ramps from `bcdfu` are needed.
+- ~~**Creatures:** 24 distinct graphics IDs game-wide, demo has 2 → **19
+  new clusters** needed~~ **superseded — see the RESOLVED block below: it's
+  25 creatures / 23 new clusters, and the earlier "24"/"19" undercounted.**
+- ~~**Tilesets:** ... **2 more tilesets** (~84 and ~47 sub-images) plus 4
+  more palette accent ramps from `bcdfu` are needed.~~ **superseded — exact
+  counts and a corrected ramp total below.**
 - ~~Confirm whether the empty `Start/End Level Specifics` bracket is where
   per-map wall decorations belonged, by finding what (if anything) still
   reads that bracket by name.~~ **Answered as a by-product of 1A.** The
@@ -516,13 +514,201 @@ won't run it legibly, the project is slower, not dead.
   selected by a numeric group id on the directory entry, *not* by the
   `Start X`/`End X` name brackets — the bracket is a packaging
   convention, and injected per-map entries need group id `map + 10` on
-  their descriptor, with `11..23` covering maps 1–13. Group ids `1..3`
+  their descriptor, with `11..23` covering maps 1–13. ~~Group ids `1..3`
   are the tilesets; ids `4..9` are unaccounted for and worth a look
-  before Phase 3 assigns anything.
+  before Phase 3 assigns anything.~~ **Resolved below.**
 
-**Owners:** `game-re` agent for 1C/1D. **1A and 1B are closed** — see
-their sections above (1A resolved by `re-codebreaker`, 2026-08-03; 1B
-resolved by `game-re` static analysis, 2026-08-04).
+> **RESOLVED, 2026-08-04 — creature roster, group ids 4-9, and tileset/ramp
+> counts all nailed down by static analysis (radare2 + the existing Amiga
+> corpus); no live execution used.**
+>
+> #### Creatures — 25 identities, not 24; 23 new clusters, not 19
+>
+> `crypt.exe`'s creature-name table isn't at `0x430800` itself — that
+> address is a **152-byte preamble** (a small count/index table, role not
+> needed for this scope) preceding **26 fixed-size 180-byte (`0xB4`)
+> records** running `0x430898`–`0x431ae0` (file-identical to VA, this
+> `.exe`'s sections are all raw-identity-mapped: `file_offset = VA -
+> 0x400000` for every section). Each record is `dword gfxId` + `2×dword`
+> pointer + `6×dword` (a `0x00010035`-constant block, confirmed
+> Two-Head-identical to the plan's own §0.4 citation) + **12× (`dword`
+> pointer, `word` w, `word` h, `dword` flag)** — a 3-tier × 4-facing frame
+> slot table (pointers alias for mirrored facings, e.g. Two Head's N and E
+> slots share one pointer — the DOS-side counterpart of the Amiga
+> "mirror-view" sprites already documented in `amiga/data-structure.md`).
+> Scanning the whole region for the known Amiga `gfxId` byte values as
+> zero-extended dwords finds all **26** records, exactly once each, at a
+> uniform 180-byte stride — the region has no other content.
+>
+> Reading `crypt.exe`'s own `Start Monsters`/creature-name strings (never
+> read directly before — the plan's earlier "24"/"26" figures came from
+> the `0x430800` preamble and clue-book cross-reference, not this table)
+> gives **26 creature-name groups**, matching `0.4`'s original roster
+> ("Estoroth, Lich Dragon, Medusa, ... Statue, Green Guy…") term-for-term:
+> `Two Head`(7 frames: `3S/3E/2S/2E/1S/1E/A0`), `Rock Eye`(7: `3S/2S/1S/1E/
+> 1N/A1/A0`), `Magnito`(10), `Green Guy`(4), `Maggot`(10), `Druid Watcher`
+> (10), `Ironhead`(10), `Slime`(4), `Big Glop`(10), `Little Glop`(10),
+> `Lich Dragon`(2: `1/A0`), `Plant`(10), `Spider`(10), `Possessor`(10),
+> `Possessor Body`(10), `Ram Demon`(11: adds `A1`), `Cloaker`(2: `1/A0`),
+> `Ram Lord`(10), `Merman`(10), `Squid`(10), `Water Lord`(10, two words —
+> an earlier `Waterlord`-only regex search missed it, hence the original
+> "unaccounted" framing), `Medusa`(10), `Spirit`(4), `Statue`(3: `3/2/1`),
+> `Skeleton Lord`(10), `Estoroth`(11). **`Statue` is not a creature** — its
+> gfx id `0xbd` is the Statue *structure*, already inside §1B's "5 new
+> structure gfxNumbers" bucket, so it's excluded from the creature count
+> below (its 3 sprites are still part of Amiga's 204-sprite total, just
+> tracked under structure art, not double-counted).
+>
+> **The 26 records and 26 name-groups pair up positionally, in *reverse*
+> file order** (the record area is built high-to-low, `Estoroth`…`Two
+> Head`; the name/string pool is laid out low-to-high, `Two Head`…
+> `Estoroth`) — confirmed three independent ways: (1) every one of the 10
+> creatures already named via the Amiga-side Manual/Clue-book
+> cross-reference lands on the thematically matching DOS name at its
+> paired position (`0xb2`→Two Head, `0xb3`→Rock Eye, `0x50`→**Lich
+> Dragon** [=Dragonlich], `0xb5`→**Ram Demon**, `0xb6`→**Ram Lord**,
+> `0xbc`→**Water Lord** [=the Great Waterlord], `0xbe`→**Medusa**,
+> `0xc5`→**Estoroth**, `0xbd`→**Statue**); (2) frame count matches exactly
+> for 23/26 pairs; (3) the 3 residual count mismatches (below) are all
+> Amiga-side *undercounts* consistent with the already-documented
+> mirror-view mechanism, not random noise. **New finding, not previously
+> recorded on either side:** the Possessor pair flips the guess a naming
+> pass made from thematic-only reasoning — `0xb7` (no static placement, a
+> recolour variant) is named **`Possessor`**, and `0xb8` (placed, carries
+> the game's only `SOUL KEY`) is named **`Possessor Body`** — the reverse
+> of the plausible-sounding assumption; not applied to
+> `scripts/cluster_monster_names.py`'s `NAMED_CLUSTERS` this pass (out of
+> scope — Phase 3's job), but worth doing then.
+>
+> | gfx | Map | Bank | Amiga n | DOS name | DOS n | Δ | Shipped? |
+> |-----|-----|------|---------|----------|-------|---|----------|
+> | `0xb2` | 1 | bcdfb | 7 | Two Head | 7 | 0 | **yes** |
+> | `0xb3` | 1 | bcdfb | 7 | Rock Eye | 7 | 0 | **yes** |
+> | `0x4f` | 2 | bcdfc | 7 | Magnito | 10 | +3 | no |
+> | `0xb0` | 2 | bcdfc | 4 | Green Guy | 4 | 0 | no |
+> | `0xb1` | 2 | bcdfc | 10 | Maggot | 10 | 0 | no |
+> | `0x4d` | 3 | bcdfd | 10 | Druid Watcher | 10 | 0 | no |
+> | `0x4e` | 3 | bcdfd | 10 | Ironhead | 10 | 0 | no |
+> | `0xc7` | 3 | bcdfd | 4 | Slime | 4 | 0 | no |
+> | `0x4b` | 4 | bcdfe | 7 | Big Glop | 10 | +3 | no |
+> | `0x4c` | 4 | bcdfe | 7 | Little Glop | 10 | +3 | no |
+> | `0x50` | 4 | bcdfe | 2 | Lich Dragon | 2 | 0 | no |
+> | `0xba` | 5 | bcdff | 10 | Plant | 10 | 0 | no |
+> | `0xc3` | 5 | bcdff | 10 | Spider | 10 | 0 | no |
+> | `0xb7` | 6 | bcdfg | 10 | Possessor | 10 | 0 | no |
+> | `0xb8` | 6 | bcdfg | 10 | Possessor Body | 10 | 0 | no |
+> | `0xb5` | 7 | bcdfh | 10 | Ram Demon | 11 | +1 | no |
+> | `0xb9` | 7 | bcdfh | 1 | Cloaker | 2 | +1 | no |
+> | `0xb6` | 8 | bcdfi | 10 | Ram Lord | 10 | 0 | no |
+> | `0xc4` | 9 | bcdfj | 10 | Merman | 10 | 0 | no |
+> | `0xbf` | 9 | bcdfj | 10 | Squid | 10 | 0 | no |
+> | `0xbc` | 10 | bcdfk | 10 | Water Lord | 10 | 0 | no |
+> | `0xbe` | 11 | bcdfl | 10 | Medusa | 10 | 0 | no |
+> | `0xc6` | 11 | bcdfl | 4 | Spirit | 4 | 0 | no |
+> | `0xb4` | 12 | bcdfm | 10 | Skeleton Lord | 10 | 0 | no |
+> | `0xc5` | 13 | bcdfn | 11 | Estoroth | 11 | 0 | no |
+> | *(`0xbd`, map 11, bcdfl, 3 frames, "Statue" — structure, see §1B)* | | | | | | | |
+>
+> Totals (creatures only, `0xbd` excluded): **25 creature identities, 2
+> already shipped → 23 new clusters** (not 19 — the plan's original count
+> undercounted by missing `Water Lord` in its own filter and by treating
+> the `0x430800` preamble as the table). Amiga sprite total 201 (excl.
+> Statue), 14 already shipped → **187 new sprites to convert**. DOS entry
+> total 212 (excl. Statue), 14 already shipped → **198 new `clipper.clp`
+> directory entries to write**. The gap between those two deltas (`198 −
+> 187 = 11`) is exactly the 5 rows with `Δ > 0` above (`+3` Magnito, `+3`
+> Big Glop, `+3` Little Glop, `+1` Ram Demon, `+1` Cloaker) — DOS names 3
+> tiers × 4 facings per "normal" creature but several Amiga clusters only
+> store 7 (not 10) distinct bitmaps, reusing one pixel image under two
+> facing names (directory-entry aliasing — one image, two directory
+> records pointing at it — is already a confirmed mechanism in this
+> container; Two Head's own N/E facing-slot pointers alias the same way,
+> per the record layout described above) —
+> so **11 of the 198 new entries need no new pixel conversion**, just an
+> extra directory record pointing at an already-converted sprite. Ram
+> Demon (`+1`) and Cloaker (`+1`) are small residuals worth a second look
+> in Phase 3 (either a genuinely missed 11th/2nd Amiga sprite, or one more
+> hand-redrawn DOS-only pose like Two Head/Rock Eye's own re-authoring,
+> §3.3) but don't change the headline numbers.
+>
+> #### Group ids 4-9 — resolved: two real, four dead
+>
+> All 4 call sites to `fcn.0040b820(group)` in the whole binary are now
+> traced (its only 4 xrefs, confirmed exhaustively):
+>
+> | Call site | Caller | Group | Role |
+> |---|---|---|---|
+> | `0x4268fb` | `fcn.00426880` (`SwitchMap`) | `1`/`2`/`3` (dynamic) | Tilesets — already known |
+> | `0x40bf01` | `fcn.0040bbe0` (directory build) | **`0`** (literal `esi`, xor'd at function entry and never rewritten before this call — radare2's static analysis comment guessed `0xa` here, which the actual data flow refutes) | Runs once during the initial `clipper.clp`-directory build, before the first by-name resolution (`Start Items`); role not needed for this scope |
+> | `0x401008` | `fcn.00401000`, called only from `fcn.00402700` | **`5`** (literal) | One-time **startup preload**, run before the title sequence |
+> | `0x40b974` | `fcn.0040b970` | **`6`** (literal) | The **title/splash sequence itself** — this function's body references `"Title 1"`…`"Title 4"`, `"Scroll Font 1"`, `"Bubble"`, `"Start Attack Sounds"`, and the literal string `"PC CRYPT V1.0 BY RICK JOHNSON!"` |
+>
+> **`4`, `7`, `8`, `9` are never passed to `fcn.0040b820` anywhere in
+> `crypt.exe`** — confirmed by enumerating literally every call site to the
+> only function that dispatches on a bare group id (as opposed to
+> `curMap+10`, which only ever produces `11..23`). They are dead/unused
+> ids, not an unscoped resource category — **this does not change Phase
+> 3's scope**: `5` and `6` are UI/startup bundles the demo already ships
+> in full (not creature or tileset content), and `0` is an internal
+> build-time no-op-looking pass. Group ids actually meaningful to Phase 3
+> remain exactly `1..3` (tilesets) and `11..23` (per-map).
+>
+> #### Tilesets and accent ramps — exact counts, and one correction
+>
+> Confirmed against the already-solved Amiga corpus (`amiga/data-structure.md`
+> §§ "bcdfx/y/z" and "Dungeon accent-ramp selection"), replacing the
+> plan's earlier `~84`/`~47`/`4 more ramps` approximations:
+>
+> - `bcdfx` (**already shipped** — the demo's own tileset): **84**
+>   sub-images (83 pixel images + 1 door-clip stencil), 12 chunks,
+>   100% byte coverage confirmed. Serves ramp **0** (tan, levels 1-4) and
+>   ramp **3** (grey, levels 12-13).
+> - `bcdfy` (new): **47** sub-images (7 of the same 12 chunk kinds — it
+>   genuinely lacks the pit/alcove/plaque/panel-fountain/button chunks),
+>   all decoded. Serves ramp **1** (violet/plum) exclusively, level 5 only.
+> - `bcdfz` (new): **84** sub-images, same 12-chunk structure as `bcdfx`,
+>   all decoded. Serves ramp **2** (bone/cream) exclusively, levels 6-11.
+> - **New tileset sub-image conversions needed: 47 + 84 = 131.**
+> - **Ramps — corrected from "4 more" to 3.** `bcdfu` stores 5 named
+>   32-word dungeon-look variants (0 tan, 1 violet, 2 bone, 3 grey, 4
+>   blue-grey), but the confirmed tileset↔ramp dispatch table
+>   (`amiga/data-structure.md` § "Dungeon accent-ramp selection") is
+>   **bijective and only ever selects ramps 0-3** — ramp 4 (blue-grey) is
+>   not used by any tileset/level and was never a Phase-3 requirement; the
+>   plan's original "4 more" simply counted "5 stored variants minus the
+>   1 already shipped" without checking which ones dungeon rendering
+>   actually calls for. Ramp 0 is already shipped (demo's own `Palette`/
+>   `Automap_Palette`). **New ramps needed: 1 (violet, `bcdfy`), 2 (bone,
+>   `bcdfz`), 3 (grey, `bcdfx`'s own levels 12-13 recolour) — 3, not 4.**
+>   Bonus lead, not confirmed this pass: ramp 2's 6 accent values are
+>   byte-identical to the demo's own already-shipped `Options_Palette`
+>   entry (`amiga/data-structure.md` line ~4728) — worth checking in
+>   Phase 3 whether that resource can be reused outright instead of
+>   injecting a new one, though the two may differ in on-disk shape (full
+>   256-colour palette vs. a 6-entry accent ramp).
+>
+> #### Total Phase 3 payload manifest
+>
+> | Item | Count |
+> |---|---|
+> | New creature clusters | 23 (of 25 total identities; 2 shipped) |
+> | New `clipper.clp` creature entries | 198 |
+> | New creature sprite pixel-conversions | 187 (11 of the 198 entries alias an already-converted sprite) |
+> | New tileset sub-image conversions | 131 (47 `bcdfy` + 84 `bcdfz`) |
+> | New accent-ramp palettes | 3 (ramps 1, 2, 3 — was stated as 4) |
+> | (tracked separately, unchanged) structure gfxNumbers, §1B | 5, incl. Statue's 3 sprites already in the 204-sprite Amiga total |
+>
+> New directory entries overall: `198 + 131 (one per sub-image, upper
+> bound) + 3 = 332`, comfortably inside the confirmed **~1,184**-entry
+> headroom (§3.1). Total new pixel-art conversions: `187 + 131 = 318`
+> sprites/sub-images, none requiring new hypotheses — every one resolves
+> to a real, already-decoded Amiga source image or accent-ramp table entry.
+
+**Owners:** `game-re` agent for 1C (still open). **1A, 1B and 1D are
+closed** — see their sections above (1A resolved by `re-codebreaker`,
+2026-08-03; 1B resolved by `game-re` static analysis, 2026-08-04; 1D
+resolved by `game-re` static analysis, 2026-08-04 — creature roster,
+group ids 4-9, and tileset/ramp counts all closed).
 
 ---
 
@@ -804,7 +990,7 @@ cheaper first — 1A's outcome means neither blocks the other.
 | ~~1A map-switch trace~~ | **Done** (one session) | **Resolved — go** | `re-codebreaker`, radare2 |
 | ~~1B gfxNumber resolver~~ | **Done** (one session) | **Resolved — no new item art needed** | `game-re`, radare2 |
 | 1C Wine viability | Hours | Partially answered (launches, presentation broken) | `wine`, `winedbg`, scratch copy of game dir |
-| 1D art scoping | Hours | High | `game-re`, existing `bclib` |
+| ~~1D art scoping~~ | **Done** (one session) | **Resolved — exact payload manifest: 23 creature clusters (198 entries, 187 new sprites), 131 tileset sub-images, 3 ramps** | `game-re`, radare2, existing Amiga corpus |
 | ~~2 converter~~ | **Done** (one session) | **Verified — zero deviation, 15,099/15,099 B** | Python, `bclib`, `game-re`, radare2 |
 | 3 resource injection | Days–weeks (19 clusters + 2 tilesets) | Medium-high | Python, existing extraction pipeline |
 | ~~4 code patch~~ | **Done** (one session) | **Resolved — byte-exact verified; live proof blocked on §1C + tooling, not the patch** | `rasm2`, radare2, Python patcher (`scripts/patch_crypt_exe.py`) |
