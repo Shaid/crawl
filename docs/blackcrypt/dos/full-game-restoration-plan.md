@@ -1,6 +1,7 @@
 # Plan: can the Black Crypt Windows demo be completed from Amiga data?
 
 **Status: Phase 1A resolved — GO. 1B resolved — no new item art needed.
+Phase 4 resolved — DONE (`scripts/patch_crypt_exe.py`, byte-exact verified).
 1C/1D still open.** This
 doc records both the plan and the disassembly findings that shaped it — the
 planning pass for this project involved actually opening `crypt.exe` in
@@ -698,6 +699,83 @@ patch — walls will render from the map-1 tileset. That makes Phase 4
 independently testable *before* Phase 3, which is the reverse of the
 original assumption.
 
+> **DONE, 2026-08-04 — patcher written, both edits assembled and
+> byte-exact verified against the real shipped `crypt.exe`; live Wine
+> proof attempted but not completed (tooling gap, not a patch problem).**
+>
+> **The two edits, as actually applied (all `rasm2 -a x86 -b 32`,
+> addresses re-derived by the tool from `-s <seek>`, never hand-computed):**
+>
+> 1. `jmp rel32` at file+`0x23b50` (vaddr `0x423b50`) → cave vaddr
+>    `0x42deb3`: **`e9 5e a3 00 00`** (5 B). Pre-flight check confirmed the
+>    16-byte stub window still reads
+>    `68 c8 b6 43 00 e8 b6 8d fe ff 59 c3 90 90 90 90` in the real
+>    `data/blackcrypt/dosvga/crypt.exe` (253,952 B) before patching — i.e.
+>    this run's file is exactly the build every earlier trace was done
+>    against.
+> 2. Thunk at file+`0x2deb3` (vaddr `0x42deb3`), 22 B:
+>    **`8b 44 24 04 0f b7 0d 1a 48 47 00 50 51 e8 bb 89 ff ff 83 c4 08 c3`**
+>    — `mov eax,[esp+4]` / `movzx ecx,word[0x47481a]` / `push eax` /
+>    `push ecx` / `call 0x426880` / `add esp,8` / `ret`. The cave region
+>    was re-checked at run time (not just trusted from the doc): all 333
+>    bytes `0x2deb3`-`0x2e000` are `0x00` in the real file, `.text` is
+>    `-r-x` and `paddr`/`vaddr` for that section coincide 1:1 (`r2 iS`:
+>    `.text` `paddr 0x1000 vaddr 0x401000 size 0x2d000` both raw and
+>    virtual), so `file_offset = vaddr - 0x400000` holds exactly and the
+>    thunk sits fully inside the raw PE image, not BSS.
+>
+> **Verification performed (all against the real, unmodified
+> `data/blackcrypt/dosvga/crypt.exe`, patched into a scratch copy — the
+> real file was never written to):**
+>
+> | Check | Result |
+> |---|---|
+> | Round-trip disassembly of both patched regions (`r2 pd`) | Stub: `jmp 0x42deb3` — the *entire* rest of the old 12-byte stub body (the `call`/`pop`/`ret` that used to print the TEST LEVEL message) is now unreached dead bytes, never executed. Cave: all 7 intended instructions decode back exactly as written, ending in `ret` at `0x42dec8`, confirmed by an independent disassembler pass, not just the patcher's own self-check |
+> | `jmp` target resolves to cave start | `0x423b50 + 5 + (rel32) = 0x42deb3` exactly — checked both by the script's own assert and independently by `r2`'s disassembly printing `jmp 0x42deb3` |
+> | `call` target resolves to `SwitchMap` | `0x42dec0 + 5 + (rel32) = 0x426880` exactly — same double-check |
+> | Full-file byte diff, patched vs. original, outside the two intended windows | **0 differences.** 25 total changed bytes across the whole 253,952 B file; all 25 fall inside `[0x23b50,0x23b55)` (4 of the 5 jmp bytes — 1 byte coincidentally matched the original `0x00`) or `[0x2deb3,0x2dec9)` (21 of the 22 thunk bytes — 1 byte coincidentally matched the pre-existing zero cave). Computed independently in Python against both the patcher's output and a separate `r2`-inspected copy |
+> | Pre-flight guards actually fire | Confirmed the patcher refuses in-place patching (`input == output`), refuses to overwrite an existing output without `--force`, and (by construction, not separately exercised) would refuse a `crypt.exe` whose stub bytes or cave bytes don't match the expected build |
+>
+> This meets the same bar as every other "confirmed" claim in this
+> plan: a byte-exact structural check (the full-file diff), not a
+> spot-check or a "looks right".
+>
+> **Live end-to-end proof: attempted, not achieved — tooling gap.** Built
+> a scratch game directory (outside the repo, under `/tmp`) containing the
+> patched `crypt.exe`, the real `clipper.clp`/`Config.dat`, and a full
+> 13-map `maindung.gam` from `scripts/bclib/maindung.py` (so map 2's real
+> data — not just map 1 — is present, per the sequencing note above).
+> Launched it under `wine` (`wine-11.14`, confirmed present) from that
+> directory; the process started and ran (X11/EGL driver warnings only in
+> `WINEDEBUG` output, no crash dialog, no `wine: Unhandled exception`) but
+> exited at the end of the timeout window having written no
+> `TempDung.gam`/`orig%d.gam`/`char%d.dat` — i.e. it never got past the
+> title/chargen screen in the window observed, consistent with §1C's
+> already-documented "launches, but the DirectDraw presentation is broken
+> (tiny letterboxed window)" finding. Getting further needs either (a)
+> §1C's display-config fix so the window is legible, or (b) blind input
+> automation to navigate title → chargen → dungeon → the map-1 staircase
+> without seeing the screen. Neither tool was available in this
+> environment: no `xdotool`/`ydotool`/`xte` for synthetic key/mouse
+> events, and ImageMagick's `import`/`magick import -window root` failed
+> with `missing an image filename` even for a bare relative path (an
+> environment/IM7 CLI issue, not investigated further — out of scope for
+> this task). Per the task's own scoping, this is a stretch goal and not
+> worth burning more time on; static verification above is the complete,
+> sufficient deliverable for Phase 4. A future session with §1C's display
+> fix and/or key-automation tooling available could pick this up directly
+> using the scratch-dir recipe above (`scripts/patch_crypt_exe.py` +
+> `scripts/bclib/maindung.py` + the real `clipper.clp`/`Config.dat`) — no
+> new investigation needed, only tooling.
+>
+> **Deliverable:** `scripts/patch_crypt_exe.py` — takes a user-supplied
+> input `crypt.exe` path and a separate output path, refuses to modify the
+> input in place, applies both edits, and re-reads its own written output
+> to self-check both windows plus a full-file diff before reporting
+> success. Never touches `data/blackcrypt/dosvga/crypt.exe`, and no
+> patched binary is committed anywhere in this repo (verified: `git
+> status` after this session shows only the new script as untracked).
+
 ---
 
 ## Verification — what "it worked" looks like
@@ -708,7 +786,7 @@ original assumption.
 | 2 | ✅ **Done.** Converter reproduces the shipped `maindung.gam` byte-for-byte, 15,099/15,099, from `bcdfs` map 1 alone; full 13-map output is exactly 171,005 B. `scripts/bclib/maindung.py` + `scripts/verify_maindung.py` |
 | 3 | Rebuilt `clipper.clp` still boots the demo unchanged (all 816 original entries resolve identically); a deliberately-injected sprite (e.g. a Ram Demon placed into map 1) renders correctly |
 | 3 (instrumented, if 1C succeeds) | Under Wine, the `0x4699ac` message log shows zero `** Could not find Clip '%s' **` lines while walking a converted map |
-| 4 | Take map 1's staircase at (col 49, row 23) — its destination-map byte is already `2` — and arrive in map 2 at (27, 20) without the "TEST LEVEL" message, then walk back up |
+| 4 | ✅ **Statically done.** Take map 1's staircase at (col 49, row 23) — its destination-map byte is already `2` — and arrive in map 2 at (27, 20) without the "TEST LEVEL" message, then walk back up. Code patch is byte-exact verified (round-trip disasm + zero-diff-outside-window check); the *live* walk-and-observe proof is still open, blocked on §1C's Wine presentation issue plus missing input-automation tooling in this environment, not on the patch itself |
 | End-to-end | Reach Estoroth on map 13 |
 
 **Test ordering:** Phases 3 and 4 are *both* independently testable
@@ -729,7 +807,7 @@ cheaper first — 1A's outcome means neither blocks the other.
 | 1D art scoping | Hours | High | `game-re`, existing `bclib` |
 | ~~2 converter~~ | **Done** (one session) | **Verified — zero deviation, 15,099/15,099 B** | Python, `bclib`, `game-re`, radare2 |
 | 3 resource injection | Days–weeks (19 clusters + 2 tilesets) | Medium-high | Python, existing extraction pipeline |
-| 4 code patch | **Hours** — one ~20 B thunk + a 5 B `jmp` | **High** — all callees identified and verified | radare2, Python patcher |
+| ~~4 code patch~~ | **Done** (one session) | **Resolved — byte-exact verified; live proof blocked on §1C + tooling, not the patch** | `rasm2`, radare2, Python patcher (`scripts/patch_crypt_exe.py`) |
 
 **Phase 2 is the safest work in the whole plan** and independently valuable
 — a verified `bcdfs`↔`maindung.gam` converter documents the port's data
