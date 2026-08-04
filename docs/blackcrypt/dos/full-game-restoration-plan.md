@@ -1533,6 +1533,118 @@ container or art is committed (verified: `git status` after this session
 shows only the new script as untracked, `data/` and `public/assets/`
 unmodified).
 
+### 3a.6 — live in-game finding: door transparency — **real bug, found and fixed**
+
+**Symptom.** The project owner ran the patched `crypt.exe` (§ "Phase 4")
+against a scratch copy of the swapped `clipper.clp` (§ "3a.2"–"3a.3") live
+under Wine and reported a door in the dungeon view rendering as a solid,
+opaque black-ish box instead of showing any see-through masking
+(`data/blackcrypt/wine-test/Screenshot_20260804_225516.png`).
+
+**Question 1 — does `crypt.exe` respect masking for door art at draw time,
+or is it always an opaque rectangle blit?** Traced past the already-known
+resolver (`fcn.00406d50`, § "1B") into its blit callee, `fcn.0040d550`
+(`crypt.exe`, x86, radare2). Every call site inside `fcn.00406d50` pushes
+the literal constant `2` as the last (flags) argument — confirmed for all 7
+branches (frame at 3 depths, leaf at 2 door types × 3 depths, and the
+fallback). Inside `fcn.0040d550`, that flags byte's bit 0 being clear
+routes execution to `0x40d6c1`→`0x40d70f`, which calls
+**`IDirectDrawSurface::BltFast`** (COM vtable offset `+0x1c`) with
+`dwFlags = ((flags & 2) | 0x20) >> 1`. For `flags == 2` this evaluates to
+**`0x11` = `DDBLTFAST_WAIT (0x10) | DDBLTFAST_SRCCOLORKEY (0x01)`** —
+i.e. every door/structure draw goes through DirectDraw's own hardware
+source-colour-key masking, not a flat copy. **Verdict: DOS *does* respect
+per-pixel masking for doors, mirroring the Amiga side's mask-blit
+convention (§ "Kind 11", `+0x24C6E`/`+0x24C76`) — this rules out "DOS
+renderer ignores masking" as the explanation.**
+
+**Question 2 — is the swap script's transparency-key assumption wrong?**
+Traced where the per-image `IDirectDrawSurface::SetColorKey` value actually
+comes from. `fcn.00402350` (the clip-surface loader, called from
+`fcn.0040b7a0`/`fcn.0040b820` — resource-group load) reads a **word at
+directory-record offset `+0xC`** and passes it (`fcn.0040eca0` @
+`0x4023e1`, forwarded to `SetColorKey` flags `DDCKEY_SRCBLT` at
+`fcn.0040eca0+0x91` / vtable `+0x74`) as that surface's colour key — unless
+it's the sentinel `0xFFFF`, which skips `SetColorKey` entirely (fully
+opaque surface, no masking at all). Tracing that word back through the
+runtime record's on-disk source (`fcn.004022d0`, the per-entry directory
+parser: 8 sequential `fread`s) pins it to **on-disk directory offset
+`+50`, a `uint16 LE` field between `data_offset` (`+46`, 4 B) and `width`
+(`+52`, 2 B)** — a real, per-entry field that neither `extract_clipper.py`
+nor `build_proof_of_concept_art_swap.py` had ever parsed before this pass.
+
+Parsing it out of the real, unmodified `data/blackcrypt/dosvga/clipper.clp`
+for every one of the 70 map-1 tileset entries (indices 7–76) gives **three**
+distinct real values, not one:
+
+| Real per-entry colour key | Count | Entries |
+|---|---|---|
+| **32** (`0x20`, DOS palette RGB `(0,255,255)` cyan) | 32 | Every Door Way / Door Type (13), Pillar (3), Pull Chain (4), Wall Left/Right (2, not converted), plus Alcove/Plaque (10, never hit the masked-write path at all — see below) |
+| **33** (`0x21`, DOS palette RGB `(95,67,51)` brown) | 24 | Floor Pit (4), Ceiling Pit (2), every Button (18) |
+| `0xFFFF` (sentinel — no `SetColorKey` call, fully opaque) | 14 | Wall 0/1/2, Floor 1/2, Stairs ×6, Ceiling, Door Slot, Panel Top — all confirmed 6-plane (no Amiga mask) sub-images, zero exceptions |
+
+**The bug: `build_proof_of_concept_art_swap.py`'s old `DOS_TRANSPARENT_INDEX
+= 33` module constant was a single, hardcoded value used for *every*
+masked tileset write, but every door entry's real, on-disk colour key is
+**32**, not 33.** The swap wrote background pixels as palette index 33
+(a real, opaque brown) into `Door Type 1 - 1`; at runtime, DirectDraw keys
+out index **32** for that surface (the real, untouched directory field —
+the swap never edits directory bytes at all, § "3a.1"), so those
+brown-33 pixels are *not* transparent in-game — they render as solid
+opaque brown, i.e. the "black box" the screenshot shows. This is a real
+bug in the conversion script, not an engine limitation (Question 1) and
+not an inherent property of the stock art (the stock, unswapped
+`Door Type 1 - 1` genuinely has 0 real-transparent pixels at its own
+correct key too — confirmed below — so the *stock* door being solid was
+never in question; only the *swapped* door's wrong key was).
+
+Confirms the task brief's own hint almost exactly: tileset/structure art
+does **not** use the same colour-key convention as item/creature art.
+`extract_clipper.py`'s `KNOWN_BG = ((95,67,51), (0,255,255))` render-side
+heuristic (which flags a pixel transparent if its RGB matches *either*
+tuple, for visual inspection) had been masking this the whole time — both
+32 and 33 map to a `KNOWN_BG` colour, so a render always "looked"
+plausible regardless of which index the pixel actually held, even though
+the *real, single-key* runtime only ever keys out one of the two for any
+given entry.
+
+**The fix** (`scripts/build_proof_of_concept_art_swap.py`): `parse_directory`
+now reads each entry's real `colorkey` field (offset `+50`); every masked
+write (`decode_tileset_label`, and the Rock Eye/Green Guy conversion) fills
+background pixels with the **target entry's own** real colour key, not a
+module-wide constant. `DOS_RESERVED_INDICES = (32, 33)` (used only to keep
+the nearest-RGB palette-mapping LUT from ever assigning a real opaque
+pixel to either reserved index) is unchanged — both real per-entry values
+this script's touched entries use are still excluded from the candidate
+pool.
+
+**Re-verification, same bar as § "3a.4":**
+
+| Check | Result |
+|---|---|
+| Self-check (file length, directory bytes, touched-window containment) | Unchanged from § "3a.4" — **1,151,267 B in/out, header+directory byte-identical, 247,183 pixel bytes changed across 75 entries, 0 differences anywhere else** |
+| `Door Type 1 - 1` pixels equal to its **real** colour key (32), stock | **0 / 7,360** — confirms the stock demo's own door leaf is genuinely fully opaque at its real key (not a rendering artifact of the diagnosis) |
+| `Door Type 1 - 1` pixels equal to its real colour key (32), swapped (pre-fix, written as index 33) | **0 / 7,360** at the real key — the old output had 0 pixels a real DirectDraw `SetColorKey(32)` would ever treat as transparent, exactly reproducing the reported bug |
+| `Door Type 1 - 1` pixels equal to its real colour key (32), swapped (post-fix) | **1,953 / 7,360** — real, non-zero transparency at the index the game actually keys out |
+| Visual re-render (patched output, correct single-key alpha, composited over a checkerboard to show real transparency) | `Door Type 1 - 1` renders as a coherent portcullis/grate — solid green-eyed centre bars with genuine checkerboard-visible gaps between them, not noise; `Rock Eye A 1` (Green Guy, key 33 — unaffected by this fix since 33 was already its correct real value) re-rendered identically to § "3a.4", confirming no regression |
+
+**Verdict: real bug, found via disassembly (not guessed), fixed, and
+re-verified to the project's existing bar.** DOS's structure renderer does
+respect per-pixel masking (Question 1, closed — no engine limitation);
+`clipper.clp` carries a genuine per-entry transparency-key field the
+conversion pipeline must read rather than assume (Question 2, closed —
+fixed in the script). This also generalises past doors: the same
+per-entry-field read now applies to every masked write this script
+performs, so Floor Pit/Ceiling Pit/Button entries (already correct by
+coincidence, since their real key already was 33) keep working, and Phase
+3's future full injection (§ "3.2") inherits the same fix by construction.
+Live-in-Wine re-confirmation of the *rendered* fix (as opposed to this
+byte/pixel-level re-verification) is not done this pass — same "no
+input-automation tooling in this environment" constraint as Phase 4's live
+proof (§ "1C") — but the failure mode is now understood precisely enough
+that the byte-level re-verification stands on its own, the same way § "3a.4"
+did before any live test existed at all.
+
 ---
 
 ## Verification — what "it worked" looks like

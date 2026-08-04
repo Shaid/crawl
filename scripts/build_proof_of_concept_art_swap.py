@@ -89,8 +89,35 @@ ROOT = Path(__file__).resolve().parents[1]
 DIR_ENTRY_SIZE = 56
 HEADER_SIZE = 2
 
-DOS_TRANSPARENT_INDEX = 33          # DOS clipper.clp's monster/item bg key
-DOS_RESERVED_INDICES = (32, 33)     # cyan wall-bg key, brown monster-bg key
+# --- Per-entry transparency key (corrected, see "live in-game finding" in ---
+# --- the plan doc's Phase 3a section) ---------------------------------------
+# clipper.clp's own 56-byte directory carries a real per-entry background/
+# colour-key field at offset +50 (uint16 LE), between `data_offset` and
+# `width` -- read directly by crypt.exe's clip-surface loader
+# (`fcn.00402350` @ 0x4023e1/0x4023d4, DOS x86) and passed to
+# IDirectDrawSurface::SetColorKey (vtable +0x74, flags DDCKEY_SRCBLT). The
+# door-render path (`fcn.0040d550` @ 0x40d70f) blits every structure sprite
+# with IDirectDrawSurface::BltFast, flags 0x11 = DDBLTFAST_WAIT |
+# DDBLTFAST_SRCCOLORKEY -- i.e. the DOS renderer *does* respect per-pixel
+# masking for doors/structures; it is not a flat opaque blit. There is
+# therefore no single game-wide "the" transparency index: across the real
+# `clipper.clp`, masked entries carry 32, 33, 0, 20, 35 or 53 depending on
+# what background the art was authored against, and unmasked/fully-opaque
+# entries carry the sentinel 0xFFFF (no SetColorKey call at all). This
+# script never hardcodes a value -- `parse_directory` reads each entry's
+# real `colorkey` field and every masked write uses that entry's own value.
+#
+# Within the 70-entry map-1 tileset (indices 7-76) and the 7 Rock Eye
+# entries this script touches, the real per-entry values are only ever 32,
+# 33 or 0xFFFF -- confirmed by parsing the real shipped file (32 entries at
+# 32, incl. every Door Way/Door Type/Pillar/Pull Chain; 24 entries at 33,
+# incl. every Floor Pit/Ceiling Pit/Button, and all 7 Rock Eye entries; 14
+# entries at 0xFFFF, all of them fully-opaque 6-plane sub-images with no
+# Amiga mask plane at all -- Wall 0/1/2, Floor 1/2, Stairs x6, Ceiling, Door
+# Slot, Panel Top). DOS_RESERVED_INDICES excludes both real masked values
+# from the nearest-RGB palette-mapping candidate pool so a converted opaque
+# pixel can never accidentally land on either.
+DOS_RESERVED_INDICES = (32, 33)     # every real masked colorkey this script's own touched entries use
 
 # --- Pre-flight expectations (the real shipped 1995 demo clipper.clp) -----
 EXPECTED_ENTRY_COUNT = 816
@@ -222,6 +249,11 @@ def parse_directory(data):
             'type': data[off + 40],
             'size': struct.unpack_from('<I', data, off + 42)[0],
             'data_offset': struct.unpack_from('<I', data, off + 46)[0],
+            # Real per-entry background/transparency-key index (0xFFFF =
+            # sentinel "no colour key", opaque). Field at +50, between
+            # data_offset and width -- see the module-level comment above
+            # DOS_RESERVED_INDICES for the disassembly evidence.
+            'colorkey': struct.unpack_from('<H', data, off + 50)[0],
             'width': struct.unpack_from('<H', data, off + 52)[0],
             'height': struct.unpack_from('<H', data, off + 54)[0],
         })
@@ -265,9 +297,10 @@ def resize_nearest(arr, w, h):
     return np.array(img.resize((w, h), Image.NEAREST), dtype=np.uint8)
 
 
-def decode_tileset_label(chunks, label, lut):
+def decode_tileset_label(chunks, label, lut, bg_index):
     """One bcdfxyz.SUB_IMAGES sub-image, palette-mapped to DOS indices, with
-    mask==0 written as the DOS background key."""
+    mask==0 written as `bg_index` -- the *target DOS entry's own* real
+    per-entry colour-key (see DOS_RESERVED_INDICES), not a fixed constant."""
     sub = next(s for s in bcdfxyz.SUB_IMAGES if s[0] == label)
     _, slot, offset, w, h, planes = sub
     data = chunks[slot]
@@ -278,13 +311,16 @@ def decode_tileset_label(chunks, label, lut):
         mask = None
     dos_idx = lut[idx]
     if mask is not None:
-        dos_idx = np.where(mask > 0, dos_idx, DOS_TRANSPARENT_INDEX)
+        dos_idx = np.where(mask > 0, dos_idx, bg_index)
     return dos_idx.astype(np.uint8)
 
 
-def build_tileset_conversions(lut):
+def build_tileset_conversions(lut, by_name):
     """{dos_entry_name: (h, w) uint8 array} for every resolvable TILESET_MAP
-    entry."""
+    entry. `by_name` supplies each target entry's real, per-entry `colorkey`
+    field from the actual clipper.clp directory -- masked sub-images are
+    background-filled with *that* entry's own key, not a single hardcoded
+    index (see DOS_RESERVED_INDICES)."""
     src_path = ROOT / 'data' / 'blackcrypt' / 'amiga' / 'bcdfz'
     s1_path = ROOT / 'data' / 'blackcrypt' / 'extracted' / 'bcdft_decompressed.bin'
     if not src_path.exists() or not s1_path.exists():
@@ -298,22 +334,26 @@ def build_tileset_conversions(lut):
 
     out = {}
     for name, recipe in TILESET_MAP.items():
+        bg_index = by_name[name]['colorkey']
         kind = recipe[0]
         if kind == 'direct':
-            out[name] = decode_tileset_label(chunks, recipe[1], lut)
+            out[name] = decode_tileset_label(chunks, recipe[1], lut, bg_index)
         elif kind == 'hflip':
-            out[name] = np.fliplr(decode_tileset_label(chunks, recipe[1], lut))
+            out[name] = np.fliplr(decode_tileset_label(chunks, recipe[1], lut, bg_index))
         elif kind == 'hconcat':
-            pieces = [decode_tileset_label(chunks, lbl, lut) for lbl in recipe[1]]
+            pieces = [decode_tileset_label(chunks, lbl, lut, bg_index) for lbl in recipe[1]]
             out[name] = np.hstack(pieces)
         else:
             raise ValueError(f'unknown recipe kind {kind!r}')
     return out
 
 
-def build_rock_eye_conversions(lut, target_dims):
+def build_rock_eye_conversions(lut, target_dims, target_colorkeys):
     """{dos_entry_name: (h, w) uint8 array}, each resized to `target_dims`
-    (from the real directory entries, not hardcoded)."""
+    (from the real directory entries, not hardcoded). `target_colorkeys`
+    supplies each target entry's own real per-entry `colorkey` field --
+    every Rock Eye slot happens to carry 33 in the real file, but this is
+    read, not assumed (see DOS_RESERVED_INDICES)."""
     src_path = ROOT / 'data' / 'blackcrypt' / 'amiga' / GREEN_GUY_FILE
     if not src_path.exists():
         print(f'  Rock Eye swap: skipped (missing {GREEN_GUY_FILE})')
@@ -332,13 +372,15 @@ def build_rock_eye_conversions(lut, target_dims):
         blob = dec[off:off + 7 * bpr * h]
         idx, mask = bclib.decode_masked(blob, w, h, 6)
         dos_idx = lut[idx]
-        dos_idx = np.where(mask > 0, dos_idx, DOS_TRANSPARENT_INDEX).astype(np.uint8)
-        frames.append(dos_idx)
+        frames.append((dos_idx, mask))
 
     out = {}
     for name, frame_i in ROCK_EYE_MAP.items():
+        dos_idx, mask = frames[frame_i]
+        bg_index = target_colorkeys[name]
+        filled = np.where(mask > 0, dos_idx, bg_index).astype(np.uint8)
         h, w = target_dims[name]
-        out[name] = resize_nearest(frames[frame_i], w, h)
+        out[name] = resize_nearest(filled, w, h)
     return out
 
 
@@ -384,7 +426,7 @@ def patch(data: bytes) -> bytes:
         accent = bclib.read_accent_ramp(s1, 2)  # bcdfz's exclusive ramp
         ramp2_flat = bclib.ehb_palette(words[:26] + accent)
         tileset_lut = ehb_to_dos_lut(dos_palette_rgb, ramp2_flat)
-        for name, arr in build_tileset_conversions(tileset_lut).items():
+        for name, arr in build_tileset_conversions(tileset_lut, by_name).items():
             write_entry(name, arr)
 
     # --- Rock Eye -> Green Guy swap -----------------------------------------
@@ -394,7 +436,9 @@ def patch(data: bytes) -> bytes:
         monster_lut = ehb_to_dos_lut(dos_palette_rgb, monster_flat)
         target_dims = {name: (by_name[name]['height'], by_name[name]['width'])
                        for name in ROCK_EYE_MAP}
-        for name, arr in build_rock_eye_conversions(monster_lut, target_dims).items():
+        target_colorkeys = {name: by_name[name]['colorkey'] for name in ROCK_EYE_MAP}
+        for name, arr in build_rock_eye_conversions(
+                monster_lut, target_dims, target_colorkeys).items():
             write_entry(name, arr)
 
     return bytes(out), changed, entries
