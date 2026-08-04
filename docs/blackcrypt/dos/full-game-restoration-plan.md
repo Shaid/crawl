@@ -494,6 +494,22 @@ side, but **not a prerequisite** — every §0 finding came from static
 analysis, and Phase 2 has a byte-exact static oracle (§2.1 below). If Wine
 won't run it legibly, the project is slower, not dead.
 
+**A cleaner alternative to `winedbg`/`/proc/<pid>/mem` polling, not yet
+tried:** [`elishacloud/dxwrapper`](https://github.com/elishacloud/dxwrapper)
+(MIT) ships a general "load custom `.dll` files into the game process" /
+ASI-loader facility, independent of its DirectDraw/Direct3D wrapping
+features. That's a ready-made injection mechanism for a small,
+purpose-built companion DLL that reads the `0x4699ac` log buffer directly
+out of the process's own memory and reports it (to a file, a pipe,
+stdout) the moment something is missing — turning §Phase 3's "walk a
+converted map and see if anything's missing" check into something that
+runs unattended, on native Windows or under Wine, instead of a live
+`winedbg` session. Not built this pass; noted here as the concrete
+mechanism if/when Phase 3 wants it. See § "1E" for why `dxwrapper` itself
+is *not* the pick for the DirectDraw presentation problem (`cnc-ddraw`
+is) — this is a separate, narrower use of a different one of its
+features.
+
 ### 1D. Scope the art conversion — sizing, not blocking
 
 - ~~**Creatures:** 24 distinct graphics IDs game-wide, demo has 2 → **19
@@ -1283,6 +1299,242 @@ unchanged across every run above).
 
 ---
 
+## Phase 3a — art-conversion proof of concept (in-place swap) — **DONE**
+
+Before attempting the full Phase 3 (23 new creature clusters + 2 new
+tilesets, all requiring the expensive insert-and-recompute-offsets
+container rewrite described in § "3.1"), this phase proves the Amiga→DOS
+art-conversion pipeline works end to end using only entries the demo
+*already ships*, via a much cheaper **in-place pixel-data swap**: map 1's
+tileset is replaced with the late-game `bcdfz` tileset, and Rock Eye is
+replaced with Green Guy. No new directory entries, no offset
+recomputation, no file-size change.
+
+### 3a.1 Container mechanics for in-place replacement — cheap, confirmed against the real file
+
+Re-derived directly from `scripts/extract_clipper.py` and the real shipped
+`data/blackcrypt/dosvga/clipper.clp` (not just read from the source):
+`uint16 count` (816) + `count × 56 B` directory (name[40], type, size,
+data_offset, width, height) + a data blob. Parsing the real file confirms
+what § "3.1" states in prose with exact numbers: the 782 non-marker
+(type ≠ 1) entries' data is laid out in **exact directory order with zero
+gaps** — `data_offset[i] + size[i] == data_offset[i+1]` holds for all 781
+consecutive pairs, the first data-bearing entry (`Palette`) starts
+immediately at byte 45,698 (`2 + 816×56`, the header+directory size
+exactly), and the last entry (`Two Head A 0`) ends at exactly 1,151,267 =
+EOF.
+
+This makes two distinct cases, only the first of which this phase needed:
+
+- **Same byte size (this phase's case).** If the replacement art's raw
+  pixel byte count (`width × height`, DOS images are uncompressed 8bpp) is
+  identical to the entry's existing `size`, the swap is a pure data
+  overwrite: write the new bytes at the entry's already-recorded
+  `data_offset`, touch **zero** directory bytes (name/type/size/offset/
+  width/height all stay exactly as shipped), and the file's length and
+  every other entry's position are unaffected. No offset math at all.
+- **Different byte size (Phase 3 proper's case, not needed here, but worked
+  out for the record).** If size changes, only entries whose `data_offset`
+  is *after* the resized one need their `data_offset` field patched (a
+  fixed 4-byte write per following entry, cheap — not a directory
+  *insert*, which is what makes Phase 3's real injection expensive), and
+  only the data blob from the resized entry's old start through EOF needs
+  rewriting — not the whole 1.15 MB file. This is materially cheaper than
+  Phase 3's insertion case (§ "3.1"), which additionally grows the
+  directory itself and therefore must recompute every single one of the
+  (up to) ~1,480 populated entries' offsets. Whether a given Phase 3
+  cluster lands on the cheap "shift a small tail" case or needs the full
+  insertion path just depends on where in the file it's added — creature
+  clusters appended at `End Monsters` (current EOF, § "3.1") never need
+  *any* offset patch to earlier entries at all, only to entries added
+  after them in the same session.
+
+This phase's two swaps were deliberately engineered to land on the first,
+cheapest case (see 3a.2/3a.3), so `scripts/build_proof_of_concept_art_swap.py`
+only implements same-size overwrite and explicitly refuses (raises
+`ValueError`) if a converted image's dimensions don't match its target
+entry — the general shifting rule above is documented, not implemented,
+since nothing in this phase's scope needs it.
+
+### 3a.2 The tileset swap — map 1 (`bcdfx`-equivalent) → `bcdfz`, 68/70 entries
+
+**Which `clipper.clp` entries back map 1's tileset.** Parsing the real
+directory finds a contiguous, unbracketed run of 70 named entries at
+indices **7–76** (`Alcove A` … `Secret Button 1 In`), sitting between the
+7 palette entries (0–6) and the empty `Start/End Level Specifics` bracket
+(77/78, already identified in § "1D" as a packaging artifact). This is the
+full set of wall/floor/door/pillar/stairs/pit/button art — every dungeon
+tileset asset the demo ships — confirmed against `bclib.bcdfxyz.SUB_IMAGES`
+(the already-solved Amiga sub-image table, `docs/blackcrypt/amiga/
+data-structure.md` § "Sub-image layout") name-for-name and
+dimension-for-dimension (e.g. `Alcove A` 112×77 on both sides, `Pillar A`
+80×116 on both sides, `Stairs Down/Up 1/2/3` matching Amiga's two stairs
+flights at all 3 depths). No code trace was needed to find this range —
+it falls out of parsing the shipped file directly, the same way the
+`Start X`/`End X` brackets do.
+
+**Why `bcdfz` needs no resizing at all.** `bcdfx` and `bcdfz` share "the
+same 12-chunk structure" (`docs/blackcrypt/amiga/data-structure.md` § "bcdfx
+/ bcdfy / bcdfz"): both decode via the identical `SLOT_SIZES`/`SUB_IMAGES`
+tables, so every one of `bcdfz`'s 84 sub-images has **exactly the same
+(width, height)** as `bcdfx`'s sub-image at the same slot/offset — the two
+tilesets are pixel-for-pixel the same layout, just different colours. That
+means every DOS tileset entry that maps 1:1 to a single Amiga sub-image
+converts to **exactly** the existing entry's byte size, with zero
+resizing — the cheap same-size overwrite case from § "3a.1" applies to the
+whole tileset swap, not just by luck but because the container format was
+built that way (one shared descriptor-driven layout, three different
+pixel payloads).
+
+**The mapping (68 of 70 entries).**
+
+| Recipe | Count | Example |
+|---|---|---|
+| Direct (1 Amiga sub-image, same w×h) | 58 | `Alcove A` ← `alcove-a` |
+| `hflip` (Amiga `floor`, mirrored) | 1 | `Floor 2` ← `hflip(floor)` |
+| `hconcat` (left-return + face + right-return, same height, widths sum to 208 — already documented in `data-structure.md` § "Slot 176") | 3×3=9 sub-images → 3 entries | `Wall 0/1/2` |
+| **Total converted** | **68** | |
+| Not converted (left as original `bcdfx` pixels) | 2 | `Wall Left`/`Wall Right` — Amiga's own art for these is a 4-depth perspective composite (4 overlapping pieces at different (x,y) offsets, § "Slot `$08`" in the Amiga doc) with no documented flat-raster stacking recipe; out of scope for a proof of concept |
+
+The `hconcat` case needed no new hypothesis: `docs/blackcrypt/amiga/
+data-structure.md` § "Slot 176" already states the three per-depth pieces'
+widths sum to exactly 208 at all three depths and share each depth's
+height (`16+176+16 = 48+112+48 = 64+80+64 = 208`), which is precisely
+DOS's own `Wall 0/1/2` width — a plain `numpy.hstack` of the three
+already-decoded, already-palette-mapped pieces reproduces the target
+dimensions exactly, and the self-check (below) confirms no seam artifact
+in the written bytes' size accounting (visual check also confirms no
+seam in the rendered brick texture — see 3a.4).
+
+**Palette.** `bcdfz` is used exclusively under accent ramp 2 ("bone/warm
+cream", `docs/blackcrypt/amiga/data-structure.md` § "Dungeon tileset
+selection") — this swap keeps that native colouring rather than forcing
+ramp 0, since the point is to show real, correctly-converted late-game art
+on map 1, not to disguise it as tan sandstone. The conversion palette is
+built the same way `scripts/export_dungeon_tileset_indexed.py` already
+builds one for its own indexed-PNG export (`bclib.read_palette_words` +
+`bclib.read_accent_ramp(s1, 2)` + `bclib.ehb_palette`), then each of the
+64 Amiga EHB colours is mapped to its nearest-RGB DOS palette entry
+(Euclidean distance in raw RGB, DOS's own shipped `Palette` entry as the
+candidate pool) — indices 32/33 (DOS's cyan/brown transparency keys) are
+excluded from the candidate pool so no real opaque pixel can accidentally
+land on a colour DOS's own renderer treats as "background".
+
+### 3a.3 The Rock Eye swap — Green Guy, 7/7 entries, no exact frame-count match exists
+
+**No other 7-frame creature exists.** § "1D"'s RESOLVED creature table
+gives every creature's real DOS frame count: Two Head and Rock Eye are
+both 7; every other creature is 2, 3, 4, 10, or 11. Two Head is excluded
+(already shipped, and swapping one already-present creature for another
+proves nothing new). So **no candidate has an exact frame-count match** —
+the task's own fallback applies: pick the closest real option and justify
+it, rather than block on a non-existent exact match.
+
+**Candidate chosen: Green Guy (Amiga gfx `0xb0`, `bcdfc`/map 2, DOS name
+confirmed in § "1D"'s table).** Reasoning:
+
+- It is a genuinely separate, real, already-identified creature (not a
+  placeholder "Map N Creature" label) with a small, clean frame set — 4
+  real Amiga frames, the smallest of any creature above Lich
+  Dragon/Cloaker/Statue (which are 2-3 frames and would need even more
+  reuse to fill 7 slots).
+- Rock Eye's own 7 DOS entries are not a generic "3-tier × 4-facing" set —
+  parsing the real directory shows 5 *distinct* sizes (`96×83`, `64×71`,
+  `64×55`×3, `32×32`, `16×17`), a near/far depth ladder with three
+  same-size "near" facings, not four genuinely different facings. That
+  shape tolerates reusing one source frame across the three same-size
+  slots far more naturally than it would tolerate stretching one image
+  across genuinely different facing poses.
+- This project's own container already has precedent for exactly this
+  "one converted image, multiple directory records" pattern — § "1D"'s
+  RESOLVED block documents 11 of Phase 3's own future creature entries as
+  needing "no new pixel conversion, just an extra directory record
+  pointing at an already-converted sprite" (directory-entry aliasing).
+  This swap uses the same idea, just realised as three identical resized
+  copies rather than three records sharing one offset, because DOS's
+  format (unlike Amiga's) has no shared-pointer convention — every
+  `clipper.clp` image entry owns its own pixel bytes.
+
+**The mapping** (`scripts/build_proof_of_concept_art_swap.py`'s
+`ROCK_EYE_MAP`), each source frame nearest-neighbour-resized to its
+target's *existing* directory (width, height) — never touching the
+directory, per § "3a.1":
+
+| DOS entry | Target size | Green Guy source frame | Source size |
+|---|---|---|---|
+| `Rock Eye A 1` | 96×83 | frame 0 (biggest) | 96×75 |
+| `Rock Eye A 0` | 64×71 | frame 1 | 80×46 |
+| `Rock Eye 1 N` | 64×55 | frame 1 (reused) | 80×46 |
+| `Rock Eye 1 E` | 64×55 | frame 1 (reused) | 80×46 |
+| `Rock Eye 1 S` | 64×55 | frame 1 (reused) | 80×46 |
+| `Rock Eye 2 S` | 32×32 | frame 2 | 48×23 |
+| `Rock Eye 3 S` | 16×17 | frame 3 (smallest) | 32×14 |
+
+Nearest-neighbour resize was used deliberately (not any smoothing filter)
+because the source is a palette-index image — blending index values
+produces meaningless intermediate palette entries, not intermediate
+colours.
+
+**Palette and transparency.** Green Guy's Amiga art uses the general
+monster/"game" palette (`scripts/palette_final.json`, the same one
+`scripts/extract_monsters.py` already uses for every other creature
+render in this repo), not a dungeon accent ramp — built into the same
+nearest-RGB-match DOS lookup as the tileset, independently, since
+creatures and dungeon tiles are authored against different Amiga
+palettes. Amiga mask-plane transparency (7-plane sprites: 1 mask + 6
+colour) is written as DOS's own monster/item background key, index 33
+(`(95, 67, 51)`, confirmed against `scripts/extract_clipper.py`'s
+`KNOWN_BG` — the same convention the demo's own shipped Rock Eye/Two Head
+art already uses).
+
+### 3a.4 Verification performed
+
+`scripts/build_proof_of_concept_art_swap.py`, run against the real
+`data/blackcrypt/dosvga/clipper.clp` into a scratch copy (the real file is
+never written to):
+
+| Check | Result |
+|---|---|
+| Pre-flight shape check | Refuses to run unless entry count is exactly 816 and 12 known (index, name) pairs match (palette, tileset start, Rock Eye's 7 names, `Start`/`End Monsters`) — guards against silently "succeeding" on a different `clipper.clp` build |
+| Output file length | **1,151,267 B in, 1,151,267 B out — unchanged**, confirming the same-size-overwrite path was actually taken, not silently falling back to something else |
+| Header + full 816-entry directory (first 45,698 B) | **Byte-identical**, input vs. output — zero directory edits, confirming this swap is pure pixel-data replacement |
+| Bytes changed outside the declared touched windows | **0** — every changed byte falls inside one of the 75 entries' own `[data_offset, data_offset+size)` window (68 tileset + 7 Rock Eye), computed independently of the patcher's own bookkeeping by re-reading the written file from disk |
+| Entries actually swapped | **68/68** mapped tileset entries (of 70; 2 documented residuals) + **7/7** Rock Eye entries — printed counts match the static mapping tables exactly |
+| Visual spot-check (rendered from the *patched output file*, not the pre-write in-memory array) | `Wall 0/1/2` render as a coherent bone/cream brick wall with **no seam** at the two `hconcat` joins; `Floor 1`/`Floor 2` render as mirror images of each other, as intended; `Alcove A` renders a recognisable tombstone/alcove; `Rock Eye A 1`/`1 S`/`3 S` all render a recognisable green spider-like creature (Green Guy) at their respective target sizes, correctly scaled, not noise |
+
+This meets the project's standard verification bar for a container-format
+edit: a byte-exact structural check (directory untouched, file length
+unchanged, no stray writes) plus a visual confirmation that the converted
+pixels are real art, not garbage that merely satisfies the byte-count
+check. It does **not** meet the bar of a live in-game screenshot (blocked
+on the same Wine/DirectDraw presentation issue as Phase 4/5, § "1C") —
+that remains open, same as Phase 4's live proof.
+
+### 3a.5 What this does and doesn't prove
+
+**Proves:** the full Amiga→DOS art-conversion pipeline — deplane (6-plane
+opaque / 7-plane mask-first) → nearest-RGB palette remap against a real
+DOS palette → mask-to-background-key transparency → same-size in-place
+container write → self-verify — works end to end on real game data, for
+both an opaque tileset asset and a masked creature sprite, with zero
+directory corruption. This directly de-risks Phase 3's art-conversion step
+(§ "3.2"), which is the same pipeline at larger scale.
+
+**Doesn't prove:** anything about Phase 3's *insertion* mechanics (new
+directory entries, offset shifting for a growing file) — this phase
+deliberately avoided that case (§ "3a.1"). It also doesn't prove the swap
+looks acceptable **in-game** (no live capture, § "1C" still open) or that
+`Wall Left`/`Wall Right`'s perspective composite is solved (still
+original `bcdfx` pixels, undocumented recipe).
+
+**Deliverable:** `scripts/build_proof_of_concept_art_swap.py`. Never
+touches `data/blackcrypt/dosvga/clipper.clp`, and no patched/converted
+container or art is committed (verified: `git status` after this session
+shows only the new script as untracked, `data/` and `public/assets/`
+unmodified).
+
+---
+
 ## Verification — what "it worked" looks like
 
 | Phase | Concrete success criterion |
@@ -1342,3 +1594,226 @@ Phase 2/3 use before the first run.
 - `docs/blackcrypt/dos/data-structure.md` — carries the §0 corrections
 - `docs/blackcrypt/amiga/data-structure.md` — ground truth for record
   layouts, the `bcdfb`–`bcdfn` creature banks, and the 3-tileset split
+
+---
+
+## Phase 6 — save-file format: is a real Amiga save portable to DOS?
+
+**New scope, not part of Phases 1–5.** The project owner played the real DOS
+demo far enough to produce a genuine save, `data/blackcrypt/dosvga/char1.dat`
+(1,396 B, 4-character party). The question: does the Amiga original's own
+save file (never reverse-engineered in this project before) share a
+byte-comparable layout, such that a real Amiga mid-game save could be
+converted into a working DOS save (or vice versa) — the save-data analogue
+of Phase 2's `bcdfs`↔`maindung.gam` converter?
+
+### Blocker — no live Amiga save was obtained this session
+
+Getting a *real* Amiga save required booting the game in Amiberry (the 3
+ADFs at `data/blackcrypt/amiga/adf/`), reaching the in-game LOAD/SAVE menu,
+saving, and recovering the file from wherever `GAMESAVE:` resolves on the
+host. This agent's operating instructions place a hard gate on
+`mcp__amiberry__*` tools: ask a real user for explicit permission before
+every use, every session, via `AskUserQuestion` — and if that tool isn't
+available and there's no other synchronous channel to a human, state the
+blocker rather than call the tool. `AskUserQuestion` was not present in
+this session's tool set (confirmed via two `ToolSearch` queries), and no
+other synchronous path to the project owner existed. No `mcp__amiberry__*`
+tool was called this session. **This is the one piece of the task not
+completed**, and it means everything below is a *static, code-derived*
+structural comparison, not a literal byte-diff of two real save files. See
+"What a future session needs" below for the exact reproducible steps.
+
+Given that constraint, this session pushed static analysis as far as it
+would go on both sides — which turned out to be much further than
+expected, because the Amiga save serializer had never been located before
+and turned out to be fully traceable in the already-decompressed `bcdft`
+S_1 buffer, and the DOS save writer (`crypt.exe fcn.00401b80`) could be
+disassembled and its output checked field-by-field against the one real
+save file in hand.
+
+### DOS `char%d.dat` — fully reconstructed from `crypt.exe fcn.00401b80`, verified byte-exact
+
+`fcn.00401b80` (`crypt.exe`, x86, disassembled with radare2) is the save
+serializer. It builds the output in a heap buffer (base `dword[0x43c420]`,
+running cursor `dword[0x46f870]`, the same "write cursor into an assembled
+buffer, flush once" idiom as the Amiga side below) and then, at
+`0x401f44`/`0x401f4e`, `sprintf("char%d.dat", word[0x46f836])` and
+`fopen(..., "wb")` before writing it out (`0x401f53`–`0x401f6b`). Traced
+end to end:
+
+| Region | Size | Source | Written at |
+|---|---|---|---|
+| Leading zero fill | 120 B | Literal — a 60-iteration loop each writing 2 zero bytes | `0x401b98`–`0x401bb7` |
+| Static template | 90 B | `rep movsd`×22 + `movsw`×1 from a **constant table baked into `crypt.exe` itself** at VA `0x4303e8` — not per-character/per-save data | `0x401bbe`–`0x401bc5` |
+| 4 × character record | 270 B each (1,080 B total) | See below | `0x401bf0`–`0x401d1b` (the `jbe 0x401bf0` loop, 4 iterations) |
+| ~16 party-level `word` globals | 32 B | Individual `mov cx, word[G]; mov word[cursor],cx` writes, incl. `word[0x47481a]` (**current map**, already confirmed elsewhere in this doc) and `word[0x46f84a]` (already confirmed as the `SwitchMap` "just arrived" flag) | `0x401d21`–`0x401e9b` |
+| 3 × `dword`/`dword`-pair globals | 20 B | `word[0x46f854]` (4 B) + two 8-byte paired-dword writes (`0x46f8ac`+`0x46f8b0`, `0x46f84c`+`0x46f850`) | `0x401e9b`–`0x401eee` |
+| **13 × `dword` map-offset table** | 52 B | **`rep`-style loop copying verbatim from `dword[0x43c424]`** — the exact global this plan's §0.2 already identified as "the file's raw offset table, whose sole job is to be copied into `char%hu.dat`" | `0x401eee`–`0x401f1b` |
+| Terminator | 2 B | `mov word[cursor], 0` | `0x401f1f` |
+| **Total** | **210 + 1,080 + 106 = 1,396 B** | | |
+
+**1,396 / 1,396 bytes accounted for, zero slack** — the disassembly-derived
+size matches the real file's size exactly with nothing left over.
+
+**The offset-table region is the decisive verification.** Slicing the real
+`char1.dat` at the position the disassembly predicts (byte offset `0x53e`,
+52 bytes) and reading it as 13 little-endian `dword`s gives:
+
+```
+[0, 15047, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+```
+
+`15047 = 0x3AC7` is not a coincidental value — it is **the exact "map 2"
+dangling-pointer offset this same plan document already derived and
+explained in §0.1** ("`15,099 − 15,047 = 52` — the file just stops 52
+bytes after that offset... No map-2 data exists"). Finding that precise,
+previously-derived number sitting at the byte offset a completely
+independent x86 disassembly predicted, inside a real save file nobody had
+looked at before, is a strong, self-consistent, zero-ambiguity anchor —
+not just "a plausible byte count".
+
+**Per-character record layout (270 B, 4 identical-shape records confirmed
+against the real file at name-to-name stride `0x10E` = 270, zero
+deviation across all 4):**
+
+| Offset (rel.) | Size | Field | Evidence |
+|---|---|---|---|
+| `+0x00` | 2 | Scalar (varies per record; small computed value) | `0x401c15`–`0x401c2a` |
+| `+0x02` | 168 (`0xA8`) | **Raw copy of the in-memory character struct** — class name string at struct offset 0 (24-byte field, e.g. `"FIGHTER\0"` padded), then a 4×10-byte slot table (2-byte sequential item id + 8 reserved bytes, ids global across the whole party: 1-4, 6-9, 11-14, 16-19), then further stat/equipment fields not decoded field-by-field this session | `0x401c1a`–`0x401c2a` (the `0xa8`-byte copy itself); real-file confirmation: `"FIGHTER\0"`/`"CLERIC\0\0"`/`"MAGIC USER\0"`/`"DRUID\0\0\0"` land exactly at `rec+2` in all 4 records |
+| `+0xAA`..`+0x10D` | up to 100 B | Conditional per-slot item data — two loops (6 and 5 iterations) that only emit a 20-byte static item-definition record (copied from a table at VA `0x430240`, keyed by an id read from the character struct) when that slot's id is nonzero; each emission is followed by a call to `fcn.00401a20` (not traced this session) | `0x401c3c`–`0x401cf3` |
+
+The real file's 4 records happen to be **byte-identical in total length**
+(exactly 270 B apart with no slack), which means this particular save's 4
+starting characters all populate the same number of item/equipment slots
+— consistent with a fresh, low-level party. The record format itself is
+technically variable-length; this session's 1,396-byte oracle can't
+distinguish "fixed 270 B" from "variable, happens to total 270 B here" —
+flagged as a **hypothesis**, not confirmed, pending a second real save
+with a different equipment loadout.
+
+### Amiga save — the serializer, found and traced for the first time in this project, but never run
+
+No Amiga save file exists anywhere in this project's data (`data/blackcrypt/amiga/` has only the 3 ADFs and 13 unpacked overlay files, no `.uss`-adjacent save state — checked). Ground truth for the *format* was instead obtained by finding and tracing the actual save routine in the already-decompressed `bcdft` S_1 buffer (`build/cache/blackcrypt/bcdft_decompressed.bin`, 166,676 B — produced by this project's existing musashi-emulated LZ77 decompressor, `tools/bcdft_decompress/`; no new decompression work needed). This is the same S_1 address space `docs/blackcrypt/amiga/data-structure.md` already cites dozens of times (e.g. "the serializer at S_1 `+0x19370`"), so the routine had a known rough location, but nobody had disassembled it before this session.
+
+Disassembled with radare2 (`-a m68k`, raw flat load, base 0 — S_1-relative
+offsets equal file offsets in the decompressed buffer, matching the doc's
+own `S_1 +0xNNNNN` citation convention). The routine spanning roughly
+`S_1 +0x1957A`–`+0x19A88` builds an in-memory buffer (cursor at `$1EDA(A4)`,
+same "assemble in RAM, flush once" idiom as the DOS side) via repeated
+calls to a local `CopyMem`-style helper at `S_1 +0xA810E`:
+
+| Step | Content | Evidence |
+|---|---|---|
+| 1 | **4 × character record**, looped `d5 = 0..3` | loop bound `cmpi.w 0x3,d5` @ `S_1 +0x19822` |
+| 1a | **168-byte (`0xA8`) raw copy** of the in-memory character struct at `$1758(A4) + d5*168` | `S_1 +0x19694`–`+0x196b8`; stride `168` independently re-derived from the multiply sequence and matches the *already-documented* "character records at `$1758(A4)`, stride 168" (`amiga/data-structure.md` line 1887) |
+| 1b | Two conditional item/spell-slot validation loops (3 iters, then 5 iters) reading words at struct offsets `+0x16`/`+0x3A`, each nonzero slot triggering a 20-byte lookup-table copy from `$91_86(A4)`-relative + a call to `S_1 +0x18DAE` | `S_1 +0x196c2`–`+0x19820` |
+| 2 | **13 × `dword` (52 B) map-offset table**, verbatim from `$1EDE(A4)` | `S_1 +0x19a4c`–`+0x19a80` — the loop bound `cmpi.w 0xc,d5` (13 iterations) and per-slot 4-byte copy match the already-documented "13 map offsets" table exactly |
+| 3 | ~20 party-level scalar globals, individual writes | `S_1 +0x1982a`–`+0x19a20`, including **`$1740(A4)`/`$1742(A4)`/`$1744(A4)`** (already confirmed as `partyY`/`partyX`/`facing`), **`$1750(A4)`** (already confirmed as the turn counter), **`$1E5C(A4)`** (already confirmed as the current dungeon level/map number), and **`$1A24(A4)`** (already confirmed elsewhere as the selected-character index, `tbl = $1758(A4) + $1A24(A4)*168`) — all four cross-checks land exactly where a save routine should touch them |
+| 4 | **Pending scheduled-events list** (12-byte records, `$1036(A4)`-based, sentinel `150` = `0x96`) | `S_1 +0x19a88`–`+0x19cfe`; matches the already-documented 12-byte scheduled-event record and sentinel value exactly |
+| 5 | Flush to disk | `S_1 +0x19b26`: string `"GAMESAVE:"` (`S_1 +0x1d45c`) + string `"CHARACTERS"` (`S_1 +0x1d93c`) → filename `GAMESAVE:CHARACTERS`; a second, adjacent code path at `+0x19bf0`/`+0x19c06` opens `"TempDungeons"`/`"OrigDungeons"` (strings at `+0x1d8e1`/`+0x1d947`) for the dungeon-state half of a save — the same file pair `bcdfp.asm` already documents being written via `GAMESAVE:OrigDungeons`, and the same `orig1.gam`/`tempdung.gam` pair present in `data/blackcrypt/dosvga/` |
+
+**Amiga saves to one fixed filename, `GAMESAVE:CHARACTERS`** — not a
+numbered `Char1`/`Char2` pattern like DOS's `char%d.dat`. This is itself
+an answer to a sub-question the task raised: the "same `char%d.dat`
+filename pattern" observed on the DOS side is DOS's own numbering scheme
+for demo-testing save slots, not something carried over from the Amiga's
+own naming (which uses one fixed name per save-game directory instead).
+
+### Structural comparison and verdict
+
+**Real, substantive structural parallels — not a coincidence:**
+
+1. Both platforms serialize by assembling a flat buffer in RAM with a
+   running cursor, then flush it in one write — same idiom, independently
+   confirmed on both sides.
+2. Both platforms copy a **168-byte raw character struct verbatim**, per
+   character, as the first/core part of that character's save record —
+   identical byte count on both sides. Given this project's Phase 2
+   precedent (the Amiga/DOS map format shares real structural DNA, needing
+   field-level not blanket transformation) and that both engines clearly
+   descend from the same original Raven Software data model, this strongly
+   suggests the 168-byte block's *field order* is close to identical
+   between platforms too — but this was **not verified field-by-field**
+   this session on either side (neither struct's individual stat/name-field
+   offsets beyond "name at the front" were decoded).
+3. Both platforms embed the **same 13-slot, 52-byte dungeon map-offset
+   table** verbatim, copied from the same conceptual global on each side
+   (`$0x43c424` DOS / `$1EDE(A4)` Amiga) — and the DOS instance is
+   byte-verified against this plan's own independently-derived `15,047`
+   value.
+4. Both platforms save roughly the same *class* of party-level scalars
+   (position, facing, current level/map, turn counter, selected-character
+   index) as individual small fields, not a packed struct.
+
+**But not byte-comparable as a blanket transform:**
+
+- **Different outer shape.** DOS wraps everything in a 210-byte header
+  (120 zero bytes + a 90-byte constant template baked into `crypt.exe`,
+  not save data) before the character records; nothing on the Amiga side
+  corresponds to that — the Amiga writer goes straight into the
+  character-record loop.
+- **Different save-file granularity.** DOS's `char%d.dat` is one
+  self-contained flat file holding characters + party scalars + the map
+  offset table, with dungeon-state (`orig1.gam`/`tempdung.gam`) external.
+  Amiga's `GAMESAVE:CHARACTERS` holds the same character/party/offset-table
+  content but *also* the pending scheduled-events list (12-byte records,
+  sentinel-terminated chain) in the same file — DOS has no traced
+  equivalent of that list anywhere in `fcn.00401b80`.
+- **Different per-character tail.** DOS's per-character record has a
+  conditional, lookup-table-driven item/equipment tail (up to 100 B,
+  copying *static* 20-byte item-definition records keyed by an id).
+  Amiga's per-character tail is a *validation* pass over item/spell slot
+  words already inside the 168-byte struct (no external item-table copy
+  observed in the traced code) — different mechanism, not just different
+  byte width.
+- **Different set of party-level globals**, and **no per-field byte-offset
+  mapping was established** between the Amiga's ~20 named scalars and
+  DOS's ~16+ named scalars — several matched by *role* (position, facing,
+  level, turn counter) but not by confirmed byte offset correspondence.
+
+**Verdict: a real, tractable converter is plausible to build — following
+exactly Phase 2's precedent of a per-field selective transform, not a
+blanket byte-swap — but it is not yet buildable from what this session
+established.** This session mapped record *boundaries and counts* on both
+sides to a very high confidence (the DOS side is now byte-exact-verified;
+the Amiga side is fully traced to the instruction level but never run
+against real data), which is real, durable progress — but neither side's
+168-byte core struct was decoded field-by-field, and the ~20-scalar
+party-state blocks were matched by name/role for only about a third of
+their fields. Closing those gaps is Phase 2-shaped work (a dedicated
+per-field mapping pass, most likely needing the actual Amiga save bytes as
+an oracle to pin down field order the way the map-offset-table match did
+here) — not a quick follow-up, and not something to guess at without that
+oracle.
+
+### What a future session needs, to finish this
+
+1. Get explicit user permission for Amiberry use (this agent's own hard
+   gate — ask first, every session).
+2. `create_config` from a template pointing at the 3 real ADFs
+   (`data/blackcrypt/amiga/adf/*.adf`) as floppy images, **plus a host
+   directory mounted as a hard-drive/assign target for `GAMESAVE:`** — a
+   read-only ADF alone cannot receive the save; check `parse_config`/
+   `get_config_content` on whatever existing Amiberry configs are present
+   in this environment for the mount-directory syntax before writing a new
+   one from scratch.
+3. Boot, get through chargen/menus to the in-game LOAD/SAVE screen (see
+   `amiga/data-structure.md` for the documented menu-item strings — "LOAD
+   GAME", "SAVE GAME" — and any chargen UI flow already recorded there),
+   save, then read `GAMESAVE:CHARACTERS` back off the host-mounted
+   directory (per the filename this session's disassembly identified —
+   confirm it matches what actually appears on disk).
+4. Byte-diff that file against this session's traced layout (buffer size,
+   4×168-byte struct positions, the 52-byte offset-table position/values)
+   to confirm or correct it, then extend to a full field-by-field map of
+   the 168-byte struct and the party-scalar block, the way Phase 2 did for
+   the dungeon record.
+5. `runtime_screenshot_view` liberally at each step — this project's
+   verified-not-assumed bar applies here too.
+
+No `.uae` config or save-related tooling was committed this session (none
+was created — no Amiberry tool was called at all). `data/blackcrypt/`
+and `build/cache/blackcrypt/` are unmodified; the only files touched are
+this document and read-only analysis of `crypt.exe` /
+`bcdft_decompressed.bin`, neither of which was written to.
