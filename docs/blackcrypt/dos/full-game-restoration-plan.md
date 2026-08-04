@@ -704,6 +704,148 @@ won't run it legibly, the project is slower, not dead.
 > sprites/sub-images, none requiring new hypotheses — every one resolves
 > to a real, already-decoded Amiga source image or accent-ramp table entry.
 
+### 1E. DirectDraw modernization (stretch) — recommended, not yet visually confirmed
+
+**Not part of the core restoration scope** — this is the project owner's
+own stretch-goal idea: could a community DirectDraw compatibility wrapper
+DLL (`ddraw.dll` dropped into the game's own directory, no changes to
+`crypt.exe`) fix 1C's "launches, but the viewport renders tiny in a
+letterboxed corner" presentation bug, both under Wine and on native modern
+Windows?
+
+**Candidates surveyed:**
+
+| Project | License | Fit for this title |
+|---|---|---|
+| **cnc-ddraw** (`FunkyFr3sh/cnc-ddraw`, canonical home now under the `CnCNet` org) | **MIT** | **Best fit.** GDI/OpenGL/Direct3D9 reimplementation of the DirectDraw API specifically for palettized, blitter-based 2D DirectDraw titles (its own description: "black screen, bad performance, crashes, defective Alt+Tab") — exactly Black Crypt's profile (320×200-class palettized primary surface, DirectDraw 3, no Direct3D use). Actively maintained (latest tagged release 7.1, prior release Dec 2024 per GitHub). Explicitly documents Wine support, including the exact override needed (`winecfg` → override `ddraw` as native, or `WINEDLLOVERRIDES="ddraw=n,b"`) |
+| **DDrawCompat** (`narzoul/DDrawCompat`) | BSD Zero Clause (source and binaries alike, from v0.3.0 on) | Actively maintained (releases through v0.7.x). Scope is narrower and different: DirectDraw *and* Direct3D 1-7 visual/compatibility fixes (palette flicker, cursor glitches, timing) on **native Windows Vista-11**, not a general presentation/scaling layer, and its README doesn't document Wine as a target environment at all. A plausible second try, not the first choice, for a title with no Direct3D usage |
+| **dgVoodoo2** (`dege`, `dgvoodoo2.com`) | Freeware, **redistribution restricted** (binaries not freely redistributable in modified/partial form; the full unmodified package can be redistributed, individual DLLs "more conveniently" per the author's own community statements, but it is not open source) | Wrong tool for this title even before the license question — it targets Glide/DirectX 1-9 **3D** wrappers (voodoo card emulation, D3D→modern backend); Black Crypt's primary surface is 2D palettized blitting, not 3D. Ruled out on fit, and the license would have needed a "download it yourself" writeup either way, same as the recommended pick |
+
+**Recommendation: `cnc-ddraw`.** It is purpose-built for exactly this
+class of game (contrast dgVoodoo2, which is for 3D-API titles), it is the
+only one of the three whose own documentation names Wine as a supported
+target with the exact override incantation, and its MIT license imposes no
+redistribution complications for documenting "go get this file yourself."
+
+**What was tested, in a scratch directory (never
+`data/blackcrypt/dosvga/`):**
+
+1. Downloaded `cnc-ddraw.zip` from the project's GitHub Releases (latest
+   tag, `7.1`, MIT-licensed) and extracted `ddraw.dll` + `ddraw.ini`.
+2. Built a scratch game directory under `/tmp` containing the real,
+   unmodified `crypt.exe`, `clipper.clp`, `Config.dat`, `maindung.gam`,
+   plus the wrapper's `ddraw.dll`/`ddraw.ini` — the same working-directory
+   requirement documented in §1C/Phase 4. `data/blackcrypt/dosvga/` itself
+   was never touched.
+3. Edited `ddraw.ini`: `windowed=true` + `fullscreen=true` (cnc-ddraw's own
+   documented combination for "windowed-fullscreen aka borderless mode" —
+   stretches the game's native surface to fill the screen without an
+   exclusive display-mode switch) + `maintas=true` (maintain aspect ratio,
+   to avoid a stretched/distorted image while fixing the "tiny" problem).
+   `renderer=gdi` was pinned explicitly after `renderer=auto` (the
+   shipped default) produced a black window — this environment's OpenGL/
+   EGL stack fails to create a context at all (`libEGL warning: egl:
+   failed to create dri2 screen`, repeating), which is a property of this
+   specific sandboxed test environment's GPU driver stack, not of
+   cnc-ddraw or of Black Crypt; GDI is cnc-ddraw's documented software
+   fallback and sidesteps the issue entirely. A real user's machine (or a
+   less restricted Wine install) would likely work with the default
+   `renderer=auto`.
+4. Launched under Wine (`wine-11.14`) with
+   `WINEDLLOVERRIDES="ddraw=n,b"` — cnc-ddraw's own documented override,
+   forcing Wine to prefer the native (dropped-in) DLL over its built-in
+   DirectDraw implementation.
+
+**Confirmed, non-visually:**
+
+- `WINEDEBUG=+loaddll` shows cnc-ddraw's `DDRAW.dll` loading as `native`
+  from the scratch game directory (`... Loaded L"...\bc-scratch-ddraw
+  \DDRAW.dll" at 7A470000: native`), immediately after `crypt.exe` itself
+  — i.e. the drop-in override mechanism works exactly as documented, no
+  patch to `crypt.exe` needed.
+- The process stays alive with no `err:` lines indicating a crash or
+  unhandled exception (only a benign, pre-existing
+  `err:system:NtUserChangeDisplaySettings ... returned -2`, also present
+  in Phase 4's un-wrapped baseline run) — same "launches, doesn't crash"
+  result §1C and Phase 4 already established for the un-wrapped build.
+
+**Not confirmed — visual verification blocked by environment tooling, not
+by the wrapper:**
+
+This session could not get a screenshot of the actual rendered window, for
+two independent reasons, discovered in this order:
+
+1. The X11-based capture tools already known to be missing/broken in this
+   environment (Phase 4 noted `xdotool`/`ydotool` and a broken
+   `import`/`magick import`) turn out to be broken for a specific,
+   diagnosable reason, not just "not installed": this session (KDE Plasma
+   on Wayland, with Xwayland running **rootless**) doesn't mirror the real
+   composited screen into the X11 root window at all, so *any* XGetImage-
+   based capture — `ImageMagick import`, `ffmpeg -f x11grab` — returns a
+   plain black frame with only the (X11-rendered) mouse cursor, for the
+   desktop in general, not just for the wine window. Confirmed by
+   capturing the literal desktop root with no wine process running at
+   all: still solid black. This is a Wayland/Xwayland-rootless property
+   of the environment, unrelated to Black Crypt or cnc-ddraw.
+2. The one capture method that *does* see the real compositor output —
+   KDE's `spectacle` (a permission-listed trusted client of KWin's
+   Wayland screenshot protocol) — only exposes whole-desktop or
+   currently-focused/under-cursor capture from the command line; a
+   same-rectangle-only capture exists at the protocol level
+   (`org.kde.KWin.ScreenShot2.CaptureArea`, which crops **inside the
+   compositor**, before any pixels reach the caller) but direct D-Bus
+   calls to it from a non-allow-listed script are rejected
+   (`NoAuthorized`), and there is no pointer/keyboard-injection tool
+   available to focus or hover the target window for `spectacle
+   -a`/`-u` either. **This session's desktop is shared with other
+   concurrent, unrelated agent work** — a first, exploratory full-screen
+   `spectacle` capture (before this constraint was understood)
+   confirmed real compositor output works, but the frame it returned
+   showed a live, unrelated session's terminal content. That file was
+   deleted immediately and not otherwise used; no further full-screen
+   capture was taken for the rest of this test, since the environment
+   cannot restrict a full capture to only this project's window and
+   using one anyway would mean writing another session's private screen
+   content into a file on this machine. The visual check the task asked
+   for — does the window now fill the screen instead of being tiny in a
+   corner — was judged not obtainable safely in this session.
+
+**Verdict:** cnc-ddraw is the right candidate on fit, license, and
+documented Wine support, and the mechanically-verifiable half of the claim
+— *"drop a renamed DLL next to `crypt.exe`, override it in Wine, get a
+working DirectDraw replacement with no exe changes"* — is confirmed
+end-to-end (native-DLL load trace, clean non-crashing run). The
+*visually*-verifiable half — does this actually fix the tiny-viewport
+presentation bug — is not confirmed in this session, for tooling/
+environment reasons unrelated to cnc-ddraw itself. This is exactly the
+kind of check the project owner already planned to do manually (per this
+task's own framing); the scratch-dir recipe above, `ddraw.ini` settings,
+and the `WINEDLLOVERRIDES="ddraw=n,b"` incantation are ready for that pass.
+
+**How to use it (optional, not required for the core restoration):**
+
+1. Download `cnc-ddraw.zip` from
+   `https://github.com/FunkyFr3sh/cnc-ddraw/releases/latest` (MIT
+   licensed; verify the release you download still shows that license in
+   its repo before trusting it, since this project never vendors
+   third-party binaries and can't pin a checksum here for you to diff
+   against a copy in-repo).
+2. Extract `ddraw.dll` and `ddraw.ini` into the **same directory as your
+   own copy of `crypt.exe`** (a restored/completed install, not this
+   repo's `data/blackcrypt/dosvga/`, which stays untouched either way).
+3. Recommended `ddraw.ini` starting point for this title: `windowed=true`,
+   `fullscreen=true` (together = borderless windowed-fullscreen, stretched
+   to fill the screen), `maintas=true` (keep the 320×200-class aspect
+   ratio while stretching). Leave `renderer=auto` on a normal machine; only
+   fall back to `renderer=gdi` if you see a black window.
+4. Running under Wine: either run `cnc-ddraw config.exe` once from that
+   directory, or set the DLL override yourself —
+   `WINEDLLOVERRIDES="ddraw=n,b" wine crypt.exe` (or the equivalent
+   `winecfg` → Libraries tab → add `ddraw` → native, builtin).
+5. This step is entirely optional — the demo (and, once Phase 3 lands, the
+   restored full game) runs without it; cnc-ddraw only changes how the
+   DirectDraw surface gets presented to the screen.
+
 **Owners:** `game-re` agent for 1C (still open). **1A, 1B and 1D are
 closed** — see their sections above (1A resolved by `re-codebreaker`,
 2026-08-03; 1B resolved by `game-re` static analysis, 2026-08-04; 1D
@@ -961,6 +1103,183 @@ original assumption.
 > success. Never touches `data/blackcrypt/dosvga/crypt.exe`, and no
 > patched binary is committed anywhere in this repo (verified: `git
 > status` after this session shows only the new script as untracked).
+
+---
+
+## Phase 5 — a restoration-note page — **DONE**
+
+Separate from the four phases above: the demo shows a short sequence of
+history/lore text before the title screen, including a genuine developer's
+note about the PC port. This phase traces exactly how that sequence works
+and adds one more page to it, in the same spirit, about this repo's own
+restoration work — without touching the game's own text or any `.rsrc`
+resource.
+
+### 5.1 The display mechanism
+
+`main` (`0x4135d0`, called from `entry0` at `0x427ea1`) shows three
+sequential **modal Win32 dialogs** before doing anything else, all built
+from one reusable pattern: `DialogBoxParamA(hInstance, MAKEINTRESOURCE(id),
+NULL, dlgProc, 0)`, where `dlgProc`'s `WM_INITDIALOG` (`msg == 0x110`)
+handler calls `SetDlgItemTextA(hDlg, controlId, someString)` to fill a text
+control, and its `WM_COMMAND` (`msg == 0x111`) handler calls
+`EndDialog(hDlg, 1)` when the OK/Next button (control id 1) is clicked:
+
+| # | `DialogBoxParamA` call site | Dialog template | `DlgProc` | Text control id | String |
+|---|---|---|---|---|---|
+| 1 | `0x4135e3`-`0x4135ed` | 101 (EULA) | `0x413450` | 1001 | `0x438850` |
+| 2 | `0x413603`-`0x41360d` | **102** | `DlgProc_History`, `0x4134f0` | **1003** | `0x43a2bc` |
+| 3 | `0x41360f`-`0x413619` | **102** (same template) | `DlgProc_DemoNote`, `0x413570` | **1003** (same control) | `0x43ab48` |
+
+After call 1, `main` checks `dword [0x474af8]` (written by the EULA
+`DlgProc`'s `WM_COMMAND` handler, `0`/`1` for Decline/Accept) and returns
+immediately if declined — the game never starts. Calls 2 and 3 are
+unconditional.
+
+**The key finding: there is no page count and no pointer table.** "How
+many pages" is simply "however many `DialogBoxParamA` calls appear in a
+row in `.text`." Pages 2 and 3 are two independent modal dialogs built
+from the **identical dialog template (102)**, with two near-identical
+`DlgProc`s that each do nothing but plug a different string into the same
+control (1003) and, on the button click, forward to `EndDialog` — compiler-
+duplicated boilerplate, not a designed "paged text" subsystem.
+
+Each of the three strings is genuinely its own null-terminated C string —
+confirmed by a byte-exact null-byte scan of `0x38850`-`0x3ae18`: exactly
+three `0x00` bytes in that whole range, immediately before `0x38850`
+(none, it's the start), and at `0x3a2bb`, `0x3ab47`, `0x3ae17` (one right
+before each of strings 2 and 3, and one terminating string 3). **The
+user-supplied lead's "three strings at `0x3a2bc`-`0x3acc0`" framing was
+half right**: `0x3a2bc` and `0x3ab48` are real string starts (the history
+note and the demo note, strings 2 and 3 above); `0x3acc0` (mid-string) is
+not a boundary at all — it's a `\r\r\n` paragraph break inside string 3
+that a plain `strings -n 15` scan reports as a new "string" only because
+CR (`0x0d`) isn't in its default printable set, not because there's a
+`0x00` there. Verified directly: `data[0x3acc0-1] == 0x0a`, not `0x00`.
+So the real page count is **2** (history + demo note) after the EULA, not
+3, and the mechanism is "N `DialogBoxParamA` calls in a row," not
+"N strings in a table."
+
+### 5.2 Feasibility — real slack space exists, confirmed two ways
+
+Following the same standard this project holds Phase 4's cave candidate
+to (`file+0x2DEB3`, "confirmed all-zero... `-r-x`... inside the raw
+image"): searched the whole file for zero-byte runs ≥ 20 B in every
+section, then required each candidate to have **zero** dwords anywhere in
+the file decoding as a pointer into it (a file-wide scan, not just eyeballing
+the surrounding bytes).
+
+- **Code** (needs to be executable): the **same `.text` cave Phase 4
+  uses**, `0x42DEB3`-`0x42E000` (333 B), has **311 B free** after Phase 4's
+  own 22-byte thunk (`0x42DEB3`-`0x42DEC9`) — confirmed all-zero in the
+  shipped file before any patching. This is enough for a new `DlgProc`
+  (52 B) plus a small thunk that makes the fourth `DialogBoxParamA` call
+  (22 B).
+- **String data** (only needs to be readable): `.rdata`'s own unused tail,
+  `0x42F2D9`-`0x430000` (**3,367 B**) — the zero padding after the PE
+  import name table (`"SetEnvironmentVariableA\0"` is the last real
+  content, ending at `0x2F2D9`; the section's raw size just rounds up to
+  the next file-alignment boundary). A candidate rejected for comparison:
+  the 3,069-byte zero run at `0x3C403`-`0x3D000` in `.data` overlaps
+  `0x43C7A0`, the documented start of the runtime-built 2000×68-byte
+  clipper directory table (§0.4/§1D) — real, live memory the game
+  overwrites at startup, not truly free, so it was **not used**.
+  `.rdata`'s tail was checked against every existing known structure the
+  same way and is genuinely inert: a file-wide dword scan for pointers
+  into `[0x42F2D9, 0x430000)` found exactly 2 hits, both proven
+  coincidental (an unrelated `0xFFFFFFFF` rect-list terminator immediately
+  followed by an unrelated `0x0042`-prefixed coordinate word in a UI
+  rect table at `0x32896`/`0x32926`, not real pointers — `data[0x32898:
+  0x3289a] == 0xffff` and `data[0x3289c:0x328a0]` is the *next* rect's
+  first word, not related to this string region at all).
+
+**No `.rsrc` edit needed at all** — the new page reuses dialog template
+102 verbatim (same text control id 1003, same OK-button id 1 already
+wired to `EndDialog`), the same way pages 2 and 3 already share it.
+
+### 5.3 The patch
+
+`scripts/patch_crypt_exe_add_restoration_note.py`, mirroring
+`patch_crypt_exe.py`'s exact shape (module-level byte constants with
+`assert` cross-checks on every `push`/`jmp`/`je`/`call` operand, a
+`patch()` function, a `_self_check()` re-read-from-disk verifier, refuses
+in-place patching, refuses to overwrite `--output` without `--force`).
+Three edits, all bytes assembled with `rasm2 -a x86 -b32 -s <addr>
+'<insn>'` and round-trip-verified with an independent `r2 pd`
+disassembly pass (not just the patcher's own self-check):
+
+1. **New `DlgProc`** at cave vaddr `0x42DEC9` (52 B): on `WM_INITDIALOG`,
+   `SetDlgItemTextA(hDlg, 1003, 0x42F2D9)`; on `WM_COMMAND`, **`jmp`s into
+   the existing, generic tail of `DlgProc_DemoNote` at `0x413583`**
+   (which only reads its args off the stack frame and forwards to the
+   shared `EndDialog`-on-OK helper at `0x413550`) instead of duplicating
+   that ~40-byte block — confirmed safe because a `jmp` (not `call`)
+   preserves the exact stack frame Windows set up for our own `DlgProc`
+   invocation, and `EndDialog` uses the `hDlg` argument from *that* frame,
+   not a hardcoded handle.
+2. **New thunk** at cave vaddr `0x42DEFD` (22 B): re-executes the exact
+   instruction it displaces (see next item) — `mov eax, dword [0x476a5c]`
+   — then makes the fourth `DialogBoxParamA(hInstance=ebx,
+   MAKEINTRESOURCE(102), hWndParent=0/ebp, DlgProc=0x42DEC9, 0)` call
+   (`ebx`/`ebp`/`esi` — hInstance, the 0 constant, and the
+   `DialogBoxParamA` pointer — are all still live and unmodified at this
+   point in `main`, confirmed by tracing every instruction from the first
+   `DialogBoxParamA` call through the hook site), then `jmp`s back to
+   `0x413620` (`mov esi, 1`, the original next instruction).
+3. **Hook**: overwrites the single 5-byte instruction at file+`0x1361b`
+   (vaddr `0x41361b`, the first instruction after page 3's call returns)
+   — `mov eax, dword [0x476a5c]` — with a 5-byte `jmp rel32` to the new
+   thunk.
+
+**Verification performed** (against the real, unmodified
+`data/blackcrypt/dosvga/crypt.exe`, patched only into scratch copies —
+the real file was never written to):
+
+| Check | Result |
+|---|---|
+| Round-trip `r2 pd` disassembly of all three windows | Hook: `jmp 0x42defd`. `DlgProc`: `je 0x42dee0` (init) and `je 0x413583` (shared command tail) both resolve exactly; the `push 0x42f2d9` operand round-trips to the new string, printed in full by `r2`'s own string-preview. Thunk: `push 0x42dec9` (the new `DlgProc`), `call esi`, `jmp 0x413620` all resolve exactly |
+| Full-file byte diff, patched vs. original, outside the three intended windows | **0 differences.** This script alone changes exactly **759** bytes (5 hook + 74 cave + a subset of the 695 string bytes that differ from the pre-existing zero — some string bytes coincidentally are `0x00`, matching the untouched padding); composed with `patch_crypt_exe.py`'s own 25, the combined file has exactly **784** changed bytes (759 + 25, confirmed additive — the two patches' windows are fully disjoint) |
+| Pre-flight guards actually fire | Confirmed the patcher refuses in-place patching, refuses to overwrite an existing output without `--force`, and refuses a `crypt.exe` whose hook/cave/string-region bytes don't match the expected stock shape |
+| Composability with `patch_crypt_exe.py` | Works in **one order only**: `patch_crypt_exe.py` must run first. `patch_crypt_exe.py`'s own pre-flight check treats its *entire* declared 333-byte cave (`0x2DEB3`-`0x2E000`) as "must be zero," stricter than the 22 bytes it actually writes — so it correctly (if conservatively) refuses a `crypt.exe` this script has already written cave bytes into. This script itself has no such restriction and accepts either a stock or an already-Phase-4-patched input. Confirmed by running both orders: Phase4→note succeeds and produces a byte-identical result to applying the two patches' declared windows independently; note→Phase4 fails cleanly with the expected error message, not a silent corruption |
+
+### 5.4 The drafted text
+
+Written in a separate, later voice — explicitly **not** signed as Rick
+Johnson and **not** attributed to Raven Software or Activision, per the
+task's own constraint against implying official/endorsed status:
+
+> A fan reverse-engineering project later found that the map-switching
+> code mentioned above was never really removed -- just one small routine
+> disconnected from an otherwise complete, working system for loading,
+> saving, and switching between dungeon maps, the same system already
+> used every time you load a save.
+>
+> Using the original Amiga game's own data, that project reconstructed
+> the remaining twelve dungeon maps and reconnected the routine.  If you
+> find yourself somewhere beyond the first map, that is why.
+>
+> This is an unofficial, non-commercial fan preservation effort, not a
+> release by Raven Software or Activision.  More information, for anyone
+> curious, is at crawl.shaid.net.
+
+`crawl.shaid.net` is this project's own real, already-deployed docs site
+(`www/astro.config.mjs`'s `site:` value, built by `.github/workflows/
+deploy.yml`) — not an invented URL.
+
+### 5.5 What's not done
+
+Same as Phase 4: **static verification only**, per this task's own scope
+(no Wine/live-execution requirement). The dialog box will only visually
+confirm itself the same way Phase 4's would — under a working Wine
+session past §1C's still-open DirectDraw presentation issue, or on real
+Windows. Not attempted this session (out of scope; §1C's blocker is
+unrelated to this phase and not re-investigated here).
+
+**Deliverable:** `scripts/patch_crypt_exe_add_restoration_note.py`. Never
+touches `data/blackcrypt/dosvga/crypt.exe`, and no patched binary is
+committed (verified: `git status` after this session shows only the new
+script as untracked, `data/` unmodified — `md5sum` of the real file
+unchanged across every run above).
 
 ---
 
