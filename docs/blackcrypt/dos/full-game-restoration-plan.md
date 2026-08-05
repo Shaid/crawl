@@ -2149,6 +2149,170 @@ tracing in the same detail `fcn.00401b80` (the DOS serializer) got above, if
 a future session wants to build the load-side (not just save-side) half of
 a cross-platform converter.
 
+### 8. A real converter, and a converted end-game save
+
+Following directly from the "Updated verdict" above ("a converter for this
+slice is buildable today"), this pass built one:
+`scripts/bclib/charsave.py`, mirroring `scripts/bclib/maindung.py`'s role
+and rigor for the character-save format. Full design rationale and a
+field-by-field confidence table live in the module's own docstring; this
+section summarizes the result and documents two things the module's
+construction turned up that weren't known before.
+
+#### Correction: the "120-byte zero header, 80/80" claim doesn't hold across the full corpus
+
+Re-checking that claim (Update § 1, above) against all 80 real files rather
+than the small subset apparently checked originally: **only 30 of 80** have
+an all-zero leading 120 bytes. The other 50 — every one of them a
+deeper/later save from the `2/BlackCrypt/` and `6/` playthroughs — have
+real, non-zero, non-monotonically-varying data there (e.g. the target file
+below has 35 non-zero bytes in that span; `levels/28` in the same
+playthrough has 0). The *position* is still exactly right (the first
+character's name string sits at file offset 212 in literally all 80
+files, small or large — confirmed by direct search, not assumption), so
+none of the earlier offset/boundary findings are affected. What's wrong is
+specifically the claim that this region is always zero on Amiga. It isn't;
+something real (never decoded) lives there once a save has enough game
+history. This has **no effect on the converter's correctness** — see
+below, the DOS side of this region is a disassembly-proven,
+save-state-independent constant, so the Amiga source's real content there
+was never going to be used regardless.
+
+#### The DOS 210-byte header is a compile-time constant, not "mostly zero, partly a template" — new disassembly finding
+
+The original DOS-side trace (`fcn.00401b80`, top of this Phase) already
+established that the leading 120 bytes are an unconditional zero-fill loop
+and the following 90 bytes are `rep movsd` from a literal constant table
+baked into `crypt.exe` at VA `0x4303e8` — neither reads any per-save
+global. Put together with the correction above, the right conclusion is
+stronger than "DOS's header happens to match a fresh Amiga save": **every
+real DOS save has an identical 210-byte header, regardless of game
+state**, while Amiga's corresponding bytes are real (if undecoded) state.
+The converter exploits this directly — it copies the header verbatim from
+the reference file (`data/blackcrypt/dosvga/char1.dat`) rather than
+attempting any transform of the Amiga source's corresponding bytes, which
+is both simpler and more correct than the alternative.
+
+#### New: the exact byte offset of "current map" inside DOS's party-scalar block
+
+Phase 6's original pass identified `word[0x47481a]` as "current map" among
+"~16 party-level word globals" written at `0x401d21`-`0x401e9b`, without
+pinning which of those ~16 slots it lands in. This pass disassembled that
+range instruction-by-instruction: it's 17 sequential 2-byte
+`mov word[cursor], cx` writes, and the 9th one (`0x401dd9`) is `mov cx,
+word [0x47481a]`, landing at **party-scalar-block-relative offset +18**
+(i.e. absolute file offset 1308 for a standard 4-character save). Cross-
+checked against `char1.dat` itself: the word at that exact position reads
+`1`, matching its known fresh/map-1 state. This is the one party-scalar
+field the converter writes from real Amiga data (the source save's own
+current-map byte, zero-extended); the other ~50 bytes of that block are
+copied verbatim from `char1.dat`'s own known-safe fresh-game values, since
+no other field's exact DOS byte offset has been established.
+
+#### The converter's design, briefly (full detail in the module docstring)
+
+| Region | Source | Confidence |
+|---|---|---|
+| 210 B header | `char1.dat` verbatim | Confirmed (disassembly: state-independent) |
+| Party-slot index (`+0x00` of each record) | Computed (0-3) | Confirmed (matches real data on both platforms) |
+| Core struct: name, `01 FF..` marker, 3 word-pair stats, class-constant array | Amiga source, per-field swap | Confirmed (Phase 6 real byte comparison) |
+| Core struct: remaining ~90 B | Amiga source, raw copy (no swap) | Best-effort / unverified |
+| Item-slot table (`+0x18`, in-core) + 100 B per-record tail | Zeroed | Deliberate safety choice, not a decode |
+| Party-scalar block | `char1.dat` verbatim, current-map overridden | Confirmed for current-map; safe defaults elsewhere |
+| Map-offset table | Amiga source, per-field byte-swap | Confirmed (Phase 6, byte-exact 80/80) |
+| Terminator | Literal `0x0000` | Confirmed (disassembly); source's pending-event list is dropped |
+
+The per-character tail (item/spell data beyond the 168-byte core) is the
+one place the task brief specifically flagged as crash-risk if guessed —
+DOS's own tail is generated at save time from a static, id-keyed item
+table baked into `crypt.exe`, not a raw copy of anything, so raw Amiga
+tail bytes are meaningless there. `charsave.py` zeroes the item-slot ids
+inside the core *and* the 100-byte tail together, so the record is
+internally consistent (no id says "look up an item" with nothing to look
+up) rather than guessed-but-wrong. It always emits fixed 270-byte records
+regardless of how many item slots would otherwise be populated, because
+the only real *working* DOS save available (`char1.dat`) has its
+map-offset table landing at the exact fixed file offset the disassembly
+predicts — evidence the loader expects fixed record positions, not
+content-dependent ones.
+
+#### Self-verification: round-trip against the real, working DOS save
+
+`scripts/bclib/charsave.py` was round-tripped against `1/CHARACTERSA` (a
+real, small/fresh Amiga save from early in the same corpus — current map
+`1`, zero pending events, all 4 classes present) and diffed structurally
+against the real, known-working `char1.dat`:
+
+- Output size: **1,396 B, identical** to `char1.dat`.
+- 210-byte header: **byte-identical** to `char1.dat` (expected — both are
+  the same DOS-native constant).
+- All 4 records' party-slot index and class name: **exact match**.
+- All 4 records' 100-byte tail: **all zero**, as designed.
+- 3 of 4 records' 16-byte class-constant array (`+0x5E`-`+0x6D` of the
+  core): **byte-exact match** against `char1.dat`'s own independently-
+  sourced values (Fighter, Cleric, Druid). The 4th (Magic User) differs —
+  expected, not a bug: this field tracks starting *equipment*, not just
+  class (Phase 6's original single-Fighter comparison couldn't have shown
+  this), and the two saves' Magic Users carry different real starting
+  kits. Three independent exact matches on a field this specific is a
+  strong structural confirmation of the core-struct offset mapping.
+- Party-scalar block: **byte-identical to `char1.dat`** at every position
+  except the current-map word, which reads the source's real value (`1`,
+  correctly matching both saves being fresh map-1 saves).
+- Map-offset table: **differs from `char1.dat`'s own table**, correctly —
+  `char1.dat`'s table is the demo's own truncated (map-1-only) version,
+  while the converter's output carries the confirmed, byte-exact real
+  13-map table extracted from the Amiga source (relevant once loaded
+  against a full-game-capable `crypt.exe`, e.g. the Phase 4 patch).
+
+This is a genuine round-trip check on every region the converter claims
+"confirmed" or "safe default" for — it isn't a check on the best-effort
+core-struct residue (no oracle exists for that) or the deliberately-zeroed
+tail (nothing to check against).
+
+#### The conversion result: `2/BlackCrypt/CHARACTERSA` → a real DOS save
+
+Located via the confirmed anchor pattern (`00 00 00 00 00 00 3A C7`) and
+confirmed as the intended end-game target: current-map byte reads `13`.
+Source file: 7,596 B; its `levels/final/CHARACTERSA` sibling is
+byte-identical, confirming it as a stable end-of-game snapshot, not a
+mid-write artifact. Party: Fighter, Cleric, Magic User, Druid (item ids
+`[3,7,0,13]` / `[57,61,0,68]` / `[108,111,0,118]` / `[159,0,0,169]` in the
+source — all deliberately dropped in the output, see above). 2 pending
+scheduled events in the source (dropped, per the terminator finding).
+
+Converted output: **1,396 B**, structurally identical in shape to
+`char1.dat` (same header, same 4×270 B records, same 52 B party-scalar
+block, same 52 B map-offset table, same 2 B terminator). Current map
+correctly carries over as `13`. The full, real, byte-exact 13-slot
+map-offset table is present (not the demo's truncated version). All 4
+characters' names, party-slot indices, and confirmed core-struct fields
+(marker bytes, stat word-pairs, class-constant array) carry the source's
+real values; all 4 characters' item-slot tables and 100-byte tails are
+zeroed.
+
+Written to scratch only (never to `data/blackcrypt/dosvga/`, never
+committed) and copied to the project owner's existing live-test package at
+`bc-test-package/char4.dat` (an unused slot; `char1.dat`, `char2.dat`,
+`char3.dat` in that directory were left untouched) for an immediate Wine
+test.
+
+**Expected in-game result, honestly stated:** party composition, names,
+the confirmed core-struct fields, and — most importantly — the current
+map/dungeon level (13, deep end-game) should load correctly, since those
+are the confirmed-or-disassembly-verified regions. Position, facing, and
+turn-counter reset to the DOS demo's own fresh-game defaults, since no
+per-field mapping exists for those yet (Phase 6's own long-standing gap,
+not new to this pass). Inventory and spellbooks should show empty/reset
+rather than wrong or dangling — the deliberate, documented safety choice
+for the one region a wrong guess could plausibly reproduce the project
+owner's already-observed `LoadDungeon` crash. About 90 bytes per character
+of never-individually-confirmed core-struct residue (stats beyond the
+specifically-identified fields) carry over as raw, unswapped bytes — a
+best-effort choice, not verified against any oracle, and the one part of
+this conversion where wrong-but-plausible-looking values (not crashes) are
+the realistic risk.
+
 ---
 
 ## Phase 7 — title screen credit — **DONE**
