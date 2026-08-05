@@ -2563,6 +2563,167 @@ session — it doesn't change the diagnosis above, which is independently
 and completely confirmed by the register-exact match on the two crashes
 that *are* fully explained.
 
+### 10. Two real, live-observed bugs — party-display corruption and the empty map — both traced to ground and fixed
+
+Following the §"9" fix (the `CopyFileA`-guard patch), the project owner
+loaded the resulting `char4.dat` for real under Wine. It loaded without
+crashing, but two things were visibly wrong (screenshot:
+`data/blackcrypt/no-walls.png`): **all four party UI boxes showed
+identical "FIGHTER, Level 12, AC 14" data**, and **the 3-D dungeon view
+showed only floor and ceiling — no walls or doors in any direction.**
+This session traced both to ground by disassembling the *load* side for
+the first time (`crypt.exe fcn.00426390`, the restore-game routine that
+parses `char%hu.dat` back into memory) — every previous save-format pass
+in this Phase only traced the *save* side (`fcn.00401b80`).
+
+#### Bug 1: party-display corruption — a real record-length bug in `charsave.py`, not a load-side surprise
+
+**Root cause: `charsave.py` wrote fixed 270-byte character records, but
+the DOS loader's real per-character file-cursor advance is data-dependent
+on a 23-slot item/spell array the converter zeroes — for an all-zero
+record the loader only consumes 170 B, not 270, desyncing every character
+after the first.**
+
+Disassembling `fcn.00426390`'s per-character loop (`0x426488`-`0x4265bf`)
+instruction by instruction, alongside a fresh full re-disassembly of the
+save side (`fcn.00401b80`, `0x401bf8`-`0x401d1b`) to cross-check every
+finding against both directions:
+
+| Finding | Evidence |
+|---|---|
+| The loader's "168-byte core copy" (`rep movsd`, `0x426498`) starts at the record's byte 0, not byte 2 — it reads the 2-byte party-slot scalar as the struct's own leading 2 bytes, not a separate field | `0x42648f lea edi,[ebp-0x16]` (dest, per-character struct) vs. `0x426492 add edx,0xa8` (source cursor, unmodified from record start) — cross-checked against real `char1.dat` bytes: `"FIGHTER\0"` is at file offset 212, i.e. 2 B into this 168-byte span, not at its start |
+| A SEPARATE 2-byte scalar is written/read immediately after that 168-byte span (absolute file `rec+168`..`rec+170`), unrelated to character display | Save side: `0x401c1a sub word[edx],cx` / `0x401c2a mov word[eax],cx` where `edx` points into a constant table at `0x4301cc`; load side: `0x4264aa mov word[ecx],ax` where `ecx = 0x469db4` (a small global array, never consulted by anything this session traced) |
+| The item/spell array is a **dense 23-slot, 2-byte-stride array at core-relative `0x14`-`0x42`** — NOT the previously-documented "4 slots × 10 B at `+0x18`" (§"3. The 168-byte character struct" above, now corrected in place) | Both `fcn.00401b80` (save) and `fcn.00426390` (load) walk this exact range: an 18-iteration loop (3 outer × 6 inner, `var_1ch`/`var_18h`) covering core `0x14`-`0x38`, immediately followed by a 5-iteration loop covering core `0x38`-`0x42`. Cross-checked against real `char1.dat` bytes for all 4 characters: exactly 4 nonzero slots each, landing at core `0x18`/`0x22`/`0x2a`/`0x38` with values `1,2,3,4` / `6,7,8,9` / `11,12,13,14` / `16,17,18,19` — the OLD "stride 0x0A" claim was an eyeballed pattern match on 4 of these 23 slots' real values, refuted by the actual code trace (real gaps between the 4 hits are 10, 8, 14 bytes — not a clean stride) |
+| Each NONZERO slot consumes a 20-byte item-definition record from the file, and can **recurse** into more 20-byte blocks for "special" item types (byte `+5` of that record == `0x13` or `0x23`) | Load: `0x4264ca call fcn.004111f0` → `0x4264f1`/`0x4264f7` (20 B `rep movsd` from file cursor) → `0x426505`/`0x42650f call fcn.00425120`; `fcn.00425120` itself (disassembled fresh) reads more 20-byte blocks from `dword[0x46f870]` and calls **itself** recursively at `0x425211`. This fully explains why `char1.dat`'s real per-character tail is 100 B (5×20) despite only 4 directly-visible nonzero slots — one of the 4 real items is a "special" type pulling in one extra 20 B block via this recursive path |
+| Since `charsave.py` zeroes all 23 slots, none of this fires on load — every `cmp word[ebp],0` check takes the "don't touch the file cursor" branch | Symmetric skip logic confirmed on both sides: `0x401c49 test dx,dx / je 0x401c94` (save), `0x4264c3 cmp word[ebp],0 / je 0x42651e` (load) |
+
+**The bug:** a previous version of `charsave.py` always emitted a fixed
+270-byte record (170 B base + a 100-byte zeroed tail), reasoning from
+§"8"'s own flagged uncertainty ("possibly variable-length coincidence, not
+a confirmed fixed stride") that `char1.dat`'s measured 270 B stride meant
+a fixed on-disk record size. It doesn't — the loader's real cursor advance
+for an all-zero record is 170 B. Writing 270 B left a 100-byte gap the
+loader's cursor never crosses, so character 1's "core" copy actually reads
+from file offset `380` (100 B into character 0's zero-padded tail)
+instead of `480` (character 1's real start) — and the same desync compounds
+for characters 2 and 3. This is a completely different, and better,
+explanation than a core-struct field-mapping error: it accounts for why
+character 0 (Fighter) displayed at all (unaffected — no desync until after
+it) while the other three didn't come out as *garbage* so much as
+*mirrored/stale* (consistent with reading zero-padded tail bytes and
+misaligned headers rather than random memory).
+
+**The fix**, in `scripts/bclib/charsave.py`:
+- `CORE_LAYOUT`'s item-zero span widened from `(0x18, 0x40)` to
+  `(ITEM_ARRAY_BASE, ITEM_ARRAY_END)` = `(0x14, 0x42)` (46 B, 23 slots),
+  matching the disassembly-confirmed real array exactly.
+- `DOS_TAIL_BYTES` changed from a fixed `100` to `0`; `DOS_RECORD_BYTES`
+  is now `RECORD_HEADER_BYTES + CORE_BYTES` = 170, computed, not a magic
+  270. `build_dos_record` asserts this invariant so a future change can't
+  silently reintroduce a nonzero tail without updating the assert.
+- The old `ITEM_SLOT_BASE`/`ITEM_SLOT_STRIDE`/`ITEM_SLOT_COUNT` constants
+  are kept (still used only informationally, to extract `item_ids` from
+  the parsed Amiga source for logging — never written to DOS output) but
+  now documented as unverified/superseded for the DOS-side write path.
+
+**Verification:** a from-scratch simulator of `fcn.00426390`'s exact
+per-character algorithm (168-byte block read at `rec+0`, name checked at
+block-relative `+2`, all 23 item-array slots checked for zero at
+block-relative `0x16`-`0x44`) was run against the fixed converter's output
+for both `1/CHARACTERSA` (fresh save) and the real end-game target
+(`2/BlackCrypt/CHARACTERSA`). Result for both: **all 4 characters resolve
+their correct class name at the correct simulated cursor position, zero
+nonzero item slots (no desync), and the file ends exactly at the map-
+offset-table + terminator boundary** — `210 + 4×170 + 52 + 52 + 2 = 996`
+bytes total (down from the old, buggy 1,396-byte output). The map-offset
+table decodes to the same already-triple-confirmed 13 values
+(`0, 15047, 34766, ..., 165686`), and current-map still correctly reads
+`13` for the end-game target.
+
+#### Bug 2: the empty map — confirmed as the position gap, and fixed
+
+**Confirmed.** `charsave.py`'s own docstring already flagged this as an
+open gap: position/facing/turn-counter were left at `char1.dat`'s own
+fresh-map-1 defaults (X=8, Y=21, facing=0/North), since no per-field byte
+offset had been pinned. This session pinned all three, and confirmed the
+map-1 default is genuinely invalid once carried over to map 13.
+
+**Pinning X/Y/facing's byte offsets.** The same 17-write sequence in
+`fcn.00401b80` (`0x401d21`-`0x401e9b`) that §"8" used to pin "current map"
+at party-scalar-block offset `+18` was re-walked for its other writes,
+cross-referenced against this doc's own **already-confirmed** globals from
+a completely unrelated investigation (§"Party position and facing need no
+new code", above): `fcn.00410d10`/`MoveParty` pass `&word[0x46f880]` (X),
+`&word[0x46f87e]` (Y), `&word[0x46bd60]` (facing). Those three globals are
+writes 3, 4, and 5 of the same 17-write sequence, landing at party-scalar
+relative offsets **6, 8, and 10** — and this lines up exactly with write 9
+landing at the already-independently-confirmed offset 18 (current map),
+giving two independent confirmations of the same write sequence's byte
+math agreeing.
+
+**Confirming the position is really invalid for map 13.** Using
+`scripts/bclib/bcdfs.py` against the real `data/blackcrypt/amiga/bcdfs`
+file (13 real maps, no live emulator needed): map 13's sparse square data
+has 134 populated cells, row range 1-21, col range 7-17. `char1.dat`'s
+default (X=8, Y=21) — checked as both `(row, col) = (21, 8)` and `(8,
+21)`, to rule out an axis-order mistake — **is not a populated cell under
+either ordering.** The `@seer/dungeon` package's own confirmed convention
+(`packages/dungeon/src/model/FlatGridLevel.ts`: "row is y, col is x")
+puts it just one column outside map 13's real walkable area near that row
+(row 21's real data starts at column 9, not 8). Landing on an unpopulated
+cell in the shared runtime 64×64 array — which, per this doc's own
+"automap tilemap" finding above, is otherwise-unwritten memory — produces
+a real `wall_flags` nibble of `0` (no walls recorded) rather than actual
+wall data, which is exactly consistent with the live-observed symptom
+("floor and ceiling only, no walls in any direction"): floor/ceiling are
+unconditional static draws, walls only render if a wall bit is set. (The
+project's own *web-renderer* densifier, `scripts/export_dungeon_levels.py`,
+defensively fills unpopulated cells as "walled on every side" for its own
+unrelated purpose of keeping the browser renderer safe — that convention
+doesn't apply to the real DOS engine's own runtime array, which is what
+matters here.)
+
+**The fix:** `scripts/bclib/charsave.py` gained `_pick_start_cell(map_number,
+bcdfs_path=None)`, which walks the target map's real `bcdfs` data (lazily
+importing `bclib.bcdfs`, the project's existing shared decoder) and picks
+the real, populated, non-wall-type square closest to the centroid of all
+such squares on that map — a simple, deterministic "somewhere in the
+middle of the level" heuristic, **not** the game's own real intended
+entrance (that logic wasn't traced this session; just guaranteed-real,
+walkable geometry instead of a map-1-shaped guess). `build_dos_save` now
+calls this whenever the source save's current map isn't 1 (map 1 keeps
+`char1.dat`'s own default verbatim — it's the DOS demo's real, live-tested
+entrance, strictly better than any heuristic pick) and overrides X, Y, and
+facing (set to North) in the party-scalar block. For the real end-game
+target (`2/BlackCrypt/CHARACTERSA`, current map 13), this picks
+**(X=12, Y=12)** — confirmed via `bcdfs.py` to be a real, populated,
+fully-open (`wall_flags=0`, type=floor) square inside map 13's real
+central hall.
+
+#### Both fixes, one re-converted output
+
+Both fixes landed in the same `scripts/bclib/charsave.py` and were applied
+together in a single re-conversion of the same target save
+(`2/BlackCrypt/CHARACTERSA`). Result: **996-byte output** (vs. the old
+1,396-byte one), current map `13`, party position `(12, 12)` facing north,
+all 4 characters' names/classes/confirmed-core-fields intact, and a
+from-scratch loader simulation confirms zero desync across all 4
+characters plus a byte-exact map-offset table. Copied to the project
+owner's existing live-test package
+(`bc-test-package/char4.dat`, outside the repo, never committed),
+overwriting the previous (buggy) `char4.dat` used in the crash test in
+§"9" above.
+
+**Live re-verification: not performed this session** — same
+input-automation tooling gap flagged in §"9" (no `xdotool`/`ydotool`/`xte`
+available to drive Wine's menus). Both fixes are verified by disassembly
+(instruction-by-instruction on both save and load code paths) and by a
+from-scratch simulator of the loader's own exact algorithm against the
+real converter output — the same evidence bar as every other "confirmed"
+finding in this Phase — but the final "does it now actually display 4
+distinct characters and real map-13 geometry" confirmation needs a human
+at the keyboard, or future input-automation tooling.
+
 ---
 
 ## Phase 7 — title screen credit — **DONE**
