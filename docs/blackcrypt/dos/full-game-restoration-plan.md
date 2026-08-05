@@ -2313,6 +2313,256 @@ best-effort choice, not verified against any oracle, and the one part of
 this conversion where wrong-but-plausible-looking values (not crashes) are
 the realistic risk.
 
+### 9. The `LoadDungeon` crash traced to ground — not a save-format bug at all
+
+Both the raw, unconverted Amiga save dropped into `char2.dat` ("Live
+cross-check" above) and the carefully converted, independently-verified
+end-game save at `char4.dat` (§8) crashed **identically**, down to the
+register level, when loaded under Wine:
+
+```
+Unhandled exception: page fault on write access to 0x00000024
+EAX:00000000 EBX:00000020 ECX:0043b860 EDX:<differs>
+ESI:0000ffff EDI:00000000
+Backtrace:
+=>0 <ntdll+0x22a83>            lock addl $1, 4(%ebx)
+  1 crypt+0x28c36
+  2 crypt+0x2537f
+```
+(`data/blackcrypt/wine-test/backtrace.txt`, `backtrace-load-game-4.txt`.)
+
+That two very different inputs crash on the exact same instruction with
+the exact same `EAX`/`EBX`/`ECX` was the tell this session followed to
+ground, by disassembling the full call chain with radare2 rather than
+guessing: `fcn.00426390` (restore-game) → `fcn.00425350` (`LoadDungeon`) →
+`fcn.004274d3` (fseek wrapper) → `fcn.00428c08` (the CRT stream-lock
+helper). **Verdict: this is not a save-format bug, not a charsave.py
+byte-offset bug, and not something Phase 4's map-switch patch touches. It
+is a genuine, always-present bug in the shipped 1998 `crypt.exe`:
+`fcn.00426390` never checks whether `CopyFileA` actually succeeded before
+handing a possibly-nonexistent `tempdung.gam` to `LoadDungeon`.**
+
+#### The exact call chain, traced instruction by instruction
+
+`crypt+0x2537f` (frame 2) is not inside `LoadDungeon`'s own body — it's the
+**return address** pushed by the `call fcn.004274d3` instruction at
+`0x42537a`:
+
+```
+fcn.00425350 (LoadDungeon), file+0x25350:
+  0x425356  push 0x4304b4            ; "rb"
+  0x42535b  push str.tempdung.gam
+  0x425360  call fcn.00427357        ; fopen("tempdung.gam","rb")
+  0x425365  mov edi, eax             ; edi = FILE* (or NULL)
+  0x425369  mov ax, word[0x47481a]   ; curMap
+  0x425371  mov ecx, dword[eax*4+0x4738b4]  ; offset table entry
+  0x425379  push edi                 ; stream
+  0x42537a  call fcn.004274d3        ; fseek(stream, offset, 0)
+  0x42537f  <-- return address == crash backtrace frame 2
+```
+
+`fcn.004274d3` (the fseek wrapper) does, as its very first action:
+
+```
+fcn.004274d3, file+0x274d3:
+  0x4274d7  push dword[arg_8h]       ; the stream (edi from above)
+  0x4274da  call fcn.00428c08        ; lock the stream
+```
+
+`fcn.00428c08` is the CRT's internal stream-lock helper — the standard
+"is this FILE* one of the static `_iob`-table entries, or a heap one"
+dispatch every MSVCRT build has:
+
+```
+fcn.00428c08(FILE *stream), file+0x28c08:
+  0x428c08  mov eax, dword[arg_4h]   ; eax = stream
+  0x428c0c  mov ecx, 0x43b860        ; static FILE-table base
+  0x428c11  cmp eax, ecx
+  0x428c13  jb 0x428c2c              ; below the static table -> fallback
+  0x428c15  cmp eax, 0x43bac0        ; static FILE-table end
+  0x428c1a  ja 0x428c2c              ; above it -> fallback too
+  0x428c1c  ...                      ; (in-range case, not taken here)
+  0x428c2c  add eax, 0x20            ; fallback: CRITICAL_SECTION = stream+0x20
+  0x428c2f  push eax
+  0x428c30  call [KERNEL32.EnterCriticalSection]
+  0x428c36  ret                      ; <-- crash backtrace frame 1
+```
+
+If `stream` (`eax`) is `NULL`, `0 < 0x43b860` so the "below the static
+table" branch is taken (`jb 0x428c2c` at `0x428c13`), computing
+`CRITICAL_SECTION = NULL + 0x20 = 0x20` and calling
+`EnterCriticalSection(0x20)`. Wine's `ntdll` implementation loads that
+argument into `EBX` and performs `lock addl $1, 4(%ebx)` on the
+`CRITICAL_SECTION.LockCount` field — `0x20 + 4 = 0x24`, the exact fault
+address in both crash dumps. Every register in both crash dumps matches
+this reconstruction exactly: `EAX=0` (the `stream` argument was `NULL`),
+`ECX=0x0043b860` (the untouched static-table-base constant loaded at
+`0x428c0c`), `EBX=0x20` (computed at `0x428c2c`), `ESI=0xffff` (`SwitchMap`'s
+`fromMap=-1` sentinel, truncated to 16 bits somewhere inside `SwitchMap`
+itself — identical in both crashes because both went through
+`fcn.00426390`'s `SwitchMap(-1, curMap)` call, §"1A"). `EDX` is the only
+register that differs between the two crash dumps, and it plays no part in
+this call chain (dead/leftover value from whatever computation preceded it
+in each specific run) — consistent with everything else lining up exactly.
+
+**This crash happens before `LoadDungeon` ever consults anything from the
+save file's own map-offset table** — the `fopen` at `0x425360` is the very
+first thing `LoadDungeon` does, before the `dword[eax*4+0x4738b4]` read at
+`0x425371` even executes meaningfully (that read happens, but its result is
+never used — the crash is inside the *fseek call* that follows). This
+directly answers the session's opening question #1: **no, this is not a
+load-side/save-side byte-offset mismatch** — `charsave.py`'s map-offset
+table (or any other field) is never reached.
+
+#### Why `stream` is `NULL`: the actual root cause, upstream in `fcn.00426390`
+
+`fcn.00426390` (restore-game), right before its `SwitchMap(-1, curMap)`
+call, does this unconditionally once `char%hu.dat` has been read
+successfully:
+
+```
+fcn.00426390, file+0x426390:
+  0x426802  call fcn.0040cb50
+  0x426807  push str.tempdung.gam
+  0x426811  call [KERNEL32.DeleteFileA]      ; delete tempdung.gam
+  0x426819  ...                              ; sprintf "orig%hu.gam" % slot
+  0x42682a  call fcn.0042736a
+  0x426834  push str.tempdung.gam            ; lpNewFileName
+  0x426839  push 0x46f41c                    ; lpExistingFileName = "orig<N>.gam"
+  0x42683e  call [KERNEL32.CopyFileA]        ; copy orig<N>.gam -> tempdung.gam
+  0x426846  test eax, eax                    ; CopyFileA's return (0 = failed)
+  0x426849  jne 0x42685d                     ; success -> skip failure branch
+  0x42684b  push str._COPY_FAILED_           ; "*** COPY FAILED ***"
+  0x426850  call fcn.0040c910
+  0x426858  call fcn.00425d80                ; GetLastError + FormatMessageA
+                                              ; into a LOCAL buffer -- never
+                                              ; displayed, never logged
+  ; falls straight through to 0x42685d regardless of success/failure:
+  0x42685d  mov cx, word[0x47481a]           ; curMap
+  0x426867  call fcn.00426880                ; SwitchMap(-1, curMap)
+```
+
+`fcn.00425d80` is confirmed inert — it's just `GetLastError` +
+`FormatMessageA` into a 500-byte stack-local buffer that goes out of scope
+on `ret`; nothing ever reads or displays it. So the "`*** COPY FAILED ***`"
+branch is dead-end diagnostics, not error handling, and **execution falls
+through into `SwitchMap`/`LoadDungeon` whether or not `CopyFileA`
+succeeded.** Combined with the unconditional `DeleteFileA` immediately
+before it, a failed copy leaves **no `tempdung.gam` on disk at all**, so
+`LoadDungeon`'s `fopen` at `0x425360` returns `NULL` — the `stream` that
+then crashes the lock helper above.
+
+`CopyFileA(orig<N>.gam, tempdung.gam, FALSE)` fails whenever `orig<N>.gam`
+doesn't exist for slot `N`. That file is per-save-slot dungeon *state*
+(the DOS counterpart of the Amiga's own `TempDungeons`/`OrigDungeons`
+pair, §"Amiga save" above) — it's created by the game's own Save Game
+flow the first time a player actually saves into that slot, not something
+that ships pre-populated for every possible slot. Confirmed by a filesystem
+search of this entire environment: **the only `orig*.gam`/`tempdung.gam`
+files that exist anywhere are `data/blackcrypt/dosvga/orig1.gam` and
+`tempdung.gam`** — the pair that came with the demo's own shipped
+`char1.dat` (the project owner's real save, made by actually playing and
+saving through the UI). The Phase 4/6 Wine test package
+(`bc-test-package/`, built for these live tests) never had `orig2.gam`,
+`orig3.gam`, or `orig4.gam` — because `char2.dat`/`char3.dat`/`char4.dat`
+were all dropped into their slots by file copy, bypassing the "Save Game"
+UI flow that would normally create the matching `orig<N>.gam` the first
+time. **This is exactly why `char1.dat` loads fine and every other slot
+crashes**, regardless of what bytes are actually inside the `.dat` file —
+confirming this session's opening hypothesis that something *structural in
+the load path itself*, not the converted save's content, explains the
+identical crash on both a garbage input and a carefully-verified one.
+
+This also answers question #2 directly: `fcn.00426390`'s call to
+`SwitchMap(-1, curMap)` is not gated by any hidden `curMap` range check —
+it's unconditional and always was, in the pristine unpatched demo too
+(§"1A" already established the demo "already runs the full map-switch path
+on every game load"). The bug is entirely in the unchecked `CopyFileA`
+above it, wholly independent of Phase 4's `fcn.00423b50` stub fix (a
+different call site, live in-game transitions, not save loading).
+
+#### The fix: a new, independent patch — `scripts/patch_crypt_exe_guard_copy_failure.py`
+
+Following the same `rasm2`-assemble-and-verify pattern as Phase 4/5/7:
+redirect the dead "`*** COPY FAILED ***`" fallthrough at file+`0x2684b`
+(18 bytes: `push str; call fcn.0040c910; add esp,4; call fcn.00425d80`) to
+jump to `fcn.00426390`'s own *existing* clean bailout at `0x426408`
+(`mov ax,1; pop esi; add esp,0x24; ret` — the same "load failed, return to
+menu" path already used when `char%hu.dat` itself doesn't open). Stack
+depth was traced instruction-by-instruction across the entire intervening
+~0x440 bytes of `fcn.00426390` to confirm it's identical at both points
+(every `push`/`call`/`add esp,N` pair balances, including the explicit
+`push ebx,ebp,edi` / `pop edi,ebp,ebx` bracket around the character-parsing
+loop) — jumping there is stack-safe. The replacement is byte-for-byte the
+same length as what it replaces (18 B in, 18 B out: `push str; call
+fcn.0040c910; add esp,4` kept verbatim, only the inert `call fcn.00425d80`
+becomes `jmp 0x426408`), so no code cave is needed.
+
+| Check | Result |
+|---|---|
+| Pre-flight: guard window matches known build | `6830b74300e8bb60feff83c404e823f5ffff` confirmed present at file+`0x2684b` in the real, unmodified `crypt.exe` |
+| `jmp` bytes | `rasm2 -a x86 -b 32 -s 0x426858 "jmp 0x426408"` → `e9abfbffff`; independently round-tripped back through `r2 pd`, which prints `jmp 0x426408` exactly |
+| Target resolves correctly | `0x426858 + 5 + (-0x44D) = 0x426408` exactly, checked both by the script's own assert and `r2`'s disassembly |
+| Full-file diff vs. the real, unmodified `crypt.exe` | **3 bytes changed**, all inside the intended 5-byte `jmp` opcode (2 bytes coincidentally matched the replaced `call`'s trailing `ff ff`) |
+| Composability with `patch_crypt_exe.py` (Phase 4) | Applied both, in sequence, to the real `crypt.exe`: **28 total changed bytes**, all inside the three known windows (Phase 4's jmp + thunk, this patch's guard) — zero interaction, zero unexpected differences |
+| Round-trip disassembly of the patched region | `push str._COPY_FAILED_` / `call fcn.0040c910` / `add esp,4` / `jmp 0x426408` — the CODE XREF from `0x426849` now correctly resolves into the new bailout, confirmed by an independent `r2` pass, not just the patcher's own self-check |
+
+Never touches `data/blackcrypt/dosvga/crypt.exe`; refuses in-place
+patching; self-checks its own written output before reporting success —
+identical contract to `patch_crypt_exe.py`/Phase 5/Phase 7.
+
+#### Practical unblock applied to the live-test package
+
+Two changes were made to the project owner's existing Wine test package
+(`bc-test-package/`, outside the repo, never committed) so the next manual
+test can actually exercise the converted save instead of hitting this
+crash again:
+
+1. **`crypt.exe` replaced** with a copy carrying Phase 4's patch (already
+   present) plus this session's new guard patch on top — verified via the
+   same composability check above. The pre-patch file was kept as a
+   scratch backup, not deleted.
+2. **`orig2.gam`, `orig3.gam`, `orig4.gam` provisioned**, each a copy of
+   the full 13-map `maindung.gam` already in that directory. This is a
+   deliberate, documented simplification (same spirit as `charsave.py`'s
+   position/facing/turn-counter reset) — there is no real per-map dungeon
+   *state* delta from the Amiga playthrough to carry over (only the
+   character/party save was converted this project, never the dungeon
+   overlay), so seeding with the pristine full dungeon is the closest
+   available approximation to "a slot that was just started fresh". With
+   these two changes, `char4.dat` should now load past the point that
+   crashed, since `CopyFileA` will succeed and populate a real
+   `tempdung.gam` before `LoadDungeon` runs.
+
+**Live re-verification: not performed this session — same tooling gap as
+Phase 4's own "Live end-to-end proof" and §1C.** Reaching the Load Game
+menu and selecting slot 4 requires interactive keyboard/mouse input;
+`xdotool`/`ydotool`/`xte`/`wmctrl` are all absent from this environment (a
+repeat of the exact gap Phase 4 already documented), so this session could
+not itself drive Wine through the menu the way the project owner evidently
+has been doing manually (both crash reports were produced by real,
+recent, interactively-driven Wine runs, most likely the project owner's
+own). The diagnosis above is complete and byte-exact-verified by static
+means (disassembly trace + register-level correlation across two
+independent real crashes), matching this project's established bar; only
+the final "does it now actually load" confirmation needs a human at the
+keyboard, or future session with input-automation tooling.
+
+**One loose end, honestly flagged, not resolved this session:** the
+"Live cross-check" note above also recorded that the *smaller* raw Amiga
+save (`char3.dat`, 3,692 B) "returned cleanly to the load-game menu" rather
+than crashing, while the larger one (`char2.dat`) crashed. Under this
+session's finding, both should hit the identical missing-`orig<N>.gam`
+crash if they reached the same code path with the same missing companion
+file — so either that earlier test used a directory where `orig3.gam`
+happened to exist (a different/earlier test-package state, not reproduced
+this session), or a separate, not-yet-traced validation path elsewhere
+(possibly UI-level, before `fcn.00426390` is ever invoked) rejects
+`char3.dat` for an unrelated reason. Not investigated further this
+session — it doesn't change the diagnosis above, which is independently
+and completely confirmed by the register-exact match on the two crashes
+that *are* fully explained.
+
 ---
 
 ## Phase 7 — title screen credit — **DONE**
