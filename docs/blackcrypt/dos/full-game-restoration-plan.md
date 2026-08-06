@@ -2724,6 +2724,196 @@ finding in this Phase — but the final "does it now actually display 4
 distinct characters and real map-13 geometry" confirmation needs a human
 at the keyboard, or future input-automation tooling.
 
+### 11. Bug 2 was real but incomplete — "walkable" isn't "visibly near a wall"; fixed by landing on a Stairs Up landmark instead
+
+A third live Wine test of §"10"'s fixed `char4.dat` reported the same
+visual symptom as before: **"still appear to be in the middle of
+nowhere."** This confirms a real, distinct bug — not a regression of §"10"'s
+two fixes, both of which re-verify clean below — in the *quality* of the
+position `_pick_start_cell`'s old centroid heuristic picked, not in its
+correctness. "Real, populated, walkable, non-wall square" (what the old
+picker guaranteed) is not the same thing as "a square with real wall/door
+geometry actually visible from it" — a big open hall's centroid is
+routinely several squares from the nearest wall, and per
+`amiga/data-structure.md` § "3D Viewport Compositing", front-wall/structure
+rendering only reaches **3 squares deep** (`DrawSquareRecord`'s
+depth-remaining counter, S_1 `+0x220F0`: front walls draw only for the
+square that terminates the sight line, "at most 3 squares out"). Landing
+on a real floor square that happens to have no wall within 3 squares in
+any of the 4 facings produces exactly the same visual symptom as Bug 2's
+original unwritten-memory cause — floor and ceiling only — for a much more
+mundane reason.
+
+**Confirmed concretely for the specific tested case** before changing
+anything, per the task brief: map 13, the old picker's output position
+(x=12, y=12). Re-running `_pick_start_cell_centroid` (the old logic,
+kept as a fallback below) reproduces the same pick — it *is* a real,
+populated, open floor square (`0F F1 00 0A`, `wall_flags=0`), matching
+what §"10" already established. Walking outward from it up to 3 squares
+in each of the 4 facings (the confirmed `ApplyFacingDelta` deltas, and
+the confirmed `wall_flags`/wall-type-square blocking rule) finds: facing
+**North** has a real `wall_flags` block 1 square out (leaving `(13,12)`);
+facing **East, South and West** have no wall of either kind anywhere in
+the 3-square render range — open floor all the way. Since the old fix
+hardcoded facing **North** for every non-map-1 save, this is a genuine
+partial puzzle: North alone should have shown *something* within range,
+yet the live report was still "the middle of nowhere" for the whole view.
+This session did not fully close that specific discrepancy (a deeper
+trace of exactly what `DrawSquareRecord`'s depth-remaining counter does
+with a `wall_flags`-blocked departure square specifically, vs. a
+wall-type square further down the corridor, was not attempted — see "Still
+open" below) — but it doesn't need to be closed to fix the underlying
+problem: 3 of the 4 possible facings at that position demonstrably show
+nothing at all, which alone reproduces the reported symptom and confirms
+the diagnosis in the task brief ("walkable" isn't "visibly near a wall").
+The fix below sidesteps needing to fully resolve the North discrepancy by
+picking a position with a **guaranteed non-wall, adjacent** target in the
+chosen facing, not a heuristic proximity check.
+
+**The project owner's refinement (received mid-session): use a real
+landmark instead of a generic nearby-wall heuristic — specifically, the
+Stairs Up structure, since map 13 → map 12 is a meaningful, recognizable
+transition, not an arbitrary spot.** This is a strictly better fix than
+"pick a square with a wall bit set nearby": it guarantees not just *some*
+geometry in view but a *specific, identifiable* one (the stairs sprite
+itself), and it reuses structure data this project's own tooling already
+walks (`bclib.bcdfs`'s `on_record`/`on_square` callbacks), with no new
+parsing needed.
+
+**Which sub-kind is "Up".** `bcdfs` type-`0x12` (Stairs/Teleport/Spinner)
+records carry their sub-kind in `word +0x10`; sub-kind **2** (gfx `0x43`,
+"flight A") is **Stairs Up** and sub-kind **3** (gfx `0x44`, "flight B") is
+**Stairs Down** — already confirmed, not re-derived this pass, in
+`amiga/data-structure.md` § "The 24 automap tiles" and cross-checked
+against DOS `clipper.clp`'s own labelled `Stairs Up 1/2/3` entries by
+palette-independent pixel-region agreement (1.0000 vs 0.63-0.80 for the
+wrong pairing). This sidesteps the coordinator's suggested DOS-side
+`+0x0F` destination-map byte entirely — that field exists in `crypt.exe`'s
+*own* record encoding (a DOS-native layout Phase 2's `maindung.py`
+produces, not the Amiga source layout), and the Amiga `bcdfs` structure
+record has no equivalent field of its own (its 20 bytes are fully
+accounted for: gfx/name/position/type/`+0x06`/`+0x07` ramp-selector/
+`+0x08` facing-delta/`+0x0A`/dest X `+0x0C`/dest Y `+0x0E`/sub-kind
+`+0x10`/chain-next `+0x12` — no room for a separate map-number byte). The
+already-confirmed `word +0x10` sub-kind is both stronger evidence (cross-
+platform pixel match, not a re-derived byte offset) and sufficient on its
+own to distinguish Up from Down without needing to resolve how the
+engine picks which `bcdfs` file the stairs actually loads.
+
+**Census: every one of the 13 maps has at least one Stairs Up record**
+(map 3 has 12; map 13, being the last level, has exactly 1 — and no
+Stairs Down record at all, consistent with being the bottom of the
+dungeon):
+
+| Map | Stairs Up squares (row, col) |
+|---|---|
+| 1 | (28, 37) |
+| 2 | (18, 48), (20, 26), (24, 32), (27, 28) |
+| 3 | (26, 9), (29, 17), (29, 19), (29, 21), (29, 23), (29, 25), (29, 32), (36, 17), (36, 19), (36, 21), (36, 23), (36, 25) |
+| 4 | (4, 15), (8, 35), (8, 62) |
+| 5 | (7, 37) |
+| 6 | (1, 34), (10, 10) |
+| 7 | (1, 8), (8, 27), (11, 27), (11, 29), (14, 28), (21, 5), (27, 9) |
+| 8 | (1, 4) |
+| 9 | (16, 27), (27, 33), (36, 34) |
+| 10 | (5, 9) |
+| 11 | (4, 6) |
+| 12 | (20, 22) |
+| 13 | (2, 12) |
+
+**Map 13's stairs, concretely.** The one Stairs Up record sits at
+`(row=2, col=12)`, square bytes `0F F1 E0 01` — type `0` (floor), level
+nibble 1, `wall_flags = 0xE` (`0b1110` = walls on E/S/W, **North clear**).
+Its 4 compass neighbours: south `(1,12)` and west/east `(2,11)`/`(2,13)`
+are all real, populated **wall-type** squares (`type_nib & 0x10` set —
+can't stand there); north `(3,12)` is real, populated, **floor**, with its
+own `wall_flags = 0` (no walls on any side) — the one open approach,
+exactly matching the stairs square's own north-clear edge. Standing at
+`(3,12)` facing South looks directly at `(2,12)` — the stairs — at the
+closest possible non-party depth (one square away), with the stairs the
+very first thing the sight line reaches (nothing closer can block it,
+since the party's own square has zero wall bits set in every direction).
+
+**The fix**, in `scripts/bclib/charsave.py`:
+- `_find_stairs_up_start(map_number, bcdfs_path=None)` — new. Walks the
+  target map for every type-`0x12` record with `word +0x10 == 2`, then for
+  each one tries its 4 compass neighbours in a fixed N/E/S/W order,
+  returning the first that is (a) really populated, (b) not itself a
+  wall-type square, and (c) has no `wall_flags` bit blocking the *view*
+  from that neighbour towards the stairs — reusing the same wall-check bit
+  convention `MoveParty` (`+0x16CDC`) and the automap tile-0 rule both use
+  (the CURRENT square's own bit in the direction of travel/view, not the
+  destination's). Returns `(x, y, facing)`.
+- `_pick_start_cell_centroid(map_number, bcdfs_path=None)` — the old
+  heuristic, renamed and kept as a fallback (now also returns a 3-tuple,
+  facing hardcoded to North) for the theoretical case a map has no usable
+  Stairs Up approach. Not exercised for any of the 13 real maps — the
+  census above shows every map has at least one Stairs Up record, and this
+  session confirmed every one of the 13 has a valid unobstructed
+  neighbour on its **first** Stairs Up record (no map needed to fall
+  through to a second candidate record, let alone the centroid fallback).
+- `_pick_start_cell(map_number, bcdfs_path=None)` — now a thin wrapper:
+  stairs-based pick first, centroid fallback second.
+- `build_dos_save` now unpacks `x, y, facing = cell` and writes the real
+  `facing` (previously hardcoded to North for every non-map-1 save).
+
+**Verification.** Re-ran `_pick_start_cell` (now stairs-based) against all
+13 maps — every one resolves on its first Stairs Up candidate, zero
+fallbacks to the centroid heuristic:
+
+| Map | Stairs-based pick (x, y, facing) |
+|---|---|
+| 1 | (37, 27, North) |
+| 2 | (49, 18, West) |
+| 3 | (9, 27, South) |
+| 4 | (15, 5, South) |
+| 5 | (38, 7, West) |
+| 6 | (34, 2, South) |
+| 7 | (8, 2, South) |
+| 8 | (4, 2, South) |
+| 9 | (27, 15, North) |
+| 10 | (8, 5, East) |
+| 11 | (6, 3, North) |
+| 12 | (21, 20, East) |
+| 13 | (12, 3, South) |
+
+For the real end-game target (`2/BlackCrypt/CHARACTERSA`, current map 13):
+re-converting now produces **(x=12, y=3, facing=2/South)**, replacing the
+old (12, 12, North). Re-ran the same from-scratch loader-algorithm
+simulator §"10" used for Bug 1 against the freshly re-converted output —
+**unaffected by this change** (it only touches the party-scalar block, not
+the character records): all 4 characters still resolve their correct
+class name at the correct simulated cursor position with zero item-array
+desync, the file still ends exactly at the map-offset-table + terminator
+boundary (996 B, unchanged), the map-offset table still decodes to the
+same 13 already-triple-confirmed values, and current-map still reads 13.
+Copied to the project owner's live-test package
+(`bc-test-package/char4.dat`, outside the repo, never committed),
+overwriting §"10"'s (already fixed-but-imprecisely-placed) version.
+
+**Live re-verification: not performed this session** — same
+input-automation tooling gap as §"9"/§"10". The position/facing fix is
+verified the same way as everything else in this Phase: disassembly
+(`ApplyFacingDelta` facing→delta mapping, `MoveParty`'s wall-check bit
+convention — both already-confirmed, reused rather than re-derived) plus
+direct structural checks against the real `bcdfs` data (populated,
+non-wall, unobstructed, adjacent to a real Stairs Up record) — but the
+final "does the initial view actually show the stairs" confirmation needs
+a human at the keyboard, or future input-automation tooling.
+
+**Still open:** the exact mechanism of the old (12,12,North) pick's
+reported total emptiness isn't fully closed — the structural check above
+shows facing North *should* have had a real `wall_flags` block within
+render range (1 square out), yet the report described the whole view as
+empty, not just 3 of 4 facings. A deeper trace of `DrawSquareRecord`'s
+depth-remaining counter (specifically whether a `wall_flags`-blocked
+departure square renders differently from a wall-*type* square further
+down the corridor) was not attempted. Doesn't block this fix — the new
+stairs-based placement doesn't depend on depth-counter details, only on
+"is there real content on the very next square", the strongest guarantee
+available short of live testing — but worth investigating if a live test
+of *this* fix still somehow comes back empty.
+
 ---
 
 ## Phase 7 — title screen credit — **DONE**

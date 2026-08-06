@@ -109,23 +109,24 @@ anything here — every offset below cites the evidence that pinned it.
      tail bytes anyway would desync every following character. See above.
 
 3. **52-byte party-scalar block — safe defaults from the reference DOS
-   save, with one field overridden.** Phase 6 never established a
-   per-field byte-offset mapping between the Amiga's ~20 named scalars and
-   DOS's; guessing at 19 of them risked writing plausible-looking garbage
-   into fields that drive gameplay (position, facing, turn counter,
-   selected-character index). This module instead copies the fresh DOS
-   demo save's own 52-byte scalar block verbatim (i.e. every one of those
-   fields resets to safe, known-working "start of the game" values) and
-   overrides just the one field this session pinned to an exact byte
-   offset by fresh x86 disassembly: **current map**, at party-scalar-block
-   relative offset **+18** (`crypt.exe fcn.00401b80` `0x401dd9`, `mov cx,
-   word [0x47481a]`, the 9th of 17 sequential 2-byte writes starting at
-   `0x401d21` — each write's destination offset was traced instruction by
-   instruction; independently confirmed against `char1.dat` itself, which
-   reads `1` at that exact byte position, matching its known fresh-map-1
-   state). The Amiga source's real current-map byte (confirmed elsewhere
-   in Phase 6, `table_start - 33`) is written there zero-extended to a
-   word.
+   save, with current map, position and facing overridden.** Phase 6 never
+   established a per-field byte-offset mapping between the Amiga's ~20
+   named scalars and DOS's; guessing at the rest risked writing
+   plausible-looking garbage into fields that drive gameplay (turn
+   counter, selected-character index, etc). This module instead copies the
+   fresh DOS demo save's own 52-byte scalar block verbatim for everything
+   except 4 fields it pinned to exact byte offsets by fresh x86
+   disassembly: **current map** (`+18`), **X** (`+6`), **Y** (`+8`) and
+   **facing** (`+10`) — see `CURRENT_MAP_REL_OFFSET`/`X_REL_OFFSET`/
+   `Y_REL_OFFSET`/`FACING_REL_OFFSET` for the disassembly evidence
+   (`crypt.exe fcn.00401b80`'s 17-write sequence starting at `0x401d21`,
+   cross-checked against `char1.dat`'s own known fresh-map-1 values). For
+   map 1, `char1.dat`'s own real, live-tested-working entrance is kept
+   verbatim. For any other map, X/Y/facing are replaced with a real
+   landmark position: immediately in front of a real Stairs Up structure
+   on the target map's own data, facing it, so the initial view shows
+   recognizable geometry rather than an arbitrary open square — see
+   `_pick_start_cell`.
 
 4. **52-byte map-offset table — confirmed, highest confidence.** Direct
    per-field byte-swap (13 big-endian Amiga dwords -> 13 little-endian DOS
@@ -190,8 +191,9 @@ not an assumption about on-disk stride.
 | Core struct: name, `01 FF..` marker, 3 word-pair stats, class-constant array | Confirmed (Phase 6 real byte comparison) |
 | Core struct: remaining ~90 B | Best-effort / unverified (raw copy, no swap) |
 | Item/spell-slot array (`+0x14`..`+0x42`, 23x2 B) + no tail | Confirmed correct span and consumption behaviour this session (disassembly of both save and load routines); deliberately zeroed (safety choice, not a decode) |
-| Party-scalar block (51 of 52 B) | Safe defaults from a real working DOS save, not derived from the Amiga source |
+| Party-scalar block (44 of 52 B) | Safe defaults from a real working DOS save, not derived from the Amiga source |
 | Current map (party-scalar `+18`) | Confirmed (fresh disassembly this session + `char1.dat` cross-check) |
+| X/Y/facing (party-scalar `+6`/`+8`/`+10`) | Byte offsets confirmed by disassembly; for map != 1, the *value* picked is a real Stairs Up landmark from the target map's own `bcdfs` data (confirmed populated, non-wall, unobstructed view — see `_pick_start_cell`), not the game's actual intended entrance (not traced) |
 | Map-offset table | Confirmed (Phase 6, byte-exact 80/80) |
 | Terminator | Confirmed (disassembly); source pending-event list is dropped |
 """
@@ -469,10 +471,112 @@ def build_dos_record(slot, amiga_record):
 #: position for maps other than 1 -- see `_pick_start_cell` below.
 BCDFS_PATH = ROOT / 'data' / 'blackcrypt' / 'amiga' / 'bcdfs'
 
+#: `bcdfs` structure type byte (record byte +0x05) for Stairs/Teleport/
+#: Spinner, and the `word +0x10` sub-kind value that means "Stairs Up"
+#: (flight A, gfx `0x43`) -- both confirmed in
+#: `amiga/data-structure.md` §§ "The 24 automap tiles" / "Special-square
+#: sub-kinds" (`Flight A = Stairs Up, flight B = Stairs Down -- CONFIRMED`
+#: against DOS `clipper.clp`'s own labelled `Stairs Up 1/2/3` entries by
+#: palette-independent pixel-region agreement, 1.0000/~0.999 vs 0.63-0.80
+#: for the wrong pairing).
+STRUCTURE_TYPE_STAIRS = 0x12
+STAIRS_UP_SUBKIND = 2
 
-def _pick_start_cell(map_number, bcdfs_path=None):
-    """Find a real, valid, in-bounds `(x, y)` starting cell for
-    `map_number` (1-13) by walking the real Amiga `bcdfs` dungeon file.
+#: `ApplyFacingDelta` (S_1 `+0x002B4`, confirmed): facing 0=N moves Y+=1
+#: (row+1), 1=E moves X+=1 (col+1), 2=S moves Y-=1 (row-1), 3=W moves
+#: X-=1 (col-1). `FACING_APPROACH` maps a compass direction from the
+#: stairs square to (a) the neighbour square you'd stand on in that
+#: direction and (b) the facing that looks back at the stairs square from
+#: there (the opposite compass direction).
+#:   neighbour south of stairs (row-1, col) -> face North(0) to look at it
+#:   neighbour north of stairs (row+1, col) -> face South(2)
+#:   neighbour west  of stairs (row, col-1) -> face East(1)
+#:   neighbour east  of stairs (row, col+1) -> face West(3)
+FACING_APPROACH = [
+    (-1, 0, 0),   # neighbour south, facing North
+    (1, 0, 2),    # neighbour north, facing South
+    (0, -1, 1),   # neighbour west, facing East
+    (0, 1, 3),    # neighbour east, facing West
+]
+#: Wall-flags bit (N=1,E=2,S=4,W=8) tested on the NEIGHBOUR square for the
+#: given facing -- `MoveParty` (`+0x16CDC`) and the render-side wall check
+#: both gate on the CURRENT square's own wall_flags bit in the direction of
+#: travel/view, not the destination square's -- see
+#: `amiga/data-structure.md` § "`MoveParty(verb)`" and "The 24 automap
+#: tiles" (tile 0: "a `wall_flags` bit between party and square").
+FACING_WALL_BIT = {0: 0x1, 1: 0x2, 2: 0x4, 3: 0x8}
+
+
+def _find_stairs_up_start(map_number, bcdfs_path=None):
+    """Find a real starting `(x, y, facing)` immediately in front of a
+    Stairs Up structure on `map_number`, per the project owner's request
+    for a recognizable landmark rather than an arbitrary open square.
+
+    Walks the target map's real `bcdfs` data for every type-`0x12`
+    (Stairs/Teleport/Spinner) record whose `word +0x10` sub-kind is `2`
+    (Stairs Up, flight A -- see `STAIRS_UP_SUBKIND`'s docstring for the
+    confirmation). For each one found (a map can have more than one -- map
+    3 has 12), tries all 4 compass neighbours of its square in the fixed
+    order `FACING_APPROACH` lists (south, north, west, east) and returns
+    the first that is (a) really populated on this map, (b) not itself a
+    wall-type square (can't stand in a wall),
+    and (c) has no `wall_flags` bit blocking the view from that neighbour
+    towards the stairs square -- i.e. the stairs will render at depth 0,
+    directly ahead, unobstructed, per `amiga/data-structure.md` § "3D
+    Viewport Compositing" (structures render only within `depth < 3`, and
+    a `wall_flags` bit facing the direction of travel/view blocks the
+    render, per the automap tile-0 rule reusing the same bit).
+
+    Returns `None` if the map has no Stairs Up record, or every one found
+    has no valid unobstructed neighbour (not observed on any of the 13
+    real maps -- see the verification in `full-game-restoration-plan.md`
+    § "Phase 6" subsection 11).
+    """
+    path = Path(bcdfs_path) if bcdfs_path is not None else BCDFS_PATH
+    if not path.exists():
+        return None
+    from bclib import bcdfs
+    raw = path.read_bytes()
+    offsets = bcdfs.read_map_offsets(raw)
+    idx = map_number - 1
+    if not (0 <= idx < len(offsets)):
+        return None
+
+    squares = {}
+    stairs_up = []
+
+    def on_square(m, row, col, off, sq):
+        squares[(row, col)] = bytes(sq)
+
+    def on_record(m, row, col, off, rec):
+        if rec[5] == STRUCTURE_TYPE_STAIRS:
+            subkind = struct.unpack_from('>H', rec, 0x10)[0]
+            if subkind == STAIRS_UP_SUBKIND:
+                stairs_up.append((row, col))
+
+    bcdfs.walk_map(raw, offsets, idx, on_record=on_record, on_square=on_square)
+
+    for stairs_row, stairs_col in stairs_up:
+        for dr, dc, facing in FACING_APPROACH:
+            nrow, ncol = stairs_row + dr, stairs_col + dc
+            neighbor = squares.get((nrow, ncol))
+            if neighbor is None:
+                continue
+            if neighbor[0] & 0x10:      # wall-type square -- can't stand here
+                continue
+            neighbor_wall_flags = neighbor[2] >> 4
+            if neighbor_wall_flags & FACING_WALL_BIT[facing]:
+                continue                # view towards the stairs is blocked
+            return ncol, nrow, facing   # (x, y, facing): x=col, y=row
+    return None
+
+
+def _pick_start_cell_centroid(map_number, bcdfs_path=None):
+    """Fallback heuristic: the real, populated, non-wall-type square
+    closest to the centroid of all such squares on the map -- a simple,
+    deterministic "somewhere in the middle of the level" pick, used only
+    when `_find_stairs_up_start` finds no usable Stairs Up landmark (not
+    observed on any of the 13 real maps, but kept as a safety net).
 
     This session confirmed (`data/blackcrypt/dosvga/char1.dat`'s own fresh-
     save default, X=8/Y=21, checked against map 13's real square data via
@@ -489,14 +593,11 @@ def _pick_start_cell(map_number, bcdfs_path=None):
     (`scripts/export_dungeon_levels.py`'s `FILL_WALL_FLAGS`) defensively
     assumes for its own unrelated purposes.
 
-    Picks the real, populated, non-wall-type square closest to the
-    centroid of all such squares on the map -- a simple, deterministic
-    "somewhere in the middle of the level" heuristic. This is NOT the
-    game's own real intended entrance/spawn point (that logic was not
-    traced this session) -- just guaranteed-real, in-bounds, walkable
-    geometry instead of a map-1-shaped guess. Returns `None` if
-    `bcdfs_path` doesn't exist or the map has no populated non-wall
-    squares (should not happen for any of the 13 real maps).
+    Returns `None` if `bcdfs_path` doesn't exist or the map has no
+    populated non-wall squares (should not happen for any of the 13 real
+    maps). Returns `(x, y, facing)` with `facing` hardcoded to North (0)
+    -- unlike the stairs-based pick, this heuristic has no natural "look
+    at something" direction.
     """
     path = Path(bcdfs_path) if bcdfs_path is not None else BCDFS_PATH
     if not path.exists():
@@ -519,7 +620,25 @@ def _pick_start_cell(map_number, bcdfs_path=None):
     mean_col = sum(c for r, c in walkable) / len(walkable)
     best_row, best_col = min(
         walkable, key=lambda rc: (rc[0] - mean_row) ** 2 + (rc[1] - mean_col) ** 2)
-    return best_col, best_row  # (x, y): x=col, y=row
+    return best_col, best_row, 0  # (x, y, facing): x=col, y=row, North
+
+
+def _pick_start_cell(map_number, bcdfs_path=None):
+    """Find a real, valid, in-bounds `(x, y, facing)` starting placement
+    for `map_number` (1-13) by walking the real Amiga `bcdfs` dungeon
+    file: prefer standing immediately in front of a real Stairs Up
+    structure, facing it, so the initial view always shows a recognizable
+    landmark (`_find_stairs_up_start`); fall back to the old "closest to
+    the walkable centroid" heuristic only if the map has no usable Stairs
+    Up record (`_pick_start_cell_centroid`) -- not observed on any of the
+    13 real maps (every one has at least one Stairs Up record with a real,
+    unobstructed approach square; see the per-map census in
+    `full-game-restoration-plan.md` § "Phase 6" subsection 11).
+    """
+    cell = _find_stairs_up_start(map_number, bcdfs_path=bcdfs_path)
+    if cell is not None:
+        return cell
+    return _pick_start_cell_centroid(map_number, bcdfs_path=bcdfs_path)
 
 
 def build_dos_save(parsed, dos_template=None, bcdfs_path=None):
@@ -549,12 +668,14 @@ def build_dos_save(parsed, dos_template=None, bcdfs_path=None):
 
     # 3. 52-byte party-scalar block: safe defaults from the reference save,
     #    current map overridden with the real extracted value. Position
-    #    (X/Y/facing) is ALSO overridden, but only when the target map
-    #    isn't 1 -- `char1.dat`'s own default position is the DOS demo's
-    #    real, live-tested-working map-1 entrance, strictly better than any
+    #    AND facing are ALSO overridden, but only when the target map isn't
+    #    1 -- `char1.dat`'s own default position is the DOS demo's real,
+    #    live-tested-working map-1 entrance, strictly better than any
     #    heuristic pick; for any other map, that same default is real, but
     #    wrong-map geometry (see `_pick_start_cell`), so this replaces it
-    #    with a real cell from the TARGET map's own data when available.
+    #    with a real landmark cell (immediately in front of a Stairs Up
+    #    structure, facing it -- see `_pick_start_cell`'s docstring) from
+    #    the TARGET map's own data when available.
     block_start = HEADER_BYTES + 4 * DOS_RECORD_BYTES
     block = bytearray(
         dos_template[block_start:block_start + PARTY_SCALAR_BYTES])
@@ -563,10 +684,10 @@ def build_dos_save(parsed, dos_template=None, bcdfs_path=None):
     if parsed['current_map'] != 1:
         cell = _pick_start_cell(parsed['current_map'], bcdfs_path=bcdfs_path)
         if cell is not None:
-            x, y = cell
+            x, y, facing = cell
             struct.pack_into('<H', block, X_REL_OFFSET, x)
             struct.pack_into('<H', block, Y_REL_OFFSET, y)
-            struct.pack_into('<H', block, FACING_REL_OFFSET, 0)  # North
+            struct.pack_into('<H', block, FACING_REL_OFFSET, facing)
     out += block
 
     # 4. 52-byte map-offset table: confirmed per-field byte-swap.
