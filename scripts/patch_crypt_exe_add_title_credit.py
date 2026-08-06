@@ -13,54 +13,92 @@ PROGRAMMING/SOUND, ~350 ticks), `"Title 1"` (a bare gargoyle-temple
 background with no "BLACK CRYPT" wordmark yet, ~100 ticks), `"Title 2"`
 (the same background *with* the wordmark, ~400 ticks), then `"Title 3"`
 (the game's premise blurb + item icons, waits indefinitely for a keypress).
-Each screen is: resolve the bitmap by name (`fcn.00402650`), blit it, then
-either `fcn.00403d20()` (Title 1/3/4's "make visible" step) or, for Title 2
-only, `fcn.00408120(0, 320, 200)` (a slower, explicit-dimension present
-routine -- confirmed by disassembly to Lock two directory-indexed surfaces
-and byte-copy `200` rows across 4 bands, i.e. it really does present a full
-320x200 region, not a smaller sub-rect).
+
+Each screen's background is blitted onto one of a small pair of
+directory-indexed off-screen surfaces (`dword[idx*4 + 0x469998]`, `idx`
+selected by the global "current" index `word[0x4699a4]`), then made
+visible either by `fcn.00403d20()` (Title 1/3/4's normal path -- flips the
+just-drawn buffer to the screen and *also* toggles `word[0x4699a4]`
+(next draw target) against `word[0x46b2fc]` (mirrors whichever buffer is
+now on-screen)) or, for Title 2 only, `fcn.00408120(0, 320, 200)` (locks
+the two directory-indexed surfaces selected by `word[0x4699a4]` (source)
+and `word[0x46b2fc]` (dest) and byte-copies **200 rows only** -- a
+real, code-derived bound, `H` is the one argument the function actually
+reads).
 
 **The existing "PC CRYPT V1.0 BY RICK JOHNSON!" credit** is drawn by
 `fcn.0040c9b0(stringPtr, styleArg, widthArg)`, called once during Title 2's
-block (`0x40ba9a`-`0x40baa3`, args `(str.PC_CRYPT_..., 1, 0x24)`) *before*
-Title 2's own background blit -- confirmed safe because that credit renders
-at a fixed row **below** the picture area, not inside it (see next
-paragraph), so draw-then-blit ordering doesn't matter: the background blit
-never touches that row.
+block (`0x40ba9a`-`0x40baa3`, args `(str.PC_CRYPT_..., 1, 0x24)`).
+`fcn.0040c9b0` draws its glyphs onto a **single fixed global surface,
+`dword[0x46bd38]`** (confirmed by reading its own Blt call at `0x40cab4`/
+`0x40cadc`: `mov ecx, dword[0x46bd38]` used directly as the call's `this`,
+no directory indexing at all) -- the same fixed surface used by ~40
+unrelated in-game UI-drawing routines elsewhere in this executable (item
+icons, health bars, etc., all outside the title sequence), strongly
+indicating it's the buffer the game always draws UI overlays onto for
+display, not one of the toggled scratch buffers. Every character blits an
+8x8 slice of the `"Scroll Font 1"` font strip to a **hardcoded destination
+row, `y = 0xdd` (221)** -- a literal inside `fcn.0040c9b0`'s own body
+(`push 0xdd` at `0x40cad2`), identical for every caller, *not* a parameter.
 
-`fcn.0040c9b0` (392 B, traced instruction-by-instruction):
+**Why the existing credit survives Title 2's own background-refresh-then-
+present sequence**: `fcn.0040c9b0` is called (drawing onto `0x46bd38`)
+*before* Title 2's own background blit (onto the directory-indexed
+surface) and *before* `fcn.00408120`'s composite -- but neither of those
+later steps can erase it, because both are bounded to the top `200` rows
+(`H` argument / SetRect height), while the credit sits at row `221`,
+outside that range. This -- not draw-order alone -- is what actually makes
+the credit immune to the composite step, a detail the original write-up
+of this phase didn't establish and got partially wrong (see the "Live-test
+bug, fixed this session" section below).
 
-- Computes `strlen` via `repne scasb`, then the glyph loop's starting X as
-  `esi = (40 - strlen) * 4` -- exactly the classic centering formula for a
-  320px-wide, 8px-per-glyph text line (`(320 - strlen*8) / 2`, refactored).
-  **This is a real, code-level constraint, not a guess**: with `strlen`
-  characters at 8 px each, the line only stays on-screen (0 <= x <
-  320) for `strlen <= 40`; the existing credit is 31 chars, so it already
-  uses most of that budget (9 chars of headroom, `(40-31)*4 = 36 px` start
-  offset).
-- Per character: glyph index = `charCode - 0x20`; **bounds-checked against
-  the "Scroll Font 1" clipper entry's own declared height field** (confirmed
-  via `clipper.clp`: entry 128, `"Scroll Font 1"`, type 2, `8x472` px --
-  472/8 = 59 glyph slots, i.e. valid chars are exactly `0x20` (space)
-  through `0x5A` (`'Z'`), covering space, digits, most ASCII punctuation,
-  and uppercase A-Z, but **no lowercase** (`fcn.0040c9b0` at `0x40ca90`:
-  `cmp ax, word[edx*4+0x43c7b0]; jg <skip this char>` -- a character whose
-  glyph offset exceeds the strip's own height is silently dropped, not
-  drawn, no crash). This matches the existing credit's own ALL-CAPS style
-  exactly, and is why any addition must also be ALL-CAPS with no lowercase.
-- Every character blits from an 8x8 slice of the `"Scroll Font 1"` strip to
-  a **hardcoded destination row, `y = 0xdd` (221)** -- a literal embedded in
-  `fcn.0040c9b0`'s own body (`push 0xdd` at `0x40cad2`), identical for
-  every caller; it is *not* a parameter. Confirmed via the standard
-  `(this, x, y, srcSurf, srcRect, flags)` calling convention already
-  established for the file's other directory-entry Blit calls (verified by
-  reading the exact push order for both the credit-line call and the known-
-  correct Title-N background blit, which uses the same convention with
-  known-correct `x=0, y=0` values). Since `y` is compiled-in, giving a
-  *second* credit its own row would need patching `fcn.0040c9b0` itself
-  (touching the one existing, working credit) or a full near-duplicate of
-  the function -- neither is worth it when there are three other title
-  screens with nothing drawn at that row at all.
+## The live-test bug (found and fixed this session)
+
+The first shipped version of this patch reused `fcn.00408120(0, 320, 200)`
+-- Title 2's own "make visible" call -- as its present step, on the theory
+that it was a safe, already-proven drop-in. Live-testing under Wine showed
+the new credit *did* render, but **Title 4's Raven Software credits screen
+flashed back onto the display at the same time.**
+
+Root cause, traced instruction-by-instruction (not guessed): at the exact
+point in `fcn.0040b970` where this patch's hook fires (right after Title
+1's own `call fcn.00403d20` at `0x40ba61`, its only in-between instruction
+being the stolen, harmless `fcn.0040aaf0(3, 1)` sound call), the toggle
+bookkeeping is deterministic and confirmed by tracing every prior
+`fcn.00403d20` call in the sequence: `word[0x4699a4] == 1`. That directory
+slot (`dword[0x46999c]`, i.e. `1*4 + 0x469998`) was **last written during
+Title 4's own background blit, at the very start of the function, and is
+never redrawn again before this point** -- Title 1's own background blit
+went to the *other* slot (index 0). So it's genuinely stale, holding
+Title 4's picture.
+
+Title 2's own, real call site never hits this problem because its call
+order is: draw credit (onto `0x46bd38`) -> **resolve and Blt Title 2's own
+background onto the directory slot `fcn.00408120` is about to read as its
+source** -> call `fcn.00408120`. That background blit is what keeps the
+composite's source fresh. This patch's cave skipped that step entirely --
+it drew the credit and went straight to `fcn.00408120`, so the composite's
+`H=200`-row copy pulled two-screens-old Title 4 pixels into the on-screen
+picture area (rows 0-199); the credit itself survived only because row
+221 falls outside that copied range, exactly per the mechanism above --
+which is why the bug looked exactly like "new credit, but old Raven logo
+underneath it" rather than a scrambled mess.
+
+**The fix, verified against that same trace**: `fcn.00408120` was never
+actually necessary. Title 1's own normal presenter,
+`call fcn.00403d20`, already runs *unmodified*, immediately before this
+patch's hook, and correctly Blits Title 1's own (non-stale) background
+onto `dword[0x46bd38]` before the hook ever fires -- i.e. the on-screen
+picture is already correct at the moment the cave starts running. Adding
+*any* extra composite/present call after that is not just redundant, it's
+actively harmful here, because the one directory slot available for such a
+call to source from (`word[0x4699a4]`) happens to be the stale one at this
+exact point in the four-screen sequence. Re-calling `fcn.00403d20()`
+itself would reproduce the same class of bug (it also sources from
+`word[0x4699a4]`). The correct cave simply **drops the present step
+entirely**: re-execute the stolen sound call, draw the credit onto
+`0x46bd38` (already showing the correct picture), and resume -- nothing
+else is needed. This shrinks the cave from 47 B to 27 B (see below).
 
 ## What this patch does
 
@@ -78,22 +116,17 @@ Insertion point: Title 1's block ends with
 fcn.0040aaf0` at `0x40ba6a` (5 B: `e8 81 f0 ff ff`) is stolen and replaced
 with a 5-byte `jmp rel32` to a cave that: re-executes the exact stolen
 call (args were already pushed by the two instructions just before the
-hook and are untouched), draws the new credit the same way Title 2's own
-credit is drawn (`fcn.0040c9b0(newStr, 1, 0x24)` -- identical arg shape to
-the proven-working call), presents it with the same routine already proven
-to make a `fcn.0040c9b0`-drawn credit visible (`fcn.00408120(0, 320, 200)`,
-Title 2's own "make visible" call -- Title 1 normally uses the plainer
-`fcn.00403d20()` instead, which stays untouched and still runs immediately
-before the hook fires, so Title 1's picture displays exactly as before for
-one instant, then our credit is drawn and an extra, harmless present makes
-it visible too), then jumps back to resume Title 1's own code unmodified.
+hook and are untouched), then draws the new credit the same way Title 2's
+own credit is drawn (`fcn.0040c9b0(newStr, 1, 0x24)` -- identical arg
+shape to the proven-working call), then jumps back to resume Title 1's own
+code unmodified. No present/composite call is made -- see above for why
+none is needed.
 
-Both `fcn.0040c9b0` and `fcn.00408120` end in a bare `ret` (confirmed by
-disassembly, not assumed) -- i.e. cdecl, caller cleans the stack -- so the
-cave explicitly balances its own two calls with `add esp, 0xc` each; it
-does not rely on any of the surrounding function's own deferred/batched
-stack cleanup (which exists for the *original*, untouched instructions and
-must not be disturbed).
+`fcn.0040c9b0` ends in a bare `ret` (confirmed by disassembly, not
+assumed) -- i.e. cdecl, caller cleans the stack -- so the cave explicitly
+balances its own call with `add esp, 0xc`; it does not rely on any of the
+surrounding function's own deferred/batched stack cleanup (which exists
+for the *original*, untouched instructions and must not be disturbed).
 
 ## Feasibility -- slack space, checked fresh for this patch
 
@@ -108,14 +141,14 @@ consumed part of the same cave):
   thunk and Phase 5's 74 B DlgProc+thunk (`0x2DEB3`+22+74 = `0x2DF13`
   onward). Freshly confirmed all-zero in the real, unmodified
   `data/blackcrypt/dosvga/crypt.exe` at the time of this patch (not
-  inherited from the older docs). This patch's cave (47 B) fits inside
-  with 190 B to spare.
+  inherited from the older docs). This patch's cave (27 B, after this
+  session's fix -- previously 47 B) fits inside with 210 B to spare.
 - **String data**: `.rdata`'s own unused tail, `0x42F2D9`-`0x430000`
   (3,367 B), of which Phase 5 uses the first 695 B (`0x42F2D9`-`0x42F590`).
   This patch places its string well clear of that, at `0x42F600` (112 B of
   margin from Phase 5's own end), with 2,560 B still free afterward. A
   fresh file-wide dword scan for pointers into either target region (the
-  47-byte cave slice and the 40-byte string slice) found **zero** hits in
+  27-byte cave slice and the 40-byte string slice) found **zero** hits in
   both.
 
 **Composability, checked explicitly, not assumed:** this patch's own hook,
@@ -128,11 +161,14 @@ patched by both Phase 4 and Phase 5, in any combination. **One real
 ordering constraint exists, inherited from Phase 5's own precondition, not
 introduced by this patch:** Phase 5's pre-flight check requires its *entire
 311-byte cave remainder* (`0x2DEC9`-`0x2E000`) to read all-zero, which
-includes the 47 bytes this patch writes. So if this patch is applied
+includes the bytes this patch writes. So if this patch is applied
 *before* Phase 5, Phase 5 can never be applied afterward (its own guard
 will correctly refuse). **Apply Phase 5 before this patch if you want
 both.** This patch itself does not require Phase 4 or Phase 5 -- it can be
-applied to a stock `crypt.exe` on its own.
+applied to a stock `crypt.exe` on its own. Composability with Phase 6's
+copy-failure guard (`patch_crypt_exe_guard_copy_failure.py`, hook at
+`fcn.00423b50`'s own body / `"9"` in the plan doc) was also re-checked this
+session: disjoint hook and cave windows, no interaction.
 
 ## The drafted text
 
@@ -157,13 +193,15 @@ re-reads the file from disk and re-verifies both windows plus a full-file
 byte diff showing zero changes outside the three intended windows (hook,
 cave, string).
 
-**Not done (same scope boundary as Phase 4/5):** live Wine/screenshot
-confirmation. Static, byte-exact verification is this project's established
-bar for code patches (Phase 4/5 shipped on that basis); the credit's
-placement (same row as the already-proven-working Rick Johnson credit, same
-draw/present routine pair, same font, same centering formula) is derived
-from, not merely modeled after, the one credit line already confirmed to
-render correctly in the shipped game.
+**Live-tested this session (Wine), not just statically verified**: the
+first version of this patch (with the now-removed `fcn.00408120` present
+call) was live-tested under Wine by the project owner and the Title-4
+flashback bug was observed and reported first-hand -- this is the ground
+truth that drove the fix above, not a hypothesis. The corrected version
+(this file) has been statically re-verified with the same rigor as the
+original (byte-exact diff, round-trip disassembly, composability checks),
+but a second live Wine pass to confirm the fix is still recommended before
+calling this phase fully closed.
 
 ## Repo hygiene
 
@@ -192,15 +230,11 @@ STRING_FILE_OFFSET = STRING_VADDR - 0x400000     # 0x2f600
 STRING_REGION_LEN = 0x430000 - STRING_VADDR      # 2,560 B available
 
 TITLE_1_DRAW_TEXT_IAT = 0x40C9B0        # fcn.0040c9b0 (the credit-line drawer)
-PRESENT_IAT = 0x408120                  # fcn.00408120 (Title 2's own "make visible")
 STOLEN_CALL_TARGET = 0x40AAF0           # fcn.0040aaf0 (sound start/stop)
 RESUME_VADDR = HOOK_VADDR + HOOK_LEN    # 0x40ba6f, 'push 1' (wait loop start)
 
 DRAW_ARG2 = 1        # matches Title 2's own credit call exactly
 DRAW_ARG3 = 0x24      # matches Title 2's own credit call exactly
-PRESENT_ARG_X = 0
-PRESENT_ARG_W = 0x140  # 320
-PRESENT_ARG_H = 0xC8   # 200
 
 # --- The new title-screen credit line ---------------------------------
 # ALL CAPS, space/letters/period only -- "Scroll Font 1" (clipper.clp entry
@@ -217,20 +251,17 @@ NEW_CREDIT_BYTES = NEW_CREDIT_TEXT.encode('ascii') + b'\x00'
 assert len(NEW_CREDIT_BYTES) <= STRING_REGION_LEN
 
 # --- Assembled bytes (rasm2 -a x86 -b 32 -s <addr> '<insn>', see docstring) -
-
-# Cave layout @ CAVE_BASE_VADDR (0x42df13), 47 B total:
+#
+# Cave layout @ CAVE_BASE_VADDR (0x42df13), 27 B total (was 47 B before
+# this session's fix -- the present/composite step at the old +22..+41 was
+# removed, see "The live-test bug" above):
 #   +0  e8d8cbfdff      call 0x40aaf0        ; re-executed stolen instruction
 #   +5  6a24            push 0x24            ; DRAW_ARG3
 #   +7  6a01            push 1               ; DRAW_ARG2
 #   +9  6800f64200      push 0x42f600        ; NEW_CREDIT_BYTES address
 #   +14 e88aeafdff      call 0x40c9b0        ; fcn.0040c9b0 (draw credit)
 #   +19 83c40c          add esp, 0xc         ; cdecl cleanup (3 args)
-#   +22 68c8000000      push 0xc8            ; height=200
-#   +27 6840010000      push 0x140           ; width=320
-#   +32 6a00            push 0               ; x=0
-#   +34 e8e6a1fdff      call 0x408120        ; fcn.00408120 (present)
-#   +39 83c40c          add esp, 0xc         ; cdecl cleanup (3 args)
-#   +42 e92ddbfdff      jmp 0x40ba6f         ; resume Title 1's own code
+#   +22 e941dbfdff      jmp 0x40ba6f         ; resume Title 1's own code
 CAVE_PAYLOAD = bytes.fromhex(
     'e8d8cbfdff'
     '6a24'
@@ -238,14 +269,9 @@ CAVE_PAYLOAD = bytes.fromhex(
     '6800f64200'
     'e88aeafdff'
     '83c40c'
-    '68c8000000'
-    '6840010000'
-    '6a00'
-    'e8e6a1fdff'
-    '83c40c'
-    'e92ddbfdff'
+    'e941dbfdff'
 )
-assert len(CAVE_PAYLOAD) == 47
+assert len(CAVE_PAYLOAD) == 27
 assert len(CAVE_PAYLOAD) <= CAVE_MAX_LEN
 
 # Cross-checks -- decode every operand back out of the assembled bytes and
@@ -266,22 +292,9 @@ _c2_next = CAVE_BASE_VADDR + 14 + 5
 _c2_rel32 = int.from_bytes(CAVE_PAYLOAD[15:19], 'little', signed=True)
 assert _c2_next + _c2_rel32 == TITLE_1_DRAW_TEXT_IAT, hex(_c2_next + _c2_rel32)
 
-# +22: 'push 0xc8' (5 B: 68 imm32)
-_pushed_h = int.from_bytes(CAVE_PAYLOAD[23:27], 'little')
-assert _pushed_h == PRESENT_ARG_H, hex(_pushed_h)
-
-# +27: 'push 0x140' (5 B: 68 imm32)
-_pushed_w = int.from_bytes(CAVE_PAYLOAD[28:32], 'little')
-assert _pushed_w == PRESENT_ARG_W, hex(_pushed_w)
-
-# +34: 'call 0x408120' (5 B: e8 rel32)
-_c3_next = CAVE_BASE_VADDR + 34 + 5
-_c3_rel32 = int.from_bytes(CAVE_PAYLOAD[35:39], 'little', signed=True)
-assert _c3_next + _c3_rel32 == PRESENT_IAT, hex(_c3_next + _c3_rel32)
-
-# +42: 'jmp 0x40ba6f' (5 B: e9 rel32)
-_jmp_back_next = CAVE_BASE_VADDR + 42 + 5
-_jmp_back_rel32 = int.from_bytes(CAVE_PAYLOAD[43:47], 'little', signed=True)
+# +22: 'jmp 0x40ba6f' (5 B: e9 rel32)
+_jmp_back_next = CAVE_BASE_VADDR + 22 + 5
+_jmp_back_rel32 = int.from_bytes(CAVE_PAYLOAD[23:27], 'little', signed=True)
 assert _jmp_back_next + _jmp_back_rel32 == RESUME_VADDR, hex(_jmp_back_next + _jmp_back_rel32)
 
 # Original bytes at HOOK_FILE_OFFSET, for the pre-flight sanity check.
@@ -441,8 +454,8 @@ def main() -> int:
     print(f'  hook   file+{HOOK_FILE_OFFSET:#x} (vaddr {HOOK_VADDR:#x}) '
           f'-> jmp cave vaddr {CAVE_BASE_VADDR:#x}: {JMP_BYTES.hex()}')
     print(f'  cave   file+{CAVE_FILE_OFFSET:#x} (vaddr {CAVE_BASE_VADDR:#x}), '
-          f'{len(CAVE_PAYLOAD)} B: re-executed sound call + draw-credit + '
-          f'present thunk')
+          f'{len(CAVE_PAYLOAD)} B: re-executed sound call + draw-credit '
+          f'(no present call -- see docstring for why none is needed)')
     print(f'  string file+{STRING_FILE_OFFSET:#x} (vaddr {STRING_VADDR:#x}), '
           f'{len(NEW_CREDIT_BYTES)} B, NUL-terminated: '
           f'{NEW_CREDIT_TEXT!r}')

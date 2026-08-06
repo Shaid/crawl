@@ -3036,13 +3036,21 @@ file, not assumed) is stolen and replaced with a 5-byte `jmp rel32` to a
 2. Draws the new credit exactly the way Title 2's own credit is drawn:
    `fcn.0040c9b0(newStr, 1, 0x24)` — identical `arg2`/`arg3` to the
    proven-working call, differing only in the string pointer.
-3. Presents it with the same routine already proven to make a
+3. ~~Presents it with the same routine already proven to make a
    `fcn.0040c9b0`-drawn credit visible: `fcn.00408120(0, 320, 200)`, Title
    2's own "make visible" call. Title 1 normally uses the plainer
    `fcn.00403d20()` instead, which is left completely untouched and still
    runs immediately before the hook fires — so Title 1's picture displays
    exactly as before for one instant, then the new credit is drawn and an
-   extra, harmless present makes it visible too.
+   extra, harmless present makes it visible too.~~
+
+   > **Correction — see § 7.6.** This step was wrong and caused a real,
+   > live-observed bug (Title 4's Raven Software credits flashing back
+   > onto the screen alongside the new text). The borrowed
+   > `fcn.00408120` call was removed entirely, not replaced — no present
+   > step is needed here at all. § 7.6 has the full root-cause trace and
+   > the fix; the step numbering above (steps 1, 2, 4) is otherwise
+   > unchanged and still accurate.
 4. Jumps back to `0x40ba6f` (`push 1`, the original next instruction —
    Title 1's own 100-tick wait loop), resuming unmodified code.
 
@@ -3052,6 +3060,10 @@ cleans the stack — so the cave explicitly balances its own two calls with
 `add esp, 0xc` each, rather than relying on the surrounding function's own
 deferred/batched stack cleanup (which exists only for the original,
 untouched instructions and must not be disturbed).
+
+> **Correction — see § 7.6.** The shipped cave only makes *one* call
+> (`fcn.0040c9b0`), not two — the `fcn.00408120` present call described
+> above was removed. The cave is 27 B, not 47 B.
 
 **Deliverable:** `scripts/patch_crypt_exe_add_title_credit.py`, matching
 `patch_crypt_exe.py`/`patch_crypt_exe_add_restoration_note.py`'s exact
@@ -3084,17 +3096,27 @@ byte-exact structural check (the full-file diff) plus an independent
 disassembly pass (not just the patcher's own self-check), not a spot-check
 or a "looks right".
 
-**Not done, same scope boundary as Phase 4/5:** live Wine/screenshot
-confirmation that the second credit line actually renders on screen. The
-credit's placement is *derived from*, not merely modeled after, the one
-credit line already known to render correctly in the shipped game — same
-row (`y=0xdd`), same draw routine (`fcn.0040c9b0`, byte-identical
-`arg2`/`arg3`), same present routine (`fcn.00408120`, identical
-arguments), same font, same centering formula, same character-set
-constraint. Static, byte-exact verification is this project's established
-bar for code patches (Phase 4/5 shipped on that same basis, and §1C's
-still-open DirectDraw/Wine presentation issue remains the blocker for any
-live capture, unchanged by this phase).
+> **Correction — see § 7.6.** This table describes the *original* cave
+> (47 B, 12 instructions, including the `fcn.00408120` present call). A
+> live Wine test of exactly this build surfaced a real bug (§ 7.6): the
+> credit rendered, but Title 4's Raven Software credits flashed back onto
+> the screen at the same time. The corrected cave (27 B, 7 instructions,
+> no present call) has been re-verified with the identical battery of
+> checks in this table — round-trip disassembly, byte-exact full-file
+> diff, and all four composability directions — see § 7.6 for the
+> corrected numbers. This row-by-row table is left as-is (not rewritten)
+> because it's still an accurate record of what the *first* build did and
+> how it was checked; it is simply no longer what ships.
+
+**Not done, same scope boundary as Phase 4/5, at the time this table was
+first written:** live Wine/screenshot confirmation that the second credit
+line actually renders on screen.
+
+> **Correction — see § 7.6.** This *was* subsequently done (that's how
+> the bug above was found) — a live Wine test is no longer an open item
+> for "does the credit line ever get drawn," only for "does the corrected,
+> present-call-free build look right end-to-end," which § 7.6 flags as
+> still recommended before closing this phase out completely.
 
 ### 7.5 The drafted text
 
@@ -3110,3 +3132,110 @@ affiliation — "fan restoration" reads as exactly what it is, the same
 posture Phase 5's dialog page already takes at greater length.
 `crawl.shaid.net` is this project's own real, already-deployed docs site,
 the same URL Phase 5 uses.
+
+### 7.6 Live-test bug, root cause, and fix
+
+The project owner tested the § 7.3 build under Wine. The new credit text
+rendered correctly, but **Title 4's Raven Software credits screen flashed
+back onto the display at the same time.** This section traces the real
+cause (not a guess) and documents the fix that shipped.
+
+**The suspect.** § 7.3's cave drew the new credit with the same proven
+call as Title 2's own credit (`fcn.0040c9b0`), then presented it with
+`fcn.00408120(0, 320, 200)` — borrowed from Title 2's own real call site,
+since Title 1 normally uses a different, plainer routine
+(`fcn.00403d20()`) which the cave left untouched and running immediately
+before the hook fires.
+
+**`fcn.00408120`, disassembled in full this session** (492 B,
+`0x408120`-`0x40830b`): it reads two 16-bit globals, `word[0x4699a4]`
+("current") and `word[0x46b2fc]` ("other"), each used as an index into a
+small directory of off-screen surfaces (`dword[idx*4 + 0x469998]`,
+populated once at startup in `fcn.0040bbe0` — three entries confirmed via
+xrefs, `0x469998`/`0x46999c`/`0x4699a0`). It `Lock`s the surface at
+`directory[word[0x4699a4]]` (source) and the surface at
+`directory[word[0x46b2fc]]` (dest), then does a raw per-byte copy loop
+bounded by its one real argument, `H` (`200` in every call site found) —
+i.e. it copies **rows 0-199 only**, nothing below row 200. It never
+references `dword[0x46bd38]` anywhere in its body (checked via a full
+xref search over the function's whole address range).
+
+**`fcn.00403d20`, Title 1's own normal presenter, re-checked**: it reads
+`word[0x4699a4]` (old "current"), calls `fcn.00403be0(1, old-current)`
+(a Blit from `directory[old-current]` onto the fixed global
+`dword[0x46bd38]` — confirmed via `fcn.0040ea70`'s DirectDraw surface
+setup that `0x46bd38` is the game's single, non-toggled draw/display
+surface, also used directly by ~40 unrelated in-game UI-drawing routines
+elsewhere in this executable), then **toggles the bookkeeping**:
+`word[0x46b2fc] := old-current` (now mirrors what's on screen),
+`word[0x4699a4] := 1 - old-current` (the *other* slot, for the next
+draw).
+
+**`fcn.0040c9b0`, the credit drawer, re-checked**: its own Blt call
+(`0x40cab4`/`0x40cadc`) targets `dword[0x46bd38]` directly — the same
+fixed global `fcn.00403d20` presents onto, not a directory-indexed
+surface, and not parameterized by the caller at all.
+
+**Tracing the toggle state deterministically.** `word[0x4699a4]` starts
+at `1` (`fcn.0040bbe0` sets it explicitly, `0x40bc38`, before
+`fcn.0040b970` ever runs). Title 4's own background blit therefore
+targets `directory[1]`; its own `fcn.00403d20` call then toggles
+`word[0x4699a4]` to `0`. Title 1's own background blit targets
+`directory[0]`; its own `fcn.00403d20` call (`0x40ba61`, unmodified,
+running immediately before this patch's hook) toggles `word[0x4699a4]`
+back to `1`. **At the exact instant the hook fires, `word[0x4699a4] ==
+1` — and `directory[1]` was last written during *Title 4's* background
+blit, at the very start of the function, and has not been touched since.**
+It is genuinely stale, two screens old.
+
+Title 2's own real call site never hits this, because its order is:
+draw credit onto `0x46bd38` → **resolve and Blt Title 2's own background
+onto `directory[word[0x4699a4]]`** (refreshing the exact slot
+`fcn.00408120` is about to read) → call `fcn.00408120`. § 7.3's cave
+skipped that middle step — it went straight from drawing the credit to
+calling `fcn.00408120`, so the composite's `H=200`-row copy pulled
+`directory[1]`'s stale Title-4 pixels into rows 0-199 of the on-screen
+picture. The credit itself (drawn onto `0x46bd38` directly, at row `0xdd`
+= 221) survived because row 221 is outside the copy's `0`-`199` range —
+which is exactly why the bug looked like "new credit, correct; old Raven
+logo underneath it" rather than a scrambled mess, matching the reported
+symptom precisely.
+
+**Why the task's first-guess fix (call `fcn.00403d20()` a second time
+instead) doesn't work either, traced not assumed:** `fcn.00403d20()`
+itself sources its present Blit from `word[0x4699a4]` — the *same* stale
+slot (`1`) implicated above. Calling it again after drawing the credit
+would present `directory[1]`'s stale Title-4 content just the same,
+reproducing the identical class of bug.
+
+**The actual fix**: drop the present/composite call entirely. Title 1's
+own, unmodified `fcn.00403d20()` call (`0x40ba61`) already runs
+*before* the hook fires and has already correctly Blitted Title 1's own
+(non-stale) background onto `dword[0x46bd38]` — the picture on screen is
+already right at the moment the cave starts running. `fcn.0040c9b0`
+draws the credit directly onto that same, already-correct surface; no
+further present step is needed or safe to add, since the only directory
+slot such a call could source from at this point in the sequence is the
+stale one. The corrected cave is just: re-execute the stolen sound call,
+draw the credit, jump back — 27 B (was 47 B), 7 instructions (was 12).
+
+**Re-verification**, same rigor as § 7.4, against the corrected
+`scripts/patch_crypt_exe_add_title_credit.py`:
+
+| Check | Result |
+|---|---|
+| Round-trip `r2` disassembly of the cave | All 7 intended instructions decode back exactly as written: `call 0x40aaf0`, `push 0x24`, `push 1`, `push str.FAN_RESTORATION_AT_CRAWL.SHAID.NET`, `call 0x40c9b0`, `add esp,0xc`, `jmp 0x40ba6f` — falls through correctly to the resume address |
+| `jmp` bytes, assembled via `rasm2` | `rasm2 -a x86 -b32 -s 0x42df29 'jmp 0x40ba6f'` → `e941dbfdff`, independently cross-checked against the hand-decoded `rel32` |
+| Full-file byte diff, patched-alone vs. the real, unmodified `crypt.exe` | **64** changed bytes (hook 5 B + cave 27 B + string 35 B, several coincidentally matching pre-existing `0x00`), **0** differences anywhere else; the real file's md5sum confirmed unchanged before and after |
+| Composability: Phase 4 → Phase 6 guard → Phase 5 → this patch (corrected), full chain | Succeeds, self-check passes at every one of the 4 steps |
+| Pre-flight guards | Confirmed the patcher still refuses in-place patching, refuses to overwrite an existing output without `--force` |
+
+**Live-test package updated**: the project owner's Wine test-package
+`crypt.exe` was rebuilt this session with the corrected 4-patch chain
+(Phase 4 → Phase 6's copy-failure guard → Phase 5 → this corrected
+Phase 7), ready for the next live pass. A second live Wine confirmation
+that the flashback is actually gone is recommended before treating this
+phase as fully closed end-to-end — the fix is statically verified to the
+project's full bar and directly targets the traced root cause, but (per
+this project's own established scope boundary, § 1C) a live screenshot
+of the fix specifically has not yet been captured.
