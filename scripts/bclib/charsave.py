@@ -83,21 +83,31 @@ anything here — every offset below cites the evidence that pinned it.
    identical, wrong data (character 0's data, mirrored) after converting
    and loading a real end-game save under Wine.
 
-   - **Core struct (168 B):** transformed field-by-field per `CORE_LAYOUT`,
-     using exactly the SAME/SWAP evidence
-     `dos/full-game-restoration-plan.md` § "3. The 168-byte character
-     struct" established from real DOS-vs-Amiga byte comparison (class
-     name, the `01 FF FF FF FF FF` marker, the `+0x4C/+0x4E`/`+0x50/+0x52`/
-     `+0x54` word-pair stats, the 16-byte class-constant array). The
-     remaining ~90 bytes of the struct were never decoded field-by-field by
-     Phase 6 ("further stat/equipment fields not decoded"); this module
-     copies them byte-for-byte unchanged (no swap) as the least-risky
-     default, on the grounds that every *confirmed* region so far is either
-     an unswapped byte array or a small, specifically-identified word pair
-     — never a "blanket word-swap everything" rule. **This is a best-effort,
-     unverified choice for those ~90 bytes** — they may hold real stats
-     (HP, AC, XP, etc.) at values that come out numerically wrong (though
-     not crash-inducing the way a corrupted pointer/offset table would be).
+   - **Core struct (168 B):** transformed field-by-field per `CORE_LAYOUT`.
+     **Correction, a later session (see `full-game-restoration-plan.md` §
+     "Phase 6" subsection 13):** the "01 FF FF FF FF FF marker /
+     `+0x4C/+0x4E`/`+0x50/+0x52`/`+0x54` word-pair stats / 16-byte
+     class-constant array" region (core `0x42`-`0x70`) that a prior session
+     called "confirmed" was only ever checked against a FRESH, just-created
+     character, where current==max and equipment==starting-kit hide the
+     real variability. Real end-game data refutes it (the "marker" isn't
+     constant, the "current/max pair" isn't a matching pair, the
+     "class-constant array" is completely different per character even
+     within the same class) — it is real, `crypt.exe`-display-consumed
+     equipment/known-spell state (`fcn.00421cc0`, the live party-box
+     icon/equipment-panel renderer, reads several offsets inside this exact
+     span). Since its true DOS on-disk encoding was never independently
+     verified, this span is now **templated from the DOS reference file's
+     own same-class character** (`EQUIP_STATE_BASE`/`_dos_template_cores`)
+     rather than transformed from the Amiga source — the same safety policy
+     already used for the item array and the party-scalar block. The
+     remaining ~56 bytes of the struct (core `0x70`-`0xA8`) were never
+     decoded field-by-field; this module still copies them byte-for-byte
+     unchanged (no swap) as the least-risky default. **This is a
+     best-effort, unverified choice for those ~56 bytes** — they may hold
+     real stats (gold, weight, XP, etc.) at values that come out
+     numerically wrong (though not crash-inducing the way a corrupted
+     pointer/offset table would be).
    - **Item/spell-slot array (`+0x14`, 23x2 B within the core — corrected
      this session, was `+0x18`, 4x10 B):** deliberately **zeroed**, not
      transformed. This is the safety call the task brief asked for — see
@@ -188,8 +198,9 @@ not an assumption about on-disk stride.
 |---|---|
 | 210 B header | Confirmed (disassembly: state-independent on DOS) |
 | Party-slot index (record `+0x00`) | Confirmed (matches on both platforms, real data) |
-| Core struct: name, `01 FF..` marker, 3 word-pair stats, class-constant array | Confirmed (Phase 6 real byte comparison) |
-| Core struct: remaining ~90 B | Best-effort / unverified (raw copy, no swap) |
+| Core struct: `0x00`-`0x14` (name + gap) | Confirmed (Phase 6 real byte comparison) |
+| Core struct: `0x42`-`0x70` (equipment/known-spell state, formerly-"confirmed" marker/stat-pair/class-array) | Refuted as constant/simple-swap this session (real end-game data diverges completely from the fresh-save case that "confirmed" it); display-consumed by `fcn.00421cc0`; now templated from the DOS reference file's own same-class character rather than transformed from the Amiga source (safety choice, not a decode) |
+| Core struct: remaining `0x70`-`0xA8` (~56 B) | Best-effort / unverified (raw copy, no swap) |
 | Item/spell-slot array (`+0x14`..`+0x42`, 23x2 B) + no tail | Confirmed correct span and consumption behaviour this session (disassembly of both save and load routines); deliberately zeroed (safety choice, not a decode) |
 | Party-scalar block (44 of 52 B) | Safe defaults from a real working DOS save, not derived from the Amiga source |
 | Current map (party-scalar `+18`) | Confirmed (fresh disassembly this session + `char1.dat` cross-check) |
@@ -309,12 +320,54 @@ ITEM_ARRAY_BASE = 0x14
 ITEM_ARRAY_SLOT_COUNT = 23
 ITEM_ARRAY_END = ITEM_ARRAY_BASE + ITEM_ARRAY_SLOT_COUNT * 2  # 0x42
 
+#: Correction, this session (see `full-game-restoration-plan.md` § "Phase 6"
+#: subsection 13): core `0x42`-`0x70` is NOT "a confirmed 6-byte marker +
+#: 3 confirmed current/max stat-word-pairs + an unmapped gap + a confirmed
+#: 16-byte class-constant array", as every prior pass in this Phase
+#: documented. Every one of those "confirmed" sub-claims was checked ONLY
+#: against a FRESH, just-created character (`1/CHARACTERSA` vs. `char1.dat`,
+#: both level-1 starting parties) -- where, by construction, current stat
+#: == max stat and current equipment == starting kit, making raw/swapped
+#: bytes LOOK like a stable template by coincidence. Diffing that same span
+#: against the real end-game target this module actually converts
+#: (`2/BlackCrypt/CHARACTERSA`, current map 13) refutes it directly: the
+#: "01 FF FF FF FF FF marker" reads `01 04 FF FF FF FF` for the deep
+#: Cleric; the "+0x4C/+0x4E current/max pair" reads `0x02FF`/`0x00B9`
+#: (767/185 -- current > max, not a matching pair); and the "class-constant
+#: array" at core `0x60`-`0x70` (the REAL byte position of the array
+#: `full-game-restoration-plan.md` subsection 3 quoted -- that citation's
+#: own "+0x5E" offset was itself off-by-2 relative to `core`, though it made
+#: no functional difference since every span either side of it was already
+#: 'raw') is COMPLETELY DIFFERENT between the fresh and deep saves, for
+#: EVERY class including Fighter (fresh Fighter `08080e0608...`, deep
+#: Fighter `0e4d151414...`). This is real, per-character, currently-
+#: equipped-gear/known-spell state (matches the "Update" section's own
+#: "known-spells list" hypothesis, and is independently confirmed as
+#: DISPLAY-CONSUMING, not inert: `crypt.exe fcn.00421cc0` -- the live party-
+#: box icon/equipment-panel renderer, called every frame after a successful
+#: load via `fcn.00426990` -- reads struct-relative `0x58`/`0x5A`/`0x60`/
+#: `0x61`/`0x62` (== core `0x56`/`0x58`/`0x5E`/`0x5F`/`0x60`, all inside
+#: this span) to drive icon blits and numeric-field renders). Since the
+#: real DOS on-disk encoding for "currently equipped item/known spell"
+#: state was never independently verified beyond the coincidentally-static
+#: fresh case, and the Amiga source's own real bytes here are `crypt.exe`-
+#: display-consumed, blindly raw/word-swap-copying them is the same class
+#: of risk this module already zeroes the item array to avoid. Given no
+#: verified transform exists, this module now applies the SAME safety
+#: policy it already uses elsewhere (party-scalar block, 210 B header):
+#: substitute the known-working DOS reference file's own bytes for this
+#: class (`_dos_template_cores`) instead of guessing at the Amiga source's.
+EQUIP_STATE_BASE = ITEM_ARRAY_END          # 0x42
+EQUIP_STATE_END = 0x70
+
 #: How to build the DOS core struct from the Amiga core struct, byte range
-#: by byte range. 'raw' = copy unchanged; 'word' = swap each 2-byte unit;
-#: 'zero' = always zero (the item-slot array, this converter's safety
-#: choice for inventory/spell data -- see ITEM_ARRAY_BASE above). See the
-#: module docstring's numbered list (item 2) and confidence table for the
-#: evidence behind each span.
+#: by byte range. 'raw' = copy unchanged from the Amiga source; 'zero' =
+#: always zero (the item-slot array, this converter's safety choice for
+#: inventory/spell data -- see ITEM_ARRAY_BASE above); 'template' = copy
+#: from the DOS reference file's own same-class character instead of the
+#: Amiga source (the equipment/spell-state span -- see EQUIP_STATE_BASE
+#: above). See the module docstring's numbered list (item 2) and confidence
+#: table for the evidence behind each span.
 CORE_LAYOUT = [
     (0x00, ITEM_ARRAY_BASE, 'raw'),        # class name (24 B) + gap, up to
                                             # the real item-array start
@@ -323,30 +376,40 @@ CORE_LAYOUT = [
     (ITEM_ARRAY_BASE, ITEM_ARRAY_END, 'zero'),  # 23x2 B item/spell array --
                                             # zeroed (safety); was
                                             # mistakenly (0x18,0x40) before
-    (ITEM_ARRAY_END, 0x46, 'raw'),         # unmapped residue (was
-                                            # (0x40,0x46) before -- now
-                                            # starts at the corrected 0x42
-    (0x46, 0x4C, 'raw'),    # confirmed unswapped 6-byte marker (01 FF x5)
-    (0x4C, 0x56, 'word'),   # 5 confirmed swapped words (3 stat fields:
-                            # +0x4C/+0x4E and +0x50/+0x52 are 2-word
-                            # current/max pairs, +0x54 is a single word)
-    (0x56, 0x5E, 'raw'),    # unmapped gap -- best-effort
-    (0x5E, 0x6E, 'raw'),    # confirmed unswapped 16-byte class-const array
-    (0x6E, 0xA8, 'raw'),    # unmapped remainder of the core -- best-effort.
-                            # Note: the LAST 2 bytes of this span (core
-                            # 0xA6-0xA8, i.e. absolute file rec+168..+170)
-                            # are, per this session's fresh disassembly of
-                            # both fcn.00401b80 and fcn.00426390, NOT
-                            # actually part of the rep-movsd'd struct at
-                            # all -- they're a separately-written/read 2-
-                            # byte scalar (DOS save side: a per-slot value
-                            # computed from a constant table at 0x4301cc
-                            # minus slot_index*9; load side: stored into an
-                            # unrelated global array at 0x469db4, never
-                            # consulted for character display). Raw-copying
-                            # Amiga bytes there is harmless either way (the
-                            # byte count matches regardless of content) but
-                            # is not a "real" struct field on DOS.
+    (EQUIP_STATE_BASE, EQUIP_STATE_END, 'template'),  # 0x42-0x70: real,
+                                            # display-consumed equipment/
+                                            # spell state -- previously
+                                            # mismodeled as constant/
+                                            # confirmed fields (see
+                                            # EQUIP_STATE_BASE's comment
+                                            # above); now templated from
+                                            # the DOS reference file's own
+                                            # same-class character, not
+                                            # guessed from the Amiga source
+    (EQUIP_STATE_END, 0xA8, 'raw'),        # unmapped remainder of the core
+                                            # -- best-effort. Note: the LAST
+                                            # 2 bytes of this span (core
+                                            # 0xA6-0xA8, i.e. absolute file
+                                            # rec+168..+170) are, per fresh
+                                            # disassembly of both
+                                            # fcn.00401b80 and fcn.00426390,
+                                            # NOT actually part of the
+                                            # rep-movsd'd struct at all --
+                                            # they're a separately-written/
+                                            # read 2-byte scalar (DOS save
+                                            # side: a per-slot value
+                                            # computed from a constant table
+                                            # at 0x4301cc minus
+                                            # slot_index*9; load side:
+                                            # stored into an unrelated
+                                            # global array at 0x469db4,
+                                            # never consulted for character
+                                            # display). Raw-copying Amiga
+                                            # bytes there is harmless either
+                                            # way (the byte count matches
+                                            # regardless of content) but is
+                                            # not a "real" struct field on
+                                            # DOS.
 ]
 
 
@@ -431,11 +494,35 @@ def parse_amiga_save(raw):
     }
 
 
-def transform_core(core):
+def _dos_template_cores(dos_template):
+    """Extract the DOS reference file's own 4 character cores (168 B each),
+    keyed by class name offset order (Fighter/Cleric/Magic User/Druid --
+    `CLASS_NAMES`' fixed order, same convention `_find_class_offsets`
+    already enforces for the Amiga source). Used by `transform_core`'s
+    `'template'` spans (see `EQUIP_STATE_BASE`) to source real,
+    known-working, same-class bytes instead of guessing at the Amiga
+    source's own equipment/spell-state encoding.
+
+    Works regardless of the reference file's own per-character record
+    length (a real played save like `char1.dat` has real, variable-length,
+    non-170-byte records -- see `_locate_template_party_scalar_block`'s
+    docstring for the same caveat) because it locates each core purely by
+    its class-name string, not by any assumed record stride.
+    """
+    name_offsets = _find_class_offsets(dos_template)
+    return [dos_template[off:off + CORE_BYTES] for off in name_offsets]
+
+
+def transform_core(core, template_core=None):
     """Amiga -> DOS transform of one 168-byte character-core struct. See
     `CORE_LAYOUT` and the module docstring for the evidence behind each
-    span."""
+    span. `template_core` (168 B, from `_dos_template_cores`) supplies the
+    `'template'`-kind spans; if omitted, those spans fall back to a raw
+    (unswapped) copy of the Amiga source, the same best-effort behaviour
+    the whole span used before this session's correction."""
     assert len(core) == CORE_BYTES
+    if template_core is not None:
+        assert len(template_core) == CORE_BYTES
     out = bytearray(CORE_BYTES)
     for start, end, kind in CORE_LAYOUT:
         if kind == 'raw':
@@ -445,25 +532,30 @@ def transform_core(core):
         elif kind == 'word':
             for i in range(start, end, 2):
                 out[i], out[i + 1] = core[i + 1], core[i]
+        elif kind == 'template':
+            out[start:end] = (template_core if template_core is not None
+                               else core)[start:end]
         else:
             raise ValueError(f'charsave: unknown CORE_LAYOUT kind {kind!r}')
     return bytes(out)
 
 
-def build_dos_record(slot, amiga_record):
+def build_dos_record(slot, amiga_record, template_core=None):
     """Build one 170-byte DOS character record (2 B slot index + 168 B
     core, no tail) from a parsed Amiga record. There is deliberately NO
     tail: every item/spell slot inside the core is zeroed (CORE_LAYOUT),
     and `fcn.00426390` (the DOS loader) consumes zero extra file bytes for
     an all-zero item array -- see DOS_TAIL_BYTES's docstring for the fresh
     disassembly evidence. Writing a nonzero-length tail here would desync
-    every subsequent character's read position."""
+    every subsequent character's read position. `template_core` (see
+    `_dos_template_cores`) supplies the equipment/spell-state span -- see
+    `EQUIP_STATE_BASE`."""
     assert DOS_RECORD_BYTES == RECORD_HEADER_BYTES + CORE_BYTES, (
         'charsave: DOS_RECORD_BYTES no longer matches header+core -- '
         'update build_dos_record if a real (nonzero) tail is ever needed')
     out = bytearray(DOS_RECORD_BYTES)
     struct.pack_into('<H', out, 0, slot)
-    out[2:2 + CORE_BYTES] = transform_core(amiga_record['core'])
+    out[2:2 + CORE_BYTES] = transform_core(amiga_record['core'], template_core)
     return bytes(out)
 
 
@@ -641,6 +733,74 @@ def _pick_start_cell(map_number, bcdfs_path=None):
     return _pick_start_cell_centroid(map_number, bcdfs_path=bcdfs_path)
 
 
+def _locate_template_party_scalar_block(dos_template):
+    """Find the TRUE byte offset of the 52-byte party-scalar block inside
+    a real DOS `char%d.dat` reference file (the template used for "safe
+    default" bytes), by working backward from the end of the file rather
+    than forward from `HEADER_BYTES + 4 * DOS_RECORD_BYTES`.
+
+    **Why the forward formula is wrong for a real template file.** The
+    forward formula (`block_start = HEADER_BYTES + 4 * DOS_RECORD_BYTES`)
+    assumes every one of the template's 4 character records is exactly
+    `DOS_RECORD_BYTES` (170 B, i.e. all-zero item/spell slots). That's true
+    of *this converter's own output* (which always zeroes every item slot,
+    per `CORE_LAYOUT`/`DOS_TAIL_BYTES`), but it is NOT true of a real,
+    played DOS save like `char1.dat` -- a real character has real starting
+    items, and `fcn.00426390`'s loader consumes a data-dependent number of
+    extra 20-byte blocks per nonzero item slot (see `DOS_TAIL_BYTES`'s
+    docstring). Confirmed empirically: `char1.dat`'s real party-scalar
+    block is at file offset **1290**, not the naively-assumed 890 -- a
+    400-byte error. Using 890 silently copied "safe default" bytes from
+    deep inside character 3's own real item/spell data (garbage relative
+    to the party-scalar block's real fields), corrupting every
+    non-overridden party-scalar global on every converted save this
+    module has ever produced (X/Y/facing/current-map are unaffected --
+    they're explicitly overridden after the copy -- but everything else in
+    the 52-byte block was wrong). See `full-game-restoration-plan.md`
+    § "Phase 6" subsection 12 for the full evidence chain (byte-for-byte
+    comparison of the wrong vs. real block, and why `dword` at
+    block-relative +2 -- `0x46f854`, a bound `fcn.00425350`/`LoadDungeon`
+    compares against a freshly-read map row/section count to compute a
+    structure-placement offset -- silently read as zero either way, which
+    is why this bug was invisible to the earlier position-only checks).
+
+    **The robust fix.** The party-scalar block, the 52-byte map-offset
+    table, and the 2-byte pending-event count are always the LAST fixed-
+    size regions in the file, immediately followed by `pending_count * 12`
+    bytes of scheduled-event records and nothing else (`fcn.00426390`,
+    file+0x4267a4 onward) -- regardless of how long the variable-length
+    character records were. So this walks backward from EOF assuming a
+    small pending-event count (0 is what every real save examined has),
+    and self-verifies two independent invariants before accepting a
+    candidate: the count field's own stored value must match the trial
+    count, and the map-offset table's first entry (map 1's offset within
+    `maindung.gam`) must be exactly 0 -- true in every real save in this
+    project's corpus (Phase 6, "13-slot table triple-confirmed, zero
+    deviation"). Both checks passing is strong enough evidence to trust
+    the result without needing to replicate `fcn.00426390`'s recursive
+    item-chain parser (`fcn.00425120`) by hand.
+    """
+    n = len(dos_template)
+    for pending_count in range(0, 64):
+        count_field_pos = n - 2 - 12 * pending_count
+        if count_field_pos < HEADER_BYTES:
+            continue
+        actual_count = struct.unpack_from('<H', dos_template, count_field_pos)[0]
+        if actual_count != pending_count:
+            continue
+        table_start = count_field_pos - OFFSET_TABLE_BYTES
+        block_start = table_start - PARTY_SCALAR_BYTES
+        if block_start < HEADER_BYTES:
+            continue
+        map1_offset = struct.unpack_from('<I', dos_template, table_start)[0]
+        if map1_offset == 0:
+            return block_start
+    raise ValueError(
+        'charsave: could not locate the party-scalar block in the DOS '
+        'template file (no pending-event count / map-offset-table[0]==0 '
+        'combination self-verified) -- is this a real char%d.dat?')
+
+
 def build_dos_save(parsed, dos_template=None, bcdfs_path=None):
     """Assemble a full DOS `char%d.dat` from a parsed Amiga save. See the
     module docstring's confidence table for what's confirmed vs.
@@ -662,9 +822,15 @@ def build_dos_save(parsed, dos_template=None, bcdfs_path=None):
     #    item 1).
     out += dos_template[:HEADER_BYTES]
 
-    # 2. 4 character records.
+    # 2. 4 character records. The equipment/spell-state span (core
+    #    0x42-0x70, see EQUIP_STATE_BASE) is templated per-class from the
+    #    DOS reference file's own real characters, not transformed from the
+    #    Amiga source -- see `_dos_template_cores`.
+    template_cores = _dos_template_cores(dos_template)
     for rec in parsed['records']:
-        out += build_dos_record(rec['slot'], rec)
+        template_core = (template_cores[rec['slot']]
+                          if rec['slot'] < len(template_cores) else None)
+        out += build_dos_record(rec['slot'], rec, template_core)
 
     # 3. 52-byte party-scalar block: safe defaults from the reference save,
     #    current map overridden with the real extracted value. Position
@@ -676,7 +842,17 @@ def build_dos_save(parsed, dos_template=None, bcdfs_path=None):
     #    with a real landmark cell (immediately in front of a Stairs Up
     #    structure, facing it -- see `_pick_start_cell`'s docstring) from
     #    the TARGET map's own data when available.
-    block_start = HEADER_BYTES + 4 * DOS_RECORD_BYTES
+    #
+    #    block_start is located via `_locate_template_party_scalar_block`,
+    #    NOT `HEADER_BYTES + 4 * DOS_RECORD_BYTES` -- that forward formula
+    #    only holds for an all-zero-item template (this converter's own
+    #    output), not a real played save like `char1.dat`, whose actual
+    #    per-character records are longer (data-dependent on real starting
+    #    items). Using the forward formula here was a real, previously-
+    #    undiscovered bug: see `_locate_template_party_scalar_block`'s
+    #    docstring and `full-game-restoration-plan.md` § "Phase 6"
+    #    subsection 12.
+    block_start = _locate_template_party_scalar_block(dos_template)
     block = bytearray(
         dos_template[block_start:block_start + PARTY_SCALAR_BYTES])
     struct.pack_into('<H', block, CURRENT_MAP_REL_OFFSET,

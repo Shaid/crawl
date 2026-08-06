@@ -1779,6 +1779,22 @@ end to end:
 | Terminator | 2 B | `mov word[cursor], 0` | `0x401f1f` |
 | **Total** | **210 + 1,080 + 106 = 1,396 B** | | |
 
+> **Correction — the "~16 word globals, then 3 dword/dword-pair globals"
+> grouping above implies a sequential layout that isn't real.** A fresh,
+> full `radare2` disassembly of `0x401d21`-`0x401de8` (done independently
+> while verifying Phase 6 subsection 12's party-scalar-block fix) shows
+> the two categories are **interleaved**, not laid out as two contiguous
+> 32 B / 20 B spans: `word[0x46f822]` writes at block-relative offset 0-1,
+> then `dword[0x46f854]` writes immediately after at offset **2-5** (not
+> "after the first 32 B"), then `word[0x46f880]`/`[0x46f87e]`/`[0x46bd60]`
+> (X/Y/facing) at 6-11, then more word globals continuing through offset
+> 19 (`word[0x47481a]`, current map, confirmed at the already-established
+> offset 18). The aggregate byte counts in the table (32 B of word writes
+> + 20 B of dword/dword-pair writes = 52 B total) are still correct — only
+> the *implied ordering* (all word writes first, then all dword writes)
+> is wrong. See subsection 12 below for the full corrected byte-offset
+> map and why getting this right mattered for a real bug.
+
 **1,396 / 1,396 bytes accounted for, zero slack** — the disassembly-derived
 size matches the real file's size exactly with nothing left over.
 
@@ -2913,6 +2929,429 @@ stairs-based placement doesn't depend on depth-counter details, only on
 "is there real content on the very next square", the strongest guarantee
 available short of live testing — but worth investigating if a live test
 of *this* fix still somehow comes back empty.
+
+### 12. Three correct position picks, same symptom — the real bug was a 400-byte template-slice error corrupting the rest of the party-scalar block, on every conversion
+
+A **third** live Wine test of §"11"'s stairs-based `char4.dat` reported the
+identical symptom again: "still in the middle of nowhere." Three
+independently-verified-correct position picks (§10's centroid, §11's
+stairs-adjacent square) producing the same symptom was the signal to stop
+re-deriving position math and audit everything upstream of it, per this
+session's brief. Four hypotheses were checked against real evidence, not
+assumption:
+
+| # | Hypothesis | Verdict | Evidence |
+|---|---|---|---|
+| 1 | `fcn.00426390`'s map-offset-table copy loop mis-indexes the runtime table | **Ruled out** | Disassembled the loop fresh (file+`0x426787`-`0x4267a2`): `mov eax,0x4738b8; mov ecx,0xd; loop: mov esi,dword[edx]; add edx,4; mov dword[eax],esi; add eax,4; dec ecx; jne loop` — a trivial linear 13-dword copy, on-disk index `i` (0-based) → runtime slot `0x4738b8+4i` = map `i+1`, no branch on `curMap`, no indexing trick. Since this same unconditional loop already runs correctly for the shipped demo's `char1.dat` (map 1) on every real "Load Game", any indexing bug here would break map 1 too — it doesn't. Independently confirmed by decoding `char4.dat`'s own table bytes: all 13 entries match the already-triple-confirmed values exactly (map 13 = 165686) |
+| 2 | `SwitchMap`/`fcn.00426880` unconditionally overwrites the position `charsave.py` just wrote | **Ruled out** | Disassembled `fcn.00426880` in full (file+`0x426880`-`0x426926`, 39 instructions): it touches `word[0x47481a]` (curMap), calls `SaveDungeon`/`LoadDungeon`/`LoadResourceGroup`/`LoadPerMapResources`, and conditionally zeroes `word[0x46f84a]` — it never references `0x46f880` (X), `0x46f87e` (Y), or `0x46bd60` (facing) at all. Cross-checked with a full xref census on all three globals: every writer besides the confirmed restore-game write (`fcn.00426390` @ `0x4265ee`/`0x426600`/`0x426613`) and the already-known legitimate live-transition writers (`fcn.00401fa0` "New Game" default, `fcn.0041adf0`/`fcn.0041afc0` teleport/`MoveParty`, `fcn.00423b60` real movement stepping) — none of which run inside `SwitchMap`'s own call chain (`SaveDungeon`/`LoadDungeon`/`LoadResourceGroup`/`LoadPerMapResources` don't appear in either xref list) |
+| 3 | Map 13's DOS-encoded dungeon data at the runtime-table offset doesn't actually contain real geometry | **Not the cause, but led to the real bug** | See below — the map data itself is fine; what's wrong is unrelated *party-scalar* state read immediately beforehand |
+| 4 | Live-test package files are stale/mismatched (`maindung.gam` vs `orig4.gam`, wrong sizes) | **Ruled out** | `md5sum` of `maindung.gam`, `orig2.gam`, `orig3.gam`, `orig4.gam`, and even the already-populated `tempdung.gam` (left over from a prior `CopyFileA` that evidently ran) in the live-test package: all five **byte-identical**, all 171,005 B (the confirmed full 13-map size). `crypt.exe` in the package matches the twice-patched (Phase 4 + §9 guard) build. No staleness found |
+
+None of the four explained the symptom. The real bug was found by pushing
+past hypothesis 3 into territory the task brief flagged as worth
+investigating directly: `LoadDungeon`'s (`fcn.00425350`) own consumption of
+a **party-scalar field that has nothing to do with position**, `dword
+[0x46f854]` (party-scalar-block-relative offset **+2**):
+
+```
+fcn.00425350 (LoadDungeon), right after ResetDungeonArrays:
+  0x4253d9  mov ecx, dword [0x46f870]     ; file cursor (just-seeked map data)
+  0x4253df  mov edx, dword [0x46f854]     ; <-- the party-scalar field
+  0x4253e5  mov esi, dword [ecx]          ; count read fresh from the map's own data
+  0x4253ea  cmp esi, edx
+  0x4253f6  ja 0x425400                   ; if esi > edx: SKIP the next 2 lines
+  0x4253f8  mov eax, edx
+  0x4253fa  sub eax, esi
+  0x4253fc  mov dword [var_1ch], eax      ; var_1ch = edx - esi  (only when esi <= edx)
+```
+
+`var_1ch` is later used as an **additive placement offset**, applied to
+*every* structure/action-chain record's coordinate field when the level's
+container records (types `0x13`/`0x23`, walking doors/stairs/monsters/
+containers — file+`0x425608`-`0x425655`) are placed into the runtime grid:
+`eax = dword[edx] + var_1ch` (file+`0x42561d`/`0x425628` → `fcn.004117d0`).
+If `dword[0x46f854]` is `0` and the freshly-read map count `esi` is
+anything greater than zero (true for essentially every real map), the `ja`
+branch is *always* taken, `var_1ch` is *never initialized*, and every
+structure record in the level gets placed at a **garbage grid offset** —
+which would visibly present as exactly the reported symptom (structures,
+including the Stairs Up landmark §11 deliberately placed the party next
+to, silently missing from view) independent of whether the base
+`wall_flags` per-square data (written separately, unaffected by
+`var_1ch`) is correct.
+
+#### Finding the real bug: `charsave.py`'s party-scalar "safe default" extraction reads from the wrong file offset in `char1.dat` — by 400 bytes
+
+`build_dos_save` sources every party-scalar field it doesn't explicitly
+override (X/Y/facing/current-map) as a verbatim slice of the reference
+file `char1.dat`, at:
+
+```python
+block_start = HEADER_BYTES + 4 * DOS_RECORD_BYTES   # = 210 + 4*170 = 890
+```
+
+This assumes `char1.dat`'s own 4 character records are each exactly
+`DOS_RECORD_BYTES` (170 B — i.e. **all-zero item/spell slots**). That's
+true of this converter's *own output* (it always zeroes every item slot,
+§10), but `char1.dat` is a **real, played save with real starting items**,
+and §10 already independently established that `fcn.00426390`'s loader
+consumes a **data-dependent** number of extra 20-byte blocks per nonzero
+item slot — meaning `char1.dat`'s own records are *not* uniformly 170 B.
+Concretely: reading `char1.dat` at fixed 170-byte strides decodes
+character 0 ("FIGHTER", correct — it's first, unaffected) but characters
+1-3 decode as **binary garbage names** (`\x07\x80\x0b\x01`, `\x01\xff\xff…`,
+`\t`) — proof positive the fixed-170 assumption is wrong for this file.
+
+Locating the *true* party-scalar block by brute-force signature search
+(scanning `char1.dat` for the unique combination `X=8, Y=21, facing=0,
+curMap=1` at the already-confirmed relative offsets `+6/+8/+10/+18`) finds
+exactly **one** match, at file offset **1290** — 400 bytes after the
+naive 890. This is independently self-confirmed three ways at that
+position: the following 52 bytes decode as a real 13-slot map-offset
+table with `map1=0` and `map2=15047` (an exact match to the
+already-triple-confirmed real value), the trailing 2-byte field reads `0`
+(a legal pending-event count of zero), and `890 + 400 = 1290 = 210 + 1080
++ ...` accounts exactly for the file's real 1,396-byte length (`1290 - 210
+= 1080` bytes across 4 real, variable-length character records — not
+`4 × 270`, and *not* `4 × 170` either).
+
+**Every non-overridden party-scalar field the converter ever wrote was
+therefore garbage, on every conversion this module has ever produced** —
+not just for the map-13 target, sourced instead from 400 bytes deep inside
+character 3's own real item/spell tail. A field-by-field dump at the two
+candidate offsets confirms the extent:
+
+| Block-rel. offset | Global | Real value (`@1290`) | What `charsave.py` actually wrote (`@890`, wrong) |
+|---|---|---|---|
+| +2 (dword) | `0x46f854` (the `LoadDungeon` placement-offset bound above) | `34` | `0` |
+| +16 | `0x474800` | `1` | `0` |
+| +24 | `0x46f874` | `0` | `375` |
+| +30/+32/+34 | `0x46f8a8` region | `0` / `0` / `0` | `1` / `32777` / `10253` |
+| +34 | `0x46f84a` (a 0-5 step-state var; **not** reset by `SwitchMap` for `curMap > 12`, per its own disassembly `0x426912`-`0x42691d`) | `0` | `10253` (out of the state machine's real 0-5 range) |
+| +38/+40/+42 | — | `1`/`2`/`3` | `50`/`50`/`0` |
+| +46/+48/+50 | — | `1`/`2`/`3` | `0`/`0`/`47` |
+
+> **Correction, independently re-verified by the coordinator against the
+> real file before this section was committed:** the row above originally
+> claimed `0x46f854` reads `0` at *both* the correct and buggy offsets
+> ("coincidentally the same — this is why the bug was invisible to
+> spot-checks"). That was wrong. A direct byte read of `char1.dat` at file
+> offset `1290+2` gives `22 00 00 00` little-endian = **34**, not `0`; the
+> buggy `@890` offset does read `0`. So this field was *not* a lucky
+> coincidence the earlier position-only checks happened to miss — it *was*
+> silently corrupted by the same 400-byte template-slice bug as every
+> other field in this table, from a real, nonzero bound (`34`) down to
+> `0`. That makes this fix's effect on `LoadDungeon`'s structure-placement
+> offset (`var_1ch`, above) *stronger* than originally claimed: before the
+> fix, `dword[0x46f854]=0` unconditionally skipped `var_1ch`'s
+> initialization (since the freshly-read map count is essentially always
+> `>0`); after the fix, a real bound of `34` is loaded, and whether
+> `var_1ch` initializes now depends on the real map data being compared
+> against a real number instead of a hardcoded miss. The offset mapping
+> itself (`0x46f854` at block-relative `+2`) was re-derived independently
+> from scratch via a fresh `radare2` disassembly of `fcn.00401b80`'s
+> `0x401d21`-`0x401de8` write sequence and matches exactly — only the
+> *value* claimed for the real file was wrong, not the field identification.
+
+**Why this survived three earlier fix passes and the project's own
+round-trip check.** §8's self-verification claimed "party-scalar block:
+byte-identical to `char1.dat` at every position except current-map" — true,
+but tautological: both sides of that comparison were extracted using the
+*same* wrong `block_start` formula, so of course they matched. That check
+validated internal self-consistency, never independent ground truth (the
+`map1_offset == 0` / pending-count self-check this pass uses is the first
+one that does).
+
+#### The fix
+
+`scripts/bclib/charsave.py` gained `_locate_template_party_scalar_block
+(dos_template)`: instead of computing `block_start` forward from the
+header, it works **backward from end-of-file**, exploiting the
+disassembly-confirmed fact that the party-scalar block, the 52-byte
+map-offset table, and the pending-event count/records are always the
+*last* fixed-size regions in any DOS save, regardless of how long the
+variable-length character records were. It brute-forces small
+pending-event counts (0 first — every real save examined has 0) and
+accepts a candidate only when two independent invariants both hold: the
+trailing count field's own stored value matches the trial count, and the
+map-offset table's first entry equals exactly `0` (map 1's confirmed,
+zero-deviation real offset in every save in this project's corpus).
+`build_dos_save` now calls this instead of the old forward formula.
+
+**Verification:**
+
+- Locating the block in `char1.dat` with the new function returns exactly
+  **1290** — matching the independently brute-forced signature-search
+  result above.
+- Re-running the converter against the real end-game target
+  (`2/BlackCrypt/CHARACTERSA`, current map 13): the output party-scalar
+  block now matches `char1.dat`'s *true* block **byte-for-byte** at every
+  position except the four intentionally-overridden fields (X=12, Y=3,
+  facing=South, curMap=13) — a full 52/52-byte match on the "safe
+  defaults" portion, not the 4-out-of-~26-field match the old code
+  silently produced.
+- Round-trip regression against `1/CHARACTERSA` (the fresh map-1 source
+  used in §8's original round-trip check): output is **byte-identical**
+  to `char1.dat`'s own true party-scalar block at every position (map 1
+  needs no override), a strictly stronger and now non-tautological version
+  of §8's original check.
+- Map-offset table and terminator: unaffected, still decode to the
+  already-triple-confirmed 13 values (map 13 = 165686) and `0000`.
+- Re-ran the from-scratch per-character loader simulation (§10's method):
+  all 4 characters (`FIGHTER`/`CLERIC`/`MAGIC USER`/`DRUID`) still resolve
+  at the correct cursor position with zero item-array desync, file ends
+  exactly at 996 B — this fix touches only the party-scalar block, not the
+  character-record layout, so §10's fix is confirmed unaffected.
+- CLI entry point (`python3 charsave.py <src> <dst>`) produces
+  byte-identical output to the direct-API path used for verification above.
+- `Agent: reviewer` pass on the diff: no syntax, lint, or style issues.
+
+Copied to the project owner's live-test package
+(`bc-test-package/char4.dat`, outside the repo, never committed),
+overwriting §11's version. Position/facing (X=12, Y=3, South, adjacent to
+map 13's Stairs Up structure) are unchanged from §11 — only the
+previously-garbage remainder of the party-scalar block is now real.
+
+**Live re-verification: not performed this session** — same
+input-automation tooling gap as every prior live-test note in this Phase.
+This fix is verified by disassembly (`LoadDungeon`'s placement-offset
+computation, `SwitchMap`'s full body, the map-offset-table copy loop) plus
+two independent structural invariants (byte-exact match against `char1.dat`'s
+true block, self-verifying backward file-position search) — the same bar
+as every other "confirmed" finding in this Phase — but the final "does the
+initial view now show the stairs" confirmation needs a human at the
+keyboard, or future input-automation tooling.
+
+**Still open:** the *exact* causal link between `var_1ch`'s uninitialized
+value and "no structures visible in any of the 4 facings" (§11's flagged
+North-facing discrepancy) was not traced to a specific instruction-level
+proof — that would require either live memory inspection of the
+uninitialized stack slot's actual garbage content, or a full trace of
+`fcn.004117d0`'s consumer side (what it does with a garbage placement
+offset). What *is* proven is that the underlying data was wrong, on every
+single conversion this module has ever produced, in a way with a direct
+and traceable mechanism (`0x46f854` gating `var_1ch`'s initialization) for
+producing exactly this class of symptom, and that mechanism is now fixed
+along with roughly 15 other previously-garbage globals whose individual
+roles were not exhaustively traced (a step-state machine, several UI/combat
+counters — none obviously position-related, but all now carry `char1.dat`'s
+real fresh-game values instead of century-scale noise). If a live test of
+*this* fix still comes back empty, the next step is either amiberry-based
+live memory inspection of `var_1ch` at the point structures are placed (a
+hard-gated escalation per this agent's own tooling rules — ask before
+using it) or a full trace of `fcn.004117d0`.
+
+### 13. The remaining party-display corruption ("two fighters, two dead") — a second, independent mismodeled span in the 168-byte core struct
+
+A fresh live Wine test of §10's record-length fix (with §11/§12's position
+fixes already applied) reported a **different, but still real**, symptom:
+**"two fighters and two dead characters"** — better than the original "all
+4 identical" bug (§10), but still wrong: only 2 of the 4 party boxes show
+class `Fighter`, and 2 show as dead/0 HP, instead of the real
+Fighter/Cleric/Magic User/Druid party.
+
+#### Ruled out: no additional hidden desync in `fcn.00426390`'s per-character loop
+
+The task brief's leading hypothesis was a second conditionally-consumed
+field inside the per-character loop, the same class of bug §10 found in
+the 23-slot item array. This session re-disassembled `fcn.00426390`'s
+per-character loop **exhaustively**, file+`0x426488`-`0x4265bf`, every
+instruction, not just the item-array section already documented:
+
+- The 168-byte `rep movsd` core copy (`0x426498`), the 2-byte scalar into
+  `0x469db4[i]` (`0x4264a4`-`0x4264ad`), the 18-slot loop (core
+  `0x14`-`0x38`, `0x4264c3`-`0x426535`) and the 5-slot loop (core
+  `0x38`-`0x42`, `0x426546`-`0x42659b`) account for **every** byte of the
+  loop body and **every** file-cursor-advancing instruction in it.
+- Both item loops test `word[ebp]` against the **already-copied in-memory
+  core struct** (not fresh file bytes) — confirming the item-array check
+  is exactly what §10 already modeled: zero slots (this converter's
+  output) means zero extra file-cursor advance, full stop.
+- One real difference from §10's original description, noted for accuracy
+  but not consequential here: the SECOND loop (5 slots, core `0x38`-`0x42`)
+  calls `fcn.00425120` **unconditionally** whenever its slot is nonzero
+  (`0x426581`), unlike the first loop's `cmp bl,0x13`/`cmp bl,0x23` gate
+  (`0x426505`-`0x42650d`). Irrelevant while every slot is zero, but worth
+  recording in case a future pass ever writes real item data into this
+  range.
+- The party-scalar block that follows the loop (file+`0x4265c5`-`0x4267a4`)
+  was also walked byte-by-byte and cross-checked against `char1.dat`'s
+  real bytes: it is exactly the same 52 fields §8/§10/§12 already account
+  for (17 words + 2 dword-pairs = 52 B), with exactly one conditional
+  branch (`word[0x474aca]` at party-scalar-relative `+12`, `0x426634`) that
+  triggers a 20-byte extra read if nonzero — confirmed **zero** in
+  `char1.dat`'s own true block (§12's corrected offset 1290), so this
+  converter's "copy `char1.dat`'s block verbatim except 4 overridden
+  fields" strategy is safe here too.
+
+**Verdict: there is no second hidden desync.** A from-scratch loader
+simulation (re-implementing the algorithm above literally, run against
+both `1/CHARACTERSA` and the real end-game target `2/BlackCrypt/CHARACTERSA`
+converted through the fixed `charsave.py`) confirms all 4 characters
+resolve their correct class name at the correct cursor position
+(`210, 380, 550, 720`), the file ends exactly at 996 B, and the map-offset
+table/current-map/pending-count all check out — this refutes the task
+brief's leading hypothesis directly, with the same rigor bar as §10's
+original desync fix (not just a repeat of the same "zero desync" claim
+that already proved incomplete once — see below for what a hand spot-check
+against real disassembled field usage turned up instead).
+
+#### Found instead: the real party-box renderer, and a second span mismodeled the same way as §10's item array
+
+Since the loop itself is clean, the bug had to be in what the loaded data
+*means*, not where it's positioned. Traced forward from the load call site
+(`fcn.0041b980`, the Load/Save-game menu handler) to what runs immediately
+after a successful load: `call fcn.00426990` then `call fcn.0041bc00`,
+identically after every load/save case in `fcn.0041b980`'s switch.
+`fcn.00426990` sets up viewport/palette state; **`fcn.00421cc0`** (21 call
+sites, including from `fcn.00426880`/`SwitchMap` — i.e. it runs on every
+frame the dungeon view refreshes, not just once at load) is the actual
+party-box icon/equipment-panel renderer. Decompiling it (radare2's
+`pdc`) identifies the character-struct selection and several field reads:
+
+- `esi = 0x474828 + eax*168` where `eax = word[0x46f8ac + boxIndex*2]` —
+  confirms the **party-order array** (`0x46f8ac`/`0x46f8b0`, the "3
+  dword/dword-pair globals" from the very first Phase 6 pass) is exactly
+  what selects which of the 4 loaded character structs renders in which
+  UI box. This is the field §12 (a concurrently-run investigation into a
+  *different* symptom, the empty dungeon view) independently found was
+  being sourced from **the wrong file offset** (`block_start` off by 400
+  bytes) in every conversion before that fix — meaning **this same
+  corruption was very likely a direct contributor to this session's "two
+  fighters, two dead" symptom too**: a garbage `word[0x46f8ac+N]` value
+  would make two UI boxes draw the *same* struct index (explaining
+  duplicate `Fighter` boxes if that index happened to be 0) and the other
+  two draw out-of-range/uninitialized memory (explaining "dead"). §12's
+  fix (already applied, same file, same session) corrects this at the
+  root. This session's own investigation below found a **second,
+  independent** contributor in the same struct region, so both should be
+  considered part of the same symptom's real cause.
+- `al = byte[esi+0x60]` / `ax = byte[esi+0x61]` (struct-relative, i.e. core
+  `0x5E`/`0x5F`) drive conditional icon-blit branches.
+- `cx = word[esi+0x58]` (core `0x56`, read as a small array) and
+  `cx = word[esi+0x5c]` (core `0x5A`) are pushed through
+  `fcn.00411190`→`fcn.0040c500`/`fcn.0040c540`, the same "format value,
+  then blit/render" call chain used for the confirmed item-icon-count
+  display at core `0x1A` (inside the zeroed item array) — i.e. these are
+  **live, on-screen-rendered fields**, not inert padding.
+- `dl = byte[esi+0x5e]` (core `0x5C`) and `cl = byte[esi+0x62]` (core
+  `0x60`) similarly drive icon-blit calls (`fcn.0040c560`).
+
+Every one of these offsets (core `0x56`-`0x62`) falls inside the exact
+span the module docstring's item 2 called "confirmed" — the `01 FF FF FF
+FF FF` marker (`0x46`-`0x4C`), the "current/max" word-pair stats
+(`0x4C`-`0x56`), and the "class-constant array" (previously cited as
+`0x5E`-`0x6E`, but confirmed this session to actually sit at `0x60`-`0x70`
+— a 2-byte citation error with no functional effect, since every
+surrounding span was already `'raw'`).
+
+#### The "confirmed" claim was only ever checked against a fresh character
+
+Re-checking that region against **real end-game data**
+(`2/BlackCrypt/CHARACTERSA`, the actual file being converted) instead of
+just the original fresh-save comparison (`1/CHARACTERSA` vs. `char1.dat`,
+both level-1 starting parties) refutes it directly:
+
+| Claim | Fresh save (both platforms) | Real end-game Amiga source |
+|---|---|---|
+| "`01 FF FF FF FF FF` marker" | `01 ff ff ff ff ff`, all 4 classes | Cleric: `01 04 ff ff ff ff` — **not the marker** |
+| "`+0x4C/+0x4E` current/max pair" | `0x0014`/`0x0014` (equal) | Fighter: `0x02FF`(767) / `0x00B9`(185) — **current > max, not a matching pair** |
+| "16-byte class-constant array" (core `0x60`-`0x70`) | Identical to DOS `char1.dat`'s own array, all 4 classes | **Completely different** per character, for every class including Fighter (fresh `08080e0608...` vs. deep `0e4d151414...`) |
+
+A fresh, just-created character trivially has current==max stats and
+starting==current equipment, which is exactly why a fresh-only comparison
+made this region look like a stable, swap-or-raw-copyable template — the
+same "confirmed via fresh save only" trap this Phase has now hit **three**
+times (the 120-byte header in §8's correction, the per-character record
+length in §10, and now this). Checking every 80-file real corpus'
+progression saves (`2/BlackCrypt/levels/05`→`levels/28`→`final`) confirms
+this isn't a one-off: the region visibly grows/changes with real play for
+every class (including Fighter, to a lesser degree — this is not purely a
+"known spells" list, contrary to the Update section's original narrower
+hypothesis; it also carries whatever `fcn.00421cc0` reads as current
+equipment-icon state).
+
+#### The fix
+
+`scripts/bclib/charsave.py`: `CORE_LAYOUT`'s span `0x42`-`0x70` (46 B,
+merging the old `(0x42,0x46)`/`(0x46,0x4C)`/`(0x4C,0x56)`/`(0x56,0x5E)`/
+`(0x5E,0x6E)` entries) is now a new `'template'` kind — copied from **the
+DOS reference file's own same-class character** (`_dos_template_cores`,
+which locates each of `char1.dat`'s 4 real cores by class-name string, the
+same technique `_find_class_offsets` already uses for the Amiga source)
+instead of transformed (raw or word-swapped) from the Amiga source. This
+is the identical safety policy already applied to the item array (§10) and
+the party-scalar block (§8/§12): when a region's real DOS on-disk encoding
+isn't independently verified and the Amiga source's real bytes are
+display-consumed (not inert), prefer the known-working reference's own
+bytes over a guessed transform. The remaining core `0x70`-`0xA8` span
+(~56 B) is unchanged — still best-effort raw copy, still unverified, but
+not implicated by any of this session's evidence (that span's fresh-vs-deep
+diffs are much smaller and were already flagged uncertain, not
+"confirmed").
+
+**Verification:**
+
+- Re-converting `2/BlackCrypt/CHARACTERSA`: output is still exactly **996
+  B** (this fix only changes byte *values* inside the already-correctly-
+  sized core span, not the record length) — confirmed for all 4 records.
+- All 4 records' core `0x42`-`0x70` now byte-exact-match `char1.dat`'s own
+  same-class character, confirmed programmatically (`equip==template`
+  true for Fighter/Cleric/Magic User/Druid).
+- Re-ran the from-scratch loader simulator (this section's own, re-derived
+  independently rather than reusing §10's without re-checking it): all 4
+  characters still resolve at cursor positions `210/380/550/720`, zero
+  item-array desync, file ends exactly at 996 B — confirms this fix is
+  orthogonal to §10's record-length fix (it touches a `'raw'`/`'word'` span
+  that was never part of the file-cursor-advancing item-array logic).
+- Round-trip regression against `1/CHARACTERSA` (fresh, map 1): output's
+  party-scalar block is still byte-identical to `char1.dat`'s *true* block
+  (§12's corrected offset 1290) — unaffected, since this fix only touches
+  `build_dos_record`/`transform_core`, not `build_dos_save`'s party-scalar
+  handling.
+- `Agent: reviewer` pass on the diff: pending at time of writing — see the
+  task's final report for the result.
+
+Copied to the project owner's live-test package (`bc-test-package/char4.dat`,
+outside the repo, never committed), overwriting §12's version (built on top
+of §12's own already-applied party-scalar-block fix — both fixes are
+present in this file).
+
+**Live re-verification: not performed this session** — same
+input-automation tooling gap as every prior live-test note in this Phase.
+This fix is verified by disassembly (`fcn.00426390`'s per-character loop,
+exhaustively re-traced; `fcn.00421cc0`'s field reads) plus real cross-file
+comparison (fresh vs. real end-game Amiga data at the disputed offsets) —
+the same bar as every other "confirmed" finding in this Phase — but the
+final "does the party box now show 4 distinct, correctly-classed,
+correctly-alive characters" confirmation needs a human at the keyboard, or
+future input-automation tooling.
+
+**Still open:**
+
+- The exact field-by-field semantics of core `0x42`-`0x70` (which byte is
+  "currently equipped weapon icon ID" vs. "known spell bitmap" vs.
+  something else) were **not** decoded this session — this is a safety
+  substitution (known-working template bytes), not a decode, exactly
+  parallel to the item array's "zeroed, not decoded" status. A converted
+  character's on-screen equipment icons will very likely not match their
+  *real* Amiga inventory (same tradeoff already accepted for the item
+  array and spellbooks) — this was already the accepted risk, just now
+  extended to cover a span that was previously (wrongly) believed safe to
+  carry real data through.
+- Whether this fix, combined with §12's already-applied party-scalar-block
+  fix, together fully explain "two fighters, two dead" — or whether a
+  third contributor remains — is not proven without a live test. Both
+  fixes are real, independently disassembly-verified bugs with a plausible
+  causal mechanism for the observed symptom (§12: garbage party-order
+  index → duplicate/out-of-range box selection; this section: real
+  end-game equipment/spell bytes reaching `fcn.00421cc0`'s icon-render
+  logic in an unverified encoding), but neither was confirmed as *the*
+  single sufficient cause via live memory inspection.
+- The `0x70`-`0xA8` residue (~56 B) is still raw-copied and unverified,
+  unchanged from §8. If a live test after this fix still shows wrong
+  (not just "no items shown") class/status display, that residue — or a
+  still-unfound third field — is the next place to look.
 
 ---
 
