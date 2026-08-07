@@ -110,6 +110,30 @@ const CLICK_CHAINS: Record<string, string[]> =
 			}
 		: {};
 
+// Floor items store one sprite per view depth (near/mid/far, encoded as a
+// "-d0"/"-d1"/"-d2" name suffix) rather than a single icon -- fold each
+// group of 3 into one card that cycles through its depth ladder on click.
+// Unlike the CLICK_CHAINS above (each a one-way consumable or split-pair
+// that correctly latches on its last state), this is a "camera zoom" cycle
+// with no natural endpoint, so it loops back to the first depth instead.
+const LOOPING_CHAINS = new Set<string>();
+if (manifest === 'floor-items') {
+	const depthGroups = new Map<string, SpriteFrame[]>();
+	for (const frame of spriteManifest.frames) {
+		const match = frame.name.match(/^(.+)-d\d+$/);
+		if (!match) continue;
+		const list = depthGroups.get(match[1]) ?? [];
+		list.push(frame);
+		depthGroups.set(match[1], list);
+	}
+	for (const frames of depthGroups.values()) {
+		if (frames.length < 2) continue;
+		frames.sort((a, b) => a.name.localeCompare(b.name));
+		CLICK_CHAINS[frames[0].name] = frames.map((f) => f.name);
+		LOOPING_CHAINS.add(frames[0].name);
+	}
+}
+
 const hiddenFrameNames = new Set([
 	...Object.values(HOVER_PAIRS),
 	...Object.values(CLICK_CHAINS).flatMap((chain) => chain.slice(1)),
@@ -152,7 +176,9 @@ const slotSize = Math.max(
 			.filter((f): f is SpriteFrame => f !== undefined);
 
 		const frameInfo = labels.get(frame.name);
-		const frameLabel = frameInfo?.visible ?? frame.name;
+		const frameLabel =
+			frameInfo?.visible ??
+			(manifest === 'floor-items' ? frame.name.replace(/-d\d+$/, '') : frame.name);
 		const hoverLabel = frameInfo?.hover;
 		const scale = Math.min(3, 160 / frame.w, 160 / frame.h);
 		const width = Math.max(1, Math.round(frame.w * scale));
@@ -179,6 +205,7 @@ const slotSize = Math.max(
 							class="sprite-layer sprite-layer-click"
 							data-click-positions={chainFrames.map(posStr).join(';')}
 							data-click-index="0"
+							data-click-loop={LOOPING_CHAINS.has(frame.name) ? 'true' : undefined}
 							style={`background-image:url('${imagePath}');background-size:${bgSize};background-position:${posStr(chainFrames[0])};`}
 							role="img"
 							aria-label={frameLabel}
@@ -225,8 +252,10 @@ const slotSize = Math.max(
 	);
 	for (const el of clickables) {
 		const positions = el.dataset.clickPositions.split(';');
+		const loop = el.dataset.clickLoop === 'true';
 		const advance = () => {
-			const next = Math.min(Number(el.dataset.clickIndex) + 1, positions.length - 1);
+			const current = Number(el.dataset.clickIndex);
+			const next = loop ? (current + 1) % positions.length : Math.min(current + 1, positions.length - 1);
 			el.dataset.clickIndex = String(next);
 			el.style.backgroundPosition = positions[next];
 		};
