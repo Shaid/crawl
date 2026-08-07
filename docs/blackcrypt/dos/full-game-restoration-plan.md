@@ -1006,6 +1006,353 @@ Head and Rock Eye were re-authored for the port, same as the item icons —
 not converted). The result is "the full game, with 19 creatures rendered
 in Amiga art," not "the port Raven/Rick Johnson would have shipped."
 
+### 3.4 Real injection mechanics — insertion, naming, colour keys, group ids
+
+Phase 3a proved the art-conversion pipeline using only the cheap same-size
+in-place overwrite (§ "3a.1"'s first case), deliberately avoiding real
+directory *insertion*. This section works out that real case precisely —
+disassembly-traced, not estimated — and delivers a self-verifying script,
+`scripts/plan_phase3_clipper_injection.py`, that reads the real
+`crypt.exe`/`clipper.clp` and emits the exact new-entry manifest (names,
+group ids, colour keys, dimensions, byte totals) Phase 3's eventual
+converter will consume. It never writes `clipper.clp` and never produces
+converted pixel art — planning only, matching this session's scope.
+
+#### Insertion strategy: append everything at true EOF — now proven, not just favoured
+
+§ "3.1" already favoured appending at `End Monsters` (current EOF) as the
+"natural growth point." This pass traces the three mechanisms that could
+have made position matter, and finds all three are either indifferent to
+position or already safely clear of it:
+
+1. **Group-based preloading is a full linear scan, not a positional
+   lookup.** `fcn.0040b7a0(curMap)` (x86, `crypt.exe`) computes
+   `target = (curMap & 0xffff) + 10` (`0x40b7b4`: `and eax,0xffff; lea
+   edi,[eax+0xa]`) and then loops `si = 0 .. word[0x469994]-1`
+   (`0x40b7bc`-`0x40b7ef`), comparing `byte[0x43c7a0 + si*68 + 1]` —
+   the runtime directory's group-id byte — against `target`, calling
+   `fcn.00402350` (surface loader) on every match. `fcn.0040b820(group)`
+   (the tileset-group loader, also called with literal `0`/`5`/`6` per
+   § "1D") is the same shape (`0x40b832`-`0x40b866`). Neither cares where
+   in the array a match sits — it visits every one of `count` slots.
+2. **By-name resolution is also a full linear scan, with an
+   optional group filter.** `fcn.00402650(name, typeFilter, count, table)`
+   (§ "0.3") walks `i = 0..count-1`, `strcmp`s `table[i]+0x12` against
+   `name` (`fcn.0042d4f0`), and additionally requires
+   `table[i].group == typeFilter` **whenever `typeFilter != 0`**
+   (`0x402690`-`0x4026a7`: `cmp cx, byte[esi+1]`). Creature-frame draws
+   (traced below) and door/structure draws (`fcn.00406d50`, § "1B") both
+   pass `typeFilter = 0` — an unfiltered first-match-by-name scan — so
+   directory position is irrelevant to them too, and so is entry count
+   growth (the scan just runs over a slightly longer array).
+3. **Tileset/decoration draws use the *same* by-name scan, filtered by
+   the currently-active tileset group.** The Alcove/Wall/etc. renderers
+   (e.g. `fcn.00404ce0` @ `0x404d3c`-`0x404d48`, resolving `"Alcove E"`)
+   pass `typeFilter = word[0x469748]` — a global written **only** by
+   `fcn.0040b820` at its very end (`0x40b868`/`0x40b87c`: `mov
+   word[0x469748], <group arg>`), i.e. "whichever group id was most
+   recently loaded." This is the mechanism that makes duplicate names
+   across tileset groups resolvable at all: three directory entries can
+   all be named `"Alcove A"` (one per group 1/2/3), and the by-name scan
+   picks the one whose own `group` byte equals the currently-active
+   group. **New tileset entries must therefore reuse `bcdfx`'s exact
+   existing names**, distinguished only by their `group` byte — not
+   invented per-tileset names.
+4. **The one genuinely position-sensitive mechanism (item/key icon
+   resolution, § "1B") is already clear of any insertion point after
+   `End Monsters`.** `directoryIndex = word[0x46b806] + iconIndex +
+   enchantOffset` is computed off `idx("Start Items") + 1`, fixed once at
+   startup; appending new entries anywhere after `"End Items"` (real
+   index 622) — and `End Monsters` (815) trivially qualifies — changes
+   neither `"Start Items"`'s own index nor anything between it and
+   `"End Items"`. Phase 3 needs 0 new items anyway (§ "1B", resolved), so
+   this is a non-issue in practice, but it's the reason EOF (rather than
+   "anywhere after `End Items`") remains the simplest, safest choice: it
+   can never accidentally land inside a position-sensitive bracket.
+
+**What "append at EOF" does *not* avoid: the directory itself still grows,
+and growing the header+directory region shifts the start of the data
+blob — every one of the existing 816 entries' `data_offset` must be
+incremented by the same constant** (`new_entry_count × 56`), since the
+data blob is packed in exact directory order immediately after the
+directory with zero gaps (§ "3a.1", re-confirmed this pass: `data_offset[i]
++ size[i] == data_offset[i+1]` holds for all 815 consecutive pairs in the
+real file). This is cheap — one `+=` per existing entry, zero data
+reordering, the whole 1,105,569-byte existing data blob is copied
+byte-for-byte unchanged, just relocated later in the file — but it is not
+optional; "append at EOF" describes *where the new records and pixel data
+go*, not "no existing bytes move."
+
+**The real algorithm:**
+
+```
+new_count = 816 + N                       # N = new entries this session
+dir_growth = N * 56
+new_data_start = 2 + new_count * 56       # was 2 + 816*56 = 45,698
+
+for each existing entry i (0..815):
+    new_data_offset[i] = old_data_offset[i] + dir_growth
+    # every other field (name, type, group, size, colorkey, w, h) unchanged
+
+data blob = [old data blob, byte-for-byte unchanged, relocated]
+          + [N new entries' pixel bytes, in the new entries' own directory order]
+
+write: count=new_count, new directory (816 unchanged records w/ shifted
+       data_offset + N new records), then the data blob above
+```
+
+#### Directory record fields
+
+**Creature names — read directly out of `crypt.exe`, zero guessing.**
+§ "0.4"/"1D" already found the 26×180-byte creature record table at
+`0x430898`-`0x431ae0` (file offset = VA − `0x400000`, raw-identity
+mapped). This pass decoded the full record layout and found it encodes
+**pointers to the required directory-entry name strings directly** — not
+just a name table to cross-reference, but the literal strings
+`crypt.exe`'s own draw code will `fcn.00402650`-resolve at runtime. Record
+layout (180 B): `dword gfxId` + 2×`dword` name pointer (a "pose" name,
+e.g. `"Two Head A 0"`) + 6×`dword` constant block (`0x00010035` ×6 for
+Two Head, confirmed § "0.4") + 12×(`dword` name pointer, `u16` w, `u16`
+h, `dword` flag) — a 3-tier×4-facing frame slot table whose pointers
+alias for mirrored facings. Traced end to end for Two Head (`0x431a2c`):
+the 12 frame pointers resolve (via a live hex dump at `0x4334d0`-`0x43353f`)
+to exactly 7 unique C strings — `"Two Head 3 S"`, `"3 E"`, `"2 S"`,
+`"2 E"`, `"1 S"`, `"1 E"`, and the header's own `"Two Head A 0"` — an
+**exact** match, string for string, to Two Head's 7 real shipped
+`clipper.clp` entries (indices 808-814). `scripts/plan_phase3_clipper_
+injection.py`'s `verify_against_shipped` asserts this equality for both
+Two Head and Rock Eye before doing anything else. The frame-slot `w`/`h`
+fields are **not** reliable pixel dimensions — the same name/pointer
+recurs at different table slots with different `w`/`h` (e.g. Two Head's
+`"1 E"` pointer appears with `(50,105)` and `(45,104)` at two different
+slots) — these are evidently a per-(tier,facing) logical/hit-box
+quantity, not the sprite's own bitmap size, and the script does not use
+them; see "Dimensions" below.
+
+Applying the same read to all 26 records gives every one of the 23 new
+clusters' required directory-entry names for free, with a strong
+self-check: **the dedup'd unique-name count exactly matches § "1D"'s
+already-confirmed "DOS n" column for all 23 clusters** (`assert len(names)
+== amiga_n` for the un-aliased portion, `len(records[gfx]) == DOS n`
+overall — both hold with zero exceptions across all 23, run in the
+script). Statue (`0xbd`) has its own 26th record but is excluded (§ "1B",
+structure art).
+
+**Tileset names — reuse `bcdfx`'s own 70 names verbatim, not new ones.**
+Per point 3 above, the `group` byte is what disambiguates same-named
+entries across tileset groups, so `bcdfy`/`bcdfz`'s new entries are named
+*identically* to their `bcdfx` counterpart (`"Alcove A"`, `"Wall 0"`,
+…). `scripts/build_proof_of_concept_art_swap.py`'s already-verified
+`TILESET_MAP` (bcdfx-name → Amiga-sub-image-label/recipe, 68 entries) is
+reused unmodified to build both new tilesets' manifests, filtered by
+which of `bclib.bcdfxyz.SUB_IMAGES`' 12 chunk slots each tileset actually
+has (`bcdfy`: `{0x08, 0x0C, 0xB0, 0x14, 0xB8, 0xC4, 0x20}`; `bcdfz`: all
+12, same as `bcdfx`).
+
+> **Correction to § "1D"'s tileset sub-image counts.** § "1D" counted
+> *Amiga sub-images* (47 `bcdfy`, 84 `bcdfz`) — the right number for
+> scoping the *art-conversion* effort, but not the number of *new
+> `clipper.clp` directory entries*, which is smaller: several sub-images
+> combine into one DOS entry (`Wall 0/1/2` = 3 sub-images each via
+> `hconcat`; `Floor 1`/`Floor 2` share one sub-image via `hflip`), and a
+> real residue of Amiga sub-images has **no established DOS name at
+> all** — the 8 `sidewall-depth{0-3}-{near,far}` pieces (behind the
+> still-unsolved `Wall Left`/`Wall Right` perspective composite, open
+> since § "3a.2"/"3a.5") and `fountain` (slot `0xC8`; the demo's own 70
+> real names include `Panel Top` but no `Fountain` at all — confirmed by
+> parsing the real directory). Computed directory-entry counts (not
+> sub-image counts): **`bcdfy` → 33 new entries, `bcdfz` → 68 new
+> entries — 101 total, not 131.** (`bcdfz`'s 68 matches § "3a.2"'s own
+> "68 of 70 entries convert cleanly" figure exactly, which is the
+> expected cross-check since `bcdfz` and `bcdfx` share the identical
+> 12-chunk structure.)
+
+**Colour keys — real, per-entry, mirrored from already-shipped data, not
+assumed.** For creatures: parsing the real `clipper.clp`'s colour-key
+field (on-disk directory offset `+50`, § "3a.6") for all 14 shipped
+Two Head/Rock Eye entries gives **33 (`0x21`) with zero exceptions** —
+confirmed empirically this pass (`scripts/plan_phase3_clipper_
+injection.py`'s `assert creature_keys == {33}`), settling the open
+question from the task brief ("do all creature entries use 33 the way
+Rock Eye/Two Head do?") in the affirmative for the only real evidence
+available (100% of shipped creature entries). Adopted for all 198 new
+creature entries. For tilesets: each new entry mirrors the **real**
+colour key already shipped on its same-named `bcdfx` sibling (parsed
+directly from the real 70-entry range, indices 7-76) — 32 for
+door/pillar/pull-chain/alcove/plaque, 33 for floor-pit/ceiling-pit/button,
+`0xFFFF` sentinel (opaque, no `SetColorKey` call) for the unmasked 6-plane
+entries — exactly the table already established in § "3a.6", now applied
+prospectively to entries that don't exist yet instead of retrospectively
+to entries being overwritten.
+
+**Dimensions — real Amiga source size, no forced resizing.** Unlike
+Phase 3a (which had to nearest-neighbour-resize into a *pre-existing*
+slot's fixed dimensions), new entries have no existing slot to fit —
+each can simply declare its true source size. Tileset entries use
+`bclib.bcdfxyz.SUB_IMAGES`' own `(w, h)` (or the `hconcat` sum / `hflip`
+passthrough). Creature entries use the real per-frame `(w, h)` already
+extracted into `public/assets/blackcrypt/amiga/data/monster-names.json`
+(`m<map>_off<offset>_<w>x<h>` frame labels), which the script cross-checks
+against § "1D"'s confirmed "Amiga n" frame count per cluster (0
+exceptions). For the 11 aliased entries game-wide (§ "1D": DOS names 3
+tiers × 4 facings but fewer distinct Amiga bitmaps) the exact
+tier/facing↔source-frame pairing was **not** derived this pass (would
+need decoding the frame-table's tier/facing bit convention, e.g. Two
+Head's own `flag` bit — real work, appropriately scoped to
+implementation, not this planning pass) — the script conservatively
+reuses the cluster's largest real frame's `(w, h)` for these 11, flagged
+`aliased: true` in its output. This affects only 11 of 299 new entries
+and does not change the insertion mechanics, naming, colour-key, or
+group-id findings above, all of which are exact.
+
+#### Group-id table
+
+Per § "1D" (all 4 real call sites to the group dispatcher exhaustively
+traced), tileset groups are `1`/`2`/`3` and per-map creature groups are
+`curMap + 10` (`11..23`). This pass adds one refinement: **map 1's own
+two shipped creatures (Two Head, Rock Eye) carry group `0`, not `11`** —
+confirmed by parsing their real directory entries (`mystery`/`group` byte
+`= 0` for all 14). Group `0` is the "always-resident, loaded once at
+directory-build time" bucket (§ "1D"'s own finding: `fcn.0040bbe0` calls
+`fcn.0040b820(0)` once, before any map switch), covering 717/816 of the
+demo's entries — items, UI, and, evidently, the map-1 demo's own
+creatures. This is a real, deliberate difference from how maps 2-13's
+creatures must be loaded (dynamically, on `SwitchMap`'s `LoadPerMapResources
+(curMap)` call, `fcn.0040b7a0` @ `0x42690a` inside `fcn.00426880`) — **new
+creature clusters must use `curMap + 10`, not `0`**, both because that's
+the mechanism § "1D" traced as real and load-bearing, and because tagging
+23 clusters' worth of sprites as group `0` would force them all
+memory-resident from the moment the game starts rather than streamed in
+per map, an untested and likely wasteful path this plan does not take.
+
+| gfx | Map | Group id | Creature | New entries |
+|-----|-----|----------|----------|-------------|
+| `0x4f` | 2 | 12 | Magnito | 10 (7 converted + 3 aliased) |
+| `0xb0` | 2 | 12 | Green Guy | 4 |
+| `0xb1` | 2 | 12 | Maggot | 10 |
+| `0x4d` | 3 | 13 | Druid Watcher | 10 |
+| `0x4e` | 3 | 13 | Ironhead | 10 |
+| `0xc7` | 3 | 13 | Slime | 4 |
+| `0x4b` | 4 | 14 | Big Glop | 10 (7 converted + 3 aliased) |
+| `0x4c` | 4 | 14 | Little Glop | 10 (7 converted + 3 aliased) |
+| `0x50` | 4 | 14 | Lich Dragon | 2 |
+| `0xba` | 5 | 15 | Plant | 10 |
+| `0xc3` | 5 | 15 | Spider | 10 |
+| `0xb7` | 6 | 16 | Possessor | 10 |
+| `0xb8` | 6 | 16 | Possessor Body | 10 |
+| `0xb5` | 7 | 17 | Ram Demon | 11 (10 converted + 1 aliased) |
+| `0xb9` | 7 | 17 | Cloaker | 2 (1 converted + 1 aliased) |
+| `0xb6` | 8 | 18 | Ram Lord | 10 |
+| `0xc4` | 9 | 19 | Merman | 10 |
+| `0xbf` | 9 | 19 | Squid | 10 |
+| `0xbc` | 10 | 20 | Water Lord | 10 |
+| `0xbe` | 11 | 21 | Medusa | 10 |
+| `0xc6` | 11 | 21 | Spirit | 4 |
+| `0xb4` | 12 | 22 | Skeleton Lord | 10 |
+| `0xc5` | 13 | 23 | Estoroth | 11 |
+| — | — | 2 | `bcdfy` tileset | 33 |
+| — | — | 3 | `bcdfz` tileset | 68 |
+
+Total: **198 creature entries + 101 tileset entries = 299 new directory
+entries**, all with group ids currently unused anywhere in the real
+directory — confirmed empirically (`verify_group_ids`: 0 existing entries
+at group `2`, `3`, or any of `11..23`), so there is no collision risk.
+
+#### No new palette entries — a real correction to § "1D"'s manifest
+
+§ "1D" carried over Amiga's accent-ramp mechanism (3 new 32-word ramps)
+into DOS's scope uncritically. Tracing the only 2 functions anywhere in
+`crypt.exe` that reference any `"...Palette"` string finds **DOS has no
+per-tileset-group runtime palette mechanism at all**:
+
+- `fcn.0040aaf0` is a fixed 7-case dispatcher (`cmp eax,6; ja default;
+  jmp [eax*4+0x40ad84]`) resolving exactly the 7 already-shipped, already-
+  named palettes (`Palette`, `Automap Palette`, `Character Gen Palette`,
+  `Options Palette`, `Title Palette`/`2`/`3`) by name — no 8th case, no
+  tileset-group- or `curMap`-derived index.
+- `fcn.0040b8a0` — the **only** other reference — builds the game's one
+  active `IDirectDrawPalette` from the `"Palette"` resource, called
+  **exactly once**, from `fcn.0040bbe0`'s directory-build init
+  (`0x40bf06`), before any map is ever loaded. It is never called again;
+  `SwitchMap`'s own traced body (§ "1A") has no palette step.
+
+DOS's 256-colour VGA palette evidently absorbs all 4 Amiga accent ramps
+into disjoint index ranges of one static, always-resident palette (group
+`0`, § above) rather than hot-swapping palette registers the way Amiga's
+32-colour EHB budget required — consistent with `bcdfx`/`bcdfy`/`bcdfz`
+all sharing exactly the same (width, height) per sub-image slot (§ "3a.2"):
+the *pixel data* differs, the palette doesn't need to.  This is not just
+inferred from absence of a call site — it is independently confirmed by
+data already in hand: § "3a.2"'s own real, live-tested `bcdfz` conversion
+already used nearest-RGB matching against the *existing* shipped
+`"Palette"` and rendered correctly (§ "3a.4": "coherent bone/cream brick
+wall"), and this pass repeated the same residual-distance check for all
+four ramps (0 tan / 1 violet / 2 bone / 3 grey) against the real DOS
+`Palette`: mean nearest-RGB distance 5.2-8.6 (out of a 0-441 range),
+comparable across all four — ramp 1 (violet, the one ramp § "3a.2" never
+exercised) is not an outlier. **Phase 3 needs 0 new palette entries or
+palette bytes**, correcting § "1D"'s "3 accent-ramp palettes" line.
+
+#### File growth — computed, not estimated
+
+| Item | Count | Bytes |
+|---|---:|---:|
+| New creature directory entries | 198 | 198 × 56 = 11,088 |
+| New tileset directory entries | 101 | 101 × 56 = 5,656 |
+| New palette entries | 0 | 0 |
+| **Directory growth** | **299** | **299 × 56 = 16,744** |
+| New creature pixel bytes (187 converted + 11 aliased-but-still-real-bytes) | — | 862,912 |
+| New tileset pixel bytes | — | 447,552 |
+| **New pixel bytes total** | — | **1,310,464** |
+| Old file size | | 1,151,267 |
+| **New file size** | | **2,478,475 (+1,327,208 B, +115.3%)** |
+| New directory entry count | 816 → 1,115 | ceiling 2,000 (§ "3.1") — headroom confirmed unaffected |
+
+All figures above are printed (and re-derivable) by
+`scripts/plan_phase3_clipper_injection.py`; nothing here is hand-computed.
+The creature pixel-byte figure is exact for 187/198 entries and uses the
+documented largest-frame stand-in for the remaining 11 (see "Dimensions"
+above) — a small, explicitly flagged fraction of the total, not a blanket
+estimate.
+
+#### Build order
+
+1. **Convert the 187 distinct creature sprites** using Phase 3a's proven
+   pipeline (deplane → nearest-RGB against `scripts/palette_final.json`,
+   the general monster palette, excluding indices 32/33 from the
+   candidate pool → write mask pixels as index **33**), at each frame's
+   own real Amiga `(w, h)` — no forced resizing, unlike Phase 3a.
+2. **Resolve the 11 aliased entries'** real tier/facing↔frame pairing
+   (open item above) and convert/copy them; until resolved, the plan's
+   own largest-frame stand-in is a safe placeholder (same real creature,
+   only mildly wrong scale on 11/198 entries).
+3. **Convert the 101 tileset sub-images** (33 `bcdfy` + 68 `bcdfz`) using
+   the same pipeline against the dungeon palette (deplane → nearest-RGB
+   against the real DOS `Palette`, ramp-appropriate Amiga source colours,
+   excluding 32/33 → mask pixels as **each entry's own real colour key**,
+   mirrored per-name from `bcdfx` as derived above) — `Wall Left`/`Wall
+   Right` remain out of scope for both new tilesets, same open item as
+   § "3a.2"/"3a.5".
+4. **One directory rewrite**: shift all 816 existing `data_offset`s by
+   `+16,744`, append the 299 new records (names/group ids/colour
+   keys/dimensions from `scripts/plan_phase3_clipper_injection.py`'s
+   manifest, `data_offset`s computed sequentially from the new EOF),
+   write `count = 1,115`.
+5. **Append the data blob**: old blob unchanged, then the 299 new
+   entries' pixel bytes in their new directory order.
+6. **Self-verify** (matching § "3a.4"'s bar): output length equals
+   `2,478,475`; the shifted-but-otherwise-untouched 816-entry prefix
+   round-trips (name/type/group/size/colorkey/w/h all unchanged, only
+   `data_offset` shifted by the constant); every new entry's declared
+   `size` equals `width × height`; 0 bytes changed outside the declared
+   new/shifted windows.
+
+None of this phase's own findings were verified live in-game (same Wine/
+DirectDraw blocker as Phases 3a/4/5/6/7, § "1C") — the insertion mechanics,
+naming, colour-key, and group-id claims above are disassembly-traced and
+self-consistency-checked against real shipped data, not yet run through
+the real game.
+
 ---
 
 ## Phase 4 — Code restoration
