@@ -1,5 +1,5 @@
 {
-  "source": "Clustering \u2014 map 1: DOS clipper.clp's own developer-authored entry names ('Rock Eye 1 N ... A 1', 'Two Head 1 S ... A 0'), 7 entries per creature, matching the Amiga store's 7 + 7 sprites exactly. Maps 2-13: automated same-file offset-order segmentation \u2014 a new cluster starts where a sprite's bytes-per-plane (bpr, proportional to rendered area) exceeds 1.4x the max bpr of the 2 preceding entries (a size-ladder discontinuity: a fresh 'near' pose following a 'far' pose), with one hardcoded merge on map 9. Cluster count now equals the bcdfb-n header's graphics-ID count for 13/13 maps. Cluster -> graphics-ID binding: cluster i is header ID i (+4/+6/+8, which are stored in sprite-store order, NOT sorted \u2014 bcdfj is c4,bf and bcdfl is be,c6,bd); independently corroborated by the 214-byte secondary table, whose trailing 3 x 12 pair-blocks track each cluster's per-tier width/height and whose third block is all-zero exactly on bcdfl, whose third ID (0xbd) owns no monster record. Names \u2014 resolved against the official Black Crypt Manual & Clue Book plus bcdfu's ending epilogue, via the map<->dungeon-level mapping in docs/blackcrypt/amiga/data-structure.md: Two Head/the Ogre (carries the game's only EMERALD KEY, which the epilogue says is taken from 'THE OGRE'), Rock Eye, Dragonlich (summoned by the 3 Idols of Temin on level 10), Possessor Demon (level 14/15; only movement-type-5 record, carries the only SOUL KEY), Ram Demon (only key-holder on level 17), Ram Lord (level 20; its 4 carried items are clue book L20 note 2's list byte for byte), The Great Waterlord (level 23; RING OF LOCATION + key), Medusa (only unique monster on level 24), Statue (gfx 0xbd is the Statue structure gfxNumber, not a creature) and Estoroth Paingiver (level 28 final boss). No per-graphics-ID creature name table exists anywhere in bcdft/bcdft-S2/bcdfs \u2014 the remaining clusters are geometry-only placeholders ('Map N Creature X') carrying their confirmed graphics ID and dungeon levels.",
+  "source": "Clustering \u2014 map 1: DOS clipper.clp's own developer-authored entry names ('Rock Eye 1 N ... A 1', 'Two Head 1 S ... A 0'), 7 entries per creature, matching the Amiga store's 7 + 7 sprites exactly. Maps 2-13: automated same-file offset-order segmentation \u2014 a new cluster starts where a sprite's bytes-per-plane (bpr, proportional to rendered area) exceeds 1.4x the max bpr of the 2 preceding entries (a size-ladder discontinuity: a fresh 'near' pose following a 'far' pose), with one hardcoded merge on map 9. Cluster count now equals the bcdfb-n header's graphics-ID count for 13/13 maps. Cluster -> graphics-ID binding: cluster i is header ID i (+4/+6/+8, which are stored in sprite-store order, NOT sorted \u2014 bcdfj is c4,bf and bcdfl is be,c6,bd); independently corroborated by the 214-byte secondary table, whose trailing 3 x 12 pair-blocks track each cluster's per-tier width/height and whose third block is all-zero exactly on bcdfl, whose third ID (0xbd) owns no monster record. Names \u2014 11 clusters resolved against the official Black Crypt Manual & Clue Book plus bcdfu's ending epilogue, via the map<->dungeon-level mapping in docs/blackcrypt/amiga/data-structure.md: Two Head/the Ogre (carries the game's only EMERALD KEY, which the epilogue says is taken from 'THE OGRE'), Rock Eye, Dragonlich (summoned by the 3 Idols of Temin on level 10), Possessor / Possessor Body (level 14/15; only movement-type-5 record is on Possessor Body, which carries the only SOUL KEY), Ram Demon (only key-holder on level 17), Ram Lord (level 20; its 4 carried items are clue book L20 note 2's list byte for byte), The Great Waterlord (level 23; RING OF LOCATION + key), Medusa (only unique monster on level 24), Statue (gfx 0xbd is the Statue structure gfxNumber, not a creature) and Estoroth Paingiver (level 28 final boss). No per-graphics-ID creature name table exists anywhere in bcdft/bcdft-S2/bcdfs itself (confirmed negative), but DOS crypt.exe's own 26x180-byte creature table (0x430898-0x431ae0, decoded during the DOS full-game-restoration planning pass) shares the same gfxId space as the Amiga bcdfs monster record's +0x01 monster-type byte (full-game-restoration-plan.md SS 0.4) and supplied real, literal names for the other 15 clusters outright (Magnito, Green Guy, Maggot, Druid Watcher, Ironhead, Slime, Big Glop, Little Glop, Plant, Spider, Cloaker, Merman, Squid, Spirit, Skeleton Lord), while independently confirming (exact frame-count match on 9/11) or correcting (the Possessor pair, which the earlier thematic-only guess had backwards) the first 11. All 26 clusters / 204 sprites now carry a real creature name; see data-structure.md, 'Creature names from DOS crypt.exe's own creature table', for the per-cluster evidence.",
   "groups": [
     {
       "index": 0,
@@ -39,7 +39,7 @@
     },
     {
       "index": 2,
-      "name": "Map 2 Creature A",
+      "name": "Magnito",
       "gfxId": "0x4f",
       "dungeonLevels": [
         3,
@@ -58,7 +58,7 @@
     },
     {
       "index": 3,
-      "name": "Map 2 Creature B",
+      "name": "Green Guy",
       "gfxId": "0xb0",
       "dungeonLevels": [
         3,
@@ -74,7 +74,7 @@
     },
     {
       "index": 4,
-      "name": "Map 2 Creature C",
+      "name": "Maggot",
       "gfxId": "0xb1",
       "dungeonLevels": [
         3,
@@ -96,7 +96,7 @@
     },
     {
       "index": 5,
-      "name": "Map 3 Creature A",
+      "name": "Druid Watcher",
       "gfxId": "0x4d",
       "dungeonLevels": [
         6,
@@ -119,7 +119,7 @@
     },
     {
       "index": 6,
-      "name": "Map 3 Creature B",
+      "name": "Ironhead",
       "gfxId": "0x4e",
       "dungeonLevels": [
         6,
@@ -142,7 +142,7 @@
     },
     {
       "index": 7,
-      "name": "Map 3 Creature C",
+      "name": "Slime",
       "gfxId": "0xc7",
       "dungeonLevels": [
         6,
@@ -159,7 +159,7 @@
     },
     {
       "index": 8,
-      "name": "Map 4 Creature A",
+      "name": "Big Glop",
       "gfxId": "0x4b",
       "dungeonLevels": [
         10,
@@ -178,7 +178,7 @@
     },
     {
       "index": 9,
-      "name": "Map 4 Creature B",
+      "name": "Little Glop",
       "gfxId": "0x4c",
       "dungeonLevels": [
         10,
@@ -211,7 +211,7 @@
     },
     {
       "index": 11,
-      "name": "Map 5 Creature A",
+      "name": "Plant",
       "gfxId": "0xba",
       "dungeonLevels": [
         13
@@ -231,7 +231,7 @@
     },
     {
       "index": 12,
-      "name": "Map 5 Creature B",
+      "name": "Spider",
       "gfxId": "0xc3",
       "dungeonLevels": [
         13
@@ -251,7 +251,7 @@
     },
     {
       "index": 13,
-      "name": "Possessor Demon (variant)",
+      "name": "Possessor",
       "gfxId": "0xb7",
       "dungeonLevels": [
         14,
@@ -272,7 +272,7 @@
     },
     {
       "index": 14,
-      "name": "Possessor Demon",
+      "name": "Possessor Body",
       "gfxId": "0xb8",
       "dungeonLevels": [
         14,
@@ -316,7 +316,7 @@
     },
     {
       "index": 16,
-      "name": "Map 7 Creature B",
+      "name": "Cloaker",
       "gfxId": "0xb9",
       "dungeonLevels": [
         16,
@@ -350,7 +350,7 @@
     },
     {
       "index": 18,
-      "name": "Map 9 Creature A",
+      "name": "Merman",
       "gfxId": "0xc4",
       "dungeonLevels": [
         21,
@@ -371,7 +371,7 @@
     },
     {
       "index": 19,
-      "name": "Map 9 Creature B",
+      "name": "Squid",
       "gfxId": "0xbf",
       "dungeonLevels": [
         21,
@@ -434,7 +434,7 @@
     },
     {
       "index": 22,
-      "name": "Map 11 Creature B",
+      "name": "Spirit",
       "gfxId": "0xc6",
       "dungeonLevels": [
         24,
@@ -465,7 +465,7 @@
     },
     {
       "index": 24,
-      "name": "Map 12 Creature A",
+      "name": "Skeleton Lord",
       "gfxId": "0xb4",
       "dungeonLevels": [
         27
