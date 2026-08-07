@@ -71,14 +71,24 @@ table anywhere in bcdft/bcdft-S2/bcdfs (confirmed negative). Three oracles:
     sub-chain (the Ram Lord's four items are the clue book's four items).
   * `bcdfu`'s ending epilogue, which names the six unique bosses and supplies
     the Ogre <-> EMERALD KEY link that identifies map 1's "Two Head".
+  * DOS `crypt.exe`'s own 26x180-byte creature-name table
+    (0x430898-0x431ae0), decoded during the DOS full-game-restoration
+    planning pass (full-game-restoration-plan.md SS "1D"/"3.4"). DOS's
+    creature gfxId shares the same identifier space as the Amiga bcdfs
+    monster record's own +0x01 monster-type byte (SS "0.4"), so this table's
+    26 names are real names for the Amiga creatures too, not DOS-only art
+    labels. It supplied the 15 previously-unnamed clusters' real names
+    outright, and independently confirmed (or, for the Possessor pair,
+    corrected) all 11 already-named clusters.
 
 See NAMED_CLUSTERS for the per-cluster evidence and data-structure.md,
-"Creature names from the Manual & Clue Book", for the full write-up.
+"Creature names from DOS crypt.exe's own creature table", for the full
+write-up.
 
-11 of the 26 clusters (90 of the 204 sprites) are named this way. The other 15
-are creatures the clue book never had a reason to name; they stay
-"Map N Creature X", but every group now carries its confirmed graphics ID and
-dungeon levels.
+All 26 of the 26 clusters (204 of the 204 sprites) are named. 11 came from
+the Manual & Clue Book / epilogue pass; the other 15 came from DOS
+crypt.exe's own creature-name table, which also independently confirmed
+(and, once, corrected — the Possessor / Possessor Body pair) the first 11.
 
 Output: public/assets/blackcrypt/amiga/data/monster-names.json
 """
@@ -139,33 +149,86 @@ NAMED_CLUSTERS = {
     # a row-0 prototype) because it is *summoned*: clue book L10 note 10
     # "PLACE IDOLS OF TEMIN HERE TO OPEN THE WAY TO THE DRAGON LICH", epilogue
     # "USING 3 EVIL IDOLS, YOU SUMMONED AND DEFEATED THE DREADED DRAGONLICH".
+    # DOS crypt.exe's own creature-name table (gfx 0x50, "Lich Dragon") is a
+    # second, independent confirmation (see data-structure.md, "Creature
+    # names from DOS crypt.exe's own creature table"); the Amiga-sourced
+    # "Dragonlich" name (matching the clue book/epilogue's own word order) is
+    # kept as the display name.
     (4, 2): 'Dragonlich',
-    # gfx 0xb7 / 0xb8. 0xb8 is the placed one (movement type 5 = "Possessor",
-    # the only such record in the corpus) and carries the game's only SOUL KEY
-    # — clue book L15 note 2: "POSSESSOR HAS THE KEY AND MUST BE KILLED FOR IT".
-    (6, 0): 'Possessor Demon (variant)',
-    (6, 1): 'Possessor Demon',
+    # gfx 0xb7 / 0xb8, movement type 5 = "Possessor" (the only such record in
+    # the corpus) on 0xb8, which carries the game's only SOUL KEY — clue book
+    # L15 note 2: "POSSESSOR HAS THE KEY AND MUST BE KILLED FOR IT".
+    #
+    # CORRECTED (this pass): DOS crypt.exe's own 26x180-byte creature table
+    # (0x430898-0x431ae0) names these "Possessor" (0xb7, unplaced recolour
+    # variant) and "Possessor Body" (0xb8, placed, SOUL KEY carrier) — the
+    # *reverse* of which one this project's earlier thematic-only guess
+    # treated as the "primary" name ("Possessor Demon" on 0xb8, "Possessor
+    # Demon (variant)" on 0xb7). The DOS names are literal directory-entry
+    # strings the game's own draw code resolves, not a guess, so they
+    # supersede the old pair. See data-structure.md's correction block.
+    (6, 0): 'Possessor',
+    (6, 1): 'Possessor Body',
     # gfx 0xb5: the only key-holding monster on level 17 (an IRON KEY) —
     # clue book L17 note 2 "RAM MINOR DEMON - HOLDS KEY TO DOOR AT (10,4,17)".
+    # DOS crypt.exe independently names gfx 0xb5 "Ram Demon" too (11 unique
+    # frames vs. Amiga's 10 — see the correction block for the Δ).
     (7, 0): 'Ram Demon',
     # gfx 0xb6, level 20, 550 HP. Its four carried items are, byte for byte,
     # clue book L20 note 2's list: "RAM LORD - HOLDS KEYS TO TWO LOCKED DOORS
     # AS WELL AS AMULET OF POWER (+2 AC, +4 STRENGTH), AND BELT OF SUSTENANCE".
+    # DOS crypt.exe independently names gfx 0xb6 "Ram Lord" too (exact frame
+    # count match, 10 == 10).
     (8, 0): 'Ram Lord',
     # gfx 0xbc, level 23, 375 HP, carries RING OF LOCATION + a key — clue book
     # L23 note 3 "WATERLORD, HOLDS KEY TO DOOR AT (4,5,23), AND RING OF LOCATION".
+    # DOS crypt.exe independently names gfx 0xbc "Water Lord" too (exact frame
+    # count match); "The Great Waterlord" (matching the clue book's own
+    # epithet) is kept as the display name.
     (10, 0): 'The Great Waterlord',
-    # gfx 0xbe: the only unique monster on level 24, the Medusa level.
+    # gfx 0xbe: the only unique monster on level 24, the Medusa level. DOS
+    # crypt.exe independently names gfx 0xbe "Medusa" too (exact frame count
+    # match, 10 == 10).
     (11, 0): 'Medusa',
     # gfx 0xbd is NOT a monster: 0x00BD is the *Statue* structure gfxNumber,
     # and map 11 is the only map carrying type-0x2F statue records (9 of them,
     # all on level 24 = "PREVIOUS ADVENTURERS WERE PLACED HERE WHEN TURNED TO
     # STONE"). It owns no monster record anywhere and its 214-byte block is
-    # all zeros.
+    # all zeros. DOS crypt.exe's own creature table also carries gfx 0xbd as
+    # "Statue" (3 frames == Amiga's 3), independently confirming it is not a
+    # creature the DOS side treats specially either.
     (11, 2): 'Statue (petrified adventurer)',
     # gfx 0xc5, level 28, 350 HP — the final boss, already special-cased in
-    # code as gfx word 0x80C5.
+    # code as gfx word 0x80C5. DOS crypt.exe independently names gfx 0xc5
+    # "Estoroth" too (exact frame count match, 11 == 11); "Estoroth
+    # Paingiver" (matching the epilogue's own epithet) is kept as the display
+    # name.
     (13, 0): 'Estoroth Paingiver',
+
+    # --- Below: 15 clusters newly named this pass from DOS crypt.exe's own
+    # 26x180-byte creature-name table (0x430898-0x431ae0, file offset == VA -
+    # 0x400000). DOS's creature gfxId field is confirmed (full-game-
+    # restoration-plan.md SS "0.4") to share the same identifier space as the
+    # Amiga bcdfs monster record's own +0x01 monster-type byte, so these are
+    # real names for the Amiga creatures, not just DOS-port art labels. See
+    # data-structure.md, "Creature names from DOS crypt.exe's own creature
+    # table", for the full cross-reference (gfxId, frame-count match/Δ,
+    # evidence) per cluster.
+    (2, 0): 'Magnito',        # gfx 0x4f, Amiga n=7 vs DOS n=10 (mirror-aliased)
+    (2, 1): 'Green Guy',      # gfx 0xb0, n=4 == 4
+    (2, 2): 'Maggot',         # gfx 0xb1, n=10 == 10
+    (3, 0): 'Druid Watcher',  # gfx 0x4d, n=10 == 10
+    (3, 1): 'Ironhead',       # gfx 0x4e, n=10 == 10
+    (3, 2): 'Slime',          # gfx 0xc7, n=4 == 4
+    (4, 0): 'Big Glop',       # gfx 0x4b, Amiga n=7 vs DOS n=10 (mirror-aliased)
+    (4, 1): 'Little Glop',    # gfx 0x4c, Amiga n=7 vs DOS n=10 (mirror-aliased)
+    (5, 0): 'Plant',          # gfx 0xba, n=10 == 10
+    (5, 1): 'Spider',         # gfx 0xc3, n=10 == 10
+    (7, 1): 'Cloaker',        # gfx 0xb9, Amiga n=1 vs DOS n=2
+    (9, 0): 'Merman',         # gfx 0xc4, n=10 == 10
+    (9, 1): 'Squid',          # gfx 0xbf, n=10 == 10
+    (11, 1): 'Spirit',        # gfx 0xc6, n=4 == 4
+    (12, 0): 'Skeleton Lord',  # gfx 0xb4, n=10 == 10
 }
 
 LABELS = 'ABCDEFGH'
@@ -235,7 +298,7 @@ def main():
     if possessor_ids != EXPECTED_POSSESSOR_IDS:
         print(f'  WARNING: expected Possessor movement-type on gfx '
               f'{sorted(hex(g) for g in EXPECTED_POSSESSOR_IDS)} only, '
-              f'found {sorted(hex(g) for g in possessor_ids)} — Possessor Demon naming may be stale')
+              f'found {sorted(hex(g) for g in possessor_ids)} — Possessor/Possessor Body naming may be stale')
 
     groups = []
     idx = 0
@@ -304,19 +367,29 @@ def main():
         "trailing 3 x 12 pair-blocks track each cluster's per-tier width/height and whose "
         "third block is all-zero exactly on bcdfl, whose third ID (0xbd) owns no monster "
         "record. "
-        "Names — resolved against the official Black Crypt Manual & Clue Book plus "
-        "bcdfu's ending epilogue, via the map<->dungeon-level mapping in "
+        "Names — 11 clusters resolved against the official Black Crypt Manual & Clue Book "
+        "plus bcdfu's ending epilogue, via the map<->dungeon-level mapping in "
         "docs/blackcrypt/amiga/data-structure.md: Two Head/the Ogre (carries the game's "
         "only EMERALD KEY, which the epilogue says is taken from 'THE OGRE'), Rock Eye, "
-        "Dragonlich (summoned by the 3 Idols of Temin on level 10), Possessor Demon "
-        "(level 14/15; only movement-type-5 record, carries the only SOUL KEY), Ram Demon "
-        "(only key-holder on level 17), Ram Lord (level 20; its 4 carried items are clue "
-        "book L20 note 2's list byte for byte), The Great Waterlord (level 23; RING OF "
-        "LOCATION + key), Medusa (only unique monster on level 24), Statue (gfx 0xbd is "
-        "the Statue structure gfxNumber, not a creature) and Estoroth Paingiver (level "
-        "28 final boss). No per-graphics-ID creature name table exists anywhere in "
-        "bcdft/bcdft-S2/bcdfs — the remaining clusters are geometry-only placeholders "
-        "('Map N Creature X') carrying their confirmed graphics ID and dungeon levels."
+        "Dragonlich (summoned by the 3 Idols of Temin on level 10), Possessor / Possessor "
+        "Body (level 14/15; only movement-type-5 record is on Possessor Body, which "
+        "carries the only SOUL KEY), Ram Demon (only key-holder on level 17), Ram Lord "
+        "(level 20; its 4 carried items are clue book L20 note 2's list byte for byte), "
+        "The Great Waterlord (level 23; RING OF LOCATION + key), Medusa (only unique "
+        "monster on level 24), Statue (gfx 0xbd is the Statue structure gfxNumber, not a "
+        "creature) and Estoroth Paingiver (level 28 final boss). No per-graphics-ID "
+        "creature name table exists anywhere in bcdft/bcdft-S2/bcdfs itself (confirmed "
+        "negative), but DOS crypt.exe's own 26x180-byte creature table "
+        "(0x430898-0x431ae0, decoded during the DOS full-game-restoration planning pass) "
+        "shares the same gfxId space as the Amiga bcdfs monster record's +0x01 "
+        "monster-type byte (full-game-restoration-plan.md SS 0.4) and supplied real, "
+        "literal names for the other 15 clusters outright (Magnito, Green Guy, Maggot, "
+        "Druid Watcher, Ironhead, Slime, Big Glop, Little Glop, Plant, Spider, Cloaker, "
+        "Merman, Squid, Spirit, Skeleton Lord), while independently confirming (exact "
+        "frame-count match on 9/11) or correcting (the Possessor pair, which the earlier "
+        "thematic-only guess had backwards) the first 11. All 26 clusters / 204 sprites "
+        "now carry a real creature name; see data-structure.md, 'Creature names from DOS "
+        "crypt.exe's own creature table', for the per-cluster evidence."
     )
 
     out_path = bclib.asset_dir('data') / 'monster-names.json'
@@ -326,7 +399,7 @@ def main():
     real_named = sum(len(g['frames']) for g in named)
     print(f'  data/monster-names: {len(groups)} groups, {len(all_frames)} frames')
     print(f'  {real_named}/{len(all_frames)} frames carry a real creature name '
-          f'across {len(named)} clusters; the rest are geometry-clustered placeholders')
+          f'across {len(named)}/{len(groups)} clusters')
 
     bclib.set_groups_file('sprites/monsters', 'data/monster-names.json')
 
