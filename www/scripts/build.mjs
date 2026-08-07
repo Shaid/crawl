@@ -26,7 +26,17 @@ const OUT_SIDEBAR = join(OUT_DIR, 'sidebar.mjs');
 
 // --- 1. Copy assets ---------------------------------------------------------
 mkdirSync(join(root, 'public', 'assets'), { recursive: true });
-if (existsSync(ASSET_SRC)) {
+// Whether this run has the repo's own live, gitignored extracted assets
+// available (a real local dev checkout) as opposed to only the committed
+// CI-fallback mirror. Steps below that need something ASSET_SRC provides but
+// ASSET_DST's committed mirror doesn't -- like @seer/dungeon, a local
+// sibling-repo `file:` dependency that only resolves on a machine with
+// ../../seer checked out -- must gate on this, not on a committed file's
+// mere presence in ASSET_DST (which is always true once that file has ever
+// been committed as a CI fallback, defeating the "are we actually able to
+// regenerate this" check it was meant to be).
+const hasLiveAssetSrc = existsSync(ASSET_SRC);
+if (hasLiveAssetSrc) {
 	rmSync(ASSET_DST, { recursive: true, force: true });
 	cpSync(ASSET_SRC, ASSET_DST, { recursive: true });
 	console.log(`Copied assets: ${ASSET_SRC} -> ${ASSET_DST}`);
@@ -66,7 +76,15 @@ const dungeonDataDir = join(ASSET_DST, 'amiga', 'dungeon');
 // and art actually have (e.g. bcdfy has no plaque/alcove art at all).
 const hasViewManifest = (name) =>
 	existsSync(join(textureDir, `dungeon-${name}-views.json`));
-if (existsSync(join(dungeonDataDir, 'levels.json'))) {
+// Regeneration needs @seer/dungeon (a local sibling-repo `file:` dependency,
+// see hasLiveAssetSrc's comment above) -- only ever attempt it on a real
+// local dev checkout, never just because dungeon/levels.json exists in
+// ASSET_DST (it's committed there as the CI fallback's own source data, so
+// its presence alone says nothing about whether @seer/dungeon is resolvable
+// here). This is exactly the false-positive that broke CI: levels.json is
+// committed for the *fallback* branch to read, not as a "please regenerate"
+// signal.
+if (hasLiveAssetSrc && existsSync(join(dungeonDataDir, 'levels.json'))) {
 	const dungeonViewsResult = spawnSync(
 		'node',
 		[join(root, 'scripts', 'render_dungeon_views.ts'), textureDir],
