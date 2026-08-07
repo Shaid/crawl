@@ -93,6 +93,20 @@ const CLICK_CHAINS: Record<string, string[]> =
 				[frameKey(30)]: [frameKey(30), frameKey(31)], // BACKPACK
 				[frameKey(32)]: [frameKey(32), frameKey(33)], // HOLDING BAG
 				[frameKey(129)]: [frameKey(129), frameKey(130)], // COFFER
+				// The 3 named Gauntlets and 3 named Bracers are each followed, in the
+				// bank, by 2 unnamed single-glove/single-bracer icons -- the crossed
+				// pair split into its two halves. Same three-state click-to-cycle
+				// treatment as the water skin (latches on the second single instead
+				// of looping back to the pair -- confirmed by eye: item080/083/086
+				// are crossed dual-glove icons, 081-082/084-085/087-088 are single
+				// gloves; 089/092/095 are crossed dual-bracer icons, 090-091/093-094/
+				// 096-097 are single bracers).
+				[frameKey(80)]: [frameKey(80), frameKey(81), frameKey(82)], // GAUNTLETS OF DEXTERITY
+				[frameKey(83)]: [frameKey(83), frameKey(84), frameKey(85)], // GAUNTLETS OF THE TITANS
+				[frameKey(86)]: [frameKey(86), frameKey(87), frameKey(88)], // GAUNTLETS OF TEMIN
+				[frameKey(89)]: [frameKey(89), frameKey(90), frameKey(91)], // BRACERS OF PROTECTION
+				[frameKey(92)]: [frameKey(92), frameKey(93), frameKey(94)], // BRACERS OF MIGHT
+				[frameKey(95)]: [frameKey(95), frameKey(96), frameKey(97)], // BRACERS OF AGILITY
 			}
 		: {};
 
