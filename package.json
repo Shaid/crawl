@@ -15,12 +15,12 @@
     "extract-all": "npm run extract-data && python3 scripts/render_all.py && python3 scripts/extract_monsters.py && python3 scripts/extract_clipper.py"
   },
   "dependencies": {
-    "@seer/core": "file:../seer/packages/core",
-    "@seer/dungeon": "file:../seer/packages/dungeon",
-    "@seer/engine-2d": "file:../seer/packages/engine-2d",
-    "@seer/iff": "file:../seer/packages/iff",
-    "@seer/pipeline": "file:../seer/packages/pipeline",
-    "@seer/smus": "file:../seer/packages/smus",
+    "@seer-project/core": "file:../seer/packages/core",
+    "@seer-project/dungeon": "file:../seer/packages/dungeon",
+    "@seer-project/engine-2d": "file:../seer/packages/engine-2d",
+    "@seer-project/iff": "file:../seer/packages/iff",
+    "@seer-project/pipeline": "file:../seer/packages/pipeline",
+    "@seer-project/smus": "file:../seer/packages/smus",
     "pixi.js": "^8.9.0",
     "pngjs": "^7.0.0"
   },

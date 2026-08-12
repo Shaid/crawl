@@ -2,7 +2,7 @@
 // Dungeon Textures page, replacing the illustrative hand-composited mockups
 // the old generate_tileset_views.mjs produced.
 //
-// This imports @seer/dungeon directly and runs the *same* pipeline
+// This imports @seer-project/dungeon directly and runs the *same* pipeline
 // tools/walker/ uses in the browser: buildViewList -> compositeDrawList
 // against the real exported dungeon/{levels,slots,semantics}.json. Every
 // pixel here is exactly what the walker harness would render for the same
@@ -40,7 +40,7 @@ import {
   indexedTilesetPaths,
   type PieceBankLookup,
   type RGBAColor,
-} from '@seer/dungeon';
+} from '@seer-project/dungeon';
 import {
   validateDungeonLevelFile,
   validateSlotTableFile,
@@ -49,8 +49,8 @@ import {
   type SlotTableFile,
   type LevelUnit,
   type Dir4,
-} from '@seer/dungeon/schema';
-import type { AtlasMeta } from '@seer/core';
+} from '@seer-project/dungeon/schema';
+import type { AtlasMeta } from '@seer-project/core';
 
 const textureDir = process.argv[2];
 if (!textureDir) throw new Error('Missing texture directory');

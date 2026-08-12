@@ -11,7 +11,7 @@ the party movement state machine (`docs/blackcrypt/amiga/data-structure.md`,
 `+0x0382A`) -- both read the exact same 4 bits this file describes, and
 agree.
 
-`buildViewList` and `canStep` (in `@seer/dungeon`) don't yet *consume*
+`buildViewList` and `canStep` (in `@seer-project/dungeon`) don't yet *consume*
 `walls`/`features` for Black Crypt's plain wall geometry -- both accept
 `semantics` per the walker plan's documented signature but only need the
 `wallAt()` boolean itself (see their own doc comments). This file exists so

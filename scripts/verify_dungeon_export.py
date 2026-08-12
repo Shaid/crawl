@@ -4,7 +4,7 @@
 Three checks, all against real generated data (run the exporters first):
 
 1. **Schema validation.** Shells out to a small Node/`tsx` snippet that
-   imports `@seer/dungeon/schema`'s real `validateDungeonLevelFile` /
+   imports `@seer-project/dungeon/schema`'s real `validateDungeonLevelFile` /
    `validateSlotTableFile` and runs them against the generated JSON --
    the actual runtime validator, not a hand-ported reimplementation of its
    rules.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export Black Crypt's 13 `bcdfs` maps as a `@seer/dungeon` `DungeonLevelFile`.
+"""Export Black Crypt's 13 `bcdfs` maps as a `@seer-project/dungeon` `DungeonLevelFile`.
 
 Output: `public/assets/blackcrypt/amiga/dungeon/levels.json`, conforming to
 `/home/ctemplet/Development/seer/packages/dungeon/src/schema/level.ts`
@@ -222,7 +222,7 @@ def main():
         'units': units,
         'entities': all_entities,
         # Names the per-cell plane holding a cell's same-square entity-chain
-        # head slot (0 = none) -- see `@seer/dungeon`'s
+        # head slot (0 = none) -- see `@seer-project/dungeon`'s
         # `DungeonLevelFile.entityHandlePlane` doc comment. Lets
         # `CellQuery.entitiesAt(x, y)` walk the chain generically instead of
         # a consumer re-deriving the "objectHandle" plane name/convention.

@@ -82,7 +82,7 @@ def write_indexed_png(path, indices, palette_rgb, transparent_index=None):
     transparency comes from a *separate* mask plane instead --
     see `write_indexed_png_mask`).
 
-    Mirrors `@seer/pipeline`'s `writeIndexedPNG` (`packages/pipeline/src/
+    Mirrors `@seer-project/pipeline`'s `writeIndexedPNG` (`packages/pipeline/src/
     io.ts`) for the Python side of the pipeline, which had no equivalent
     before this.
     """

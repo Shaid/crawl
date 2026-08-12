@@ -1,4 +1,4 @@
-import type { AtlasFrame, AtlasMeta } from '@seer/core';
+import type { AtlasFrame, AtlasMeta } from '@seer-project/core';
 
 export type { AtlasFrame, AtlasMeta };
 

@@ -7,7 +7,7 @@
  * levels 12-13, which serve `bcdfx` under ramp 3 rather than ramp 0).
  *
  * Movement/collision/automap (M3) are unchanged; `Walker` (the M4 facade in
- * `@seer/dungeon`) now owns pose + the last-built view + entity patches +
+ * `@seer-project/dungeon`) now owns pose + the last-built view + entity patches +
  * the animation clock in place of this harness manually driving
  * `WalkerController`/`buildViewList`/`compositeDrawList` itself.
  */
@@ -32,7 +32,7 @@ import {
   type RampPaletteFile,
   type Pose,
   type Dir4,
-} from '@seer/dungeon';
+} from '@seer-project/dungeon';
 import {
   validateSlotTableFile,
   validateDungeonLevelFile,
@@ -43,9 +43,9 @@ import {
   type DungeonLevelFile,
   type BindingsFile,
   type SlotTableFile,
-} from '@seer/dungeon/schema';
-import { KeyState } from '@seer/engine-2d/input';
-import type { AtlasMeta } from '@seer/core';
+} from '@seer-project/dungeon/schema';
+import { KeyState } from '@seer-project/engine-2d/input';
+import type { AtlasMeta } from '@seer-project/core';
 import { getAssetBasePath } from '../shared/viewer-config.ts';
 
 const statusEl = document.getElementById('status')!;
