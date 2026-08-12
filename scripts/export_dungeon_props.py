@@ -76,16 +76,32 @@ reach.
 
 ## Floor plate / trap (kind 4/12, type 0x1E, `+0x21732`)
 
-Renders the *same* single descriptor at up to 13 ("near", depth-local==0,
-i.e. caller depth==1) or 11 ("far", depth-local!=0) fixed grid positions --
-byte-pair (not word-pair) `(x, y)` tables at `+0x21788` (near, direct),
-`+0x217A2` (near, `$48F(A5)` mirrored), `+0x217BC` (far, unconditional -- the
-far case does *not* consult the mirror flag, confirmed in the disassembly).
-`pressed` (word arg, `1 - word+0x08` of the structure record) selects between
-two descriptor pools per distance: `+0x217D2`/`+0x217EE` (near,
+Renders the *same* single descriptor at up to 13 ("near", caller depth==1)
+or 11 ("far", caller depth==2) fixed grid positions -- byte-pair (not
+word-pair) `(x, y)` tables at `+0x21788` (near, direct), `+0x217A2` (near,
+`$48F(A5)` mirrored), `+0x217BC` (far, unconditional -- the far case does
+*not* consult the mirror flag, confirmed in the disassembly). `pressed`
+(word arg, `1 - word+0x08` of the structure record) selects between two
+descriptor pools per distance: `+0x217D2`/`+0x217EE` (near,
 unpressed/pressed) and `+0x2180A`/`+0x21826` (far, unpressed/pressed).
 
-**Art source resolved this pass (`blackcrypt-floorplate-art-source`).**
+**`blackcrypt-floorplate-placement-wiring` -- resolved this pass.** Tracing
+the renderer end to end (`+0x21732` plus its caller, the kind-4/12 type-0x1E
+case at `+0x248E`) shows there is **no per-plate sub-position selection at
+all**: the loop stamps the same descriptor at *every* entry of the grid
+(`MOVEQ #$C,D2 / MOVE.B (A3)+,D0 / MOVE.B (A3)+,D1 / BSR 0x24C6E / DBRA`),
+13 near / 11 far. The earlier "which of the 13/11 does a plate's on-square
+N/E/S/W position resolve to" framing was wrong -- the on-square position
+nibble plays no role. Caller gates: `lateral == 0` (center column only),
+`!BTST #1, +0x0B`, and either `depth == 1` with `word +0x0E == 0` and
+`byte +0x07 == 0` (near plate) or `depth == 2` with the same two field
+checks (far plate); `depth == 0`/`>= 3` render nothing, and the
+`word +0x0E == 1` trap variant is an effect-`0x59` marker, not a sprite.
+This script now emits a `FloorPlatePlacement` table (`schema/slots.ts`)
+into `slots.json` (bank `ui-panel`, up/down frame names, the 13/11
+positions) and `buildViewList` reproduces the gates + grid stamping.
+
+**Art source resolved (`blackcrypt-floorplate-art-source`).**
 Graphics-kernel slot `$00` is `bcdfa`'s own RLE stream at file offset 0 --
 the "Adventure Screen" UI panel bank (`data-structure.md` "bcdfa -- UI Panel
 Bank"), already extracted as `sprites/ui-panel.json`. Its own record table
@@ -190,6 +206,7 @@ DECOR_BANK_ID = 'wall-decorations'
 DECOR_BANK = {'id': DECOR_BANK_ID, 'atlas': 'sprites/wall-decorations.json', 'image': 'sprites/wall-decorations.png'}
 FLOORITEM_BANK_ID = 'dungeon-floor-items'
 FLOORITEM_BANK = {'id': FLOORITEM_BANK_ID, 'atlas': 'sprites/floor-items.json', 'image': 'sprites/floor-items.png'}
+UI_PANEL_BANK = {'id': UI_PANEL_BANK_ID, 'atlas': 'sprites/ui-panel.json', 'image': 'sprites/ui-panel.png'}
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +589,7 @@ def read_floor_item_tables(s1):
 # slots.json emission
 # ---------------------------------------------------------------------------
 
-#: `@seer/dungeon`'s `schema/slots.ts` `FrameTemplate` shape -- door-lock's
+#: `@seer-project/dungeon`'s `schema/slots.ts` `FrameTemplate` shape -- door-lock's
 #: art is per-map (`sprites/wall-decorations.json`, frame
 #: `m{mapId}_decor{gfxIndex}_{near|mid|far}`), so its slot frame can't be a
 #: literal string the way alcove/plaque/stairs/door-switch's are.
@@ -667,7 +684,7 @@ def build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_po
 
 
 def build_floor_item_placement(floor_item):
-    """`@seer/dungeon`'s `FloorItemPlacement` shape (`schema/slots.ts`) --
+    """`@seer-project/dungeon`'s `FloorItemPlacement` shape (`schema/slots.ts`) --
     the runtime table `buildViewList`'s `resolveFloorItem` reads directly,
     merged into `slots.json` itself (not just `props.json`) since it's
     consumed at render time, unlike the rest of `props.json`'s
@@ -683,6 +700,26 @@ def build_floor_item_placement(floor_item):
         'noneGroup': gfx_table['none'],
         'anchor': anchor,
         'registration': registration,
+    }
+
+
+def build_floor_plate_placement(floor_plate):
+    """`@seer-project/dungeon`'s `FloorPlatePlacement` shape (`schema/slots.ts`)
+    -- the runtime table `buildViewList`'s floor-plate handling reads
+    directly, merged into `slots.json` itself (consumed at render time).
+    `blackcrypt-floorplate-placement-wiring` (docs/blackcrypt/TODO.md):
+    the game stamps the *same* descriptor at every entry of the 13-near /
+    11-far grid (no per-plate sub-position selection), and the walker
+    renders the `$48F == 0` direct near table, so only the direct near
+    positions are emitted (the mirrored near table stays in `props.json`
+    for verification)."""
+    descs = floor_plate['descriptors']
+    return {
+        'bank': UI_PANEL_BANK_ID,
+        'near': {'up': descs['near-unpressed']['frame'], 'down': descs['near-pressed']['frame']},
+        'far': {'up': descs['far-unpressed']['frame'], 'down': descs['far-pressed']['frame']},
+        'nearPositions': [list(p) for p in floor_plate['nearPositionsDirect']],
+        'farPositions': [list(p) for p in floor_plate['farPositions']],
     }
 
 
@@ -717,11 +754,11 @@ def build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item):
                     'entity gfxNumber and the level unit id.',
         },
         'floorPlate': {
-            'note': 'Geometry confirmed; art source resolved this pass -- bcdfa UI panel '
-                    'bank (sprites/ui-panel.json), frames pressure_plate_{1,2}_{up,down}. '
-                    'Not yet wired into buildViewList (the 13-near/11-far fixed sub-tile '
-                    'grid positions need their own placement-index derivation, beyond this '
-                    'pass\'s scope) -- see docs/blackcrypt/TODO.md blackcrypt-floorplate-art-source.',
+            'note': 'Wired into buildViewList this pass (blackcrypt-floorplate-placement-'
+                    'wiring): the renderer +0x21732 stamps the same descriptor at every entry '
+                    'of the fixed 13-near/11-far grid -- no per-plate sub-position selection. '
+                    'Art is the bcdfa UI panel bank (sprites/ui-panel.json), frames '
+                    'pressure_plate_{1,2}_{up,down}.',
             'bank': UI_PANEL_BANK_ID,
             **floor_plate,
         },
@@ -739,7 +776,8 @@ def build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item):
     }
 
 
-def merge_slots(existing_path, new_slots, extra_banks, floor_item_placement=None):
+def merge_slots(existing_path, new_slots, extra_banks, floor_item_placement=None,
+                floor_plate_placement=None):
     doc = json.loads(existing_path.read_text()) if existing_path.exists() else None
     if doc is None:
         raise SystemExit(f'{existing_path} does not exist -- run export_dungeon_slots.py first')
@@ -753,6 +791,8 @@ def merge_slots(existing_path, new_slots, extra_banks, floor_item_placement=None
             known_ids.add(bank['id'])
     if floor_item_placement is not None:
         doc['floorItem'] = floor_item_placement
+    if floor_plate_placement is not None:
+        doc['floorPlate'] = floor_plate_placement
     return doc, before, after
 
 
@@ -782,16 +822,20 @@ def main():
     floor_item = read_floor_item_tables(s1)
 
     floor_item_placement = build_floor_item_placement(floor_item)
+    floor_plate_placement = build_floor_plate_placement(floor_plate)
 
     new_slots = build_prop_slots(alcove, plaque, stairs_pos, door_switch_pos, door_switch_pool, door_lock_pos)
     doc, before, after = merge_slots(
-        SLOTS_PATH, new_slots, extra_banks=[DECOR_BANK, FLOORITEM_BANK],
+        SLOTS_PATH, new_slots, extra_banks=[DECOR_BANK, FLOORITEM_BANK, UI_PANEL_BANK],
         floor_item_placement=floor_item_placement,
+        floor_plate_placement=floor_plate_placement,
     )
     paths.write_json(SLOTS_PATH, doc, pretty=True)
     print(f'\n  slots.json: {before} -> {after} slots ({after - before} new prop slots merged in), '
           f'floorItem placement table written ({len(floor_item_placement["anchor"])} anchor, '
-          f'{len(floor_item_placement["registration"])} registration entries)')
+          f'{len(floor_item_placement["registration"])} registration entries), '
+          f'floorPlate placement table written ({len(floor_plate_placement["nearPositions"])} '
+          f'near + {len(floor_plate_placement["farPositions"])} far positions)')
 
     props_doc = build_props_file(door_lock_pool, door_lock_pos, floor_plate, floor_item)
     paths.write_json(PROPS_PATH, props_doc, pretty=True)

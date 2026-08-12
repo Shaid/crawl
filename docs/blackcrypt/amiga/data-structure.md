@@ -10005,8 +10005,8 @@ the longest chain) is never indexed by this local-depth range, structurally
 the same "table sized bigger than what's reachable" pattern as `kind==3`.
 
 **Floor plate / trap (`0x1E`)** — the *same* single 28-byte descriptor
-redrawn at up to 13 ("near", local depth 0) or 11 ("far", depth≠0) fixed
-grid positions: **unsigned-byte** (not signed — 3 near-table values read
+redrawn at up to 13 ("near", caller depth 1) or 11 ("far", caller depth 2)
+fixed grid positions: **unsigned-byte** (not signed — 3 near-table values read
 negative as `i8`, e.g. `-128/-123/-114`, and land exactly at plausible
 in-viewport `u8` values `128/133/142`) `(x, y)` pairs at `+0x21788` (near,
 direct), `+0x217A2` (near, `$48F(A5)`-mirrored — confirmed, the code
@@ -10015,10 +10015,12 @@ the far case always draws the same table regardless of facing, a genuine
 asymmetry with the near case). `pressed` selects between two descriptor
 pools per distance (`+0x217D2`/`+0x217EE` near, `+0x2180A`/`+0x21826` far).
 **4/4 descriptor invariants pass and all 13+13+11 positions land inside the
-208×140 viewport** — but the descriptors' `slot` field resolves to
-graphics-kernel slot `$00`, already flagged in "Still open" above as a
-third, unidentified pixel buffer. Geometry confirmed; **no art**, so no
-slot is emitted (`blackcrypt-floorplate-art-source` below).
+208×140 viewport**; slot `$00` is now identified as `bcdfa`'s UI panel bank
+(`blackcrypt-floorplate-art-source` below), and the whole class is wired
+into `buildViewList` via a `FloorPlatePlacement` table
+(`blackcrypt-floorplate-placement-wiring` below) — the renderer stamps the
+same descriptor at **every** grid position, so there is no per-plate
+sub-position selection to derive.
 
 **Floor-item placement** (the generic kind-8/9/0-3-default renderer,
 `+0x218FA`/`+0x21C84`) needs three more tables beyond the already-extracted
@@ -10158,16 +10160,46 @@ Compositing" → "Still open" (the "Which container fills graphics-kernel slot
 `bcdfa`'s own UI panel bank, and its 4 `Pressure Plate 1/2 Up/Down` records
 (already extracted, already 100.000%-matched against DOS) are byte-exactly
 the floor-plate renderer's 4 descriptors. `scripts/export_dungeon_props.py`'s
-`read_floorplate` now resolves and cross-checks all 4 frame names. Not fully
-wired into `buildViewList` — see `blackcrypt-floorplate-placement-wiring`
-below for the one remaining gap (the 13-near/11-far sub-tile position-index
-formula).
+`read_floorplate` now resolves and cross-checks all 4 frame names.
+
+**`blackcrypt-floorplate-placement-wiring` — resolved this pass.** The
+renderer `+0x21732` (with its caller, the kind-4/12 type-0x1E case at
+`+0x248E`) turned out to invalidate the open item's own premise: it **stamps
+the same descriptor at every entry of the fixed grid** — `MOVEQ #$C,D2` /
+`MOVE.B (A3)+,D0` / `MOVE.B (A3)+,D1` / `BSR 0x24C6E` / `DBRA`, 13 near /
+11 far — so there is *no per-plate sub-position selection* and nothing to
+derive. Caller gates, re-traced: `lateral == 0` (`TST.W D4 / BNE`), `!BTST
+#1,$0B`, and (`depth == 1` → near grid, `depth == 2` → far grid) with `word
++0x0E == 0` and `byte +0x07 == 0`; `depth == 0` / `>= 3` never reach the
+renderer, and the `word +0x0E == 1` trap is the runtime effect-`0x59`
+marker at `+0x02548`, not a sprite. `word +0x08 == 0` selects the unpressed
+(`*_up`) frame, anything else the `*_down` frame. The walker renders the
+`$48F == 0` direct near table (`+0x21788`), the same mirror-flag default
+simplification as the wall rows; the far table (`+0x217BC`) ignores `$48F`
+entirely. `export_dungeon_props.py`'s `build_floor_plate_placement` emits a
+`FloorPlatePlacement` table (`schema/slots.ts`) into `slots.json` (bank
+`ui-panel`, up/down frames, the 13/11 positions) and `buildViewList`'s
+`resolveFloorPlate` reproduces gates + grid stamping
+(`propType: 'floor-plate'`). Verified: `props.test.ts`'s two new cases use
+the real map-1 renderable plate (row 10 col 25 — the only unit-1 plate with
+`byte +0x07 == 0`; the other six are the "inviso" variant) and assert
+exactly 13/11 items at byte-equal positions, the real `pressure_plate_*`
+frames against the real `ui-panel` atlas, a clean composite, and the three
+negative gates (lateral `!= 0`, depth 0, depth 3). All **7** M5 prop classes
+(alcove, plaque, stairs, door-switch, door-lock, floor-item, floor-plate)
+are now wired. (One pre-existing renderer caveat, shared with floor-item and
+door-lock: these prop atlases are loaded via `fromRGBA`, whose local
+palette indices don't align with the tileset's indexed EHB space, so the
+single-palette walker presenter maps their exact colours through the wrong
+entries — frame/mask/geometry/placement are exact, colours are not, until
+the banks get an indexed export.)
 
 ##### Still open (M5)
 
-| Item | Best current result |
-|---|---|
-| Floor-plate/trap placement wiring (`blackcrypt-floorplate-placement-wiring`) | Geometry (13/13/11 grid positions, 4/4 descriptor invariants) and art (`pressure_plate_{1,2}_{up,down}`, `sprites/ui-panel.json`) are both confirmed. Not wired into `buildViewList`: which of the 13 ("near") or 11 ("far") fixed sub-tile grid positions a given floor-plate entity's on-square position resolves to wasn't derived this pass — lowest-priority remaining M5 gap |
+None — all seven M5 prop classes are wired and tested. Remaining
+walker-side work is outside M5: the actors layer and M6
+(Wizardry 6 generalisation + porting guide), both tracked in
+`walker-plan.md`.
 
 ---
 

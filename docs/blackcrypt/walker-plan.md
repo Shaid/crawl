@@ -16,6 +16,16 @@ real game reimplementation — not just a viewer.
   *undocumented* and blocks its M2. Black Crypt's equivalent is fully solved:
   index formulas, gating conditions and exact destination coordinates for every
   wall/ceiling/floor piece are already numeric in the docs.
+  > **Update (2026-08-12):** W6 has since blown past §10.1 on its own side —
+  > the W6 project (formerly `~/Development/sorcery`, now merged into this
+  > repo under `docs/wizardry6/` + `tools/wizardry6/`) reached an M1-equivalent
+  > static-corridor render and a cell-driven walkable first-person view with
+  > collision (`evaluate-cell.ts`/`render-corridor-frame.ts`/`render-walk-sequence.ts`),
+  > and exports all 14 levels as `DungeonLevelFile`s. What remains for M6 is
+  > wiring that W6 render through the actual `@seer-project/dungeon` package
+  > (general per-cell slot-key scheme from `CODE+0x9b58`'s baseIndex arguments,
+  > a true-indexed `mazedata.ega` atlas export, `AutomapRenderer.tileForCell`
+  > de-BC'd) — tracked as `dungeon-walker-m6-wiring` in `docs/wizardry6/TODO.md`.
 - **Black Crypt exercises more of the generic surface.** Sub-levels inside a load
   unit, sparse row storage, entity-handle object records, a priority-based display
   list, per-frame click hotspots and multiple palette ramps per tileset are all
@@ -432,8 +442,8 @@ The package must be portable by someone else without reading its source.
 | **M2** | ~~Exporters C1–C3; `CellQuery`, `FlatGridLevel`, `Pose`, `buildViewList`~~ **DONE** — `scripts/export_dungeon_levels.py`/`export_dungeon_slots.py`/`export_dungeon_tileset_indexed.py`; `@seer/dungeon`'s `model/{CellQuery,FlatGridLevel,Pose,Direction}.ts`, `view/{ViewSpec,DrawItem,buildViewList}.ts`, `raster/composite.ts`'s `compositeDrawList` | A pose renders consistently with `automap_tiles.py`'s ASCII map for the same cell (confirmed: 3 real poses' `buildViewList` item counts — 3, 3, 1 — match hand-derived expectations from the same `wallFlags` bits automap itself reads); a sweep over 13 maps × 50 sampled cells × 4 facings (2,600 poses, `packages/dungeon/src/__tests__/sweep.test.ts`) gives zero exceptions, zero out-of-atlas frame refs, zero out-of-surface writes |
 | **M3** | ~~Movement, collision, bindings, automap~~ **DONE** — `schema/bindings.ts` (positional defaults), `input/WalkerController.ts`, `model/collision.ts` (edge-checked, fail-closed), `automap/{AutomapState,AutomapRenderer}.ts`, `debug/Minimap.ts` | A circuit of a corridor returns to the start pose (confirmed: a real 4-cell open loop found in map 1, walked, returns to the exact starting pose); no pose crosses a cell the automap shows as walled; automap cone matches the view (screenshotted); rebinding works from config |
 | **M4** | ~~Interaction + animation~~ **DONE** — `view/Hotspot.ts`/`view/order.ts` (picking and painting share one order, can't drift), `model/{EntityState,PatchedCellQuery}.ts` (door state patching, no policy opinion), `raster/anim.ts` (real `fire-animation.json` data, `phase:'cell'` deterministic seeding), presenters now pick the current level's own accent ramp, `src/Walker.ts` facade | Clicking an alcove/plaque/switch fires `onInteract` with the right code (confirmed); levels 12/13 render with ramp 3 (confirmed different colours from ramp 0, live in the browser); torches animate without a 60 Hz full redraw |
-| **M5** | Props: **6 of 7 classes DONE** (alcove, plaque, stairs, door-switch, door-lock, floor-item — wired into `slots.json`/`buildViewList`; alcove/plaque/stairs' 8 angled-view descriptors now included via `srcX`/`srcW` crops). Only floor-plate/trap is undrawn — its art is identified (`sprites/ui-panel.json`'s Pressure Plate frames) but the per-square sub-tile position-index formula isn't derived yet (`blackcrypt-floorplate-placement-wiring` in `TODO.md`, lowest priority). `walker-front-wall-handedness` (front row was drawn in the wrong mirror state relative to the side walls) is **fixed**, M1's golden framebuffer regenerated and visually re-confirmed. `walker-mirror-flag-polarity` is **resolved** (the `$48F` flag does not correspond to bit-29 in general — demonstrated, not just hypothesised; simulating it fully is deferred, needs action-chain schema modelling). Actors layer not started | Doors, stairs, pillars, pits, alcoves, plaques, buttons appear at correct positions |
-| **M6** | Generalise to Wizardry 6; porting guide | W6 renders with **zero Black-Crypt-specific paths** in the package (grep `blackcrypt`, `bcdf`, `wallFlags`, `0x1000` outside `__tests__/`); BC golden tests still pass |
+| **M5** | ~~Props: 6 of 7 classes~~ **DONE — all 7 classes wired** (alcove, plaque, stairs, door-switch, door-lock, floor-item, floor-plate). Floor-plate closed this pass (`blackcrypt-floorplate-placement-wiring`): the renderer `+0x21732` stamps the same descriptor at *every* entry of the fixed 13-near/11-far grid — there is no per-plate sub-position selection, the old "which index" framing was wrong; art is `sprites/ui-panel.json`'s `pressure_plate_{1,2}_{up,down}` (`blackcrypt-floorplate-art-source`). Actors layer not started | Doors, stairs, pillars, pits, alcoves, plaques, buttons appear at correct positions |
+| **M6** | Generalise to Wizardry 6; porting guide — **in progress, and the W6 project now lives in this repo** | W6 renders with **zero Black-Crypt-specific paths** in the package (grep `blackcrypt`, `bcdf`, `wallFlags`, `0x1000` outside `__tests__/`); BC golden tests still pass |
 
 ---
 
