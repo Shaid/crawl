@@ -2,6 +2,12 @@
 A [Seer](https://github.com/Shaid/seer) project for reverse-engineering
 Black Crypt (blackcrypt) data files into a browser-playable implementation.
 
+Also home to the **Wizardry 6** project (formerly `~/Development/sorcery`,
+merged in 2026-08-12): its research lives under `docs/wizardry6/`, its
+extractors under `tools/wizardry6/`, and its data under
+`data/wizardry6/` / `public/assets/wizardry6/`. Both games drive the shared
+`@seer-project/dungeon` walker (in `~/Development/seer/`).
+
 ## Getting started
 
 ```bash

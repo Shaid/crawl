@@ -1,0 +1,502 @@
+INFO: Fallback to null
+        ╎   ;-- section.ROM_00:
+        ╎   0x00008000      ad1042         lda 0x4210                  ; [00] -r-x section size 32768 named ROM_00
+        ╎   0x00008003      9c0042         stz 0x4200
+        ╎   0x00008006      78             sei
+        ╎   0x00008007      d8             cld
+        ╎   0x00008008      a98f8d         lda #0x8d8f
+        ╎   0x0000800b      0021           brk 0x21
+        ╎   0x0000800d      18             clc
+        ╎   0x0000800e      fb             xce
+        ╎   0x0000800f      a9018d         lda #0x8d01
+        ╎   0x00008012      0d425c         ora 0x5c42
+        ╎   0x00008015      18             clc
+        └─< 0x00008016      8080           bra 0x007f98
+            0x00008018      c230           rep #0x30
+            0x0000801a      a20000         ldx #0x0000
+        ┌─> 0x0000801d      7400           stz 0x00,x
+        ╎   0x0000801f      e8             inx
+        ╎   0x00008020      e8             inx
+        ╎   0x00008021      e0f01f         cpx #0x1ff0
+        └─< 0x00008024      d0f7           bne 0x00801d
+            0x00008026      a9ef1f         lda #0x1fef
+            0x00008029      1b             tas
+            0x0000802a      a90021         lda #0x2100
+            0x0000802d      5b             tad
+            0x0000802e      e220           sep #0x20
+            0x00008030      a98f           lda #0x8f
+            0x00008032      8500           sta 0x00
+            0x00008034      a900           lda #0x00
+            0x00008036      8501           sta 0x01
+            0x00008038      6402           stz 0x02
+            0x0000803a      a980           lda #0x80
+            0x0000803c      8503           sta 0x03
+            0x0000803e      a909           lda #0x09
+            0x00008040      8505           sta 0x05
+            0x00008042      6406           stz 0x06
+            0x00008044      a974           lda #0x74
+            0x00008046      8507           sta 0x07
+            0x00008048      a978           lda #0x78
+            0x0000804a      8508           sta 0x08
+            0x0000804c      a97c           lda #0x7c
+            0x0000804e      8509           sta 0x09
+            0x00008050      640a           stz 0x0a
+            0x00008052      a924           lda #0x24
+            0x00008054      850b           sta 0x0b
+            0x00008056      a906           lda #0x06
+            0x00008058      850c           sta 0x0c
+            0x0000805a      640d           stz 0x0d
+            0x0000805c      640d           stz 0x0d
+            0x0000805e      640e           stz 0x0e
+            0x00008060      640e           stz 0x0e
+            0x00008062      640f           stz 0x0f
+            0x00008064      640f           stz 0x0f
+            0x00008066      6410           stz 0x10
+            0x00008068      6410           stz 0x10
+            0x0000806a      6411           stz 0x11
+            0x0000806c      6411           stz 0x11
+            0x0000806e      6412           stz 0x12
+            0x00008070      6412           stz 0x12
+            0x00008072      6413           stz 0x13
+            0x00008074      6413           stz 0x13
+            0x00008076      6414           stz 0x14
+            0x00008078      6414           stz 0x14
+            0x0000807a      a980           lda #0x80
+            0x0000807c      8515           sta 0x15
+            0x0000807e      641a           stz 0x1a
+            0x00008080      641b           stz 0x1b
+            0x00008082      a901           lda #0x01
+            0x00008084      851b           sta 0x1b
+            0x00008086      641c           stz 0x1c
+            0x00008088      641c           stz 0x1c
+            0x0000808a      641d           stz 0x1d
+            0x0000808c      641d           stz 0x1d
+            0x0000808e      641e           stz 0x1e
+            0x00008090      a901           lda #0x01
+            0x00008092      851e           sta 0x1e
+            0x00008094      641f           stz 0x1f
+            0x00008096      641f           stz 0x1f
+            0x00008098      6420           stz 0x20
+            0x0000809a      6420           stz 0x20
+            0x0000809c      6423           stz 0x23
+            0x0000809e      6424           stz 0x24
+            0x000080a0      6425           stz 0x25
+            0x000080a2      6426           stz 0x26
+            0x000080a4      6427           stz 0x27
+            0x000080a6      6428           stz 0x28
+            0x000080a8      6429           stz 0x29
+            0x000080aa      642a           stz 0x2a
+            0x000080ac      642b           stz 0x2b
+            0x000080ae      a900           lda #0x00
+            0x000080b0      852c           sta 0x2c
+            0x000080b2      852d           sta 0x2d
+            0x000080b4      642e           stz 0x2e
+            0x000080b6      642f           stz 0x2f
+            0x000080b8      6430           stz 0x30
+            0x000080ba      a997           lda #0x97
+            0x000080bc      8531           sta 0x31
+            0x000080be      a9e0           lda #0xe0
+            0x000080c0      8d2600         sta 0x0026
+            0x000080c3      8532           sta 0x32
+            0x000080c5      6433           stz 0x33
+            0x000080c7      9c0042         stz 0x4200
+            0x000080ca      a9ff           lda #0xff
+            0x000080cc      8d0142         sta 0x4201
+            0x000080cf      9c0742         stz 0x4207
+            0x000080d2      9c0842         stz 0x4208
+            0x000080d5      9c0942         stz 0x4209
+            0x000080d8      9c0a42         stz 0x420a
+            0x000080db      9c0b42         stz 0x420b
+            0x000080de      9c0c42         stz 0x420c
+            0x000080e1      c220           rep #0x20
+            0x000080e3      a90000         lda #0x0000
+            0x000080e6      5b             tad
+            0x000080e7      e220           sep #0x20
+            0x000080e9      22adf182       jsr 0x82f1ad
+            0x000080ed      a20001         ldx #0x0100
+            0x000080f0      a02d10         ldy #0x102d
+            0x000080f3      c220           rep #0x20
+            0x000080f5      207882         jsr 0x8278
+            0x000080f8      98             tya
+            0x000080f9      18             clc
+            0x000080fa      693000         adc #0x0030
+            0x000080fd      a8             tay
+            0x000080fe      e8             inx
+            0x000080ff      e8             inx
+            0x00008100      e8             inx
+            0x00008101      e8             inx
+            0x00008102      e01001         cpx #0x0110
+            0x00008105      d0ee           bne 0x0080f5
+            0x00008107      a21001         ldx #0x0110
+            0x0000810a      207882         jsr 0x8278
+            0x0000810d      98             tya
+            0x0000810e      18             clc
+            0x0000810f      693000         adc #0x0030
+            0x00008112      a8             tay
+            0x00008113      8a             txa
+            0x00008114      18             clc
+            0x00008115      692000         adc #0x0020
+            0x00008118      aa             tax
+            0x00008119      e05003         cpx #0x0350
+            0x0000811c      d0ec           bne 0x00810a
+            0x0000811e      a20001         ldx #0x0100
+            0x00008121      a92189         lda #0x8921
+            0x00008124      208f82         jsr 0x828f
+            0x00008127      a20401         ldx #0x0104
+            0x0000812a      a96ff7         lda #0xf76f
+            0x0000812d      208f82         jsr 0x828f
+            0x00008130      a20801         ldx #0x0108
+            0x00008133      a97f88         lda #0x887f
+            0x00008136      208f82         jsr 0x828f
+            0x00008139      a20c01         ldx #0x010c
+            0x0000813c      a949fd         lda #0xfd49
+            0x0000813f      208f82         jsr 0x828f
+            0x00008142      a21001         ldx #0x0110
+            0x00008145      a989f6         lda #0xf689
+            0x00008148      208f82         jsr 0x828f
+            0x0000814b      a23001         ldx #0x0130
+            0x0000814e      a9c4f6         lda #0xf6c4
+            0x00008151      208f82         jsr 0x828f
+            0x00008154      a25001         ldx #0x0150
+            0x00008157      a95df6         lda #0xf65d
+            0x0000815a      208f82         jsr 0x828f
+            0x0000815d      a27001         ldx #0x0170
+            0x00008160      a93df6         lda #0xf63d
+            0x00008163      208f82         jsr 0x828f
+            0x00008166      a29001         ldx #0x0190
+            0x00008169      a98ced         lda #0xed8c
+            0x0000816c      208f82         jsr 0x828f
+            0x0000816f      e220           sep #0x20
+            0x00008171      a901           lda #0x01
+            0x00008173      c901           cmp #0x01
+            0x00008175      f00d           beq 0x008184
+            0x00008177      c220           rep #0x20
+            0x00008179      a23003         ldx #0x0330
+            0x0000817c      a9b6fd         lda #0xfdb6
+            0x0000817f      208f82         jsr 0x828f
+            0x00008182      e220           sep #0x20
+            0x00008184      224a8a9e       jsr 0x9e8a4a
+            0x00008188      a981           lda #0x81
+            0x0000818a      8d0042         sta 0x4200
+            0x0000818d      80fe           bra 0x00818d
+            0x0000818f      5c938180       jmp 0x808193
+            0x00008193      e220           sep #0x20
+            0x00008195      ad1042         lda 0x4210
+            0x00008198      a901           lda #0x01
+            0x0000819a      8d0042         sta 0x4200
+            0x0000819d      c210           rep #0x10
+            0x0000819f      a2ef1f         ldx #0x1fef
+            0x000081a2      9a             txs
+            0x000081a3      a98f           lda #0x8f
+            0x000081a5      8d0021         sta 0x2100
+            0x000081a8      2073bf         jsr 0xbf73
+            0x000081ab      a90f           lda #0x0f
+            0x000081ad      8d0021         sta 0x2100
+            0x000081b0      a526           lda 0x26
+            0x000081b2      8d3221         sta 0x2132
+            0x000081b5      ad1242         lda 0x4212
+            0x000081b8      4a             lsr a
+            0x000081b9      b0fa           bcs 0x0081b5
+            0x000081bb      c220           rep #0x20
+            0x000081bd      a514           lda 0x14
+            0x000081bf      8516           sta 0x16
+            0x000081c1      a512           lda 0x12
+            0x000081c3      49ffff         eor #0xffff
+            0x000081c6      8514           sta 0x14
+            0x000081c8      a510           lda 0x10
+            0x000081ca      8512           sta 0x12
+            0x000081cc      ad1842         lda 0x4218
+            0x000081cf      8510           sta 0x10
+            0x000081d1      2512           and 0x12
+            0x000081d3      2514           and 0x14
+            0x000081d5      2516           and 0x16
+            0x000081d7      8516           sta 0x16
+            0x000081d9      a51c           lda 0x1c
+            0x000081db      851e           sta 0x1e
+            0x000081dd      a51a           lda 0x1a
+            0x000081df      49ffff         eor #0xffff
+            0x000081e2      851c           sta 0x1c
+            0x000081e4      a518           lda 0x18
+            0x000081e6      851a           sta 0x1a
+            0x000081e8      ad1a42         lda 0x421a
+            0x000081eb      8518           sta 0x18
+            0x000081ed      251a           and 0x1a
+            0x000081ef      251c           and 0x1c
+            0x000081f1      251e           and 0x1e
+            0x000081f3      851e           sta 0x1e
+            0x000081f5      2033c2         jsr 0xc233
+            0x000081f8      a582           lda 0x82
+            0x000081fa      f004           beq 0x008200
+            0x000081fc      22bdc382       jsr 0x82c3bd
+            0x00008200      a20001         ldx #0x0100
+            0x00008203      205982         jsr 0x8259
+            0x00008206      e8             inx
+            0x00008207      e8             inx
+            0x00008208      e8             inx
+            0x00008209      e8             inx
+            0x0000820a      e01001         cpx #0x0110
+            0x0000820d      d0f4           bne 0x008203
+            0x0000820f      a21001         ldx #0x0110
+            0x00008212      205982         jsr 0x8259
+            0x00008215      c220           rep #0x20
+            0x00008217      8a             txa
+            0x00008218      18             clc
+            0x00008219      692000         adc #0x0020
+            0x0000821c      aa             tax
+            0x0000821d      e05003         cpx #0x0350
+            0x00008220      d0f0           bne 0x008212
+            0x00008222      a5a0           lda 0xa0
+            0x00008224      05a2           ora 0xa2
+            0x00008226      f01f           beq 0x008247
+            0x00008228      e220           sep #0x20
+            0x0000822a      a523           lda 0x23
+            0x0000822c      0901           ora #0x01
+            0x0000822e      8523           sta 0x23
+            0x00008230      225be681       jsr 0x81e65b
+            0x00008234      a6a0           ldx 0xa0
+            0x00008236      e4a2           cpx 0xa2
+            0x00008238      b006           bcs 0x008240
+            0x0000823a      2238e681       jsr 0x81e638
+            0x0000823e      a6a0           ldx 0xa0
+            0x00008240      86a2           stx 0xa2
+            0x00008242      a20000         ldx #0x0000
+            0x00008245      86a0           stx 0xa0
+            0x00008247      e220           sep #0x20
+            0x00008249      e622           inc 0x22
+            0x0000824b      ad1042         lda 0x4210
+            0x0000824e      a981           lda #0x81
+            0x00008250      8d0042         sta 0x4200
+            0x00008253      22dce381       jsr 0x81e3dc
+            0x00008257      80fa           bra 0x008253
+            0x00008259      c230           rep #0x30
+            0x0000825b      8620           stx 0x20
+            0x0000825d      b500           lda 0x00,x
+            0x0000825f      1b             tas
+            0x00008260      e220           sep #0x20
+            0x00008262      60             rts
+            0x00008263      206782         jsr 0x8267
+            0x00008266      6b             rtl
+            0x00008267      a620           ldx 0x20
+            0x00008269      c220           rep #0x20
+            0x0000826b      3b             tsa
+            0x0000826c      9500           sta 0x00,x
+            0x0000826e      a9ed1f         lda #0x1fed
+            0x00008271      1b             tas
+            0x00008272      60             rts
+            0x00008273      206782         jsr 0x8267
+            0x00008276      80fb           bra 0x008273
+            0x00008278      08             php
+            0x00008279      c220           rep #0x20
+            0x0000827b      a97282         lda #0x8272
+            0x0000827e      208382         jsr 0x8283
+            0x00008281      28             plp
+            0x00008282      60             rts
+            0x00008283      9400           sty 0x00,x
+            0x00008285      9402           sty 0x02,x
+            0x00008287      48             pha
+            0x00008288      98             tya
+            0x00008289      18             clc
+            0x0000828a      692000         adc #0x0020
+            0x0000828d      a8             tay
+            0x0000828e      68             pla
+            0x0000828f      b402           ldy 0x02,x
+            0x00008291      9400           sty 0x00,x
+            0x00008293      990100         sta 0x0001,y
+            0x00008296      60             rts
+            0x00008297      08             php
+            0x00008298      c220           rep #0x20
+            0x0000829a      a97282         lda #0x8272
+            0x0000829d      20a282         jsr 0x82a2
+            0x000082a0      28             plp
+            0x000082a1      60             rts
+            0x000082a2      b400           ldy 0x00,x
+            0x000082a4      88             dey
+            0x000082a5      88             dey
+            0x000082a6      990100         sta 0x0001,y
+            0x000082a9      9400           sty 0x00,x
+            0x000082ab      60             rts
+            0x000082ac      b400           ldy 0x00,x
+            0x000082ae      c8             iny
+            0x000082af      c8             iny
+            0x000082b0      9400           sty 0x00,x
+            0x000082b2      60             rts
+            0x000082b3      08             php
+            0x000082b4      e220           sep #0x20
+            0x000082b6      b400           ldy 0x00,x
+            0x000082b8      b504           lda 0x04,x
+            0x000082ba      88             dey
+            0x000082bb      990100         sta 0x0001,y
+            0x000082be      7404           stz 0x04,x
+            0x000082c0      c220           rep #0x20
+            0x000082c2      a97282         lda #0x8272
+            0x000082c5      88             dey
+            0x000082c6      88             dey
+            0x000082c7      990100         sta 0x0001,y
+            0x000082ca      9400           sty 0x00,x
+            0x000082cc      28             plp
+            0x000082cd      60             rts
+            0x000082ce      08             php
+            0x000082cf      e220           sep #0x20
+            0x000082d1      b400           ldy 0x00,x
+            0x000082d3      c8             iny
+            0x000082d4      c8             iny
+            0x000082d5      b90100         lda 0x0001,y
+            0x000082d8      c8             iny
+            0x000082d9      9504           sta 0x04,x
+            0x000082db      9400           sty 0x00,x
+            0x000082dd      28             plp
+            0x000082de      60             rts
+            0x000082df      40             rti
+            0x000082e0      a980           lda #0x80
+            0x000082e2      48             pha
+            0x000082e3      ab             plb
+            0x000082e4      a91e           lda #0x1e
+            0x000082e6      8d2808         sta 0x0828
+            0x000082e9      206782         jsr 0x8267
+            0x000082ec      ce2808         dec 0x0828
+            0x000082ef      d0f8           bne 0x0082e9
+            0x000082f1      206782         jsr 0x8267
+            0x000082f4      ad7a08         lda 0x087a
+            0x000082f7      0d7b08         ora 0x087b
+            0x000082fa      d0f5           bne 0x0082f1
+            0x000082fc      20f1bb         jsr 0xbbf1
+            0x000082ff      a915           lda #0x15
+            0x00008301      85bd           sta 0xbd
+            0x00008303      206782         jsr 0x8267
+            0x00008306      22398481       jsr 0x818439
+            0x0000830a      206782         jsr 0x8267
+            0x0000830d      220baa82       jsr 0x82aa0b
+            0x00008311      22d7f181       jsr 0x81f1d7
+            0x00008315      4c5ba7         jmp 0xa75b
+            0x00008318      206782         jsr 0x8267
+            0x0000831b      22f98381       jsr 0x8183f9
+            0x0000831f      206782         jsr 0x8267
+            0x00008322      a907           lda #0x07
+            0x00008324      8d2c21         sta 0x212c
+            0x00008327      8d2d21         sta 0x212d
+            0x0000832a      a902           lda #0x02
+            0x0000832c      8dce08         sta 0x08ce
+            0x0000832f      ade108         lda 0x08e1
+            0x00008332      1a             inc a
+            0x00008333      85ce           sta 0xce
+            0x00008335      af39b07e       lda 0x7eb039
+            0x00008339      f006           beq 0x008341
+            0x0000833b      ade208         lda 0x08e2
+            0x0000833e      1a             inc a
+            0x0000833f      85cf           sta 0xcf
+            0x00008341      206782         jsr 0x8267
+            0x00008344      a5cd           lda 0xcd
+            0x00008346      0d9801         ora 0x0198
+            0x00008349      0d9901         ora 0x0199
+            0x0000834c      d0f3           bne 0x008341
+            0x0000834e      ade908         lda 0x08e9
+            0x00008351      d008           bne 0x00835b
+            0x00008353      9c7408         stz 0x0874
+            0x00008356      a901           lda #0x01
+            0x00008358      20febb         jsr 0xbbfe
+            0x0000835b      adea08         lda 0x08ea
+            0x0000835e      d008           bne 0x008368
+            0x00008360      9c7508         stz 0x0875
+            0x00008363      a902           lda #0x02
+            0x00008365      20febb         jsr 0xbbfe
+            0x00008368      206782         jsr 0x8267
+            0x0000836b      a917           lda #0x17
+            0x0000836d      8d2c21         sta 0x212c
+            0x00008370      8d2d21         sta 0x212d
+            0x00008373      a93c           lda #0x3c
+            0x00008375      85a6           sta 0xa6
+            0x00008377      ade108         lda 0x08e1
+            0x0000837a      c93e           cmp #0x3e
+            0x0000837c      d006           bne 0x008384
+            0x0000837e      a249c4         ldx #0xc449
+            0x00008381      8eb801         stx 0x01b8
+            0x00008384      9cce08         stz 0x08ce
+            0x00008387      a97e           lda #0x7e
+            0x00008389      48             pha
+            0x0000838a      ab             plb
+            0x0000838b      6b             rtl
+            0x0000838c      22728083       jsr 0x838072
+            0x00008390      22a28d83       jsr 0x838da2
+            0x00008394      2246bd83       jsr 0x83bd46
+            0x00008398      adcd0b         lda 0x0bcd
+            0x0000839b      f00e           beq 0x0083ab
+            0x0000839d      ad8b0f         lda 0x0f8b
+            0x000083a0      c901           cmp #0x01
+            0x000083a2      f01a           beq 0x0083be
+            0x000083a4      a902           lda #0x02
+            0x000083a6      8d7208         sta 0x0872
+            0x000083a9      8006           bra 0x0083b1
+            0x000083ab      ade108         lda 0x08e1
+            0x000083ae      1a             inc a
+            0x000083af      85ce           sta 0xce
+            0x000083b1      adf409         lda 0x09f4
+            0x000083b4      c901           cmp #0x01
+            0x000083b6      f006           beq 0x0083be
+            0x000083b8      ade208         lda 0x08e2
+            0x000083bb      1a             inc a
+            0x000083bc      85cf           sta 0xcf
+            0x000083be      9ccd0b         stz 0x0bcd
+            0x000083c1      22589981       jsr 0x819958
+            0x000083c5      206782         jsr 0x8267
+            0x000083c8      a5cd           lda 0xcd
+            0x000083ca      d0f9           bne 0x0083c5
+            0x000083cc      a901           lda #0x01
+            0x000083ce      8585           sta 0x85
+            0x000083d0      ad0109         lda 0x0901
+            0x000083d3      8def08         sta 0x08ef
+            0x000083d6      9cb40f         stz 0x0fb4
+            0x000083d9      2078f1         jsr 0xf178
+            0x000083dc      2062bc         jsr 0xbc62
+            0x000083df      206782         jsr 0x8267
+            0x000083e2      22728e83       jsr 0x838e72
+            0x000083e6      2211bb81       jsr 0x81bb11
+            0x000083ea      206782         jsr 0x8267
+            0x000083ed      a91e           lda #0x1e
+            0x000083ef      85a6           sta 0xa6
+            0x000083f1      206782         jsr 0x8267
+            0x000083f4      c6a6           dec 0xa6
+            0x000083f6      d0f9           bne 0x0083f1
+            0x000083f8      8011           bra 0x00840b
+            0x000083fa      206782         jsr 0x8267
+            0x000083fd      224c9283       jsr 0x83924c
+            0x00008401      223cbd83       jsr 0x83bd3c
+            0x00008405      2078f1         jsr 0xf178
+            0x00008408      2062bc         jsr 0xbc62
+            0x0000840b      206782         jsr 0x8267
+            0x0000840e      a08401         ldy #0x0184
+            0x00008411      20aebd         jsr 0xbdae
+            0x00008414      206782         jsr 0x8267
+            0x00008417      2291bc83       jsr 0x83bc91
+            0x0000841b      224a8483       jsr 0x83844a
+            0x0000841f      22cd9a81       jsr 0x819acd
+            0x00008423      206782         jsr 0x8267
+            0x00008426      22d09583       jsr 0x8395d0
+            0x0000842a      ad2a0c         lda 0x0c2a
+            0x0000842d      f003           beq 0x008432
+            0x0000842f      ce2a0c         dec 0x0c2a
+            0x00008432      22e49a81       jsr 0x819ae4
+            0x00008436      206782         jsr 0x8267
+            0x00008439      ad7a08         lda 0x087a
+            0x0000843c      0d7b08         ora 0x087b
+            0x0000843f      d0f5           bne 0x008436
+            0x00008441      22728e83       jsr 0x838e72
+            0x00008445      2211bb81       jsr 0x81bb11
+            0x00008449      206782         jsr 0x8267
+            0x0000844c      adb40f         lda 0x0fb4
+            0x0000844f      d011           bne 0x008462
+            0x00008451      22bb8b83       jsr 0x838bbb
+            0x00008455      22a28d83       jsr 0x838da2
+            0x00008459      223a9583       jsr 0x83953a
+            0x0000845d      adb40f         lda 0x0fb4
+            0x00008460      f098           beq 0x0083fa
+            0x00008462      adee0b         lda 0x0bee
+            0x00008465      8d700b         sta 0x0b70
+            0x00008468      9c200b         stz 0x0b20
+            0x0000846b      9cee0b         stz 0x0bee
+            0x0000846e      a0e200         ldy #0x00e2
+            0x00008471      842a           sty 0x2a
+            0x00008473      a900           lda #0x00
+            0x00008475      eb             swa
+            0x00008476      ad4c0b         lda 0x0b4c
+            0x00008479      aa             tax
+            0x0000847a      7c7d84         jmp (0x847d,x)

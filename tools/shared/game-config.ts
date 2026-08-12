@@ -8,7 +8,7 @@ import {
   getSupportedPlatforms as _getSupportedPlatforms,
   type GameConfig as BaseGameConfig,
   type PlatformConfig as BasePlatformConfig,
-} from '@seer/pipeline';
+} from '@seer-project/pipeline';
 import {
   GAME_IDS,
   PLATFORM_IDS,
@@ -32,7 +32,7 @@ export interface GameConfig extends Omit<BaseGameConfig, "id" | "platforms"> {
 
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { writePNG } from '@seer/pipeline';
+import { writePNG } from '@seer-project/pipeline';
 import {
   BCDFQ_PALETTES,
   amiga12ToRGB,
@@ -196,7 +196,50 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       } catch (e) { console.log('  Skipped portraits:', e); }
     },
   }],
-}]);
+  },
+  {
+    id: 'wizardry6',
+    displayName: 'Wizardry 6',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['wizardry6/amiga'],
+      executable: undefined,
+      expectedFiles: [],
+      supported: false,
+      assetDir: 'wizardry6',
+      features: {},
+    }, {
+      platform: 'dosega',
+      dataDirs: ['wizardry6/dosega/wiz6'],
+      executable: undefined,
+      expectedFiles: [],
+      supported: false,
+      assetDir: 'wizardry6',
+      features: {},
+    }, {
+      platform: 'snes',
+      dataDirs: ['wizardry6/snes'],
+      executable: undefined,
+      expectedFiles: [],
+      supported: false,
+      assetDir: 'wizardry6',
+      features: {},
+    }],
+  },
+  {
+    id: 'mm2',
+    displayName: 'Might & Magic II: Gates to Another World',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['mm2/amiga'],
+      executable: undefined,
+      expectedFiles: ['items.dat', 'map.dat'],
+      supported: false,
+      assetDir: 'mm2',
+      features: {},
+    }],
+  },
+]);
 
 export const GAME_PLATFORMS = flattenConfigs(GAME_CONFIGS);
 

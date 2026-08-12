@@ -253,7 +253,7 @@ async function selectAsset(asset: ManifestEntry, opts: { keepGroup?: boolean } =
   drawAsset();
 }
 
-async function selectGroup(asset: ManifestEntry, groupsData: GroupsFile, group: AssetGroup) {
+async function selectGroup(asset: ManifestEntry, _groupsData: GroupsFile, group: AssetGroup) {
   selectedGroup = group;
   if (selected === asset && currentAtlas) {
     const byName = new Map(currentAtlas.frames.map(f => [f.name, f]));

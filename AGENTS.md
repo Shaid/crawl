@@ -1,5 +1,31 @@
 # AGENTS.md — Project conventions for AI assistants
 
+## Multi-game layout
+
+This repo hosts two first-person dungeon-crawler RE projects:
+
+- **Black Crypt** (`data/blackcrypt/`, `docs/blackcrypt/`, `tools/`, `scripts/`,
+  `public/assets/blackcrypt/`) — the original focus; this file's detail below
+  is Black Crypt-specific.
+- **Wizardry 6** (`data/wizardry6/`, `docs/wizardry6/`, `tools/wizardry6/`,
+  `public/assets/wizardry6/`) — merged in from `~/Development/sorcery`
+  (2026-08-12). Its source of truth is `docs/wizardry6/<platform>/data-structure.md`;
+  its extractors run standalone from the repo root, e.g.
+  `npx tsx tools/wizardry6/export-dungeon-levels.ts data/wizardry6/amiga`.
+  Historical session notes inside `docs/wizardry6/` still say "sorcery".
+- **Might & Magic II** (`data/mm2/amiga/`, `docs/mm2/`, `tools/mm2/`,
+  `public/assets/mm2/amiga/`) — integrated 2026-08-12 as a **port from a
+  finished ground-truth RE** (Vairn/MM2, https://github.com/Vairn/MM2): crawl's
+  `tools/mm2/` codecs are original TypeScript informed by Vairn's format docs
+  (`docs/mm2/amiga/data-structure.md` cites each), not ports of its C/Python.
+  The ground-truth repo ships no retail data; retail files live (gitignored) at
+  `data/mm2/amiga/data/`. Verifiable decoders run from the repo root:
+  `npm run mm2:data` (dat → JSON) and `npm run mm2:gfx` (.32/.anm → PNG). Note
+  `.dat` records are little-endian on disk (graphics are big-endian).
+
+Both games share the generic `@seer-project/dungeon` walker package, which
+lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).
+
 ## Extraction Status
 
 `docs/blackcrypt/amiga/data-structure.md` is the source of truth for file

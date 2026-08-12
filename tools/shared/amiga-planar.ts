@@ -155,3 +155,135 @@ export function blitRGBA(
     dst.set(src.subarray(srcOff, srcOff + srcWidth * 4), ((dy + y) * dstWidth + dx) * 4);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic planar decoders (Wizardry 6 / sorcery import) — container-agnostic,
+// with plane-major and row-interleaved layouts plus palette/greyscale renders
+// and a monochrome glyph-sheet decoder. Same-named concepts as the
+// Black Crypt helpers above but with a different (offset-taking) signature and
+// a `PlanarImage` return shape; kept separate rather than refactored so neither
+// game's verified pipeline is disturbed by the other's callers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PlanarImage {
+  /** One byte per pixel, value 0..(2^planes - 1). */
+  indices: Uint8Array;
+  width: number;
+  height: number;
+}
+
+export function decodePlanarPlaneMajor(
+  data: Uint8Array,
+  offset: number,
+  width: number,
+  height: number,
+  planes: number,
+  planeStride?: number,
+): PlanarImage {
+  const rowBytes = Math.ceil(width / 8);
+  const planeSize = rowBytes * height;
+  const stride = planeStride ?? planeSize;
+  const indices = new Uint8Array(width * height);
+  for (let p = 0; p < planes; p++) {
+    const planeOffset = offset + p * stride;
+    for (let y = 0; y < height; y++) {
+      const rowOffset = planeOffset + y * rowBytes;
+      for (let x = 0; x < width; x++) {
+        const byte = data[rowOffset + (x >> 3)] ?? 0;
+        const bit = (byte >> (7 - (x & 7))) & 1;
+        if (bit) indices[y * width + x] |= 1 << p;
+      }
+    }
+  }
+  return { indices, width, height };
+}
+
+export function decodePlanarRowInterleaved(
+  data: Uint8Array,
+  offset: number,
+  width: number,
+  height: number,
+  planes: number,
+): PlanarImage {
+  const rowBytes = Math.ceil(width / 8);
+  const indices = new Uint8Array(width * height);
+  let cursor = offset;
+  for (let y = 0; y < height; y++) {
+    for (let p = 0; p < planes; p++) {
+      const rowOffset = cursor;
+      cursor += rowBytes;
+      for (let x = 0; x < width; x++) {
+        const byte = data[rowOffset + (x >> 3)] ?? 0;
+        const bit = (byte >> (7 - (x & 7))) & 1;
+        if (bit) indices[y * width + x] |= 1 << p;
+      }
+    }
+  }
+  return { indices, width, height };
+}
+
+export function indicesToGreyscaleRGBA(img: PlanarImage, planes: number): Uint8Array {
+  const maxVal = (1 << planes) - 1;
+  const rgba = new Uint8Array(img.width * img.height * 4);
+  for (let i = 0; i < img.indices.length; i++) {
+    const v = Math.round((img.indices[i] / maxVal) * 255);
+    rgba[i * 4] = v;
+    rgba[i * 4 + 1] = v;
+    rgba[i * 4 + 2] = v;
+    rgba[i * 4 + 3] = 255;
+  }
+  return rgba;
+}
+
+export interface RGB {
+  r: number;
+  g: number;
+  b: number;
+}
+
+export function indicesToPaletteRGBA(img: PlanarImage, palette: RGB[]): Uint8Array {
+  const rgba = new Uint8Array(img.width * img.height * 4);
+  for (let i = 0; i < img.indices.length; i++) {
+    const c = palette[img.indices[i]] ?? { r: 0, g: 0, b: 0 };
+    rgba[i * 4] = c.r;
+    rgba[i * 4 + 1] = c.g;
+    rgba[i * 4 + 2] = c.b;
+    rgba[i * 4 + 3] = 255;
+  }
+  return rgba;
+}
+
+export function decodeMonoGlyphSheet(
+  data: Uint8Array,
+  glyphWidth: number,
+  glyphHeight: number,
+  glyphCount: number,
+  cols: number,
+): { rgba: Uint8Array; width: number; height: number } {
+  const rowBytes = Math.ceil(glyphWidth / 8);
+  const glyphBytes = rowBytes * glyphHeight;
+  const rows = Math.ceil(glyphCount / cols);
+  const width = cols * glyphWidth;
+  const height = rows * glyphHeight;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let g = 0; g < glyphCount; g++) {
+    const gx = (g % cols) * glyphWidth;
+    const gy = Math.floor(g / cols) * glyphHeight;
+    const glyphOffset = g * glyphBytes;
+    for (let y = 0; y < glyphHeight; y++) {
+      for (let x = 0; x < glyphWidth; x++) {
+        const byte = data[glyphOffset + y * rowBytes + (x >> 3)] ?? 0;
+        const bit = (byte >> (7 - (x & 7))) & 1;
+        const px = gx + x;
+        const py = gy + y;
+        const idx = (py * width + px) * 4;
+        const v = bit ? 255 : 0;
+        rgba[idx] = v;
+        rgba[idx + 1] = v;
+        rgba[idx + 2] = v;
+        rgba[idx + 3] = 255;
+      }
+    }
+  }
+  return { rgba, width, height };
+}

@@ -34,6 +34,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga', 'dosvga'],
   },
+  wizardry6: {
+    gameId: 'wizardry6',
+    name: GAME_DISPLAY_NAMES.wizardry6,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga', 'dosega', 'snes'],
+  },
   eotb: {
     gameId: 'eotb',
     name: GAME_DISPLAY_NAMES.eotb,
@@ -51,6 +57,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     name: GAME_DISPLAY_NAMES.landsoflore,
     defaultPlatform: 'dosvga',
     supportedPlatforms: ['dosvga'],
+  },
+  mm2: {
+    gameId: 'mm2',
+    name: GAME_DISPLAY_NAMES.mm2,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: [],
   },
 };
 

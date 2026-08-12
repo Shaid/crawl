@@ -7,7 +7,7 @@
  * the game runtime, since both read the same public/assets/ output.
  */
 
-import type { AtlasMeta } from '@seer/core';
+import type { AtlasMeta } from '@seer-project/core';
 
 export type { AtlasMeta };
 

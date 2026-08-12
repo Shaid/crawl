@@ -1,4 +1,4 @@
-import { loadAssets, createAssetLoader } from '@seer/core';
+import { loadAssets, createAssetLoader } from '@seer-project/core';
 import type { AtlasMeta, GameAssets, ManifestEntry, PaletteData } from './GameData.ts';
 import type { GameId, PlatformId } from '../game-id.ts';
 

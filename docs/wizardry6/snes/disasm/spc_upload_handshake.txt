@@ -1,0 +1,201 @@
+INFO: Fallback to null
+       ┌──> 0x001e86ec      ad4021         lda 0x2140
+       └──< 0x001e86ef      d0fb           bne 0x1e86ec
+        ╎   0x001e86f1      eb             swa
+        ╎   0x001e86f2      8d4121         sta 0x2141
+        ╎   0x001e86f5      9c4221         stz 0x2142
+        ╎   0x001e86f8      a9e68d         lda #0x8de6
+        ╎   0x001e86fb      40             rti
+        ╎   0x001e86fc      21cd           and (0xcd,x)
+        ╎   0x001e86fe      40             rti
+        ╎   0x001e86ff      21d0           and (0xd0,x)
+        ╎   0x001e8701      fb             xce
+        ╎   0x001e8702      6b             rtl
+        ╎   0x001e8703      8d080f         sta 0x0f08
+        ╎   0x001e8706      20028a         jsr 0x8a02
+        ╎   0x001e8709      201d8a         jsr 0x8a1d
+        ╎   0x001e870c      ad080f         lda 0x0f08
+       ┌──< 0x001e870f      f01a           beq 0x1e872b
+       │╎   0x001e8711      c924f0         cmp #0xf024
+       │╎   0x001e8714      16ad           asl 0xad,x
+       │╎   0x001e8716      050f           ora 0x0f
+      ┌───< 0x001e8718      d023           bne 0x1e873d
+      ││╎   0x001e871a      a9018d         lda #0x8d01
+      ││╎   0x001e871d      050f           ora 0x0f
+      ││╎   0x001e871f      a98c20         lda #0x208c
+      ││╎   0x001e8722      f8             sed
+      ││╎   0x001e8723      8a             txa
+      ││╎   0x001e8724      a91c20         lda #0x201c
+      ││╎   0x001e8727      f8             sed
+      ││╎   0x001e8728      8a             txa
+     ┌────< 0x001e8729      8012           bra 0x1e873d
+     ││└──> 0x001e872b      9c020f         stz 0x0f02
+     ││ ╎   0x001e872e      9c030f         stz 0x0f03
+     ││ ╎   0x001e8731      9c040f         stz 0x0f04
+     ││ ╎   0x001e8734      9c050f         stz 0x0f05
+     ││ ╎   0x001e8737      9c060f         stz 0x0f06
+     ││ ╎   0x001e873a      9c070f         stz 0x0f07
+     └└───> 0x001e873d      a9058d         lda #0x8d05
+        ╎   0x001e8740      0242           cop 0x42
+        ╎   0x001e8742      ad080f         lda 0x0f08
+        ╎   0x001e8745      8d0342         sta 0x4203
+        ╎   0x001e8748      ea             nop
+        ╎   0x001e8749      ea             nop
+        ╎   0x001e874a      a00000         ldy #0x0000
+        ╎   0x001e874d      ae1642         ldx 0x4216
+       ┌──> 0x001e8750      bf19899e       lda 0x9e8919,x
+       ╎╎   0x001e8754      c9fff0         cmp #0xf0ff
+       ╎╎   0x001e8757      0fd9000f       ora 0x0f00d9
+      ┌───< 0x001e875b      f00a           beq 0x1e8767
+      │╎╎   0x001e875d      99000f         sta 0x0f00,y
+      │╎╎   0x001e8760      5a             phy
+      │╎╎   0x001e8761      da             phx
+      │╎╎   0x001e8762      20f88a         jsr 0x8af8
+      │╎╎   0x001e8765      fa             plx
+      │╎╎   0x001e8766      7a             ply
+      └───> 0x001e8767      e8             inx
+       ╎╎   0x001e8768      c8             iny
+       ╎╎   0x001e8769      c00500         cpy #0x0005
+       └──< 0x001e876c      d0e2           bne 0x1e8750
+        ╎   0x001e876e      ad2309         lda 0x0923
+       ┌──< 0x001e8771      d00d           bne 0x1e8780
+       │╎   0x001e8773      9c4121         stz 0x2141
+       │╎   0x001e8776      a9e08d         lda #0x8de0
+       │╎   0x001e8779      40             rti
+       │╎   0x001e877a      21cd           and (0xcd,x)
+       │╎   0x001e877c      40             rti
+       │╎   0x001e877d      21d0           and (0xd0,x)
+       │╎   0x001e877f      fb             xce
+       └──> 0x001e8780      6b             rtl
+        ╎   0x001e8781      42ff           wdm 0xFF
+        ╎   0x001e8783      2b             pld
+        ╎   0x001e8784      424c           wdm 0x4C
+        ╎   0x001e8786      2c424d         bit 0x4d42
+        ╎   0x001e8789      2d424e         and 0x4e42
+        ╎   0x001e878c      2e424f         rol 0x4f42
+        ╎   0x001e878f      2f425030       and 0x305042
+        ╎   0x001e8793      4251           wdm 0x51
+        ╎   0x001e8795      3142           and (0x42),y
+        ╎   0x001e8797      ff4b42ff       sbc 0xff424b,x
+        └─< 0x001e879b      4c4252         jmp 0x5242
+            0x001e879e      3342           and (0x42,s),y
+            0x001e87a0      5334           eor (0x34,s),y
+            0x001e87a2      4254           wdm 0x54
+            0x001e87a4      3542           and 0x42,x
+            0x001e87a6      ff36428e       sbc 0x8e4236,x
+            0x001e87aa      6d42ff         adc 0xff42
+            0x001e87ad      38             sec
+            0x001e87ae      4256           wdm 0x56
+            0x001e87b0      39428f         and 0x8f42,y
+            0x001e87b3      3a             dec a
+            0x001e87b4      428f           wdm 0x8F
+            0x001e87b6      3b             tsa
+            0x001e87b7      4257           wdm 0x57
+            0x001e87b9      3c4258         bit 0x5842,x
+            0x001e87bc      78             sei
+            0x001e87bd      4259           wdm 0x59
+            0x001e87bf      3d425a         and 0x5a42,x
+            0x001e87c2      794259         adc 0x5942,y
+            0x001e87c5      3e425b         rol 0x5b42,x
+            0x001e87c8      7a             ply
+            0x001e87c9      4257           wdm 0x57
+            0x001e87cb      3f425c40       and 0x405c42,x
+            0x001e87cf      425d           wdm 0x5D
+            0x001e87d1      4142           eor (0x42,x)
+            0x001e87d3      5e7c42         lsr 0x427c,x
+            0x001e87d6      5f7d42ff       eor 0xff427d,x
+            0x001e87da      4242           wdm 0x42
+            0x001e87dc      6143           adc (0x43,x)
+            0x001e87de      ff8f4742       sbc 0x42478f,x
+        ┌─< 0x001e87e2      9048           bcc 0x1e882c
+        │   0x001e87e4      4291           wdm 0x91
+        │   0x001e87e6      494292         eor #0x9242
+        │   0x001e87e9      7442           stz 0x42,x
+        │   0x001e87eb      9375           sta (0x75,s),y
+        │   0x001e87ed      42ff           wdm 0xFF
+        │   0x001e87ef      7242           adc (0x42)
+        │   0x001e87f1      ff73428d       sbc 0x8d4273,x
+        │   0x001e87f5      6742           adc [0x42]
+        │   0x001e87f7      ff68428d       sbc 0x8d4268,x
+        │   0x001e87fb      6942ff         adc #0xff42
+        │   0x001e87fe      5542           eor 0x42,x
+        │   0x001e8800      ff6a42ff       sbc 0xff426a,x
+        │   0x001e8804      6b             rtl
+        │   0x001e8805      428e           wdm 0x8E
+        │   0x001e8807      6c428e         jmp (0x8e42)
+        │   0x001e880a      6d42ff         adc 0xff42
+        │   0x001e880d      6e424c         ror 0x4c42
+        │   0x001e8810      2c42ff         bit 0xff42
+        │   0x001e8813      6f627401       adc 0x017462
+        │   0x001e8817      62750d         per 0x0d75
+        │   0x001e881a      627602         per 0x0276
+        │   0x001e881d      627704         per 0x0477
+        │   0x001e8820      627802         per 0x0278
+        │   0x001e8823      627903         per 0x0379
+        │   0x001e8826      627a09         per 0x097a
+        │   0x001e8829      627b04         per 0x047b
+        └─> 0x001e882c      627c05         per 0x057c
+            0x001e882f      627d01         per 0x017d
+            0x001e8832      627e06         per 0x067e
+            0x001e8835      627f06         per 0x067f
+            0x001e8838      628007         per 0x0780
+            0x001e883b      628106         per 0x0681
+            0x001e883e      628208         per 0x0882
+            0x001e8841      628309         per 0x0983
+            0x001e8844      62840a         per 0x0a84
+            0x001e8847      628502         per 0x0285
+            0x001e884a      62860b         per 0x0b86
+            0x001e884d      62870c         per 0x0c87
+            0x001e8850      62880d         per 0x0d88
+            0x001e8853      628902         per 0x0289
+            0x001e8856      628a0e         per 0x0e8a
+            0x001e8859      628b0f         per 0x0f8b
+            0x001e885c      62ff10         per 0x10ff
+            0x001e885f      62ff11         per 0x11ff
+            0x001e8862      62ff12         per 0x12ff
+            0x001e8865      62ff13         per 0x13ff
+            0x001e8868      62ff14         per 0x14ff
+            0x001e886b      62ff15         per 0x15ff
+            0x001e886e      62ff16         per 0x16ff
+            0x001e8871      62ff17         per 0x17ff
+            0x001e8874      62ff18         per 0x18ff
+            0x001e8877      62ff19         per 0x19ff
+            0x001e887a      62ff1a         per 0x1aff
+            0x001e887d      62ff1b         per 0x1bff
+            0x001e8880      62ff1c         per 0x1cff
+            0x001e8883      62ff1d         per 0x1dff
+            0x001e8886      62ff1e         per 0x1eff
+            0x001e8889      62ff1f         per 0x1fff
+            0x001e888c      62ff20         per 0x20ff
+            0x001e888f      62ff70         per 0x70ff
+            0x001e8892      62ff71         per 0x71ff
+            0x001e8895      62ff72         per 0x72ff
+            0x001e8898      62ff73         per 0x73ff
+            0x001e889b      ffff44ff       sbc 0xff44ff,x
+            0x001e889f      ff4542ff       sbc 0xff4245,x
+            0x001e88a3      4642           lsr 0x42
+            0x001e88a5      ff4a42ff       sbc 0xff424a,x
+            0x001e88a9      4dffff         eor 0xffff
+            0x001e88ac      21ff           and (0xff,x)
+            0x001e88ae      ff22ffff       sbc 0xffff22,x
+            0x001e88b2      23ff           and 0xff,s
+            0x001e88b4      ff24ffff       sbc 0xffff24,x
+            0x001e88b8      25ff           and 0xff
+            0x001e88ba      ff26ffff       sbc 0xffff26,x
+            0x001e88be      27ff           and [0xff]
+            0x001e88c0      ff28ffff       sbc 0xffff28,x
+            0x001e88c4      29ffff         and #0xffff
+            0x001e88c7      2a             rol a
+            0x001e88c8      ffff4e62       sbc 0x624eff,x
+            0x001e88cc      ff4f62ff       sbc 0xff624f,x
+            0x001e88d0      5062           bvc 0x1e8934
+            0x001e88d2      ff5162ff       sbc 0xff6251,x
+            0x001e88d6      5262           eor (0x62)
+            0x001e88d8      ff5362ff       sbc 0xff6253,x
+            0x001e88dc      5462ff         mvn 0x62,0xff
+            0x001e88df      5562           eor 0x62,x
+            0x001e88e1      ff5662ff       sbc 0xff6256,x
+            0x001e88e5      5762           eor [0x62],y
+            0x001e88e7      ff5862ff       sbc 0xff6258,x
+            0x001e88eb      5962ff         eor 0xff62,y
+            0x001e88ee      5a             phy

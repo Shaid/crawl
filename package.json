@@ -12,7 +12,13 @@
     "format": "prettier --write 'src/**/*.ts' 'tools/**/*.ts'",
     "extract-data": "npx tsx tools/extract-game-data.ts",
     "build-assets": "npx tsx tools/extract-game-data.ts --assets-only",
-    "extract-all": "npm run extract-data && python3 scripts/render_all.py && python3 scripts/extract_monsters.py && python3 scripts/extract_clipper.py"
+    "extract-all": "npm run extract-data && python3 scripts/render_all.py && python3 scripts/extract_monsters.py && python3 scripts/extract_clipper.py",
+    "extract-data:w6": "npx tsx tools/extract-game-data.ts --game wizardry6",
+    "w6:levels": "npx tsx tools/wizardry6/export-dungeon-levels.ts data/wizardry6/amiga",
+    "w6:corridor": "npx tsx tools/wizardry6/render-static-corridor.ts data/wizardry6/amiga",
+    "w6:walk": "npx tsx tools/wizardry6/render-walk-sequence.ts",
+    "mm2:data": "npx tsx tools/mm2/export-data.ts data/mm2/amiga/data",
+    "mm2:gfx": "npx tsx tools/mm2/decode-graphics.ts data/mm2/amiga/data"
   },
   "dependencies": {
     "@seer-project/core": "file:../seer/packages/core",
