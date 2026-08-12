@@ -1,32 +1,35 @@
 /**
- * Dungeon walker harness — M4: mouse-pick interaction (click a hotspot),
- * an entity-state cheat toggle, animated torches (the real
- * `fire-animation.json`/`sprites/fire-animation.png` data), and ramp-aware
- * rendering (loads the indexed atlas + the *current unit's own*
- * `LevelUnit.paletteRamp`, not always the tileset's primary ramp — fixes
- * levels 12-13, which serve `bcdfx` under ramp 3 rather than ramp 0).
+ * Dungeon walker harness — multi-game: pick a game (Black Crypt or Wizardry
+ * 6) and a level within it, walk the dungeon with the shared
+ * `@seer-project/dungeon` raster/composite layer, and toggle debug
+ * affordances (noclip). Each game is a `GameView` (`games.ts`) providing
+ * pose/controller/items/palette/automap; the shell here is game-agnostic.
  *
- * Movement/collision/automap (M3) are unchanged; `Walker` (the M4 facade in
- * `@seer-project/dungeon`) now owns pose + the last-built view + entity patches +
- * the animation clock in place of this harness manually driving
- * `WalkerController`/`buildViewList`/`compositeDrawList` itself.
+ * Controls:
+ * - game dropdown — which game's data to load (BC: the `Walker` facade +
+ *   `buildViewList`; W6: `WalkerController` + its compose-list view model).
+ * - level dropdown — a unit within the loaded game's `levels.json` (BC) or
+ *   one of the 14 per-level files (W6).
+ * - noclip checkbox — moves through walls (the `canStep` gate is bypassed).
+ * - WASD/arrows move · Q/E turn · Space interact (BC) · Tab automap zoom.
+ *
+ * URL params: `?game=&map=&x=&y=&facing=` so a broken pose is a shareable
+ * link. MM2 is not selectable yet — it has data codecs but no walker
+ * renderer.
  */
 import {
   PieceBank,
   IndexedSurface,
   compositeDrawList,
   CanvasPresenter,
-  FlatGridLevel,
-  canStep,
-  AutomapState,
   renderAutomap,
   Minimap,
-  Walker,
-  doorState,
-  parseRampPalette,
-  paletteRampForUnit,
-  rampPalettePath,
+  FlatGridLevel,
+  DEFAULT_BINDINGS,
   indexedTilesetPaths,
+  rampPalettePath,
+  paletteRampForUnit,
+  parseRampPalette,
   type PieceBankLookup,
   type RGBAColor,
   type RampPaletteFile,
@@ -38,46 +41,33 @@ import {
   validateDungeonLevelFile,
   validateSemanticsFile,
   validateBindingsFile,
-  DEFAULT_BINDINGS,
-  type SemanticsFile,
+  type SlotTableFile,
   type DungeonLevelFile,
   type BindingsFile,
-  type SlotTableFile,
+  type SemanticsFile,
 } from '@seer-project/dungeon/schema';
 import { KeyState } from '@seer-project/engine-2d/input';
 import type { AtlasMeta } from '@seer-project/core';
 import { getAssetBasePath } from '../shared/viewer-config.ts';
+import { BlackCryptView, Wizardry6View, bcEntrancePose, w6EntrancePose, type GameView } from './games.ts';
+import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
 const confidenceEl = document.getElementById('confidence')!;
+const gameSelect = document.getElementById('game') as HTMLSelectElement;
+const levelSelect = document.getElementById('level') as HTMLSelectElement;
+const noclipCheck = document.getElementById('noclip') as HTMLInputElement;
 const canvas = document.getElementById('surface') as HTMLCanvasElement;
 const minimapCanvas = document.getElementById('minimap') as HTMLCanvasElement;
 const automapCanvas = document.getElementById('automap') as HTMLCanvasElement;
-
-/** A real, verified-open 2x2 loop in map 1 (bcdfb) — see collision.test.ts. */
-const DEFAULT_POSE: Pose = { level: 1, x: 35, y: 1, facing: 1 };
 
 const MINIMAP_RADIUS = 6;
 const AUTOMAP_WINDOW_RADIUS = 8;
 const AUTOMAP_TILE_SIZE = 8;
 
-// Each tileset's *primary* accent ramp -- the one export_dungeon_tileset_
-// indexed.py bakes into the indexed PNG's own embedded palette, needed to
-// *recover* the raw EHB index from a canvas-decoded RGBA readback
-// (PieceBank.fromIndexedRGBA's basePalette). Confirmed real data
-// (bclib.palette.tileset_ramps): bcdfx -> [0,3], bcdfy -> [1], bcdfz -> [2].
-const TILESET_PRIMARY_RAMP: Record<string, number> = { bcdfx: 0, bcdfy: 1, bcdfz: 2 };
-
 function setStatus(text: string, isError = false) {
   statusEl.textContent = text;
   statusEl.classList.toggle('error', isError);
-}
-
-function setConfidenceBanner(confidence: SemanticsFile['confidence'], source: string) {
-  confidenceEl.textContent = `semantics: ${confidence}`;
-  confidenceEl.title = source;
-  confidenceEl.classList.remove('confirmed', 'rendered', 'hypothesis');
-  confidenceEl.classList.add(confidence);
 }
 
 async function fetchJSON<T>(url: string): Promise<T> {
@@ -96,7 +86,7 @@ async function tryFetchJSON<T>(url: string): Promise<T | null> {
   }
 }
 
-/** Decode a PNG at `url` to interleaved RGBA bytes via an offscreen canvas. Returns `null` on a 404 (used for the optional indexed-atlas path). */
+/** Decode a PNG at `url` to interleaved RGBA bytes via an offscreen canvas. Returns `null` on a 404. */
 function decodePNGToRGBA(url: string): Promise<{ rgba: Uint8ClampedArray; width: number; height: number } | null> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -121,20 +111,17 @@ async function loadBank(assetBase: string, atlasPath: string, imagePath: string)
   return PieceBank.fromRGBA(decoded.rgba, decoded.width, decoded.height, atlas);
 }
 
-/**
- * The current unit's own accent-ramp palette (M4 "ramp-aware rendering") —
- * tries the real indexed atlas + `palettes/dungeon-<tileset>-ramp<N>.json`
- * first (correct for every ramp a tileset serves, including bcdfx's ramp 3
- * on levels 12-13); falls back to the plain RGBA atlas + its own baked
- * palette (M1-M3's path, always that atlas's *one* baked ramp) if the
- * indexed assets aren't present for some reason.
- */
+// Each tileset's *primary* accent ramp, needed to recover raw EHB indices
+// from the indexed atlas's baked palette (`PieceBank.fromIndexedRGBA`'s
+// basePalette). Confirmed: bcdfx -> [0,3], bcdfy -> [1], bcdfz -> [2].
+const TILESET_PRIMARY_RAMP: Record<string, number> = { bcdfx: 0, bcdfy: 1, bcdfz: 2 };
+
 async function loadTilesetBank(
   assetBase: string,
   bankRef: SlotTableFile['banks'][number],
   tileset: string | undefined,
   targetRamp: number,
-): Promise<{ bank: PieceBank; palette: RGBAColor[]; rampSource: 'indexed' | 'baked' }> {
+): Promise<{ bank: PieceBank; palette: RGBAColor[]; basePalette?: RGBAColor[]; rampSource: 'indexed' | 'baked' }> {
   const primaryRamp = tileset ? TILESET_PRIMARY_RAMP[tileset] : undefined;
   if (tileset && primaryRamp !== undefined) {
     const paths = indexedTilesetPaths(tileset);
@@ -149,14 +136,22 @@ async function loadTilesetBank(
       const basePalette = parseRampPalette(basePaletteFile);
       const bank = PieceBank.fromIndexedRGBA(indexImg.rgba, maskImg.rgba, indexImg.width, indexImg.height, atlas, basePalette);
       const palette = targetRamp === primaryRamp ? basePalette : parseRampPalette(targetPaletteFile);
-      return { bank, palette, rampSource: 'indexed' };
+      return { bank, palette, basePalette, rampSource: 'indexed' };
     }
   }
   const bank = await loadBank(assetBase, bankRef.atlas, bankRef.image);
   return { bank, palette: bank.palette, rampSource: 'baked' };
 }
 
-function parsePoseParams(): Pose | null {
+interface PoseParams {
+  game?: string;
+  level: number;
+  x: number;
+  y: number;
+  facing: Dir4;
+}
+
+function parsePoseParams(): PoseParams | null {
   const params = new URLSearchParams(window.location.search);
   const map = params.get('map');
   const x = params.get('x');
@@ -165,207 +160,347 @@ function parsePoseParams(): Pose | null {
   if (map === null || x === null || y === null || facing === null) return null;
   const f = Number(facing);
   if (![0, 1, 2, 3].includes(f)) throw new Error(`facing must be 0-3, got "${facing}"`);
-  return { level: Number(map), x: Number(x), y: Number(y), facing: f as Dir4 };
+  return {
+    game: params.get('game') ?? undefined,
+    level: Number(map),
+    x: Number(x),
+    y: Number(y),
+    facing: f as Dir4,
+  };
 }
 
-async function main() {
-  const assetBase = getAssetBasePath('blackcrypt', 'amiga');
+// ─────────────────────────────────────────────────────────────────────────
+// Game loaders — each returns a `GameView` for a chosen level + pose.
+// ─────────────────────────────────────────────────────────────────────────
 
-  setStatus('loading dungeon/{levels,slots,semantics,bindings}.json…');
+/** Black Crypt: the `Walker` facade over `levels.json`'s units (maps 1-13), with the M4/M5 asset stack. `startPose` may be `null` to use the map's data-derived entrance tile. */
+async function loadBlackCrypt(assetBase: string, unitId: number, startPose: Pose | null): Promise<GameView> {
   const [levelsRaw, slotsRaw, semanticsRaw, bindingsRaw] = await Promise.all([
     fetchJSON<unknown>(`${assetBase}/dungeon/levels.json`),
     fetchJSON<unknown>(`${assetBase}/dungeon/slots.json`),
     fetchJSON<unknown>(`${assetBase}/dungeon/semantics.json`).catch(() => null),
     fetchJSON<unknown>(`${assetBase}/dungeon/bindings.json`).catch(() => null),
   ]);
-
   const levelFile: DungeonLevelFile = validateDungeonLevelFile(levelsRaw);
   const slots = validateSlotTableFile(slotsRaw);
   const semantics: SemanticsFile = semanticsRaw
     ? validateSemanticsFile(semanticsRaw)
     : { schemaVersion: 1, confidence: 'hypothesis', source: 'tools/walker (no semantics.json found)', walls: {}, features: {} };
   const bindings: BindingsFile = bindingsRaw ? validateBindingsFile(bindingsRaw) : DEFAULT_BINDINGS;
-  setConfidenceBanner(semantics.confidence, semantics.source);
+  const unit = levelFile.units.find((u) => u.id === unitId);
+  if (!unit) throw new Error(`no unit id ${unitId} in blackcrypt dungeon/levels.json (have: ${levelFile.units.map((u) => u.id).join(', ')})`);
 
-  const startPose = parsePoseParams() ?? DEFAULT_POSE;
-  const unit = levelFile.units.find((u) => u.id === startPose.level);
-  if (!unit) throw new Error(`no unit with id ${startPose.level} in dungeon/levels.json (have: ${levelFile.units.map((u) => u.id).join(', ')})`);
-  const unitLabel = unit.name ?? unit.id;
   const ramp = paletteRampForUnit(unit);
-
-  setStatus('decoding textures…');
   const bankRef = slots.banks[0];
   if (!bankRef) throw new Error('slots.json has no piece banks');
-  const { bank, palette: ramPalette, rampSource } = await loadTilesetBank(assetBase, bankRef, unit.tileset, ramp);
+  const { bank, palette: ramPalette, basePalette } = await loadTilesetBank(assetBase, bankRef, unit.tileset, ramp);
   const banks: PieceBankLookup = { [bankRef.id]: bank };
+  // Align every other bank's indices with the tileset's EHB index space so
+  // the single-palette present renders prop art with its real colours
+  // (the fromRGBA local-palette mismatch that made items/walls look wrong).
+  const reindexed = (b: PieceBank) => (basePalette ? PieceBank.reindex(b, basePalette) : b);
 
-  // M4 -- real animated torches: fire-animation.json's 15-frame flame cycle,
-  // 4 fixed screen-space instances with their own phaseTicks (data proven,
-  // not synthesized -- see raster/anim.ts / schema/slots.ts's AnimRef).
+  // M4 — real animated torches (fire-animation.json's 15-frame flame cycle).
   const fireData = await tryFetchJSON<{
     frames: number; ticksPerFrame: number; periodTicks: number;
     instances: Array<{ x: number; y: number; phaseTicks: number }>;
   }>(`${assetBase}/data/fire-animation.json`);
   if (fireData) {
-    const fireBank = await loadBank(assetBase, 'sprites/fire-animation.json', 'sprites/fire-animation.png');
+    const fireBank = reindexed(await loadBank(assetBase, 'sprites/fire-animation.json', 'sprites/fire-animation.png'));
     banks['fire'] = fireBank;
     const frameNames = Array.from({ length: fireData.frames }, (_, i) => `flame${String(i).padStart(2, '0')}`);
     slots.staticSlots = [
       ...(slots.staticSlots ?? []),
       ...fireData.instances.map((inst) => ({
-        draws: [
-          {
-            bank: 'fire',
-            frame: { frames: frameNames, ticksPerFrame: fireData.ticksPerFrame, periodTicks: fireData.periodTicks, phase: 'fixed' as const, phaseTicks: inst.phaseTicks },
-            destX: inst.x,
-            destY: inst.y,
-            blend: 'mask' as const,
-          },
-        ],
+        draws: [{
+          bank: 'fire',
+          frame: { frames: frameNames, ticksPerFrame: fireData.ticksPerFrame, periodTicks: fireData.periodTicks, phase: 'fixed' as const, phaseTicks: inst.phaseTicks },
+          destX: inst.x,
+          destY: inst.y,
+          blend: 'mask' as const,
+        }],
       })),
     ];
   }
 
-  // M5 -- door-lock's per-map `wall-decorations` frames and floor-item's
-  // `dungeon-floor-items` frames are plain RGBA banks (no ramp/indexing,
-  // unlike the main tileset), registered by their own `slots.banks` id.
-  // `slots.banks[0]` (the main tileset) is already loaded above via
-  // `loadTilesetBank`'s ramp-aware path; load every other declared bank
-  // generically so a slot referencing it (`prop:door-lock:*`,
-  // `resolveFloorItem`'s frames) doesn't throw "unknown bank" at draw time.
+  // M5 — every other declared bank (wall-decorations, floor-items, ui-panel) generically, reindexed into the tileset's EHB palette.
   for (const ref of slots.banks.slice(1)) {
-    banks[ref.id] = await loadBank(assetBase, ref.atlas, ref.image);
+    banks[ref.id] = reindexed(await loadBank(assetBase, ref.atlas, ref.image));
   }
-
   const automapBank = await loadBank(assetBase, 'sprites/automap.json', 'sprites/automap.png');
 
-  const level = new FlatGridLevel(levelFile, unit);
-
-  const cellSpace = levelFile.cellSpace;
-  const worldWidth = cellSpace.kind === 'flat' ? cellSpace.width : 64;
-  const worldHeight = cellSpace.kind === 'flat' ? cellSpace.height : 64;
-
-  const automapState = new AutomapState(() => ({ width: worldWidth, height: worldHeight }));
-  automapState.onEnterCell(startPose.level, startPose.x, startPose.y);
-
-  const walker = new Walker(level, slots, semantics, banks, startPose, bindings, {
-    canStep: (pose, dir) => canStep(level, semantics, pose, dir),
+  return new BlackCryptView({
+    levelFile,
+    unit,
+    slots,
+    semantics,
+    bindings,
+    banks,
+    palette: ramPalette,
+    automapBank,
+    startPose: startPose ? { ...startPose, level: unit.id } : bcEntrancePose(unit),
+    onInteract: (msg) => setStatus(msg),
   });
-  walker.onInteract = (hotspot, entity, handle) => {
-    let msg = `interact: hotspot 0x${hotspot.code.toString(16)}`;
-    if (entity && handle) {
-      // M4 cheat toggle (per walker-plan.md: "the debug harness ships it as
-      // an explicit cheat toggle") -- flips a door-ish entity's open bit via
-      // Walker.setEntityState, with zero opinion about whether it's locked.
-      const before = doorState(entity);
-      walker.setEntityState(handle, { open: !before.open });
-      // Re-read through `walker.items` (not the stale `entity` closed over
-      // above) -- setEntityState patches PatchedCellQuery's overlay, which
-      // only shows up on the next rebuilt `items` read (triggered by this
-      // getter access, since setEntityState marked the view dirty), never
-      // by mutating the object already in hand.
-      const patched = walker.items.find((i) => i.entityHandle === handle);
-      const after = patched?.entity ? doorState(patched.entity) : null;
-      msg += ` on ${handle} — door state ${JSON.stringify(before)} -> requested open:${!before.open} (now: ${JSON.stringify(after)})`;
-    }
-    setStatus(msg);
+}
+
+/** Wizardry 6: one per-level `DungeonLevelFile` + the compose-list `slots.json` + the true-indexed atlas. `startPose` may be `null` to use the level's data-derived entrance tile. */
+async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose | null): Promise<GameView> {
+  const levelFile: DungeonLevelFile = validateDungeonLevelFile(
+    await fetchJSON<unknown>(`${assetBase}/dungeon/level${String(levelId).padStart(2, '0')}.json`),
+  );
+  const unit = levelFile.units[0]!;
+  const planes: CellPlanes = {
+    width: levelFile.cellSpace.kind === 'flat' ? levelFile.cellSpace.width : 16,
+    height: levelFile.cellSpace.kind === 'flat' ? levelFile.cellSpace.height : 16,
+    wallA: unit.planes.wallA,
+    wallB: unit.planes.wallB,
+    feature: unit.planes.feature,
+    orient: unit.planes.orient,
   };
 
-  const keys = new KeyState(window);
+  const slots = validateSlotTableFile(await fetchJSON<unknown>(`${assetBase}/dungeon/slots.json`));
+  const bankRef = slots.banks[0]!;
+  const [atlas, indexImg, maskImg, paletteFile] = await Promise.all([
+    tryFetchJSON<AtlasMeta>(`${assetBase}/${bankRef.atlas}`),
+    decodePNGToRGBA(`${assetBase}/${bankRef.image}`),
+    decodePNGToRGBA(`${assetBase}/${bankRef.image.replace('.png', '-mask.png')}`),
+    tryFetchJSON<RampPaletteFile>(`${assetBase}/${bankRef.palette ?? 'palettes/mazedata.json'}`),
+  ]);
+  if (!atlas || !indexImg || !maskImg || !paletteFile) {
+    throw new Error(`wizardry6: missing indexed atlas/palette under ${assetBase} — run npm run w6:atlas && npm run w6:slots`);
+  }
+  const palette = parseRampPalette(paletteFile);
+  const bank = PieceBank.fromIndexedRGBA(indexImg.rgba, maskImg.rgba, indexImg.width, indexImg.height, atlas, palette);
+  // Level model for the minimap/automap (shared-edge walls; no entities yet).
+  const level = new FlatGridLevel(levelFile, unit);
+  // Reuse Black Crypt's generic automap tile atlas (wall/floor/facing) for now.
+  const automapBank = await loadBank(getAssetBasePath('blackcrypt', 'amiga'), 'sprites/automap.json', 'sprites/automap.png');
+
+  return new Wizardry6View({
+    planes,
+    slots,
+    bank,
+    palette,
+    bindings: DEFAULT_BINDINGS,
+    levelId,
+    levelLabel: `Level ${String(levelId).padStart(2, '0')}`,
+    startPose: startPose ?? w6EntrancePose(planes, levelId),
+    level,
+    automapBank,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// The generic shell.
+// ─────────────────────────────────────────────────────────────────────────
+
+const GAMES = [
+  { id: 'blackcrypt', label: 'Black Crypt', loader: loadBlackCrypt, defaultLevel: 1 },
+  { id: 'wizardry6', label: 'Wizardry 6', loader: loadWizardry6, defaultLevel: 1 },
+] as const;
+
+type GameId = (typeof GAMES)[number]['id'];
+
+async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: number; label: string }>> {
+  if (game === 'blackcrypt') {
+    const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
+    return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
+  }
+  const index = await fetchJSON<{ levels: Array<{ id: number; file: string }> }>(`${assetBase}/dungeon/levels-index.json`);
+  return index.levels.map((l) => ({ id: l.id, label: `Level ${String(l.id).padStart(2, '0')}` }));
+}
+
+async function main() {
+  const params = parsePoseParams();
+  const urlGame = params?.game as GameId | undefined;
+  const startGame: GameId = GAMES.some((g) => g.id === urlGame) ? urlGame! : 'blackcrypt';
+  const startLevel = params?.level ?? GAMES.find((g) => g.id === startGame)!.defaultLevel;
+
+  for (const g of GAMES) {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.label;
+    gameSelect.appendChild(opt);
+  }
+  gameSelect.value = startGame;
+  noclipCheck.checked = false;
+
+  let view: GameView;
+  let lastItems: unknown = null;
   let automapZoomedOut = false;
 
-  const surface = new IndexedSurface(slots.surface.width, slots.surface.height);
+  const keys = new KeyState(window);
+  const surface = new IndexedSurface(320, 200);
   const presenter = new CanvasPresenter(canvas.getContext('2d')!);
   canvas.width = surface.width;
   canvas.height = surface.height;
+  const minimap = new Minimap(minimapCanvas.getContext('2d')!, { radius: MINIMAP_RADIUS });
+  const automapPresenter = new CanvasPresenter(automapCanvas.getContext('2d')!);
+
+  async function loadGame(game: GameId, levelId: number, pose: Pose | null): Promise<void> {
+    const g = GAMES.find((x) => x.id === game)!;
+    const assetBase = getAssetBasePath(game, 'amiga');
+    setStatus(`loading ${g.label}…`);
+
+    view = await g.loader(assetBase, levelId, pose);
+    setConfidenceBanner(view.id === 'blackcrypt' ? 'confirmed' : 'rendered', `${g.label} (W6 wall values are a rendered key)`);
+
+    levelSelect.innerHTML = '';
+    const levels = await listLevels(game, assetBase);
+    for (const l of levels) {
+      const opt = document.createElement('option');
+      opt.value = String(l.id);
+      opt.textContent = l.label;
+      levelSelect.appendChild(opt);
+    }
+    levelSelect.value = String(levelId);
+
+    const hasAutomap = !!view.automap;
+    minimapCanvas.style.display = hasAutomap ? '' : 'none';
+    automapCanvas.style.display = hasAutomap ? '' : 'none';
+    document.querySelectorAll<HTMLElement>('#sidebar .panel').forEach((p) => {
+      p.style.display = hasAutomap ? '' : 'none';
+    });
+
+    noclipCheck.checked = false;
+    view.setNoclip(false);
+
+    surface.clear(0);
+    lastItems = null;
+    renderAll();
+  }
+
+  function setConfidenceBanner(confidence: string, source: string) {
+    confidenceEl.textContent = `semantics: ${confidence}`;
+    confidenceEl.title = source;
+    confidenceEl.classList.remove('confirmed', 'rendered', 'hypothesis');
+    confidenceEl.classList.add(confidence);
+  }
+
+  function renderMainView(): number {
+    const items = view.items;
+    if (items !== lastItems) {
+      lastItems = items;
+      surface.clear(0);
+      compositeDrawList(surface, view.banks, view.slots, items, view.currentTick);
+      presenter.present(surface, view.palette);
+    }
+    return items.length;
+  }
+
+  function automapOrigin(): { x: number; y: number } {
+    const { height } = view.automap!;
+    const pose = view.pose;
+    return automapZoomedOut
+      ? { x: 0, y: height - 1 }
+      : { x: pose.x - AUTOMAP_WINDOW_RADIUS, y: pose.y + AUTOMAP_WINDOW_RADIUS };
+  }
+
+  function renderAutomapPanel() {
+    if (!view.automap) return;
+    const { level, bank, state, width, height } = view.automap;
+    const pose = view.pose;
+    const span = automapZoomedOut
+      ? Math.max(width, height)
+      : AUTOMAP_WINDOW_RADIUS * 2 + 1;
+    const origin = automapOrigin();
+    const size = span * AUTOMAP_TILE_SIZE;
+    automapCanvas.width = size;
+    automapCanvas.height = size;
+    const automapSurface = new IndexedSurface(size, size);
+    renderAutomap(automapSurface, bank, level, state.visitedCells(pose.level), origin, {
+      party: { x: pose.x, y: pose.y, facing: pose.facing },
+    });
+    automapPresenter.present(automapSurface, bank.palette);
+  }
+
+  function setStatusLine() {
+    const pose = view.pose;
+    const mapped = view.automap
+      ? `${view.automap.state.visitedCount(pose.level)}/${view.automap.width * view.automap.height} cells mapped`
+      : 'no automap';
+    setStatus(
+      `${view.gameLabel} — ${view.levelLabel} @ (${pose.x},${pose.y}) facing ${'NESW'[pose.facing]} — ` +
+        `${view.items.length} draw items — tick ${Math.floor(view.currentTick)} — ${mapped}` +
+        (automapZoomedOut ? ' [automap: full]' : ''),
+    );
+  }
+
+  function renderAll() {
+    renderMainView();
+    if (view.automap) minimap.render(view.automap.level, view.pose);
+    renderAutomapPanel();
+    setStatusLine();
+  }
+
+  gameSelect.addEventListener('change', () => {
+    const game = gameSelect.value as GameId;
+    const g = GAMES.find((x) => x.id === game)!;
+    // Entrance pose: `null` makes the loader place the viewer at the map's
+    // data-derived entrance tile.
+    loadGame(game, g.defaultLevel, null);
+  });
+  levelSelect.addEventListener('change', () => {
+    loadGame(gameSelect.value as GameId, Number(levelSelect.value), null);
+  });
+  noclipCheck.addEventListener('change', () => view.setNoclip(noclipCheck.checked));
 
   canvas.addEventListener('click', (ev) => {
     const rect = canvas.getBoundingClientRect();
     const canvasX = ((ev.clientX - rect.left) / rect.width) * canvas.width;
     const canvasY = ((ev.clientY - rect.top) / rect.height) * canvas.height;
-    walker.pick(canvasX, canvasY, presenter.scale);
+    view.pick(canvasX, canvasY, presenter.scale);
   });
 
-  const minimap = new Minimap(minimapCanvas.getContext('2d')!, { radius: MINIMAP_RADIUS });
-  const automapPresenter = new CanvasPresenter(automapCanvas.getContext('2d')!);
+  // Click the minimap to teleport to that cell (inverse of Minimap.render's
+  // layout: col = dx + radius, row = radius - dy, cellPx = 8).
+  minimapCanvas.addEventListener('click', (ev) => {
+    if (!view.automap) return;
+    const rect = minimapCanvas.getBoundingClientRect();
+    const px = ((ev.clientX - rect.left) / rect.width) * minimapCanvas.width;
+    const py = ((ev.clientY - rect.top) / rect.height) * minimapCanvas.height;
+    const cellPx = 8;
+    const radius = 6;
+    const col = Math.floor(px / cellPx);
+    const row = Math.floor(py / cellPx);
+    const x = view.pose.x + (col - radius);
+    const y = view.pose.y + (radius - row);
+    const { width, height } = view.automap;
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    view.setPose({ level: view.pose.level, x, y, facing: view.pose.facing });
+    view.automap?.state.onEnterCell(view.pose.level, x, y);
+    renderAll();
+  });
 
-  let lastItems: unknown = null;
-  function renderMainView(): number {
-    const items = walker.items;
-    if (items !== lastItems) {
-      lastItems = items;
-      surface.clear(0);
-      compositeDrawList(surface, banks, slots, items, walker.currentTick);
-      presenter.present(surface, ramPalette);
-    }
-    return items.length;
-  }
-
-  function renderAutomapPanel(pose: Pose) {
-    const span = automapZoomedOut ? Math.max(worldWidth, worldHeight) : AUTOMAP_WINDOW_RADIUS * 2 + 1;
-    const origin = automapZoomedOut
-      ? { x: 0, y: worldHeight - 1 }
-      : { x: pose.x - AUTOMAP_WINDOW_RADIUS, y: pose.y + AUTOMAP_WINDOW_RADIUS };
-    const size = span * AUTOMAP_TILE_SIZE;
-    automapCanvas.width = size;
-    automapCanvas.height = size;
-    const automapSurface = new IndexedSurface(size, size);
-    renderAutomap(
-      automapSurface,
-      automapBank,
-      level,
-      automapState.visitedCells(pose.level),
-      origin,
-      { party: { x: pose.x, y: pose.y, facing: pose.facing } },
-    );
-    automapPresenter.present(automapSurface, automapBank.palette);
-  }
-
-  function setStatusLine(pose: Pose, itemCount: number) {
-    setStatus(
-      `map ${unitLabel} @ (${pose.x},${pose.y}) facing ${'NESW'[pose.facing]} — ${itemCount} draw items — ` +
-      `ramp ${ramp} (${rampSource}) — tick ${Math.floor(walker.currentTick)} — ` +
-      `${automapState.visitedCount(pose.level)}/${worldWidth * worldHeight} cells mapped` +
-      (automapZoomedOut ? ' [automap: full]' : ' [automap: local]'),
-    );
-  }
-
-  // minimap/automap redraw only on an actual pose change (or an explicit
-  // zoom toggle) -- unlike the main view (cheap: Walker's own dirty flag
-  // already gates its recomposite), a zoomed-out automap surface can be up
-  // to 64x64 tiles and isn't worth rebuilding on every animation tick.
-  function renderAll(pose: Pose, itemCount: number) {
-    setStatusLine(pose, itemCount);
-    minimap.render(level, pose);
-    renderAutomapPanel(pose);
-  }
-
-  let itemCount = renderMainView();
-  renderAll(walker.pose, itemCount);
+  const initialPose: Pose | null = params && params.game === startGame && params.level === startLevel
+    ? { level: startLevel, x: params.x, y: params.y, facing: params.facing }
+    : null; // null = the loader's data-derived entrance tile
+  await loadGame(startGame, startLevel, initialPose);
 
   let lastTime = performance.now();
   function frame(now: number) {
     const dtMs = now - lastTime;
     lastTime = now;
 
-    const newPose = walker.update(dtMs, keys);
+    const newPose = view.update(dtMs, keys);
 
-    if (walker.interactCodes().some((c) => keys.consumePress(c))) {
-      // Space/interact re-fires the last pick at screen centre-ish as a
-      // keyboard-only fallback; mouse click is the primary M4 path.
+    if (view.interactCodes().some((c) => keys.consumePress(c))) {
       setStatus('interact: use mouse click on a hotspot (alcove/plaque/door-switch/door-lock)');
     }
-    if (walker.automapCodes().some((c) => keys.consumePress(c))) {
+    if (view.automapCodes().some((c) => keys.consumePress(c))) {
       automapZoomedOut = !automapZoomedOut;
-      renderAll(walker.pose, itemCount);
+      renderAutomapPanel();
+      setStatusLine();
     }
 
-    itemCount = renderMainView(); // cheap: only actually recomposites when Walker's view is dirty
+    renderMainView(); // cheap: only recomposites when the view is dirty
     if (newPose) {
-      automapState.onEnterCell(newPose.level, newPose.x, newPose.y);
-      renderAll(newPose, itemCount);
+      view.automap?.state.onEnterCell(newPose.level, newPose.x, newPose.y);
+      if (view.automap) minimap.render(view.automap.level, newPose);
+      renderAutomapPanel();
+      setStatusLine();
     } else {
-      setStatusLine(walker.pose, itemCount); // keep the tick counter/item count live without touching automap/minimap
+      setStatusLine(); // keep the tick counter live without touching automap/minimap
     }
 
     requestAnimationFrame(frame);

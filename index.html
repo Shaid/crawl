@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dungeon Walker</title>
+  <!--
+    Carry the query string across, so the walker's own shareable pose links
+    (`?game=&map=&x=&y=&facing=`) work when pasted at the site root. A plain
+    `<meta http-equiv="refresh">` drops it, which silently landed every such
+    link on the default game at its default pose. The meta tag stays as the
+    no-JS fallback.
+  -->
+  <script>location.replace('/tools/walker/index.html' + location.search + location.hash);</script>
   <meta http-equiv="refresh" content="0; url=/tools/walker/index.html" />
 </head>
 <body>

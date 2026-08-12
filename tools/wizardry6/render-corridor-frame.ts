@@ -15,6 +15,29 @@
  * (unmirrored) placement applies uniformly -- compose-list index =
  * baseIndex+depth, `mode:1`/OR blend.
  *
+ * > **Superseded (2026-08-12):** this module is no longer a faithful
+ * > reference. Three things it gets wrong, all fixed in the package-driven
+ * > path (`export-dungeon-slots.ts` + `view-model.ts`):
+ * >
+ * > 1. It gates the receding side-wall texture strips (static calls 4-9,
+ * >    dirIndex 4-10) on `evalCellFace(cell, facing, ∓1)` — the *lateral
+ * >    neighbour's forward face*. The game draws those strips from the
+ * >    *perpendicular* evaluators `0x969a`/`0x9876`, dispatched through
+ * >    `LAB_0506` (`data-structure.md` §4.7.6), instead. The two reads
+ * >    disagree on 29.9% of side-wall draw decisions across the 14 levels.
+ * > 2. Even given the right gate, this module only ever draws the single
+ * >    "plain wall" side-strip variant. `LAB_0506`'s dispatch has 6 more
+ * >    variants (partial walls, doors, two feature families) selected by
+ * >    the perpendicular evaluator's 0-13 code, §4.7.6.2.
+ * > 3. It has no occlusion: it runs all three depths unconditionally, so
+ * >    with `blend: 'or'` the hidden geometry bleeds through the nearer
+ * >    wall. The game gates every draw on a per-depth visibility lane,
+ * >    §4.7.6.5.
+ * >
+ * > Kept as the derivation record for the compose-list placement formulas,
+ * > which are still correct and still pixel-verified. Use
+ * > `render-through-dungeon.ts` for any visual reference.
+ *
  * ## Ceiling/floor: reused from the confirmed static-corridor sequence
  *
  * Pose-independent, no evaluator call feeds them -- reuses `static-

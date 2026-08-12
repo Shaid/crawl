@@ -3,16 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dungeon Walker — M3</title>
+  <title>Dungeon Walker</title>
   <link rel="stylesheet" href="walker.css" />
 </head>
 <body>
   <div id="app">
     <header id="toolbar">
       <span id="title">Dungeon Walker</span>
+      <select id="game" title="Game"></select>
+      <select id="level" title="Level / map"></select>
+      <select id="variant" title="Graphics variant (W6)" style="display:none"></select>
+      <label class="toggle"><input type="checkbox" id="noclip" /> noclip</label>
       <span id="status">loading…</span>
       <span id="confidence"></span>
-      <span id="help">WASD/arrows move · Q/E turn · Space interact · Tab automap zoom</span>
+      <span id="help">WASD/arrows move · Q/E turn · Space interact (BC) · Tab automap zoom</span>
     </header>
     <div id="body">
       <div id="canvas-wrap">

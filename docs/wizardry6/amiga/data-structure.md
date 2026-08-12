@@ -1413,6 +1413,35 @@ loop (`CODE+0xaa4a`–`0xaaf4`) at the same call depth as `9b58`, not from
 >   `4`) and one `EXT.L`-then-dispatch read — never as an `ADD.W` operand.
 >   It's a dispatch/gating key selecting which literal-driven draw path
 >   fires, not itself part of the baseIndex+depth arithmetic.
+>
+>   **Addendum (2026-08-12, walker session):** the four immediates are
+>   actually **two `(src,dst)` draw pairs**, and `LAB_04BD` (=`9b58`) draws
+>   **two pieces per wall call** — an **upper** perspective strip and a
+>   **lower** wall — each through `DrawMazePiece`'s **mirrored** path
+>   (`dstIdx != 0xFFFF`). Re-read from `disasm/Bane.asm`: `18(A5)`/`20(A5)`
+>   are the upper pair and `22(A5)`/`24(A5)` the lower pair (`MOVE.W
+>   18/20/22/24(A5),D0; ADD.W 8(A5),D0` at `LAB_04BF`/`LAB_04C1`/
+>   `LAB_04C5`/`LAB_04C7`). Per call site: front upper `0x7a,0x7a` lower
+>   `0,0`; left1 upper `0x82,0x8e` lower `3,0xc`; left2 upper `0x86,0x8a`
+>   lower `6,9`; right1 upper `0x8a,0x86` lower `9,6`; right2 upper
+>   `0x8e,0x82` lower `0xc,3`. The upper runs (compose 122-124 → dir 44-46
+>   front; 130-145 → dir 48-55 sides) are the top/ceiling-edge strips at
+>   `destY` 32-59; the lower runs (compose 0-14 → dir 0-2) are the main
+>   wall bodies. **This supersedes the earlier "self-identical pairs → direct
+>   (unmirrored)" reading that `render-corridor-frame.ts` was built on** — a
+>   faithful render needs both pieces per site, mirrored (`view-model.ts` /
+>   `export-dungeon-slots.ts` emit `wall:<kind>:<d>` + `wall-upper:<kind>:<d>`).
+>
+>   **Correction (later same day): the above was over-reading the dispatch
+>   table.** The verified reference implementation (`render-corridor-frame.ts`,
+>   which produced the `cell-driven-corridor-*.png` screenshots) draws each
+>   wall site **directly and unmirrored** from `composeList[baseIndex+depth]`
+>   (front `0`, left1 `3`, left2 `6`, right1 `9`, right2 `0xc`, door `0xb2`)
+>   — no upper strips, no mirrored (src,dst) pairs — and that render is
+>   **pixel-exact** against the reference (0/64,000 differing pixels across
+>   multiple real poses). The `18-24(A5)` arg blocks and `48-55` dir runs are
+>   real, but their role in the shipped walk view is gated/optional; the
+>   walker's slots + view model now reproduce the reference exactly.
 > - The 5 cited "push" address pairs don't all actually reach `9b58`.
 >   Only 3 of the table's 5 result globals do: `-0x2c70(a4)` (front, once,
 >   into `0xab92`) and `-0x2c6a(a4)`/`-0x2c68(a4)` (left/right, each
@@ -1919,6 +1948,349 @@ invariants on every run).
 Full trace and evidence (escalation report + independent re-verification):
 `docs/wizardry6/amiga/investigations/mazedata.md` (Session 4 addendum,
 `re-codebreaker` results subsection).
+
+#### 4.7.6 `LAB_0506` — the perpendicular side-wall dispatcher, and the visibility/occlusion model
+
+**Confirmed** (disassembly, `docs/wizardry6/amiga/disasm/Bane.asm`; no
+escalation needed — the arg-slot roles and dispatch structure resolved
+directly from a full instruction-by-instruction trace, and the compose-list
+cross-check in §4.7.6.4 gave a decisive, exact confirmation). Note on
+offset citations: this subsection cites raw file offsets exactly as they
+appear in `disasm/Bane.asm`'s comment column (e.g. `file 0x0a174`), which is
+numerically identical to how §4.7.1-§4.7.5 use `CODE+0xNNNN` above (verified
+against 3 independent addresses — `CODE+0x9202`, `CODE+0x9160`,
+`CODE+0xaa60` all land on exactly those file offsets) — so `file 0xNNNN`
+below is directly comparable to those earlier `CODE+0xNNNN` citations.
+
+##### 4.7.6.1 Signature and head dispatch
+
+`LAB_0506` = `file 0x0a174`-`0x0a3ae` (570 bytes exactly, `0x3ae-0x174=0x23a`).
+Called twice, both from the outer depth loop, each site pushing 16 words
+(`LEA 32(A7),A7` pops them):
+
+- Left: `file 0x0abf8`, args `(depth=-11438(A4), code=-11374(A4))` +
+  14 literal words
+- Right: `file 0x0ac5e`, args `(depth=-11438(A4), code=-11372(A4))` +
+  14 literal words
+
+Parameter layout confirmed by trace: `8(A5)`=depth, `10(A5)`=code (the same
+0-14 wall/feature dispatch value produced by `EvalCellFace`/§4.7.2's
+`CODE+0x964e` table — confirmed because `10(A5)` is fed the exact same
+`-11374(A4)`/`-11372(A4)` globals that §4.7.1 already identified as the
+`CODE+0x969a`/`0x9876` evaluator siblings' return values). `12(A5)`-`38(A5)`
+are 14 literal per-call-site words (roles resolved in §4.7.6.2).
+
+Head dispatch (`file 0x0a174`-`0x0a1ce`):
+
+```
+if depth==3 && code!=0:              goto PREAMBLE            ; forced, any nonzero code
+elif depth!=3:
+    if code==2 || code>=7:           goto PREAMBLE
+    else:                            skip PREAMBLE
+PREAMBLE (file 0x0a196-0x0a1cc):
+    DrawMazePiece(pair 16(A5)/18(A5), mode=1)   ; see formula in §4.7.6.2
+if depth>=3: return                              ; file 0x0a1ce-0x0a1d4
+jump_table[code]                                 ; file 0x0a1d8-0x0a3ae, code 0-13 only (>=14: no-op)
+```
+
+So depth 3 gets **at most the preamble draw** (16(A5)/18(A5) pair) and never
+reaches the jump table; the jump table itself only ever runs for depth 0-2.
+This matches the brief's cited "lateral evaluators run at all 5 depths but
+`LAB_0506` visibly does less at depth 3" shape.
+
+##### 4.7.6.2 The 14-entry jump table (`file 0x0a39a`-`0x0a3a8`, `LAB_0525`/`LAB_0526`)
+
+Same shape as `CODE+0x9202`'s `CODE+0x964e` table and `9b58`'s own
+`CODE+0xa04c` table: `CMP.L #$e,D0; BCC` (out-of-range → no-op) + `ASL.L #1,D0`
++ a `MOVE.W table(PC,D0.W),D0` word-offset table (`LAB_0524`, `file
+0x0a37e`-`0x0a39a`, 14 entries) + `JMP LAB_0526+2(PC,D0.W)` PC-relative
+computed jump. Decoded all 14 targets (base `file 0x0a3aa`):
+
+| code | table value | target | meaning (§4.7.2) | action |
+|---|---|---|---|---|
+| 0 | `$0002` | `0a3ac` (no-op/return) | wall 0 (open) | nothing |
+| 1 | `$fe38` | `0a1e2` | wall 1 | draw pair `20(A5)`/`22(A5)`, mode 1 |
+| 2 | `$0002` | `0a3ac` (no-op) | wall 2 (solid) | nothing extra — preamble already fired |
+| 3 | `$fe38` | `0a1e2` | wall 3 | draw pair `20/22` (mode 1) **+** direct draw `24(A5)+depth` (mode 0, unmirrored) |
+| 4 | `$fe38` | `0a1e2` | feature 7→4 | draw pair `20/22` (mode 1) **+** direct draw `26(A5)+depth` (mode 0, unmirrored) |
+| 5 | `$fece` | `0a278` | feature 1→5 ("door") | draw pair `28(A5)`/`30(A5)`, mode 1 |
+| 6 | `$fece` | `0a278` | feature 2→6 | draw pair `28/30`, mode 1 (same target as 5) |
+| 7 | `$ff0a` | `0a2b4` | feature 8→7 | draw pair `32(A5)`/`34(A5)`, mode 0 |
+| 8 | `$ff44` | `0a2ee` | feature 3→8 | **not `DrawMazePiece`** — deferred-draw-queue push, `LAB_04B9` (`file 0x09a52`), kind=1 (§4.7.6.3) |
+| 9 | `$ff74` | `0a31e` | feature 4→9 | deferred-draw-queue push, `LAB_04B9`, kind=2 |
+| 10 | `$ff9c` | `0a346` | feature 9→10 | draw pair `36(A5)`/`38(A5)`, mode 0 |
+| 11 | `$ff9c` | `0a346` | feature 10→11 | same target as 10 |
+| 12 | `$ff9c` | `0a346` | feature 11→12 | same target as 10 |
+| 13 | `$ff9c` | `0a346` | feature 12→13 | same target as 10 |
+| (14+) | n/a | `BCC` fires, no-op | feature 5→14 | **no draw at all** — code 14 is outside the table's 0-13 domain, unlike `9b58` which handles it with a literal `srcIdx=$0158`. Genuine asymmetry, confirmed by the `CMP.L #$e,D0` bound. |
+
+**The direct/mirror formula, confirmed identical across all 5 pair-based
+draws** (preamble `16/18`, code1/3/4's `20/22`, code5/6's `28/30`, code7's
+`32/34`, code10-13's `36/38`) — each pair `(A, B)` is consumed by:
+
+```
+if -11434(A4) != 0:
+    DrawMazePiece(srcIdx = B + depth, mode = M, dstIdx = A + depth)   ; MIRRORED — draws the
+                                                                        ; *other* pair slot's art,
+                                                                        ; repositioned onto A+depth
+else:
+    DrawMazePiece(srcIdx = A + depth, mode = M, dstIdx = 0xFFFF)      ; DIRECT — draws A+depth's
+                                                                        ; own art in place
+```
+
+`M` (blend mode, per the confirmed `LAB_026F`/`DrawMazePiece` signature
+`srcIdx@8, mode@10, dstIdx@12` — `0`=overwrite, nonzero=`OR.B` merge) is `1`
+for the preamble and codes 1/3/4/5/6, `0` for codes 7 and 10-13.
+
+`-11434(A4)` is a **single flag computed once per render** (before the depth
+loop even starts, `file 0x0a98a`-`0x0a99e`), not per depth or per call:
+`D0 = (-18338(A4) + -18336(A4) + -18328(A4))`, sign-extended, `DIVS #2`,
+`SWAP` → low word = remainder (0 or ±1) → stored to `-11434(A4)`. The three
+summed globals are read-only inputs here; their own derivation (almost
+certainly a compass-facing/coordinate-delta encoding, given the same three
+globals also feed the loop's per-depth `-11436(A4)` "cell offset parity"
+computation at `file 0x0a9b2`-`0x0a9ca`, with `+depth` added there) wasn't
+traced further this pass — **hypothesis**: a facing-parity switch selecting
+which of two mirror-symmetric art sets is the "native" one for the current
+compass direction. The formula and its effect on `DrawMazePiece` calls are
+**confirmed**; the deeper "why" of `-18338/-18336/-18328(A4)` is not.
+
+The two single-index-only draws (code 3's `24(A5)`, code 4's `26(A5)`) are
+**always direct** (`dstIdx=0xFFFF` unconditionally — they don't consult
+`-11434(A4)` at all): `DrawMazePiece(srcIdx = 24(A5)+depth, mode=0,
+dstIdx=0xFFFF)` and the `26(A5)` equivalent for code 4.
+
+##### 4.7.6.3 Codes 8/9 are deferred-draw-queue pushes, not `DrawMazePiece` calls
+
+`file 0x0a2ee` (code 8) and `file 0x0a31e` (code 9) both call `LAB_04B9` =
+`file 0x09a52` — **this is the already-known-but-unnamed deferred-draw
+queue push function** referenced in the TODO row (`CODE+0x9a52`, whose
+consumer at `0xaffa`-`0xb142` was already documented). Confirmed by direct
+trace of `LAB_04B9`'s body: it writes a 7-field, 12-byte-stride record into
+an array at `-11274(A4)`/`-11282(A4)`/`-11280(A4)`/`-11273(A4)`/
+`-11278(A4)`/`-11276(A4)`/`-11272(A4)`, indexed by a monotonically
+incrementing counter `-10922(A4)`, and busy-waits (`JSR -32634(A4)` in a
+tight loop — almost certainly a "wait for vblank"/flush-queue OS call) once
+the counter reaches 30 (`0x1e`), i.e. the queue has a fixed 30-entry
+capacity. **New finding this session**: `LAB_0506`'s codes 8/9 push into
+this *same* queue that `9b58`'s own codes 1/3/4/8/9 push into (per the
+already-documented §4.7.1 addendum) — i.e. wall/feature codes 8 and 9 are
+deferred-drawn identically regardless of which of the three face evaluators
+(front via `9b58`, or either perpendicular via `LAB_0506`) produced them.
+The queue record's own field semantics (what the 12 bytes/entry actually
+mean downstream) is **not** re-derived here — still open, same as before.
+Call arguments: code 8 pushes `LAB_04B9(kind=1, 0, 0, index=depth*2 +
+12(A5) + -11736(A4), 0x48, 0xf8, depth)`; code 9 pushes `LAB_04B9(kind=2, 0,
+0, index=depth + 14(A5), 0x48, 0xf8, depth)` (argument order per the
+confirmed push-order-reversal convention used throughout this doc). `12(A5)`
+(left=`0x0007`, right=`0x000d`) and `14(A5)` (left=`0x0004`, right=`0x0007`)
+are therefore the two codes' own per-side base indices into whatever the
+queue consumer resolves `index` against — **not** part of the mirror-swap
+pair family (they don't mirror-swap the way every other slot does; see
+§4.7.6.4's literal table).
+
+##### 4.7.6.4 Arg-slot role table and compose-list cross-check (Task 1.1/1.4 — decisive)
+
+| Slot | Left value | Right value | Role |
+|---|---|---|---|
+| `12(A5)` | `0x0007` | `0x000d` | code-8 queue-push index base (not mirror-paired) |
+| `14(A5)` | `0x0004` | `0x0007` | code-9 queue-push index base (not mirror-paired) |
+| `16(A5)` | `0x000f` | `0x0013` | preamble pair, own-side index |
+| `18(A5)` | `0x0013` | `0x000f` | preamble pair, mirror-source index |
+| `20(A5)` | `0x0053` | `0x0057` | codes 1/3/4 pair, own-side index |
+| `22(A5)` | `0x0057` | `0x0053` | codes 1/3/4 pair, mirror-source index |
+| `24(A5)` | `0x006a` | `0x006e` | code-3 extra draw, always-direct index (own-side, not mirror-paired with `26`) |
+| `26(A5)` | `0x0072` | `0x0076` | code-4 extra draw, always-direct index |
+| `28(A5)` | `0x00c1` | `0x00c4` | codes 5/6 pair, own-side index |
+| `30(A5)` | `0x00c4` | `0x00c1` | codes 5/6 pair, mirror-source index |
+| `32(A5)` | `0x0110` | `0x0113` | code-7 pair, own-side index |
+| `34(A5)` | `0x0113` | `0x0110` | code-7 pair, mirror-source index |
+| `36(A5)` | `0x0125` | `0x0128` | codes 10-13 pair, own-side index |
+| `38(A5)` | `0x0128` | `0x0125` | codes 10-13 pair, mirror-source index |
+
+Every pair slot (`16/18`, `20/22`, `28/30`, `32/34`, `36/38`) mirror-swaps
+exactly between the left and right calls, as expected from §4.7.1's
+established left/right symmetry convention. `24/26` (the two code-3/4
+single-index draws) and `12/14` (the two queue-push bases) do **not**
+mirror-swap the same way — each side gets its own independent value,
+consistent with each being a single always-direct draw rather than a
+reusable mirrored pair.
+
+**Cross-check against `public/assets/wizardry6/amiga/maps/mazedata-composelist.json`
+(366 records) — exact, decisive confirmation of the whole formula.** Every
+`baseIndex+depth` (`depth`=0,1,2) for every slot above resolves to a real,
+in-range compose record with plausible perspective geometry — `destXByte`
+converging toward screen centre and `widthBytes` shrinking as depth
+increases, exactly the expected receding-corridor shape:
+
+- `0x0f`/`0x13` pair (preamble): `destXByte` 9→13→16 (`0x0f` series, "left
+  edge") vs 27→24→22 (`0x13` series, "right edge"), `destY` 32/40/52,
+  `widthBytes` 4/3/2 — `dirIndex` 3-9 (front call) / matches §4.7.1's
+  already-documented "upper perspective strip" family (`destY` 32-59).
+- `0x53`/`0x57` pair: same shape, `dirIndex` 23-28 — a second upper-strip
+  variant (distinct art, likely the "wall value 1/3/4" partial-wall family).
+- `0x6a`/`0x6e` (code 3, left/right own-side): `destXByte` 9→14→16 (`0x6a`)
+  vs 30→25→22 (`0x6e`), `destY` 49/58-60/65-66, `widthBytes` 1/1/2 —
+  `dirIndex` 32-34 / 35-37, each side's own dedicated strip, never mirrored.
+- `0x72`/`0x76` (code 4): near-identical shape to `0x6a`/`0x6e`, `dirIndex`
+  38-40 / 41-43.
+- `0xc1`/`0xc4` pair (codes 5/6, "door"): `destXByte` 9→13→16 vs 27→24→22,
+  `destY` 32/40/52, `widthBytes` 4/3/2 — `dirIndex` 77-82, structurally
+  identical to the `0x0f`/`0x53` upper-strip families (a third art variant).
+- `0x110`/`0x113` pair (code 7): `destXByte` 9→13→16 vs 28→24→22, `destY`
+  44-45/53-54/60-61, `widthBytes` 3/3/2 — `dirIndex` 107-112, positioned
+  lower/more-central than the other pairs (plausible "wall body" rather
+  than "ceiling-edge strip" piece, matching mode 0/overwrite instead of
+  mode 1/OR-merge).
+- `0x125`/`0x128` pair (codes 10-13): `destXByte` 9→13→16 vs 28→24→22,
+  `destY` 46/56-57/62, `widthBytes` 3/3/2 — `dirIndex` 116-121, same family
+  as `0x110`/`0x113`.
+
+**All 12 base indices land in the compose runs the brief predicted**
+(dir 4-10/48-55 region and the surrounding compose indices ~15-23/~130-145
+— the receding side-wall strips), with zero out-of-range or implausible
+results across the 36 `(slot, depth)` combinations checked. This confirms
+Task 1's dispatch/formula reconstruction end-to-end.
+
+##### 4.7.6.5 The occlusion/visibility model (Task 2)
+
+**Seven visibility lanes, each gating exactly one draw call per depth
+iteration** — confirmed by tracing every `CMPI.B #$01,0(A0,Dn.W); BNE` guard
+in the depth loop (`file 0x0a9a6`-`0x0afe2`, `LAB_055A`-`LAB_0568`):
+
+| Lane global | Gates (call site) | Draws |
+|---|---|---|
+| `-11432(A4)` (lane0) | `0x0aafc`+`0x0abb0`+`0x0ac12` (3 separate re-checks of the **same** lane) | front wall (`9b58`@`0x0ab92`), left-perp (`LAB_0506`@`0x0abf8`), right-perp (`LAB_0506`@`0x0ac5e`) |
+| `-11392(A4)` (lane5) | `0x0ac78` | corner/floor piece #1 (`LAB_0528`@`0x0aca2`, called with lateral-arg `0`) |
+| `-11424(A4)` (lane1) | `0x0acae` | left1 side-column (`9b58`@`0x0ad52`) |
+| `-11416(A4)` (lane2) | `0x0ad6c` | left2 side-column (`9b58`@`0x0ae10`) |
+| `-11408(A4)` (lane3) | `0x0ae2a` | right1 side-column (`9b58`@`0x0aed0`) |
+| `-11400(A4)` (lane4) | `0x0aeea` | right2 side-column (`9b58`@`0x0af90`) |
+| `-11384(A4)` (lane6) | `0x0afaa` | corner/floor piece #2 (`LAB_0528`@`0x0afd6`, lateral-arg `2`) |
+
+Every lane is indexed `lane[depth]` (a `CMPI.B #1,0(A0,Dn.W)` where `Dn`=
+depth, `A0`=lane base) and initialised to `1` for depths 0-3 at `file
+0x0a944`-`0x0a958` (before the loop starts) — i.e. **all draws start
+enabled**; the loop's own logic only ever **disables** (clears to `0`)
+lanes for *deeper* depths, never re-enables them. This is occlusion
+culling: a wall/feature drawn at depth `d` can suppress specific
+(lane, depth') combinations for `depth' > d`, preventing overdraw of
+geometry that would be hidden behind it.
+
+**Seven sibling updater functions**, called immediately after their
+corresponding draw (all take `(code, depth)` — code first pushed, matching
+the same push-order convention as `LAB_0506` itself):
+
+| Updater | `file` | Called after | Fires when | Clears (`lane[depth+offset]`) |
+|---|---|---|---|---|
+| `LAB_0538` | `0x0a4d0` | front wall (`0x0aba2`) | `code==2 \|\| code>=5 \|\| frontFlag[depth]==1` | lane0`[+1,+2,+3]`, lane1`[+2]`, lane2`[+1,+2]`, lane3`[+1,+2]`, lane4`[+2]`; **also** raises `-11440(A4)` (loop's own upper depth bound) to `depth+3` if currently lower |
+| `LAB_053B` | `0x0a594` | left-perp (`0x0ac08`) | `code!=0 \|\| frontFlag[depth]==1` | lane2`[+0]`, lane1`[+1]`, lane5`[+2]` |
+| `LAB_053E` | `0x0a5de` | right-perp (`0x0ac6e`) | `code!=0 \|\| frontFlag[depth]==1` | lane3`[+0]`, lane4`[+1]`, lane6`[+2]` |
+| `LAB_0541` | `0x0a628` | left1 (`0x0ad62`) | `code==2 \|\| code>=5 \|\| leftFlag[depth]==1` | lane5`[+1]` |
+| `LAB_0544` | `0x0a662` | left2 (`0x0ae20`) | `code==2 \|\| code>=5 \|\| leftFlag[depth]==1` | lane1`[+1]`, lane5`[+2]` |
+| `LAB_0547` | `0x0a6aa` | right1 (`0x0aee0`) | `code==2 \|\| code>=5 \|\| rightFlag[depth]==1` | lane4`[+1]`, lane6`[+2]` |
+| `LAB_054A` | `0x0a6f2` | right2 (`0x0afa0`) | `code==2 \|\| code>=5 \|\| rightFlag[depth]==1` | lane6`[+1]` |
+
+(`code` here is the same evaluator result the corresponding draw call used —
+front code for `LAB_0538`, left code for `LAB_053B`/`0541`/`0544`, right
+code for `LAB_053E`/`0547`/`054A`.)
+
+**A previously-uncharacterized interleaved 3-byte-per-depth flag record,
+confirmed this session**: `frontFlag`, `leftFlag`, `rightFlag` above are
+three adjacent bytes — `-11366(A4)` (leftFlag), `-11365(A4)` (frontFlag),
+`-11364(A4)` (rightFlag), ascending address order — each read as
+`base[depth*3]` (`MOVS #3,D0` then indexed byte). Because the three bases
+are 1 byte apart and each function only ever touches its own base with a
+flat `depth*3` stride, this is structurally **one interleaved record**,
+`[left, front, right]` at 3 consecutive bytes per depth (matching the
+indexing *shape* of the already-documented `-11342(A4)`/`-11354(A4)`
+feature-14/15 "triggered" arrays from §4.7.2, though it is a distinct,
+separate array — not the same bytes). Its **writer was not located this
+session** (open) — semantically it functions as an occlusion-override:
+for wall codes that don't inherently justify culling (0,1,3,4 — open
+floor or "partial" wall types), the corresponding lane only gets cleared
+if this per-side flag is independently set for that depth, hypothesised as
+"this specific cell should occlude anyway" (possibly a discovered-secret
+or off-map marker) but not confirmed.
+
+**`LAB_0471` (`file 0x09160`) is identified**: it is the *same* function
+`§4.7.2`'s `EvalCellFace` pseudocode already calls "the shared
+coordinate-resolver at `CODE+0x9160`" — confirmed by direct trace (its
+5-pointer-argument dispatch on a facing value, adding/subtracting the
+last two args into the first two pointers via a 4-entry compass jump
+table, is called identically from both `EvalCellFace` (`file
+0x0922c`) and the outer depth loop (`file 0x0a9e8`)). **Return-value
+polarity confirmed**: `0` = step succeeded / stayed on map (the outer
+loop's `BEQ` at `file 0x0a9f2` branches to `LAB_055E`, which runs the 3
+real face evaluators for this depth); **nonzero = stepped off the map**
+(falls through to the boundary-handling block below, matching
+`EvalCellFace`'s own documented "if that step went off-map → return 2").
+
+Boundary-handling block (`file 0x0a9f4`-`0x0aa48`, runs only when
+`LAB_0471` returned nonzero this depth):
+
+```
+if -18340(A4) == 10 || -18340(A4) == 12:
+    frontFlag-style-array[depth] = 1        ; -11353(A4)[depth*3] = 1  (== frontFlag's own array,
+                                              ;   offset by 1 byte — see below)
+    otherArray[depth] = 1                    ; -11328(A4)[depth*3] (word) = 1
+    -11376(A4) = -11374(A4) = -11372(A4) = 0 ; front/left/right codes forced to 0 ("open")
+else:
+    -11376(A4) = -11374(A4) = -11372(A4) = 2 ; forced to 2 ("solid"), same convention EvalCellFace
+                                              ; itself uses for its own off-map case
+```
+
+`-11353(A4)` sits exactly 1 byte above `-11354(A4)` — §4.7.2's documented
+feature-15 "triggered" array, indexed `cellSlot*3+(lateral+1)` — so writing
+`-11353[depth*3]` is equivalent to writing `-11354[depth*3+1]`, i.e. the
+**centre/front (`lateral=0`) slot** of that same array. Likewise
+`-11328(A4)` sits 2 bytes below `-11330(A4)` (feature-13's array, word
+stride `cellSlot*6+(lateral+1)*2`), so `-11328[depth*3]` (byte offset
+`depth*6`) is `-11330[depth*6+2]` — again the centre slot. **In other
+words: when the party is at a game-mode-10-or-12 map boundary, the engine
+synthesizes the exact same "feature 13/15 triggered, centre lateral"
+flags that `EvalCellFace`'s own feature dispatch would set for a real
+feature-13/15 cell, instead of drawing a plain wall.** This strongly
+suggests modes 10/12 represent a scripted "open edge" (e.g. an
+outdoor-area or town-return boundary) rather than the default dungeon-edge
+behaviour (forced code 2 = solid wall) — **hypothesis** for the specific
+meaning of `-18340(A4)`'s value space; the mechanism itself (which flags
+get set, and that it substitutes for a solid-wall fallback) is
+**confirmed**.
+
+##### 4.7.6.6 Summary / what remains open
+
+**Closed by this session**: `LAB_0506`'s full parameter list and dispatch
+table (all 14 codes traced to concrete formulas); the direct-vs-mirror
+`DrawMazePiece` formula and its `-11434(A4)` gate; all 14 literal arg
+slots' roles, cross-checked byte-exact against `mazedata-composelist.json`
+(36/36 `(slot,depth)` combinations land on plausible, distinct compose
+runs); confirmation that codes 8/9 push to the deferred-draw queue
+(`LAB_04B9`=`CODE+0x9a52`) rather than drawing directly, extending the
+already-known "9b58 codes 1/3/4/8/9 defer" finding to `LAB_0506` too; the
+complete 7-lane occlusion model (lane↔draw-call table, all 7 sibling
+updaters' exact fire conditions and clear sets); `LAB_0471`'s identity
+(confirmed = `EvalCellFace`'s own `CODE+0x9160` coordinate stepper) and
+return polarity; and the map-boundary special-case mechanism for
+`-18340(A4)`∈{10,12}.
+
+**Still open**:
+- The deferred-draw queue's own record-field semantics (`LAB_04B9`'s
+  12-byte record, consumed at `0xaffa`-`0xb142`) — still not decoded,
+  same status as before this session.
+- The `-11364/-11365/-11366(A4)` interleaved flag array's **writer** (its
+  role as an occlusion-override reader is now confirmed; nothing found
+  this session sets it).
+- The precise semantic meaning of `-18340(A4)`'s value space (only the
+  10/12 vs. other-values behavioural split is confirmed; what game state
+  those specific values represent is a hypothesis).
+- `-18338(A4)`/`-18336(A4)`/`-18328(A4)` (the three globals summed to
+  produce both `-11434(A4)` and the per-depth `-11436(A4)`) — read-only
+  inputs here, not traced back to their own writers this pass.
+- Codes 8/9's `12(A5)`/`14(A5)` "index base" values don't fit the
+  mirror-pair pattern the other 10 slots follow; their exact role inside
+  the (still-undecoded) queue consumer isn't pinned down beyond "per-side
+  base index into whatever the consumer resolves against."
 
 ---
 
