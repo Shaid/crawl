@@ -242,6 +242,11 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         const { exportMm1Maps } = await import('../mm1/export-maps.ts');
         const result = exportMm1Maps(resolve('data/mm1/dosega'));
         console.log(`  mm1/dosega: ${result.screens} maze screens decoded (slug-from-exe: ${result.slugFromExe}, ovr-match: ${result.ovrMatch})`);
+        // Graphics decoders are Python (scripts/mm1lib/) — same pattern as mm3.
+        const { execFileSync } = await import('node:child_process');
+        const repo = process.cwd();
+        const py = process.env.PYTHON ?? 'python3';
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm1_gfx.py')], { stdio: 'inherit', cwd: repo });
       },
     }],
   },

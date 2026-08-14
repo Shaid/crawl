@@ -21,6 +21,7 @@
     "w6:walk": "npx tsx tools/wizardry6/render-walk-sequence.ts",
     "w6:through": "npx tsx tools/wizardry6/render-through-dungeon.ts",
     "mm1:maps": "npx tsx tools/mm1/export-maps.ts data/mm1/dosega",
+    "mm1:gfx": "python3 scripts/extract_mm1_gfx.py",
     "mm2:data": "npx tsx tools/mm2/export-data.ts data/mm2/amiga/data",
     "mm2:gfx": "npx tsx tools/mm2/decode-graphics.ts data/mm2/amiga/data",
     "mm2:pcgfx": "npx tsx tools/mm2/decode-pc-graphics.ts data/mm2/dosega",
