@@ -170,7 +170,11 @@ export function decodeEventFile(data: Uint8Array): EventFile {
   for (let i = 0; i < header.length; i++) {
     const h = header[i];
     const end = i + 1 < header.length ? header[i + 1].offset : data.length;
-    const record = data.subarray(h.offset, Math.min(end, h.offset + h.length));
+    // The game clamps data_length to EVENT_MAX_RECORD at runtime (see the
+    // header doc comment); mirror that so a corrupt/oversized length field
+    // can't read past what the real engine would ever have loaded.
+    const length = Math.min(h.length, EVENT_MAX_RECORD);
+    const record = data.subarray(h.offset, Math.min(end, h.offset + length));
     locations.push(decodeEventLocation(i, record));
   }
   return { header, locations };

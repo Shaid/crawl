@@ -66,5 +66,8 @@ byte-exact against Vairn's reference on the GOG data at `data/mm2/dosega/`);
 remaining highest-value items: composed `.anm` walk sequences as GIFs
 (combat engine block selection is the only gap — the longest-block heuristic
 works for showcase), the copy-protection `globe.32` XOR decode
-(`20-copy-protection-table.md`), the GOG `*.DAT` LZW wrapper, and the
+(`20-copy-protection-table.md`), the GOG `STR.DAT`/`MONSTERS.DAT`/
+`ATTRIB.DAT` LZW wrapper (confirmed byte-exact, not yet ported — `ITEMS.DAT`
+turns out not to be LZW-wrapped at all and is already decodable with the
+existing Amiga codec, see `docs/mm2/dosega/data-structure.md`), and the
 event-script opcode VM.

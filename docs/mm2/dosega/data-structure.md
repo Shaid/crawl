@@ -5,10 +5,18 @@ Format documentation for `data/mm2/dosega/` (GOG release: `MM2.EXE` +
 
 The PC DOS `.4`/`.16` graphics formats were reverse-engineered by Vairn/MM2
 (see `54-pc-dos-graphics-formats.md` there; this project's TypeScript port is
-in `tools/mm2/pc-gfx.ts`, written with the author's permission). The
-`.DAT` files are the same Amiga formats (the GOG `*.DAT` are LZW-compressed
-on disk but decompress to the Amiga files — not yet ported; see
-`docs/mm2/TODO.md`).
+in `tools/mm2/pc-gfx.ts`, written with the author's permission). The `.DAT`
+files are **not uniformly LZW-wrapped** — status is per-file, verified
+against the retail bytes:
+
+| File | Status |
+|------|--------|
+| `STR.DAT`, `MONSTERS.DAT`, `ATTRIB.DAT` | LZW-wrapped (`u32LE` decompressed-size header + `lzwDecompress` body, same codec as the graphics files) — decompresses **byte-exact** to the Amiga `.dat` file (0 mismatches, full length); genuinely unported |
+| `ITEMS.DAT` | **not** LZW — plain, already Amiga-format bytes (byte-identical size to Amiga `items.dat`, 5120 B; readable directly, e.g. `"Small Club"` at record offset 20) — decodable today with the existing `tools/mm2/items.ts` Amiga codec, no new work needed |
+| `ROSTER.DAT` | **not** LZW — plain, Amiga-format-shaped (`"Sir Felgar"` at offset 0) but 8292 B vs Amiga `roster.dat`'s 8320 B (28-byte delta, cause not yet investigated) |
+| `MAP.DAT`, `SPELLS.DAT`, `EVENTSI.DAT`, `EVENTSO.DAT` | **unverified** — first 4 bytes are not a plausible `lzwDecompress` size header (e.g. `MAP.DAT` reads as ~37M, `SPELLS.DAT` as ~25M), so this is a different format, not the same LZW wrapper; not yet classified |
+
+See `docs/mm2/TODO.md` for the open-work breakdown.
 
 ## Verification ledger
 
@@ -55,6 +63,18 @@ EGA pen 8 / CGA pen 1; outdoor front panels key index 0 (the walker-facing
 paired CGA/EGA silhouette masks from the reference are not ported — see
 `renderWallFrameRGBA`'s basic colour-key rule).
 
+**`GLOBE.*`/`DISK.*` are real images on DOS** (unlike Amiga, where
+`globe.32`/`disk.32` are XOR-obfuscated copy-protection blobs — see
+`amiga/data-structure.md`). Decoded through the same wall-sheet parser as
+any other `.4`/`.16` file, with no errors and no fallback heuristics
+triggered: `GLOBE.16`/`GLOBE.4` are a clean 12-frame, uniform 56×73
+animation (a spinning globe icon — background-index pixel count is
+constant ±1 across all 12 frames while the other colour indices vary
+smoothly frame-to-frame, consistent with a rotating sprite, not noise);
+`DISK.16`/`DISK.4` are a single clean 88×67 frame with a small, consistent
+colour histogram between the CGA and EGA versions. Exported to
+`textures/globe16.png` / `globe4.png` / `disk16.png` / `disk4.png`.
+
 ## Monster combat atlas (`MONSTERS.4` / `MONSTERS.16`) — confirmed
 
 ```
@@ -93,8 +113,15 @@ Not analysed here.
 
 ## Still open
 
-- GOG `*.DAT` on-disk LZW wrapper (decompresses to the Amiga `.dat` files;
-  codec is the same `lzwDecompress` — the wrapper is a filename-mapped
-  container, see Vairn's `pc_dat_lzw.py`).
+- GOG `STR.DAT`/`MONSTERS.DAT`/`ATTRIB.DAT` LZW wrapper: confirmed
+  byte-exact vs the Amiga `.dat` files (see the table above) but not yet
+  ported to a TS decoder/export path.
+- `ITEMS.DAT` (and likely `ROSTER.DAT`, pending its 28-byte size delta)
+  are **not** LZW-wrapped and could be exported today with the existing
+  Amiga-format codecs (`tools/mm2/items.ts`/`roster.ts`) — no wrapper work
+  needed, just wiring a DOS export path.
+- `MAP.DAT`/`SPELLS.DAT`/`EVENTSI.DAT`/`EVENTSO.DAT`: not the same LZW
+  wrapper as STR/MONSTERS/ATTRIB (implausible size header) — format
+  unclassified.
 - The walker-facing paired CGA/EGA silhouette masks (outdoor/sky/overlay
   renders) from the reference are documented but not ported.

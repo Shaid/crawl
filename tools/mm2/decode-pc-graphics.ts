@@ -74,10 +74,16 @@ function writeWallSheet(dataDir: string, name: string, outDir: string): boolean 
   return true;
 }
 
-/** Outdoor biome sheets (DESERT/GRASS/etc.) key transparent index 0 on front panels. */
-function isOutdoorSheet(name: string): boolean {
+/**
+ * Outdoor biome sheets key transparent index 0 on front panels. Must match
+ * the Amiga outdoor-sheet set (`docs/mm2/amiga/data-structure.md`) — DESERT/
+ * OCEAN/OUTDOOR1-3/SWAMP/TUNDRA are the only outdoor biomes actually shipped
+ * (GRASS/HIGHGRASS/LAVA/SNOW correspond to no file on either platform and
+ * were a copy-paste from an unrelated game's biome list; OCEAN was missing).
+ */
+export function isOutdoorSheet(name: string): boolean {
   const base = name.replace(/\.(4|16)$/i, '').toUpperCase();
-  return ['DESERT', 'GRASS', 'HIGHGRASS', 'LAVA', 'SNOW', 'SWAMP', 'TUNDRA', 'OUTDOOR1', 'OUTDOOR2', 'OUTDOOR3'].includes(base);
+  return ['DESERT', 'OCEAN', 'SWAMP', 'TUNDRA', 'OUTDOOR1', 'OUTDOOR2', 'OUTDOOR3'].includes(base);
 }
 
 function writeMonsters(dataDir: string, name: string, outDir: string, outEntries: ManifestEntry[]): boolean {

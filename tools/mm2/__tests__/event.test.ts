@@ -5,6 +5,7 @@ import {
   decodeEventLocation,
   verifyEventContiguity,
   EVENT_LOCATION_COUNT,
+  EVENT_MAX_RECORD,
 } from '../event.ts';
 
 /** Build a standard location record: triplets + string-offset word + script + 0xFF-terminated strings. */
@@ -70,5 +71,33 @@ describe('event.dat codec', () => {
     expect(violations).toEqual([]);
 
     expect([...encodeEventFile(parsed)]).toEqual([...file]);
+  });
+
+  it('clamps a header data_length beyond EVENT_MAX_RECORD (matches the runtime clamp)', () => {
+    // One location whose declared length is EVENT_MAX_RECORD + 100, filled
+    // with non-zero bytes so an unclamped read would visibly overrun.
+    const declaredLength = EVENT_MAX_RECORD + 100;
+    const locations = new Array<Uint8Array>(EVENT_LOCATION_COUNT);
+    for (let i = 0; i < EVENT_LOCATION_COUNT; i++) {
+      locations[i] = i === 0 ? new Uint8Array(declaredLength).fill(0x41) : Uint8Array.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff]);
+    }
+    const header = new Uint8Array(EVENT_LOCATION_COUNT * 6);
+    const w = new DataView(header.buffer);
+    let cursor = EVENT_LOCATION_COUNT * 6;
+    for (let i = 0; i < EVENT_LOCATION_COUNT; i++) {
+      w.setUint32(i * 6, cursor);
+      w.setUint16(i * 6 + 4, locations[i].length & 0xffff);
+      cursor += locations[i].length;
+    }
+    const file = new Uint8Array(cursor);
+    file.set(header, 0);
+    let off = EVENT_LOCATION_COUNT * 6;
+    for (const loc of locations) {
+      file.set(loc, off);
+      off += loc.length;
+    }
+
+    const parsed = decodeEventFile(file);
+    expect(parsed.locations[0].raw.length).toBe(EVENT_MAX_RECORD);
   });
 });

@@ -52,20 +52,20 @@ export interface SpellRef {
   name: string;
 }
 
-const flatIndex = (tbl: Record<number, string[]>): Map<number, SpellRef> => {
+const flatIndex = (tbl: Record<number, string[]>, school: 'S' | 'C'): Map<number, SpellRef> => {
   const out = new Map<number, SpellRef>();
   let f = 0;
   for (let lv = 1; lv <= 9; lv++) {
     for (let n = 0; n < tbl[lv].length; n++) {
       f++;
-      out.set(f, { school: 'S', level: lv, number: n + 1, name: tbl[lv][n] });
+      out.set(f, { school, level: lv, number: n + 1, name: tbl[lv][n] });
     }
   }
   return out;
 };
 
-const SORCERER_FLAT = flatIndex(SORCERER_SPELLS);
-const CLERIC_FLAT = flatIndex(CLERIC_SPELLS);
+export const SORCERER_FLAT = flatIndex(SORCERER_SPELLS, 'S');
+export const CLERIC_FLAT = flatIndex(CLERIC_SPELLS, 'C');
 
 /** Flat 1-based index (both schools have identical 48-spell structure). */
 export function spellAt(school: 'S' | 'C', flat: number): SpellRef | undefined {

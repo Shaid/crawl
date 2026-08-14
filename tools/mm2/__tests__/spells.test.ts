@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeItemEffect, decodeSpellRecord, decodeSpellsDat, encodeSpellsDat, spellAt } from '../spells.ts';
+import { CLERIC_FLAT, decodeItemEffect, decodeSpellRecord, decodeSpellsDat, encodeSpellsDat, SORCERER_FLAT, spellAt } from '../spells.ts';
 
 describe('item effect byte -> spell (flat index)', () => {
   it('decodes the documented known-answer examples byte-exact', () => {
@@ -51,6 +51,11 @@ describe('spell flat-index tables', () => {
     expect(spellAt('S', 48)?.name).toBe('Enchant Item');
     expect(spellAt('C', 1)?.name).toBe('Apparition');
     expect(spellAt('C', 48)?.name).toBe('Uncurse Item');
+  });
+
+  it('SORCERER_FLAT/CLERIC_FLAT carry the correct school on their own, without relying on spellAt() overriding it', () => {
+    for (const ref of SORCERER_FLAT.values()) expect(ref.school).toBe('S');
+    for (const ref of CLERIC_FLAT.values()) expect(ref.school).toBe('C');
   });
 });
 
