@@ -176,15 +176,24 @@ deviation** across all 402 sprite-container files:
   shared frames pixel-exact, DOS-only (possibly-spurious) pixels
   0.58% and one-sided (the DOS mask is a strict subset of Amiga's in
   1,062/1,292 frames — cross-port art differences, not a DOS decode bug).
+  Independent re-check on the 32×32 `.fac` faces: 32/33 face cells
+  decode with every row filling exactly `width` px (the lone exception,
+  `elf3.fac` row 13, has one genuine transparent pixel — a skip opcode in
+  the art), and the DOS decode's palette-index colours map 1:1 onto the
+  Amiga face colours (e.g. DOS index 11 → `(161,161,161)` vs Amiga
+  `(153,153,153)` — the ports' own 6-bit vs 5-bit palettes), confirming
+  both the grammar and the palette from the data side.
 - Renders (`build/cache/mm3/dos-sprite-renders/`) at the confirmed
   256-colour palette: `archer.mon` (blue-tunic archer drawing a bow),
   `beholder.mon`, `bank.out`, `caswl1.vga`, `castle.til`, `dwarf1.fac` —
   all coherent, recognisable art.
 
 → `scripts/mm3lib/dos_sprite.py` (decoder, every rule cites its `vga`+
-offset), `scripts/verify_mm3_dos_sprites.py` (corpus verifier). Not yet
-wired into the extractor/viewer pipeline — see TODO
-`mm3-dos-sprite-pipeline`.
+offset), `scripts/verify_mm3_dos_sprites.py` (corpus verifier). Wired into
+the extractor/viewer pipeline via `scripts/extract_mm3_dos_sprites.py`
+(`mm3-dos-sprite-pipeline` closed) — every sprite-container file renders
+to a PNG strip + JSON sidecar under `public/assets/mm3/dosvga/sprites/`,
+hooked into `tools/shared/game-config.ts`'s mm3/dosvga `buildAssets`.
 
 ## MM3.EXE / palette
 
@@ -229,7 +238,13 @@ same `.raw` screens pixel-aligned (DOS index → Amiga colour consistency
 1.00 across 7 screens), and nearest-colour re-quantisation of the DOS
 render reproduces the Amiga `create.raw` for 77.4 % of pixels vs 29.9 %
 for the VGA BIOS default and 1.1 % for random.
-→ `build/cache/mm3/palette/mm3_dos_palette.json` (256 × `{r,g,b}`, 0–63).
+→ `build/cache/mm3/palette/mm3_dos_palette.json` (256 × `{r,g,b}`, 0–63,
+the original emulation-derived artifact). No emulation is actually needed
+to *extract* the table, only to have discovered where it lives — it's a
+static byte range inside a normally LZHUF-decompressed `MM3.CC` entry, so
+`scripts/mm3lib/dos_palette.py` reads it directly via the existing
+`dos_cc` container reader (confirmed byte-identical to the artifact
+above) and is what the extraction pipeline actually runs.
 
 ### Executrix self-unpacking — **SOLVED** (`tools/mm3_executrix_unpack/run.py`)
 
@@ -284,6 +299,54 @@ turned out to live in `MM3.CC`, not this exe (see "DOS 256-colour palette"
 above); the FBOV overlay's own segment operands don't resolve with any
 single relocation delta and need reading from a live memory dump, not the
 static file.
+
+### Runtime loading architecture — how the `vga` driver gets loaded and called
+
+The "segment operands don't resolve statically" caveat above is explained
+by the loader machinery, traced by booting the real packed `MM3.EXE` under
+a Unicorn harness (DOS/BIOS int stubs + a real memory allocator + VGA
+port/vblank emulation). Body offsets below are in the decompressed body
+(loaded at LOAD_SEG `0x210`, DS `0x1A7F` = body `0x186F0`):
+
+1. **FBOV loader** — segment `0x18A9`, body `0x169A9`. Opens the game's
+   own `MM3.EXE`, reads the **packed** MZ header (20 B), and recovers the
+   FBOV offset from its size fields: `e_cp=324, e_cblp=192` →
+   `(324-1)*512+192 = 0x286C0` (Executrix crafted these fields so the
+   arithmetic lands on the overlay). Seeks there, verifies `'FBOV'`
+   (`cmp word [bp-0x14],0x4246` at body `0x16A4B`), saves the region end
+   (`0x286D0`) at DS `0x114/0x116`, then loads the 46 segments
+   (`0x16CB4`, `0x16D81`).
+2. **Segment map** — DS `0x19D0:0x1A0`, 46 × 8-byte entries
+   `{u16 seg; u16 size; u16 flags; u16 w4}`, read by `0x16C34` (which
+   walks it from `0x1A0` to `0x310`, step 8, and patches each loaded
+   segment: `[seg+4:6] += FBOV_base`, `[seg+0x18] = 0x4CF`). The image's
+   own segments (root `0x210` … data `0x1A7F`) are listed first; the
+   loader reads them from the file back into their in-image positions
+   (self-load). This table is the FBOV `seginfo`; it lives in the image,
+   not the file (the game never seeks to the MZ-relative `exeinfo`).
+3. **CC code overlays** — the display driver and other loadable modules
+   come from `MM3.CC` entries (the `vga` driver = entry `0x8F99`; also the
+   PIT/timer driver entry 33, etc.). The boot loads them via the CC reader
+   (`0x145F` segment, body `0x12636` = the documented CC open/decrypt) into
+   allocated memory, and the game calls them through **far-branch-table
+   stubs** that are runtime-patched.
+4. **FBT dispatch** — segment `0x145F`'s stub table at body `0x14F53+`
+   (`push word cs:[0x2A73]; mov ax,ID; push ax; retf`, 10 B each, IDs
+   `0x03/0x06/0x0C/…/0x30`). The loader writes the driver's runtime
+   segment into `[0x145F:0x2A73]`; each stub then jumps to
+   `[driver_seg]:ID`. In the boot harness the driver loaded at segment
+   `0x92FC`, and `[0x145F:0x2A73] = 0x92FC` — the IDs are indices into the
+   driver's own API jump table (`0x000–0x035`), confirming the driver's
+   entry points (`0x03→0x1498`, `0x06→0x3624`, `0x0C→0x1256`,
+   `0x2D→0x15A9`, `0x30→0x2812`, …). This is why the far-call segment
+   operands in the static image don't resolve — the target segment is a
+   runtime allocation, written into the stub table at load time.
+
+The harness run (DOS/BIOS stubs, allocator, port 0x3DA vblank, AdLib
+0x330/0x331, keyboard) boots the packed exe to mode 13h, through the
+resource-table sort, and into the driver's screen/palette code — the same
+driver path independently confirmed by the palette and blitter traces.
+
 
 ## Still open / paths tried
 

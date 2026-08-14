@@ -314,9 +314,11 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         const repo = process.cwd();
         const py = process.env.PYTHON ?? 'python3';
         execFileSync(py, [resolve(repo, 'scripts/extract_mm3_dos.py')], { stdio: 'inherit', cwd: repo });
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm3_dos_screens.py')], { stdio: 'inherit', cwd: repo });
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm3_dos_sprites.py')], { stdio: 'inherit', cwd: repo });
         syncDataManifest('mm3', 'dosvga');
         writePlatformIndex([{ game: 'mm3', platform: 'dosvga' }]);
-        console.log('  mm3/dosvga: container extracted (python)');
+        console.log('  mm3/dosvga: container + screens + sprites extracted (python)');
       },
     }],
   },

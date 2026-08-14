@@ -60,15 +60,20 @@ Run from the repo root: `python3 scripts/extract_mm3_dos.py` and
 - **mm3 viewer wired (amiga + dosvga)** — both platforms are now
   `supported: true` in `tools/shared/game-config.ts` with `buildAssets`
   hooks that run the Python extractors (`extract_mm3_amiga.py` +
-  `extract_mm3_amiga_sprites.py` / `extract_mm3_dos.py`) and merge the
-  manifests through the shared TS helpers. `npm run extract-data -- --game
-  mm3` (per platform) works end-to-end. Live-verified with Playwright:
-  mm3/amiga = 279 assets (252 sprite strips + 13 screens + 10 palettes +
-  4 data tables), 0 console errors; `spider.mon`/`demon.mon`/`archer.mon`
-  render on canvas with 12k+ opaque px at 3× zoom. `data/cc-directory`
-  table renders; mm3/dosvga = 4 data tables. Amiga screens render with the
-  confirmed palette (`mm3-amiga-palette` closed); DOS screens still not
-  rendered (`mm3-dos-palette` in TODO).
+  `extract_mm3_amiga_sprites.py` / `extract_mm3_dos.py` +
+  `extract_mm3_dos_screens.py` + `extract_mm3_dos_sprites.py`) and merge
+  the manifests through the shared TS helpers. `npm run extract-data --
+  game mm3` (per platform) works end-to-end. Live-verified with
+  Playwright: mm3/amiga = 279 assets (252 sprite strips + 13 screens + 10
+  palettes + 4 data tables), 0 console errors; `spider.mon`/`demon.mon`/
+  `archer.mon` render on canvas with 12k+ opaque px at 3× zoom.
+  `data/cc-directory` table renders. Amiga screens render with the
+  confirmed palette (`mm3-amiga-palette` closed). DOS side: sprites +
+  screens + palette are now all solved and wired (`mm3-dos-palette`,
+  `mm3-mon-rle`, `mm3-dos-sprite-pipeline` all closed) — manifest grows to
+  421 entries, spot-checked correct (`create.raw` teal marble, `archer.mon`
+  plausible pixel counts) — but not yet live-verified in a browser with
+  Playwright the way the Amiga side was; see TODO `mm3-wire-viewer`.
 - **Amiga LZ77 oracle — CLOSED** (`mm3-amiga-lz-oracle`): the game's own
   decompressor (CODE payload 0x55C4) now runs under musashi in
   `tools/mm3_lz_harness/emu_lz.c`; **552/552 LZ entries decode
@@ -120,5 +125,6 @@ Run from the repo root: `python3 scripts/extract_mm3_dos.py` and
 - **Screens**: DOS `.raw` = 320×200 raw 8-bit VGA (no palette in file);
   Amiga 40000-byte screens = 320×200 5-plane planar (tmp.scr is a saved
   screen) — rendered with the confirmed static Amiga palette
-  (`mm3-amiga-palette` closed). The DOS screens still need their palette
-  (`mm3-dos-palette` in TODO).
+  (`mm3-amiga-palette` closed). DOS screens now render too, with the
+  confirmed 256-colour VGA palette (`mm3-dos-palette` closed) —
+  `scripts/extract_mm3_dos_screens.py`, all 12 `.raw` files.
