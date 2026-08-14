@@ -109,6 +109,16 @@ export interface GameView {
   readonly slots: SlotTableFile;
   /** Black Crypt only for now — W6 has no automap renderer yet (the package's `AutomapRenderer.tileForCell` is still BC-specific). */
   readonly automap?: { level: CellQuery; bank: PieceBank; state: AutomapState; width: number; height: number };
+  /**
+   * Full-color canvas renderer (MM1/MM2 frustum walkers). When present the
+   * harness calls this instead of the DrawItem composite path — the view
+   * draws the whole main canvas (320x200 game-screen space) itself. Draws
+   * only when the view reports it is dirty via `currentTick`/pose change;
+   * the harness calls it every frame (cheap).
+   */
+  renderCanvas?(ctx: CanvasRenderingContext2D): void;
+  /** Full-color minimap renderer (MM1/MM2). When present it replaces the package `Minimap`. */
+  renderMinimap?(ctx: CanvasRenderingContext2D): void;
   update(dtMs: number, keys: KeyStateLike): Pose | null;
   setPose(pose: Pose): void;
   setNoclip(on: boolean): void;

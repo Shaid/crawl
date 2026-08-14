@@ -50,6 +50,7 @@ import { KeyState } from '@seer-project/engine-2d/input';
 import type { AtlasMeta } from '@seer-project/core';
 import { getAssetBasePath } from '../shared/viewer-config.ts';
 import { BlackCryptView, Wizardry6View, bcEntrancePose, w6EntrancePose, type GameView } from './games.ts';
+import { loadMM1View, loadMM2View, mmLevelLists } from './games-mm.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
@@ -145,9 +146,9 @@ async function loadTilesetBank(
 
 interface PoseParams {
   game?: string;
-  level: number;
-  x: number;
-  y: number;
+  level?: number;
+  x?: number;
+  y?: number;
   facing: Dir4;
 }
 
@@ -157,14 +158,17 @@ function parsePoseParams(): PoseParams | null {
   const x = params.get('x');
   const y = params.get('y');
   const facing = params.get('facing');
-  if (map === null || x === null || y === null || facing === null) return null;
-  const f = Number(facing);
+  const game = params.get('game') ?? undefined;
+  if (map === null && x === null && y === null && facing === null && game === undefined) return null;
+  // Partial params are allowed (a game-only link, or game+map): missing pose
+  // fields default to the loader's entrance selection.
+  const f = facing !== null ? Number(facing) : 0;
   if (![0, 1, 2, 3].includes(f)) throw new Error(`facing must be 0-3, got "${facing}"`);
   return {
-    game: params.get('game') ?? undefined,
-    level: Number(map),
-    x: Number(x),
-    y: Number(y),
+    game,
+    level: map !== null ? Number(map) : undefined,
+    x: x !== null ? Number(x) : undefined,
+    y: y !== null ? Number(y) : undefined,
     facing: f as Dir4,
   };
 }
@@ -295,13 +299,17 @@ async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose
 // ─────────────────────────────────────────────────────────────────────────
 
 const GAMES = [
-  { id: 'blackcrypt', label: 'Black Crypt', loader: loadBlackCrypt, defaultLevel: 1 },
-  { id: 'wizardry6', label: 'Wizardry 6', loader: loadWizardry6, defaultLevel: 1 },
+  { id: 'blackcrypt', label: 'Black Crypt', loader: loadBlackCrypt, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'wizardry6', label: 'Wizardry 6', loader: loadWizardry6, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'mm1', label: 'Might & Magic I', loader: loadMM1View, defaultLevel: 0, platform: 'dosega' as const },
+  { id: 'mm2', label: 'Might & Magic II', loader: loadMM2View, defaultLevel: 0, platform: 'amiga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
 
 async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: number; label: string }>> {
+  if (game === 'mm1') return mmLevelLists.mm1();
+  if (game === 'mm2') return mmLevelLists.mm2();
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
@@ -339,7 +347,7 @@ async function main() {
 
   async function loadGame(game: GameId, levelId: number, pose: Pose | null): Promise<void> {
     const g = GAMES.find((x) => x.id === game)!;
-    const assetBase = getAssetBasePath(game, 'amiga');
+    const assetBase = getAssetBasePath(game, g.platform);
     setStatus(`loading ${g.label}…`);
 
     view = await g.loader(assetBase, levelId, pose);
@@ -356,10 +364,11 @@ async function main() {
     levelSelect.value = String(levelId);
 
     const hasAutomap = !!view.automap;
-    minimapCanvas.style.display = hasAutomap ? '' : 'none';
+    const hasMinimap = hasAutomap || !!view.renderMinimap;
+    minimapCanvas.style.display = hasMinimap ? '' : 'none';
     automapCanvas.style.display = hasAutomap ? '' : 'none';
     document.querySelectorAll<HTMLElement>('#sidebar .panel').forEach((p) => {
-      p.style.display = hasAutomap ? '' : 'none';
+      p.style.display = hasMinimap ? '' : 'none';
     });
 
     noclipCheck.checked = false;
@@ -378,6 +387,11 @@ async function main() {
   }
 
   function renderMainView(): number {
+    if (view.renderCanvas) {
+      // Full-colour renderers (MM1/MM2) draw the whole canvas themselves.
+      view.renderCanvas(canvas.getContext('2d')!);
+      return view.items.length;
+    }
     const items = view.items;
     if (items !== lastItems) {
       lastItems = items;
@@ -428,7 +442,11 @@ async function main() {
 
   function renderAll() {
     renderMainView();
-    if (view.automap) minimap.render(view.automap.level, view.pose);
+    if (view.renderMinimap) {
+      view.renderMinimap(minimapCanvas.getContext('2d')!);
+    } else if (view.automap) {
+      minimap.render(view.automap.level, view.pose);
+    }
     renderAutomapPanel();
     setStatusLine();
   }
@@ -472,9 +490,10 @@ async function main() {
     renderAll();
   });
 
-  const initialPose: Pose | null = params && params.game === startGame && params.level === startLevel
-    ? { level: startLevel, x: params.x, y: params.y, facing: params.facing }
-    : null; // null = the loader's data-derived entrance tile
+  const initialPose: Pose | null =
+    params && params.game === startGame && params.level === startLevel && params.x !== undefined && params.y !== undefined
+      ? { level: startLevel, x: params.x, y: params.y, facing: params.facing }
+      : null; // null = the loader's data-derived entrance tile
   await loadGame(startGame, startLevel, initialPose);
 
   let lastTime = performance.now();
@@ -496,7 +515,11 @@ async function main() {
     renderMainView(); // cheap: only recomposites when the view is dirty
     if (newPose) {
       view.automap?.state.onEnterCell(newPose.level, newPose.x, newPose.y);
-      if (view.automap) minimap.render(view.automap.level, newPose);
+      if (view.renderMinimap) {
+        view.renderMinimap(minimapCanvas.getContext('2d')!);
+      } else if (view.automap) {
+        minimap.render(view.automap.level, newPose);
+      }
       renderAutomapPanel();
       setStatusLine();
     } else {
