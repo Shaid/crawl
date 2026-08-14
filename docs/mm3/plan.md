@@ -128,3 +128,17 @@ Run from the repo root: `python3 scripts/extract_mm3_dos.py` and
   (`mm3-amiga-palette` closed). DOS screens now render too, with the
   confirmed 256-colour VGA palette (`mm3-dos-palette` closed) —
   `scripts/extract_mm3_dos_screens.py`, all 12 `.raw` files.
+- **Maze (wall-layout) records — SOLVED** (`mm3-cur-format` closed): the
+  dungeon/town wall data lives in `MM3.CUR` (the "current game" archive,
+  not the read-only `MM3.CC` — the game mutates and saves it), 240/240
+  entries named. `maze<N>.dat` (105, 832 B raw) = 16x16 wall grid (4
+  nibbles per cell = N/E/S/W, each 3-bit graphic index + 1 blocking bit)
+  + 16x16 cell grid + a fully code-cited 64-byte trailer (neighbour maze
+  ids, run position, 256-bit seen bitmap). `maze<N>.bin`/`.evt` add
+  object/monster placement and event scripts. Outdoor mazes (41-64) are a
+  separate terrain-layer encoding sharing the same word. Verified against
+  two independent shipped-art oracles: the World Map poster (outdoor
+  sections match section-for-section) and the Castle Blackwind route map
+  (108/109 arrows legal on maze33 vs a 31.4% corpus mean). Wired into
+  `scripts/extract_mm3_dos_mazes.py` -> `tools/shared/game-config.ts`;
+  not yet consumed by a walker (`mm3-maze-viewer` open).

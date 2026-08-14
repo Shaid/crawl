@@ -8,7 +8,7 @@ Format documentation for `data/mm3/dosvga/`. All offsets file-relative.
 |------|------|------|
 | `MM3.CC` | 3,430,389 | the game data archive (558 entries) |
 | `MM3.EXE` | 280,032 | packed executable (Executrix by Knowledge Dynamics + Borland TLINK; uncompressed FBOV overlay at 0x286C0) |
-| `MM3.CUR` | 207,551 | current-game data — **CC archive** (parses with `dos_cc.py`, 240 entries: many 832-byte maze blocks + character/party records; per-entry semantics open, see TODO `mm3-cur-format`) |
+| `MM3.CUR` | 207,551 | current-game data — **CC archive**, the maze/wall-layout archive (240/240 entries named: `maze<N>.dat`/`.bin`/`.evt` + `maze.nam`/`.chr`/`.pty`) — **SOLVED**, see "Maze records" below |
 | `MM3.CFG` | 4 | `00 01 20 02` (sound config) |
 | `Mm3.com` | 776 | copy-protection loader: hooks `INT 21h`, patches a far call in the loaded MM3.EXE to a short jump on file-close — not a plain overlay stub |
 | `MM3.$$$` | 28,600 | 8-bit PCM scratch (byte histogram clustered 0x97–0xD8) — not a CC archive |
@@ -194,6 +194,178 @@ the extractor/viewer pipeline via `scripts/extract_mm3_dos_sprites.py`
 (`mm3-dos-sprite-pipeline` closed) — every sprite-container file renders
 to a PNG strip + JSON sidecar under `public/assets/mm3/dosvga/sprites/`,
 hooked into `tools/shared/game-config.ts`'s mm3/dosvga `buildAssets`.
+
+## Maze records — **SOLVED** (`MM3.CUR`)
+
+The dungeon/town wall-layout data — what MM1 calls `MAZEDATA.DTA` and MM2
+calls `map.dat` — is **not** in the read-only `MM3.CC`. It's in
+`MM3.CUR`, the "current game" archive, because the game mutates it at
+runtime (doors opened, walls destroyed, visited-cell tracking) and writes
+it back — `MM3.CUR` is simultaneously the pristine static layout *and*
+the save state. `MM3.CC` has zero maze records; `MM3.CUR` parses with the
+same `dos_cc` container reader into **240 entries, 240/240 now named**:
+
+| Entries | Names | Contents |
+|---|---|---|
+| 3 | `maze.nam`, `maze.chr`, `maze.pty` | misc (31/9090/918 B) |
+| 105 | `maze1.dat`…`maze103.dat`, `maze105.dat`, `maze106.dat` | **832 B each, raw (not LZHUF)** — wall/cell grid, id 104 absent |
+| 66 | `maze1.bin`…`maze64.bin`, `maze105/106.bin` | object + monster placement |
+| 66 | `maze1.evt`…`maze64.evt`, `maze105/106.evt` | Xeen-format event records |
+
+`832` is the game's own constant (`muls.w #0x340` at the loader and 63
+other sites in the Amiga executable). Filenames beyond `maze99` render
+with 3 digits, which is why an earlier `maze%02u` (2-digit) filename-hash
+sweep against `MM3.CC` and the Amiga `.cc` files found nothing real — it
+was searching the wrong container *and* missing the 3-digit ids. (Two
+false-positive hash collisions were caught and discarded along the way:
+`MAZE72/73.DAT`'s hash collides with the real `takb1.vga`/`takb2.vga`,
+and `MAZE95-98.DAT`'s collides with `elf1-4.fac` — the 16-bit hash is
+known to collide freely, so a name match alone is never sufficient
+evidence; see the "MM3.CC container" section above.)
+
+### `maze<N>.dat` — 832 B (confirmed)
+
+```
+0x000  512 B  wall grid  : 16x16 u16 LE, index = y*16 + x
+0x200  256 B  cell grid  : 16x16 u8,     index = y*16 + x
+0x300   64 B  trailer
+```
+
+The loader keeps 4 records resident at a time (`cmpi.w #4` in the Amiga
+exe) — a 2x2 block forming one 32x32 area, which is why event coordinates
+run 0..31 rather than 0..15.
+
+**Orientation: x increases EAST, y increases NORTH** (y = 0 is the south
+edge; renders here flip y so north is up, matching the game's own maps).
+
+**Wall u16 — four 4-bit sides, each = 3-bit graphic index + 1 blocking
+bit** (word reads N E S W left-to-right in hex):
+
+| Bits | Side | graphic-index mask | blocking-bit mask |
+|---|---|---|---|
+| 0–3 | West | `0x0007` | `0x0008` |
+| 4–7 | South | `0x0070` | `0x0080` |
+| 8–11 | East | `0x0700` | `0x0800` |
+| 12–15 | North | `0x7000` | `0x8000` |
+
+`0x9999` = solid rock on all four sides; `0x0000` = fully open. The 3+1
+split (never a full 4-bit wall-type value) is confirmed from all 16 call
+sites of the wall accessor, each passing exactly one of
+`0x7/0x70/0x700/0x7000` or `0x8/0x80/0x800/0x8000`, and the
+direction↔mask mapping is confirmed from the line-of-sight/step-check
+code: stepping east tests the target cell's `0x0008` (its **west** wall),
+stepping west tests `0x0800` (its **east** wall), stepping north tests
+`0x8000` (its **north** wall), stepping south tests `0x0080` (its
+**south** wall) — i.e. you always test the wall facing back at you.
+Accessor: `addr = mazeRecord[slot] + ((y&0xF)<<5) + ((x&0xF)<<1)`, returns
+`u16 & mask`, or `0x1111` (all sides blocked) if off-map.
+
+This is **not** Xeen's (MM4/5) `MazeData` — MM3's nibble→direction order
+is the reverse of Xeen's (Xeen: bits 0–3 = North; MM3: bits 0–3 = West),
+and Xeen uses a full 4-bit wall-type value where MM3 splits 3+1.
+Assuming Xeen-compatibility here would silently produce a
+plausible-looking but 90°-rotated decode.
+
+**Outdoor mazes (ids 41–64) are a different union member**: the same u16
+is terrain layers (low nibble = surface variant, the other three =
+overlay/sprite layers), not per-side walls — detected via "graphic-set
+table at trailer +0x00 is nonzero" (true for exactly those 24 ids and no
+others). The 6x4 outdoor grid tiles as `section = 41 + 4*col + row`
+(A1=41 … F4=64), matching the world's `n+4 = east, n+1 = south` layout —
+see the world-map verification below. The individual overlay-layer roles
+(surface vs. the 3 higher layers) aren't code-traced yet — see TODO
+`mm3-maze-outdoor-layers`.
+
+### Trailer `0x300..0x33F` (confirmed unless noted)
+
+Every byte in `0x300..0x31E` is referenced by name at a specific code
+site in the Amiga executable (full census, 68 sites) — no unexplained
+bytes in the header half.
+
+| Off | Field |
+|---|---|
+| +0x00..06 | 7 x graphic-set id; a wall's 3-bit index N (1..7) selects entry N−1, looked up 1-based in a global name table and loaded as `<name>.vga` |
+| +0x07 | percentage-chance field |
+| +0x08/09/0A/0B | surrounding maze id: **North / East / South / West** (used when stepping off the 16x16 edge) |
+| +0x0C | saving allowed ("…no saving in this maze.") |
+| +0x0D | flag, map-timer related |
+| +0x0E | resting allowed ("Too dangerous to rest here!") |
+| +0x0F | dismiss allowed ("Too dangerous to dismiss here!") |
+| +0x10 | 0 in all 105 records |
+| +0x11/0x12 | percentage-chance fields |
+| +0x13 | **run/start position**: low nibble = x, high nibble = y |
+| +0x14..1A | 7 x 0/1 permission flags |
+| +0x1B..1E | 4 percentage-chance fields |
+| +0x1F | **maze number** (u8) — matches the filename id in 104/105 records (`maze89.dat` stores 0 in its own number byte; its neighbours reference it correctly and its wall grid is unique, so this is an original-data quirk, not a decode bug) |
+| +0x20..3F | **256-bit seen/visited bitmap**, bit index = y\*16+x (all-zero in the shipped file — the game sets bits as the party explores, then writes the record back) |
+
+### `maze<N>.evt` — event records (confirmed framing)
+
+`[len][x][y][direction][line][opcode][params…]`, record size = `1+len`,
+`len` = 5 + params. x/y run 0..31 (the 2x2-block coordinate space).
+11,028 records parse across the 66 files.
+
+### `maze<N>.bin` — objects + monsters (**partial**, 59/66 files)
+
+```
+[{x, y, packed}]*   3-byte object records; packed&3 = facing, packed>>2 = sprite type
+0xFF                record-aligned terminator (only tested at record boundaries)
+[5 bytes]           the maze's 5 monster-type ids, 0xFF = unused slot
+[{x, y, typeIdx}]*  3-byte monster records; typeIdx 0..4 indexes those 5 ids
+```
+
+Object slots with `x == 128` are unused. Two corpus-wide invariants hold
+across the 59 clean files: **0 monster records reference an unused
+(0xFF) type slot**, and **1357/1357 resolved monster type ids are valid
+0..89 indices into the already-decoded `Mon*.dat` stat tables** — `.bin`
+links placement directly to the monster-stats work earlier in this doc.
+The 7 stragglers desync in the object list (not the monster list) — the
+reader has a conditional branch implying some object records aren't a
+flat 3 bytes; see TODO `mm3-maze-bin`.
+
+### Verification
+
+`scripts/verify_mm3_dos_mazes.py` (corpus invariants) and
+`scripts/verify_mm3_blackwind_route.py` (an independent human-authored
+oracle), both reproduced independently:
+
+| Check | Result |
+|---|---|
+| `MM3.CUR` entries resolved to a name | 240/240 |
+| 832-byte raw records | 105/105 |
+| stored maze number (+0x1F) == filename id | 104/105 (`maze89` quirk above) |
+| wall blocking-bit symmetric across every interior wall (81 indoor mazes) | 38,878/38,880 (99.995%) |
+| surrounding-maze links reciprocal | 178/186 (95.7%; failures confined to 2 of 14 castle 2x2 blocks — original-data errors) |
+| open map edge <-> surrounding-maze link agrees | 309/324 (95.4%) |
+| surrounding table agrees with the 6x4 world tiling | 24/24 |
+
+Two independent shipped-art oracles, both reproduced:
+
+- **The world map poster** (`data/mm3/amiga/Docs/World Map.jpg`, a
+  hand-illustrated 6x4 lettered A1..F4 grid). Rendering the 24 outdoor
+  sections with the decoded terrain nibble reproduces the poster
+  section-for-section — visually confirmed: the isolated diamond-shaped
+  "Isle of Fire" island, the Frozen Isles as separate pale blobs, the
+  large forested western continent, and — the most specific match — a
+  literal checkerboard-textured "Thorn Blossom Orchard" in the reference
+  art landing in the exact same grid cell in the render. →
+  `public/assets/mm3/dosvga/maps/world.png`.
+- **The Castle Blackwind route map**
+  (`data/mm3/amiga/Docs/mm3-map-castleblackwind.gif`, a hand-drawn
+  16x16 arrow path, 109 arrows). Testing whether each arrow's indicated
+  step crosses a blocking wall: **maze33 scores 108/109** (the one
+  "failure" is the arrow walking off the map's south edge, i.e. the
+  exit) against a **31.4% corpus mean** across the 81 indoor mazes — and
+  `maze33` is independently confirmed as Castle Blackwind by its own
+  `.maz` text ("A ladder up to Castle Blackwind…", "The statue of Hamon
+  Othreute, Warlord of Castle Blackwind").
+
+→ `scripts/mm3lib/dos_maze.py` (decoder, every field cites its Amiga
+file offset), `scripts/extract_mm3_dos_mazes.py` (wired into
+`tools/shared/game-config.ts`'s mm3/dosvga `buildAssets` —
+`data/mazes.json`, `maps/maze<NN>.png` for the 81 indoor mazes,
+`maps/world.png` for the outdoor composite). Not yet consumed by any
+viewer/walker — see TODO `mm3-maze-viewer`.
 
 ## MM3.EXE / palette
 
