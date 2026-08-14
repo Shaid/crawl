@@ -282,10 +282,50 @@ scattered UI/effect strings, and the SP cost is a formula (spell level,
 lists are transcribed in `scripts/mm1lib/mm1_spells.json` (ScummVM
 `strings_en.yml` + `spells_monsters.cpp` SPELLS[] names) → `data/spells.json`.
 
+## `.OVR` map-script overlays — container, selection fields, and text (**solved**; code semantics open)
+
+55 files, one per MAZEDATA screen, named by the slug table (SORPIGAL.OVR,
+AREAA1.OVR, ...). `scripts/mm1lib/ovr.py` + `scripts/extract_mm1_ovr.py`
+(`npm run mm1:ovr`).
+
+### Container (**confirmed**, 55/55: `14 + code_sz + data_sz == file size`, 0 deviation)
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 2 | entry offset into the code segment (242 in all 55 files) |
+| +0x02 | 2 | far-data constant 0xF48F (all files) |
+| +0x04 | 2 | `code_sz` |
+| +0x06 | 2 | far-data constant 0xC940 (all files; the code entry writes it — `MOV AX,0xC940` / `MOV [0x132],AX`) |
+| +0x08 | 2 | `data_sz` |
+| +0x0A | 2 | 0 |
+| +0x0C | 2 | per-file value (candidate: overlay runtime load segment) |
+| +0x0E | code_sz | **compiled 8086 machine code** — not a custom bytecode. Position-bound: references absolute game memory addresses (0xC973, 0x3C3A, ...), i.e. the game's fixed data layout (MM.RSM's territory) |
+| +0x0E+code_sz | data_sz | data segment: selection tables + the map's text |
+
+### Data segment (**partially confirmed**, semantics of the deeper tables open)
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 1 | map id/code: towns 1–5, caves 6–14 (screen index+1), overland 0x81–0x94 (0x80\|(index−13)), dungeons 0x20–0x40 (doom 0x20, alamar 0x22, demon 0x40, astral 0x39) |
+| +0x01 | 1 | WALLPIX area table (1–3 → `maps.cpp` TILE_AREAS) |
+| +0x02 | 6 | 3 × `u16` wall/lane ids (near/mid/far frustum lanes or overland horizons) |
+| +0x08 | 12 | 4 × 3-byte event records (x, y, kind) — repeating; semantics open |
+| +0x14 | … | further per-map tables, then the map's text strings (null-separated, `\r\n` line breaks) |
+
+Wall/lane resolution cross-checks: towns → WALLPIX entries 0–2, caves → 3–5,
+overland → 6–13 with **AREAA1 = entries 6/13/12 (wall07/wall14/wall13),
+byte-for-byte matching Vairn/MM2 doc 24**; dungeons via area table 3.
+→ `data/ovr.json` (per-map header/fields/events) and `data/ovr-text.json`
+(**387 text strings** — the actual in-game dialogues/descriptions per screen,
+e.g. Sorpigal's "EULARDS FINE FOODS", "THE INN OF SORPIGAL").
+
+**Open**: the code segment's full script semantics (which code routine does
+what — encounter triggers, doors, exits, text dispatch) requires
+disassembling the 8086 code against the game's memory map; MM.RSM's symbol
+table and the exe's overlay loader are the next oracles.
+
 ## Still open (not part of this pass)
 
-- `*.OVR` event scripts — ScummVM `maps/map00-55.cpp` are its hand-translated
-  per-map scripts; MM.RSM's symbol table is the head start for the loader.
 - `FLOORPIX.DTA`/`OBJPIX.DTA` — absent from this GOG install.
 - A live-game (DOSBox) screenshot comparison for the WALLPIX/MONPIX/title
   renders would be a stronger visual oracle than the structural checks

@@ -24,6 +24,7 @@
     "mm1:gfx": "python3 scripts/extract_mm1_gfx.py",
     "mm1:misc": "python3 scripts/extract_mm1_misc.py",
     "mm1:tables": "python3 scripts/extract_mm1_tables.py",
+    "mm1:ovr": "python3 scripts/extract_mm1_ovr.py",
     "mm2:data": "npx tsx tools/mm2/export-data.ts data/mm2/amiga/data",
     "mm2:gfx": "npx tsx tools/mm2/decode-graphics.ts data/mm2/amiga/data",
     "mm2:pcgfx": "npx tsx tools/mm2/decode-pc-graphics.ts data/mm2/dosega",
