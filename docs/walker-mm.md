@@ -16,7 +16,7 @@ bypass the DrawItem/IndexedSurface composite path the BC/W6 views use.
 
 | | MM1 (`mm1`) | MM2 (`mm2`) |
 |---|---|---|
-| Wall art | **Real `WALLPIX.DTA` slices** (17 sets × 12 frustum slices) — each screen picks its set from the decoded `.OVR` selection fields (`wallEntries[0]`; overland uses its biome entry) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) |
+| Wall art | **Real `WALLPIX.DTA` slices** (18 sets × 12 frustum slices) — each screen's near/mid/far frustum depth lanes each pick their own set from the decoded `.OVR` selection fields (`wallEntries[0..2]`; overland lanes are biome entries, e.g. AREAA1 = near/mid/far wall07/wall14/wall13) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) |
 | Torch overlays | **none** — MM1 renders no torch overlay (the reference implementation draws code-3 faces as plain walls; WALLPIX has no torch frames) | authentic `*t.32` with 3-phase flicker |
 | Floor/sky bands | simple dark band | `*f.32` floor + `sky.32` (roof bit flips the sky frame) |
 | Screens | all 55 (indoor frustum everywhere; overland uses its biome wall art) | indoor: 0–4 town, 17–32 cavern, 45–59 castle; **overland (5–16, 33–44) renders the outdoor scene** (`outdoor3d.ts` port: outdoor1-3 horizon lanes + desert/ocean/swamp/tundra decor bands from the terrain ids, terrain minimap from `outb.32`) |

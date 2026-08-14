@@ -85,12 +85,17 @@ interface MmScreen {
   label: string;
   env: string;
   outdoor: boolean;
+  /** True when outdoor cells use the MapWalls wall-code encoding (MM1) rather
+   * than MM2's terrain-id encoding — gates the MM2-only terrain-block check
+   * in `movementBlocked`. */
+  mapWalls: boolean;
   visual: Uint8Array;
   collision: Uint8Array;
   neighbors: number[];
   roofBits?: Uint8Array;
-  /** MM1: WALLPIX entry used for the frustum walls. */
-  wallEntry: number;
+  /** MM1: near/mid/far WALLPIX entries (`.OVR` `wallEntries[0..2]`), indexed
+   * by frustum depth lane — not a single texture set for the whole screen. */
+  wallEntries: number[];
   /** MM2 overland: attrib surface byte. */
   surface: number;
 }
@@ -156,10 +161,11 @@ function loadMm1(): Promise<Mm1Data> {
           label: `${s.index}: ${s.title}`,
           env: s.env,
           outdoor: s.env === 'outside',
+          mapWalls: true,
           visual,
           collision,
           neighbors: [-1, -1, -1, -1],
-          wallEntry: ovr && ovr.wallEntries ? (ovr.wallEntries[0] as number) : 0,
+          wallEntries: ovr && ovr.wallEntries ? (ovr.wallEntries as number[]) : [0, 0, 0],
           surface: 0,
         };
       },
@@ -213,11 +219,12 @@ function loadMm2(): Promise<Mm2Data> {
         label: `screen ${s.index} (${env})`,
         env,
         outdoor: isOutdoor,
+        mapWalls: false,
         visual,
         collision,
         neighbors: attrib ? (attrib.neighbours as number[]) : [-1, -1, -1, -1],
         roofBits,
-        wallEntry: 0,
+        wallEntries: [0, 0, 0],
         surface: attrib ? (attrib.surfaceFlag as number) : 0,
       };
     });
@@ -394,6 +401,12 @@ export abstract class MmWalkerView implements GameView {
 // MM1 view — real WALLPIX slices
 // ──────────────────────────────────────────────────────────────────────────
 
+/** Pick the near/mid/far WALLPIX entry for a blit's frustum depth lane
+ * (depths beyond the far lane reuse it — there are only 3 lanes). */
+export function wallLaneForDepth(wallEntries: number[], depth: number): number {
+  return wallEntries[Math.min(depth, 2)] ?? wallEntries[0] ?? 0;
+}
+
 export class MM1View extends MmWalkerView {
   readonly id = 'mm1';
   readonly gameLabel = 'Might & Magic I';
@@ -419,7 +432,7 @@ export class MM1View extends MmWalkerView {
     const scene = buildIndoorScene(grid, this.pose_.x, this.pose_.y, this.pose_.facing);
 
     for (const b of scene.blits) {
-      const fr = data.wallpix.frame(wallpixSliceName(sc.wallEntry, b.frame));
+      const fr = data.wallpix.frame(wallpixSliceName(wallLaneForDepth(sc.wallEntries, b.depth), b.frame));
       if (!fr) continue;
       ctx.drawImage(data.wallpix.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
     }

@@ -65,6 +65,19 @@ describe('frustum engine', () => {
     expect(movementBlocked(sc, 2, 1, 0)).toBe(false);
   });
 
+  it('movementBlocked only applies the MM2 terrain-id check when mapWalls is false', () => {
+    const sc = emptyScreen();
+    sc.outdoor = true;
+    // destination visual byte 0xff matches MM1's border-cell convention but
+    // also happens to match MM2's terrain-block bit pattern ((v&0x60)===0x60).
+    // facing 0 (N) from (1,1) steps to (1,2) -> visual index 2*16+1 = 33.
+    sc.visual[2 * MAP_GRID + 1] = 0xff;
+    sc.mapWalls = true; // MM1: MapWalls encoding, not an MM2 terrain id — must not block
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(false);
+    sc.mapWalls = false; // MM2: same byte read as a terrain id — blocks
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(true);
+  });
+
   it('stepParty clamps at screen edges without neighbours', () => {
     const screens = [emptyScreen(), emptyScreen()];
     const p = stepParty(2, 0, 0, 0, screens); // facing S, at (0,0) -> stays
@@ -94,6 +107,18 @@ describe('frustum engine', () => {
     expect(wallpixSliceName(3, 8)).toBe('wall03_right0'); // right depth 0
     expect(wallpixSliceName(3, 0x10)).toBe('wall03_front0'); // door frame falls back
     expect(wallpixSliceName(3, 12)).toBe('wall03_left0'); // mirror base
+  });
+
+  it('StitchedVisual reads across the west screen boundary', () => {
+    // west neighbour = screen 1 (n[3] = 1, per StitchedVisual's page order N/E/S/W)
+    const a = emptyScreen([-1, -1, -1, 1]);
+    const b = emptyScreen();
+    b.visual[8 * MAP_GRID + 15] = 0xab; // screen b's east edge (its col 15), row 8
+    const grid = new StitchedVisual([a, b], 0);
+    // x=-1 is one cell west of screen a's west edge -> screen b's col 15
+    expect(grid.at(-1, 8)).toBe(0xab);
+    // x=-4 -> screen b's col 12 (unset)
+    expect(grid.at(-4, 8)).toBe(0);
   });
 
   it('buildIndoorScene is deterministic for a straight corridor', () => {

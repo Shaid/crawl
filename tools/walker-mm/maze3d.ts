@@ -298,9 +298,9 @@ export class StitchedVisual {
     if (x > 0x0f && x < 0x14) {
       page = this.pages[1];
       lx = x - 0x10;
-    } else if (x >= 0xfc) {
+    } else if (x < 0) {
       page = this.pages[3];
-      lx = x - 0xf0;
+      lx = x + 0x10;
     }
     if (y >= MAP_GRID) {
       page = this.pages[0];
