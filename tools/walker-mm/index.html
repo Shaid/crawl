@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Might &amp; Magic I + II — Maze Walkers</title>
+  <link rel="stylesheet" href="walker-mm.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="title">Might &amp; Magic Walkers</span>
+      <select id="game" title="Game">
+        <option value="mm1">MM1 — Secret of the Inner Sanctum</option>
+        <option value="mm2">MM2 — Gates to Another World</option>
+      </select>
+      <select id="screen" title="Screen / map"></select>
+      <select id="wallset" title="Wall set (MM1)" style="display:none"></select>
+      <label class="toggle"><input type="checkbox" id="noclip" /> noclip</label>
+      <span id="status">loading…</span>
+    </header>
+    <main id="stage">
+      <div id="viewport-wrap">
+        <canvas id="view" width="960" height="600" aria-label="3D view"></canvas>
+      </div>
+      <div id="side">
+        <canvas id="minimap" width="224" height="224" aria-label="Minimap"></canvas>
+        <p class="hint">WASD/arrows move · Q/E turn · N noclip · Tab zoom minimap</p>
+        <p class="note">
+          MM1 renders the real <code>WALLPIX.DTA</code> wall sets; MM2 uses the
+          authentic <code>.32</code> sheets. Both run the ASM-faithful frustum
+          engine from the original games' 3D view.
+        </p>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="./app.ts"></script>
+</body>
+</html>

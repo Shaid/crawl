@@ -6,7 +6,11 @@
  * runtime `A4-$EEF4`.
  *
  *   Page 0 (visual, +0x000): four 2-bit wall fields per cell, N/E/S/W:
- *       `0` open, `1` wall, `2` wall+torch, `3` door.
+ *       `0` open, `1` wall, `2` door, `3` wall+torch.
+ *       (Correction: earlier text said 2=torch, 3=door — wrong. Vairn's own
+ *       ASM-traced walkers treat 2 as door and 3 as torch, and the collision
+ *       page agrees: code-2 faces are passable doorways, code-3 faces sit on
+ *       blocked walls.)
  *       N = byte&3, E = (byte>>2)&3, S = (byte>>4)&3, W = (byte>>6)&3.
  *   Page 1 (collision, +0x100): per direction `(dark<<1)|wall`; the low bit
  *       is the wall, the high bit darkness. West's dark slot is reused:

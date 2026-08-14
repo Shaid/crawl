@@ -19,8 +19,17 @@ MM2 codec (`tools/mm2/map.ts` → `tools/mm1/map.ts`).
 
 | Offset | Size | Page |
 |--------|------|------|
-| `0x000` | 256 | **Visual** — four 2-bit wall fields per cell (N/E/S/W): `0` open, `1` wall, `2` wall+torch, `3` door |
+| `0x000` | 256 | **Visual** — four 2-bit wall fields per cell (N/E/S/W): `0` open, `1` wall, `2` door, `3` wall+torch |
 | `0x100` | 256 | **Collision** — per direction `(dark<<1)\|wall`; bit `0x80` = event flag |
+
+> **Correction:** earlier text (and Vairn's `21/22-map-dat-format` prose)
+> said `2`=wall+torch, `3`=door. That is **wrong** — the ASM-traced walker
+> implementations (Vairn's own `view3d_indoor.py` legend: "code=2 door,
+> code=3 torch") and the collision page both confirm `2`=door (passable
+> doorway faces: 30 walkable vs 12 blocked in Sorpigal) and `3`=torch
+> (wall-mounted, blocked faces: 68 blocked vs 4 walkable). On overland,
+> cells whose four fields are all `3` (byte `0xFF`) are border/edge cells
+> (Vairn doc 23).
 
 Cell packing (both pages): `N = byte&3`, `E = (byte>>2)&3`, `S = (byte>>4)&3`,
 `W = (byte>>6)&3`. Grid is 16×16, row 0 on disk = **south** (automap renders

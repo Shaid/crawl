@@ -38,8 +38,8 @@ import { writeJson, writeManifest, writePlatformIndex, syncDataManifest } from '
 const CELL_RGB: Record<number, [number, number, number]> = {
   0: [0x18, 0x18, 0x20], // open floor
   1: [0xa8, 0xa8, 0xb0], // wall
-  2: [0xf8, 0xc8, 0x50], // torch
-  3: [0xe0, 0x70, 0x48], // door
+  2: [0xe0, 0x70, 0x48], // door
+  3: [0xf8, 0xc8, 0x50], // torch
 };
 const EVENT_RGB: [number, number, number] = [0xff, 0x30, 0x30];
 const SCALE = 2; // pixels per cell
@@ -56,8 +56,8 @@ function screenStats(cells: Mm1MapCell[][]): Record<string, number> {
     for (const cell of row) {
       for (const code of [cell.visual.n, cell.visual.e, cell.visual.s, cell.visual.w]) {
         if (code === 1) stats.walls++;
-        else if (code === 2) stats.torches++;
-        else if (code === 3) stats.doors++;
+        else if (code === 2) stats.doors++;
+        else if (code === 3) stats.torches++;
       }
       if (cell.event) stats.events++;
       if (cellIsDark(cell)) stats.dark++;

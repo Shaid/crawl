@@ -264,7 +264,14 @@ Each screen = page 0 (visual) + page 1 (collision), 16×16 grid, 256 bytes each.
 Row 0 on disk = south; auto-map draws north-up.
 
 **Page 0 — visual** (drives the 3D hood): four 2-bit wall fields per cell,
-N/E/S/W: `0` open, `1` wall, `2` wall+torch, `3` door.
+N/E/S/W: `0` open, `1` wall, `2` door, `3` wall+torch.
+
+> **Correction:** earlier text said `2` wall+torch / `3` door. Wrong — the
+> ASM-traced walker implementations (`view3d_indoor.py`: "code=2 door,
+> code=3 torch") and the collision page confirm `2`=door (passable doorway
+> faces), `3`=torch (blocked wall faces). The `.32` wall sheets reserve
+> frames 0x10–0x1B for door art and the torch sheets hold the wall+torch
+> overlays — matching code 2/3 respectively.
 
 ```
 N = byte & 3,  E = (byte >> 2) & 3,  S = (byte >> 4) & 3,  W = (byte >> 6) & 3
