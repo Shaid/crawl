@@ -250,6 +250,26 @@ The full address encoding is **not** confirmed (the `0x28` constant byte's
 role is unclear) — the symbol list itself is solid.
 → `data/mm-rsm-symbols.json` (will inform the `*.OVR` script work).
 
+**Oracle check (both come up empty):** neither external source has this.
+Vairn/MM2 — `grep -rli rsm EXTRACTED/docs/` across the whole doc tree
+returns **zero hits**; its only overlay-loader discussion (`08-event-runtime.md`
+`-$7DFA`/`event_dat_loader`) is MM2 Amiga's `event.dat` runtime, an
+unrelated system. ScummVM — `engines/mm/mm1/maps/map.cpp`
+`Map::loadOverlay()` (see `.OVR` section above) reads the container header
+and data segment directly and **skips the code segment entirely**, so
+structurally it never needs an overlay-loader symbol table at all; there
+is no `.rsm`/RSM-named file in `engines/mm/mm1/`'s directory listing or the
+`dists/engine-data/mm1` manifest (checked via the GitHub contents API — a
+full source-wide code search wasn't available in this environment:
+`api.github.com/search/code` requires auth, `grep.app` returned no usable
+response for either `RSM` or a known-present control string). Given the
+self-contained loader shown above and zero hits in every check that did
+work, `mm1-rsm-encoding` is **answered-by-neither** — the `0x28`-byte
+address encoding remains genuinely open and would need manual analysis
+(the overlay-loader routines the symbol table names — `ovloader_`,
+`loadmaze`, `readwall_`, etc. — are themselves inside `MM.EXE`, not
+reimplemented by any oracle we have access to).
+
 ### `GACARD.DTA` — copy-protection card state (**hypothesis**)
 
 1 byte (`0x03`). MM1's copy protection is the "Game Access Card" grid;
@@ -316,7 +336,7 @@ scattered UI/effect strings, and the SP cost is a formula (spell level,
 lists are transcribed in `scripts/mm1lib/mm1_spells.json` (ScummVM
 `strings_en.yml` + `spells_monsters.cpp` SPELLS[] names) → `data/spells.json`.
 
-## `.OVR` map-script overlays — container, selection fields, and text (**solved**; code semantics open)
+## `.OVR` map-script overlays — container, selection fields, and text (**solved**; script *behavior* answered by ScummVM, raw 8086 opcodes still undecoded)
 
 55 files, one per MAZEDATA screen, named by the slug table (SORPIGAL.OVR,
 AREAA1.OVR, ...). `scripts/mm1lib/ovr.py` + `scripts/extract_mm1_ovr.py`
@@ -336,15 +356,78 @@ AREAA1.OVR, ...). `scripts/mm1lib/ovr.py` + `scripts/extract_mm1_ovr.py`
 | +0x0E | code_sz | **compiled 8086 machine code** — not a custom bytecode. Position-bound: references absolute game memory addresses (0xC973, 0x3C3A, ...), i.e. the game's fixed data layout (MM.RSM's territory) |
 | +0x0E+code_sz | data_sz | data segment: selection tables + the map's text |
 
-### Data segment (**partially confirmed**, semantics of the deeper tables open)
+Independent cross-check, ScummVM `engines/mm/mm1/maps/map.cpp`
+`Map::loadOverlay()`: reads and validates the exact same 14-byte header
+(field names differ but offsets/sizes match byte-for-byte — `magicId` @
++0x00 must be `0xF2` = 242 decimal, `codePtr` @ +0x02 must be `0xF48F` **or**
+`0xF47C`), then **skips the code segment outright** (`f.skip(codeSize)`)
+and reads only the data segment into `_data[]`. Comment in the source:
+*"Skip over code segment, since each map's code is going to be
+reimplemented in C++"* — i.e. ScummVM never disassembled the 8086 either;
+it re-derived each map's behavior independently (design docs / manual
+replay) and hard-coded it in C++. `0xF47C` as an alternate +0x02 constant
+is new information vs. our "0xF48F all files" note — not a contradiction
+(our 55/55 GOG files are all `0xF48F`), just evidence ScummVM's engine also
+targets a variant release where it differs.
 
-| Offset | Size | Field |
-|--------|------|-------|
-| +0x00 | 1 | map id/code: towns 1–5, caves 6–14 (screen index+1), overland 0x81–0x94 (0x80\|(index−13)), dungeons 0x20–0x40 (doom 0x20, alamar 0x22, demon 0x40, astral 0x39) |
-| +0x01 | 1 | WALLPIX area table (1–3 → `maps.cpp` TILE_AREAS) |
-| +0x02 | 6 | 3 × `u16` wall/lane ids (near/mid/far frustum lanes or overland horizons) |
-| +0x08 | 12 | 4 × 3-byte event records (x, y, kind) — repeating; semantics open |
-| +0x14 | … | further per-map tables, then the map's text strings (null-separated, `\r\n` line breaks) |
+### Data segment (**confirmed header fields**, via ScummVM `maps/map.h` `DataOffset` enum — a byte-exact independent decode of the same struct)
+
+`Map::_data[]` in ScummVM is loaded directly from our `+0x0E+code_sz`
+data-segment bytes (`loadOverlay()`: `_data.resize(dataSize); f.read(&_data[0], dataSize)`),
+and `maps/map.h` names every field up to offset 50 via its `DataOffset` enum:
+
+| Offset | Size | Field | ScummVM name |
+|--------|------|-------|--------------|
+| +0x00 | 1 | map id/code: towns 1–5, caves 6–14 (screen index+1), overland 0x81–0x94 (0x80\|(index−13)), dungeons 0x20–0x40 (doom 0x20, alamar 0x22, demon 0x40, astral 0x39) | `MAP_ID` |
+| +0x01 | 1 | WALLPIX area table (1–3 → `maps.cpp` TILE_AREAS) | `MAP_1` |
+| +0x02 | 6 | 3 × `u16` wall/lane ids (near/mid/far frustum lanes or overland horizons) | `MAP_2`/`MAP_4`/`MAP_6` |
+| +0x08 | 3 | **north exit**: `u16` dest map id, 1-byte dest section | `MAP_NORTH_EXIT_ID`/`_SECTION` |
+| +0x0B | 3 | **east exit**: `u16` dest map id, 1-byte dest section | `MAP_EAST_EXIT_ID`/`_SECTION` |
+| +0x0E | 3 | **south exit**: `u16` dest map id, 1-byte dest section | `MAP_SOUTH_EXIT_ID`/`_SECTION` |
+| +0x11 | 3 | **west exit**: `u16` dest map id, 1-byte dest section | `MAP_WEST_EXIT_ID`/`_SECTION` |
+| +0x14–0x15 | 2 | unlabeled | `MAP_20`/`MAP_21` |
+| +0x16 | 1 | flee threshold | `MAP_FLEE_THRESHOLD` |
+| +0x17–0x18 | 2 | flee-to (x, y) | `MAP_FLEE_X`/`_Y` |
+| +0x19 | 1 | surrender threshold | `MAP_SURRENDER_THRESHOLD` |
+| +0x1A–0x1B | 2 | surrender-to (x, y) | `MAP_SURRENDER_X`/`_Y` |
+| +0x1C | 1 | bribe threshold | `MAP_BRIBE_THRESHOLD` |
+| +0x1D–0x21 | 5 | unlabeled | `MAP_29`..`MAP_33` |
+| +0x22 | 1 | max monsters (encounter cap) | `MAP_MAX_MONSTERS` |
+| +0x23–0x24 | 2 | sector1/sector2 (overland grid coords) | `MAP_SECTOR1`/`_2` |
+| +0x25 | 1 | map type | `MAP_TYPE` |
+| +0x26 | 1 | dispel threshold | `MAP_DISPEL_THRESHOLD` |
+| +0x27 | 5 | surface exit: `u16` id, section, x, y | `MAP_SURFACE_ID`/`_SECTION`/`_X`/`_Y` |
+| +0x2C–0x2D | 2 | unlabeled | `MAP_44`/`MAP_45` |
+| +0x2E | 1 | state flags | `MAP_FLAGS` |
+| +0x2F | 1 | unlabeled | `MAP_47` |
+| +0x30 | 1 | trap threshold | `MAP_TRAP_THRESHOLD` |
+| +0x31 | 1 | unlabeled | `MAP_49` |
+| +0x32 (=51) | N | **special-cell map-offset table** (see below) | — |
+| +0x32+N (≈74/75) | N | **special-cell direction-mask table** (see below) | — |
+| after | … | further per-map data, then the map's text strings (null-separated, `\r\n` line breaks) | — |
+
+> **Correction vs. earlier text**: `+0x08 | 12 | 4 × 3-byte event records
+> (x, y, kind)` was a guess. ScummVM's `DataOffset` enum shows those 12
+> bytes are actually the **4-directional exit table** (N/E/S/W, each a
+> `u16` destination map id + 1-byte destination section) — the exact
+> `(id, section)` pair pattern already independently observed in
+> `Maps::step()` (`mm/mm1/maps/maps.cpp`), which reads `MAP_NORTH_EXIT_ID`
+> etc. when the party walks off a map edge.
+
+**Special-cell dispatch (the actual "map script" mechanism, confirmed
+identical in every sampled map — Map00/Map05/Map34/Map49/Map54):** each
+map keeps a small fixed table of "special" cells starting at data-segment
+offset 51: one map-offset byte per cell (offset 51+i) and one direction
+bitmask byte per cell later in the table (`DIRMASK_N/E/S/W` =
+`0xC0/0x30/0xC/0x03`, offset 74 or 75+i depending on the map's special-cell
+count). `Map::special()` (each `mapNN.cpp`'s override) scans that table
+for `party_offset == special_offset[i]`; if the party is also facing the
+cell's required direction it calls a per-map `specialNN()` handler
+(door/sign/exit/statue/plot logic); every other cell — the overwhelming
+majority of the 256 — falls through to a **generic monster encounter roll**
+(`g_globals->_encounters.execute()`). This *is* what the compiled 8086
+code segment does per map; ScummVM's C++ is a clean-room behavioral
+reimplementation of it, not a decode of the actual opcodes.
 
 Wall/lane resolution cross-checks: towns → WALLPIX entries 0–2, caves → 3–5,
 overland → 6–13 with **AREAA1 = entries 6/13/12 (wall07/wall14/wall13),
@@ -353,10 +436,73 @@ byte-for-byte matching Vairn/MM2 doc 24**; dungeons via area table 3.
 (**387 text strings** — the actual in-game dialogues/descriptions per screen,
 e.g. Sorpigal's "EULARDS FINE FOODS", "THE INN OF SORPIGAL").
 
-**Open**: the code segment's full script semantics (which code routine does
-what — encounter triggers, doors, exits, text dispatch) requires
-disassembling the 8086 code against the game's memory map; MM.RSM's symbol
-table and the exe's overlay loader are the next oracles.
+### Code-segment semantics — answered-by-ScummVM (behavior), not by disassembly
+
+**Verdict:** the open question "what do the `.OVR` code segments do —
+encounters, doors, exits, text dispatch" is **answered at the behavioral
+level** by ScummVM's `engines/mm/mm1/maps/mapNN.cpp` (one C++ file per
+map, `map00.cpp`..`map54.cpp`, 55 files — `map55.cpp` is a ScummVM-only
+"Secret ScummVM" easter-egg map with no `.OVR` counterpart). It is **not**
+answered at the opcode level: ScummVM's own loader explicitly skips the
+code segment (see container note above) and reimplements behavior from
+other sources, so there is no disassembly or opcode table to import —
+only ground-truth *behavior*, which is what the open TODO item actually
+needed (encounter/door/exit/text-dispatch semantics), just not via
+disassembly.
+
+**`.OVR` file ↔ `mapNN.cpp` mapping is solved and complete, not just
+sampled:** each `MapNN` constructor passes the exact slug string as its
+overlay filename base (used by `loadOverlay()` as `<name>.ovr`), and
+`Maps::Maps()` (`maps.cpp`) constructs `Map00()..Map54()` in exactly
+MAZEDATA/slug-table order. Confirmed directly:
+
+| Index | Constructor | Slug in our table |
+|-------|-------------|--------------------|
+| 0 | `Map00() : MapTown(0, "sorpigal", 0x604, 1)` | `sorpigal` |
+| 1 | `Map01() : MapTown(1, "portsmit", 0xc03, 1, "Portsmith")` | `portsmit` |
+| 5 | `Map05() : Map(5, "cave1", 0xa11, 1)` | `cave1` |
+| 34 | `Map34() : Map(34, "doom", 0x706, 3, "Castle Doom")` | `doom` |
+| 49 | `Map49() : Map(49, "alamar", 0xb07, 3, "Castle Alamar")` | `alamar` |
+| 54 | `Map54() : Map(54, "astral", 0xb1a, 3, "The Astral Plane")` | `astral` |
+
+i.e. `mapNN.cpp` for `NN = 00..54` is `screens[NN]` in our slug table,
+**no MM.RSM or id-byte cross-referencing needed** — the future-pass idea
+of matching via the data-segment `MAP_ID` byte + `maps.cpp` town-id
+constants turned out to be unnecessary; the literal filename string
+already gives a complete 1:1 mapping.
+
+**Concrete examples of what a map's compiled routine does:**
+
+- **Locked door, `map34.cpp` (Doom) `special07()`:** `if
+  (g_globals->_party.hasItem(GOLD_KEY_ID)) { checkPartyDead(); } else {
+  send(SoundMessage(STRING["maps.map34.door"])); g_maps->_mapPos.y--;
+  updateGame(); }` — classic gated-door check: has the required key →
+  proceed (just re-check death state); otherwise show a door message and
+  bounce the party back one tile.
+- **Overland exit, `map34.cpp` `special01()`:** `visitedExit();
+  send(SoundMessage(STRING["maps.passage_outside1"], []() {
+  g_maps->_mapPos = Common::Point(7, 15); g_maps->changeMap(0xf01, 2); }));`
+  — mark the cell visited-as-exit, show a transition message, then jump to
+  map id `0xf01` section 2 at position (7,15).
+- **Flag-gated encounter, `map34.cpp` `special20()`:** `if (_data[VAL1])
+  { g_maps->clearSpecial(); g_globals->_encounters.execute(); } else {
+  none160(); }` — an encounter that only fires if a data-segment flag
+  (set earlier by `special17()`, a "box" event) was previously written.
+- **Sign / static text, `map00.cpp` (Sorpigal) `special01()`:** dispatches
+  on the party's facing direction (`DIRMASK_E`/`DIRMASK_W`/default) to
+  show one of three different shop-sign strings at the same cell.
+- **Default case, every map:** `g_maps->clearSpecial();
+  g_globals->_encounters.execute();` — any cell not in the special-cell
+  table just rolls a monster encounter.
+
+**Genuinely still open:** the raw 8086 opcode bytes of the `.OVR` code
+segment have not been disassembled or mapped instruction-by-instruction
+to these behaviors — what's answered is "what each map's script *does*"
+(via a trusted clean-room reimplementation), not "which bytes at which
+`.OVR` code-segment offset implement which special-cell handler." Closing
+that opcode-level gap would still require hand disassembly against
+MM.RSM/the exe's overlay loader, which remains unattempted (and is a much
+lower-value exercise now that behavior is independently known).
 
 ## Still open (not part of this pass)
 
@@ -364,4 +510,10 @@ table and the exe's overlay loader are the next oracles.
 - A live-game (DOSBox) screenshot comparison for the WALLPIX/MONPIX/title
   renders would be a stronger visual oracle than the structural checks
   above — not yet performed (no DOSBox in this environment).
-- `MM.RSM` address-field encoding — observed but not fully decoded.
+- `MM.RSM` address-field encoding — observed but not fully decoded; checked
+  against both external oracles (Vairn/MM2, ScummVM), neither has it (see
+  § "MM.RSM" above). Would need manual analysis.
+- `.OVR` code segment, opcode level — script *behavior* is answered by
+  ScummVM's `mapNN.cpp` reimplementation (see § ".OVR map-script overlays"
+  above), but the raw 8086 bytes are still undisassembled and unmapped to
+  that behavior instruction-by-instruction.

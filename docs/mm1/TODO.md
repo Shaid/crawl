@@ -15,13 +15,21 @@ still open);
 MONSTER tables are SOLVED** (MM.EXE +0x19B2A 255×24 and +0x1B312 195×32,
 byte-exact 255/255 and 195/195 vs ScummVM's transcription); **spells are
 documented** (no binary table — code + string pool). **`.OVR` overlays:
-container/selection-fields/text SOLVED** (55/55 size invariant, 387 text
-strings extracted, wall entries match Vairn doc 24 byte-for-byte); the
-**code-segment script semantics remain open** (compiled 8086 bound to the
-game's memory map). See `docs/mm1/dosega/data-structure.md`.
+container/selection-fields/text SOLVED**, and the **data-segment header +
+script behavior are now SOLVED too** (55/55 size invariant, 387 text
+strings extracted, wall entries match Vairn doc 24 byte-for-byte; the
+data-segment field table and the special-cell dispatch mechanism — door
+checks, exits, flag-gated encounters, generic encounter fallback — are
+confirmed byte-exact against ScummVM's `maps/map.h` `DataOffset` enum and
+`mapNN.cpp` per-map classes, with the `.OVR`→`mapNN.cpp` mapping solved
+for all 55 files via the literal slug string in each map constructor). The
+**raw 8086 opcode bytes remain undisassembled** — what's closed is
+*behavior* (via ScummVM's clean-room reimplementation), not an
+instruction-level decode of the actual code segment. See
+`docs/mm1/dosega/data-structure.md`.
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| mm1-ovr-code | open | Disassemble the `.OVR` code segments against the game's memory map to decode script semantics (encounters, doors, exits, text dispatch) — 8086 code referencing absolute addresses (0xC973, 0x3C3A...); oracles: MM.RSM symbol table + the exe's overlay loader | data-structure.md § `.OVR` map-script overlays | 2026-08-14 game-re |
+| mm1-ovr-code | answered-by-ScummVM (behavior); opcode disasm still open | Disassemble the `.OVR` code segments against the game's memory map to decode script semantics (encounters, doors, exits, text dispatch) | data-structure.md § `.OVR` map-script overlays, § "Code-segment semantics — answered-by-ScummVM" — cites `engines/mm/mm1/maps/map.h`, `map.cpp`, `maps.cpp`, `map00.cpp`, `map34.cpp` | 2026-08-14 game-re |
 | mm1-live-capture | open | DOSBox screenshot of real walls/monsters/title screens as a stronger visual oracle than the structural checks (no DOSBox in this environment yet) | data-structure.md § "Still open" | 2026-08-14 game-re |
-| mm1-rsm-encoding | open | Decode the `MM.RSM` 4-byte address-field encoding (`seg-byte, 0x28, u16LE offset`) — the symbol names are confirmed, the addressing isn't | data-structure.md § MM.RSM | 2026-08-14 game-re |
+| mm1-rsm-encoding | open — answered-by-neither (both oracles checked) | Decode the `MM.RSM` 4-byte address-field encoding (`seg-byte, 0x28, u16LE offset`) — the symbol names are confirmed, the addressing isn't; Vairn has zero `rsm` hits, ScummVM's loader skips the code segment entirely and never parses an overlay symbol table | data-structure.md § MM.RSM ("Oracle check") | 2026-08-14 game-re |
