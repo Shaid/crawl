@@ -155,14 +155,81 @@ Outputs (`public/assets/mm1/dosega/`): `textures/wallpix.png` (204-slice
 atlas + sidecar), `data/wallpix.json`, `sprites/monpix.png` (75-portrait
 atlas + sidecar), `data/monpix.json`.
 
+## Misc data files — `ROSTER.DTA`, `SCREEN0-9`, `MM.RSM`, `GACARD.DTA` (**solved / documented**)
+
+Extractor `scripts/extract_mm1_misc.py` (`npm run mm1:misc`).
+
+### `ROSTER.DTA` — 18 starting characters (2304 B, **confirmed**)
+
+18 × **127-byte** records + 18 town bytes = 2304 B exactly. Layout ported
+from ScummVM `data/roster.cpp` (`Roster::synchronize`, 18 `Character`s) +
+`data/character.cpp` (`Character::synchronize`). Record:
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 16 | name (padded; stored uppercase) |
+| +0x10 | 5 | sex, alignmentInitial, alignment, race, class (1 B each) |
+| +0x15 | 16 | 8 × `(base, current)` AttributePairs: intelligence, might, personality, endurance, speed, accuracy, luck, level |
+| +0x25 | 2 | age, ageDayCtr |
+| +0x27 | 4 | experience `u32LE` |
+| +0x2B | 4 | `sp.current`, `sp.base` (`u16LE` each) |
+| +0x2F | 2 | spellLevel `(base, current)` |
+| +0x31 | 2 | gems `u16LE` |
+| +0x33 | 6 | `hpCurrent`, `hp`, `hpMax` (`u16LE` each) |
+| +0x39 | 3 | gold: `u16LE` lo + 1 byte hi |
+| +0x3C | 2 | AC `(base, current)` |
+| +0x3E | 2 | food, condition |
+| +0x40 | 24 | 4 × 6-byte inventory pass (equipped ids, backpack ids, equipped charges, backpack charges) |
+| +0x58 | 16 | 8 × resistances `(base, current)`: magic, fire, cold, electricity, acid, fear, poison, psychic |
+| +0x68 | 4 | physical, missile `(base, current)` pairs |
+| +0x6C | 4 | trapCtr, quest, worthiness, alignmentCtr |
+| +0x70 | 14 | `_flags[14]` |
+| +0x7E | 1 | portrait |
+
+Then 18 town bytes (1 = Sorpigal; the shipped party all start in Sorpigal).
+Decoded record 0 = **"CRAG THE HACK"** (Knight, lvl 1, 14/14 HP, 60 XP, 200
+gold) — the canonical MM1 starter party (Crag the Hack, Sir Galand =
+Paladin, Zenon III = Archer, Swifty Sarg = Robber, Serena = Cleric, Wizz
+Bane = Sorcerer), all 6 town bytes = Sorpigal. Note the on-disk portrait
+bytes 0–5 are remapped at load to ScummVM's `DEFAULT_PORTRAITS
+{0,11,9,7,4,3}` — the stored values are sequential, the remap is the
+canonical character-creation portraits. → `data/roster.json`.
+
+### `SCREEN0-9` — title/menu screens (**confirmed**)
+
+Each = `u16LE` size word + ScreenDecoder RLE stream at **320×200**, 0
+remainder on all 10. Colour remap `_indexes = [0,2,4,15]` (screen 2 uses
+`[0,3,5,15]`) — `views/title.cpp` `Title::msgFocus`. → `screens/title-*.png`.
+
+### `MM.RSM` — overlay-loader symbol table (6656 B, **hypothesis**, observed)
+
+Not consumed by ScummVM. Direct observation: 22 null-terminated symbol
+names — `$ovbgn`, `main_`, `ovloader_`, `Bpcomand`, `Zsetspell`, `mybuffer`,
+`scr_seg`, `scrb_seg`, `shpseg`, `grmovax`, `grmovsw`, `specerror`,
+`scr_width`, `adapter`, `adapter6`, `text`, `hertable`, `machine`, `opw`,
+`xoffset`, `color1`, `color2` — plus `readmaze_`, `readrost_`, `writrost_`,
+`readwall_`, `readmon_`, `readpix_`, `readscr_`, `chkopen_` etc. Each is
+followed by a 4-byte address field (`seg-byte, 0x28, u16LE offset`). The
+names are the game's own internal I/O + video routines, so the file is the
+`.OVR` overlay system's symbol/relocation table (MM1 loads its per-map
+scripts as overlays). The full address encoding is **not** confirmed (the
+`0x28` constant byte's role is unclear) — the symbol list itself is solid.
+→ `data/mm-rsm-symbols.json` (will inform the `*.OVR` script work).
+
+### `GACARD.DTA` — copy-protection card state (**hypothesis**)
+
+1 byte (`0x03`). MM1's copy protection is the "Game Access Card" grid;
+this file likely stores the card variant the install uses. No consumer
+found in ScummVM (it bypasses the protection). No decode attempted.
+
 ## Still open (not part of this pass)
 
-- `ROSTER.DTA`, `GACARD.DTA`, `SCREEN0`–`9`, `MM.RSM` — untouched (roster
-  format has a ScummVM oracle in `data/roster.cpp`).
 - Items / monsters / spells / `*.OVR` event scripts — Vairn explicitly did
   **not** decode these (doc 52). Likely sources: `MM.EXE` tables + per-map
-  OVR code/data segments. Oracle: ScummVM `engines/mm/mm1`.
+  OVR code/data segments. Oracle: ScummVM `engines/mm/mm1`. MM.RSM's
+  symbol table is a head start for the OVR loader.
 - `FLOORPIX.DTA`/`OBJPIX.DTA` — absent from this GOG install.
-- A live-game (DOSBox) screenshot comparison for the WALLPIX/MONPIX renders
-  would be a stronger visual oracle than the structural checks above — not
-  yet performed (no DOSBox in this environment).
+- A live-game (DOSBox) screenshot comparison for the WALLPIX/MONPIX/title
+  renders would be a stronger visual oracle than the structural checks
+  above — not yet performed (no DOSBox in this environment).
+- `MM.RSM` address-field encoding — observed but not fully decoded.
