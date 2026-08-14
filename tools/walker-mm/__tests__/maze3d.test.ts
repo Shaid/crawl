@@ -16,6 +16,7 @@ import {
 
 function emptyScreen(neighbors = [-1, -1, -1, -1]): ScreenLike {
   return {
+    index: 0,
     visual: new Uint8Array(MAP_PAGE_SIZE),
     collision: new Uint8Array(MAP_PAGE_SIZE),
     neighbors,

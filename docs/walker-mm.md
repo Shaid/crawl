@@ -17,10 +17,10 @@ bypass the DrawItem/IndexedSurface composite path the BC/W6 views use.
 | | MM1 (`mm1`) | MM2 (`mm2`) |
 |---|---|---|
 | Wall art | **Real `WALLPIX.DTA` slices** (17 sets × 12 frustum slices) — each screen picks its set from the decoded `.OVR` selection fields (`wallEntries[0]`; overland uses its biome entry) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) |
-| Torch overlays | MM2 torch sheets as stand-ins (MM1 WALLPIX has no torch frames — same choice Vairn made) | authentic `*t.32` with 3-phase flicker |
+| Torch overlays | **none** — MM1 renders no torch overlay (the reference implementation draws code-3 faces as plain walls; WALLPIX has no torch frames) | authentic `*t.32` with 3-phase flicker |
 | Floor/sky bands | simple dark band | `*f.32` floor + `sky.32` (roof bit flips the sky frame) |
-| Screens | all 55 (indoor frustum everywhere; overland uses its biome wall art) | indoor: 0–4 town, 17–32 cavern, 45–59 castle; **overland (5–16, 33–44) shows a placeholder** (terrain-id pages — horizon renderer is future work) |
-| Cross-screen stepping | none (edges clamp; level selector jumps) | yes — attrib `neighbours` links |
+| Screens | all 55 (indoor frustum everywhere; overland uses its biome wall art) | indoor: 0–4 town, 17–32 cavern, 45–59 castle; **overland (5–16, 33–44) renders the outdoor scene** (`outdoor3d.ts` port: outdoor1-3 horizon lanes + desert/ocean/swamp/tundra decor bands from the terrain ids, terrain minimap from `outb.32`) |
+| Cross-screen stepping | none (edges clamp; level selector jumps) | yes — attrib `neighbours` links (indoor + overland) |
 
 Controls: **WASD/arrows** move/turn, **Q/E** turn, noclip checkbox, Tab
 zooms the automap (BC/W6). URL params: `?game=mm1&map=5&x=4&y=2&facing=0`
@@ -51,8 +51,11 @@ data-structure.md` / `docs/mm2/amiga/data-structure.md` (the earlier
 
 Headless playwright run: the redirect lands on the integrated walker with
 MM1 selected; all four games in the dropdown; MM1 renders Sorpigal (entry
-cell (4,2), matching the OVR data) with white town walls; MM2 renders
-town/cave/castle `.32` art with sky/floor bands; level switching, movement
-and URL pose params work; zero console errors.
-`tools/walker-mm/__tests__/maze3d.test.ts` pins the frustum engine
-(determinism, movement blocking, torch placement, slice-name mapping).
+cell (4,2), matching the OVR data) with white town walls and **no torch
+overlay**; MM2 renders town/cave/castle `.32` art with sky/floor bands and
+**overland screens render the outdoor scene** (horizon + biome decor) with
+a terrain minimap; switching games leaves no stale pixels (the canvas is
+cleared in full); level switching, movement and URL pose params work; zero
+console errors. `tools/walker-mm/__tests__/` pins the frustum engine and
+the outdoor scene builder (terrain lookup, biome mapping, neighbour
+stitching).

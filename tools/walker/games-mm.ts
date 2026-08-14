@@ -33,6 +33,7 @@ import {
   wallpixSliceName,
   StitchedVisual,
 } from '../walker-mm/maze3d.ts';
+import { StitchedOutdoor, buildOutdoorScene } from '../walker-mm/outdoor3d.ts';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Asset loading
@@ -90,12 +91,13 @@ interface MmScreen {
   roofBits?: Uint8Array;
   /** MM1: WALLPIX entry used for the frustum walls. */
   wallEntry: number;
+  /** MM2 overland: attrib surface byte. */
+  surface: number;
 }
 
 interface Mm1Data {
   screens: MmScreen[];
   wallpix: Sheet;
-  torchSheets: Record<string, Sheet>;
 }
 
 interface Mm2Data {
@@ -104,6 +106,8 @@ interface Mm2Data {
   floors: Record<string, Sheet>;
   torches: Record<string, Sheet>;
   sky: Sheet;
+  /** Overland: horizon lanes + biome decor sheets + terrain tiles. */
+  outdoor: Record<string, Sheet>;
 }
 
 interface CellJson {
@@ -143,14 +147,6 @@ function loadMm1(): Promise<Mm1Data> {
       fetch(`${base}/data/ovr.json`).then((r) => r.json()),
       loadSheet(`${base}/textures/wallpix.png`, `${base}/textures/wallpix.json`),
     ]);
-    const torchNames = ['town', 'cave', 'castle'];
-    const torchSheets: Record<string, Sheet> = {};
-    for (const t of torchNames) {
-      torchSheets[t] = await loadSheet(
-        `/assets/mm2/amiga/textures/${t}t.png`,
-        `/assets/mm2/amiga/textures/${t}t.json`,
-      );
-    }
     const screens: MmScreen[] = mapsJson.screens.map(
       (s: { index: number; slug: string; title: string; env: string; cells: CellJson[][] }) => {
         const { visual, collision } = pagesFromCells(s.cells);
@@ -164,10 +160,11 @@ function loadMm1(): Promise<Mm1Data> {
           collision,
           neighbors: [-1, -1, -1, -1],
           wallEntry: ovr && ovr.wallEntries ? (ovr.wallEntries[0] as number) : 0,
+          surface: 0,
         };
       },
     );
-    return { screens, wallpix, torchSheets };
+    return { screens, wallpix };
   })();
   return mm1Promise;
 }
@@ -195,15 +192,17 @@ function loadMm2(): Promise<Mm2Data> {
       return ['town', false];
     };
     const sheets = ['town', 'cave', 'castle'];
-    const [walls, floors, torches, sky] = await Promise.all([
+    const outdoorSheets = ['outdoor1', 'outdoor2', 'outdoor3', 'outb', 'desert', 'ocean', 'swamp', 'tundra'];
+    const [walls, floors, torches, sky, outdoor] = await Promise.all([
       Promise.all(sheets.map((s) => loadSheet(`${base}/textures/${s}.png`, `${base}/textures/${s}.json`))),
       Promise.all(sheets.map((s) => loadSheet(`${base}/textures/${s}f.png`, `${base}/textures/${s}f.json`))),
       Promise.all(sheets.map((s) => loadSheet(`${base}/textures/${s}t.png`, `${base}/textures/${s}t.json`))),
       loadSheet(`${base}/textures/sky.png`, `${base}/textures/sky.json`),
+      Promise.all(outdoorSheets.map((s) => loadSheet(`${base}/textures/${s}.png`, `${base}/textures/${s}.json`))),
     ]);
     const screens: MmScreen[] = (mapJson as { index: number; cells: CellJson[][] }[]).map((s, i) => {
       const { visual, collision } = pagesFromCells(s.cells);
-      const [env, outdoor] = envFor(i);
+      const [env, isOutdoor] = envFor(i);
       const attrib = attribJson[i];
       const roofBits =
         attrib && attrib.roofBits
@@ -213,12 +212,13 @@ function loadMm2(): Promise<Mm2Data> {
         index: s.index,
         label: `screen ${s.index} (${env})`,
         env,
-        outdoor,
+        outdoor: isOutdoor,
         visual,
         collision,
         neighbors: attrib ? (attrib.neighbours as number[]) : [-1, -1, -1, -1],
         roofBits,
         wallEntry: 0,
+        surface: attrib ? (attrib.surfaceFlag as number) : 0,
       };
     });
     return {
@@ -227,6 +227,7 @@ function loadMm2(): Promise<Mm2Data> {
       floors: Object.fromEntries(sheets.map((s, i) => [s, floors[i]])),
       torches: Object.fromEntries(sheets.map((s, i) => [s, torches[i]])),
       sky,
+      outdoor: Object.fromEntries(outdoorSheets.map((s, i) => [s, outdoor[i]])),
     };
   })();
   return mm2Promise;
@@ -406,27 +407,25 @@ export class MM1View extends MmWalkerView {
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const data = this.data;
     const sc = this.sc();
+    // Clear the whole canvas — the harness canvas is the full 320x200 game
+    // screen and may hold the previous game's pixels outside the viewport.
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    // dark floor band for readability
     ctx.fillStyle = '#181818';
     ctx.fillRect(ORIGIN_X, FLOOR_Y, VIEW_W - ORIGIN_X * 2, VIEW_H - FLOOR_Y);
 
     const grid = new StitchedVisual(data.screens, this.pose_.level);
     const scene = buildIndoorScene(grid, this.pose_.x, this.pose_.y, this.pose_.facing);
-    const torchSheet = data.torchSheets[sheetKeyFor(sc.env)] ?? data.torchSheets.cave;
 
     for (const b of scene.blits) {
       const fr = data.wallpix.frame(wallpixSliceName(sc.wallEntry, b.frame));
       if (!fr) continue;
       ctx.drawImage(data.wallpix.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
     }
-    for (const b of scene.torchBlits) {
-      const tb = torchBlitFor(b, Math.floor(this.tick / 120) % 3);
-      if (!tb) continue;
-      const fr = torchSheet.frame(tb.frame);
-      if (!fr) continue;
-      ctx.drawImage(torchSheet.img, fr.x, fr.y, fr.w, fr.h, tb.x, tb.y, fr.w, fr.h);
-    }
+    // MM1 renders no torch overlays: the reference implementation
+    // (ScummVM drawTile) draws code-3 (wall+torch) faces as plain walls and
+    // WALLPIX has no torch frames, so MM2's torch art doesn't belong here.
   }
 
   renderMinimap(ctx: CanvasRenderingContext2D): void {
@@ -452,14 +451,9 @@ export class MM2View extends MmWalkerView {
     const data = this.data;
     const sc = this.sc();
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     if (sc.outdoor) {
-      ctx.fillStyle = '#202028';
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-      ctx.fillStyle = '#888';
-      ctx.font = '14px monospace';
-      ctx.fillText('overland renderer pending', ORIGIN_X + 20, 60);
-      ctx.fillText('(use the minimap)', ORIGIN_X + 20, 80);
+      this.renderOutdoor(ctx);
       return;
     }
     const env = sheetKeyFor(sc.env);
@@ -490,8 +484,70 @@ export class MM2View extends MmWalkerView {
     }
   }
 
+  /** Overland: horizon lanes + biome decor bands (outdoor3d.ts port). */
+  private renderOutdoor(ctx: CanvasRenderingContext2D): void {
+    const data = this.data;
+    const grid = new StitchedOutdoor(data.screens, this.pose_.level);
+    const scene = buildOutdoorScene(grid, this.pose_.x, this.pose_.y, this.pose_.facing, data.screens);
+    for (const b of scene.horizon) {
+      const sheet = data.outdoor[b.sheet];
+      if (!sheet) continue;
+      const fr = sheet.frame(b.frame);
+      if (!fr) continue;
+      ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
+    }
+    for (const b of scene.decor) {
+      const sheet = data.outdoor[b.sheet];
+      if (!sheet) continue;
+      const fr = sheet.frame(b.frame);
+      if (!fr) continue;
+      ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
+    }
+  }
+
   renderMinimap(ctx: CanvasRenderingContext2D): void {
+    const sc = this.sc();
+    if (sc.outdoor) {
+      this.drawTerrainMinimap(ctx, sc);
+      return;
+    }
     this.drawMinimap(ctx);
+  }
+
+  /** Overland minimap: draws the outb.32 terrain tile for each cell. */
+  private drawTerrainMinimap(ctx: CanvasRenderingContext2D, sc: MmScreen): void {
+    const size = 224;
+    const cell = size / MAP_GRID;
+    const outb = this.data.outdoor.outb;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = '#141420';
+    ctx.fillRect(0, 0, size, size);
+    for (let y = 0; y < MAP_GRID; y++) {
+      for (let x = 0; x < MAP_GRID; x++) {
+        const tid = sc.visual[y * MAP_GRID + x] & 0x1f;
+        const fr = outb.frame(String(tid));
+        if (!fr) continue;
+        ctx.drawImage(outb.img, fr.x, fr.y, fr.w, fr.h, x * cell, y * cell, cell, cell);
+      }
+    }
+    this.drawPlayerDot(ctx, cell);
+  }
+
+  private drawPlayerDot(ctx: CanvasRenderingContext2D, cell: number): void {
+    const pose = this.pose_;
+    const px = pose.x * cell + cell / 2;
+    const py = pose.y * cell + cell / 2;
+    ctx.fillStyle = '#ff3030';
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(2, cell / 5), 0, Math.PI * 2);
+    ctx.fill();
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const [dx, dy] = dirs[pose.facing & 3];
+    ctx.strokeStyle = '#ff3030';
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + dx * cell * 0.4, py + dy * cell * 0.4);
+    ctx.stroke();
   }
 }
 

@@ -36,12 +36,15 @@ const BUNDLE_W = [255, 0, 0, 255, 0, 1];
 const BUNDLES = [BUNDLE_N, BUNDLE_E, BUNDLE_S, BUNDLE_W];
 
 export interface ScreenLike {
+  index: number;
   visual: Uint8Array | number[];
   collision: Uint8Array | number[];
   neighbors: number[];
   roof?: number[] | Uint8Array;
   outdoor?: boolean;
   mapWalls?: boolean;
+  /** MM2 overland: attrib surface byte (0xCC ocean, 0x99 tundra, 0xBB swamp, else desert). */
+  surface?: number;
 }
 
 export interface Pose {
