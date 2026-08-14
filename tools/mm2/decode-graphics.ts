@@ -18,6 +18,7 @@ import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { decodeImage32, paletteWordsToRGB, frameToRGBA, type Image32File } from './image32.ts';
 import { parseAnm, composeAnmFrame, anmFrameCount, type AnmParsed } from './anm.ts';
 import { shelfPack } from '../shared/atlas-pack.ts';
+import { manifestEntry, writeManifest, syncDataManifest, type ManifestEntry } from '../shared/asset-paths.ts';
 
 export interface GraphicsExportResult {
   game: 'mm2';
@@ -35,7 +36,7 @@ function writeSheet(dataDir: string, name: string, outDir: string): boolean {
   let img: Image32File;
   try {
     img = decodeImage32(readBinary(file));
-  } catch (e) {
+  } catch {
     return false;
   }
   const palette = paletteWordsToRGB(img.paletteWords);
@@ -73,7 +74,7 @@ function writeAnm(dataDir: string, name: string, outDir: string): boolean {
   let anm: AnmParsed;
   try {
     anm = parseAnm(readBinary(file));
-  } catch (e) {
+  } catch {
     return false;
   }
   const palette = paletteWordsToRGB(anm.image.paletteWords);
@@ -113,6 +114,7 @@ function writeAnm(dataDir: string, name: string, outDir: string): boolean {
     palette: anm.image.paletteWords.map((w) => ({ word: w, rgb: paletteWordsToRGB([w])[0] })),
     storedFrames: anm.image.frames.map((f, i) => ({ index: i, width: f.width, height: f.height, flags: f.flags })),
     composedFrames: composed,
+    frames: composed,
     width: count * baseW,
     height: baseH,
   });
@@ -138,6 +140,13 @@ export function exportMm2Graphics(dataDir: string): GraphicsExportResult {
       else skipped.push(name);
     }
   }
+
+  const manifest: ManifestEntry[] = [
+    ...sheets.map((n) => manifestEntry(`textures/${n.replace(/\.32$/, '')}`, 0)),
+    ...animations.map((n) => manifestEntry(`sprites/${n.replace(/\.anm$/, '')}`, 0)),
+  ];
+  writeManifest(manifest, 'mm2', 'amiga');
+  syncDataManifest('mm2', 'amiga');
 
   return { game: 'mm2', platform: 'amiga', dataDir, sheets, animations, skipped };
 }

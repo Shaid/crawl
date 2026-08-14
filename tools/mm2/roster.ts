@@ -116,6 +116,7 @@ export function decodeRoster(data: Uint8Array): RosterFile {
     const nameRaw = Uint8Array.from(d.subarray(0x00, 0x0b));
     characters.push({
       index: i,
+      // eslint-disable-next-line no-control-regex
       name: new TextDecoder('latin1').decode(nameRaw).replace(/[\u0000 ]+$/, ''),
       nameRaw,
       town: townByte & 0x7f,
@@ -191,6 +192,7 @@ export function encodeRoster(roster: RosterFile): Uint8Array {
     const off = i * ROSTER_CHAR_RECORD_SIZE;
     // Preserve the original name-field bytes when the name is unchanged;
     // otherwise re-pad with spaces (the doc's other padding convention).
+    // eslint-disable-next-line no-control-regex
     const rawName = new TextDecoder('latin1').decode(c.nameRaw).replace(/[\u0000 ]+$/, '');
     if (rawName === c.name) {
       out.set(c.nameRaw, off);

@@ -10,10 +10,16 @@ ground truth rather than re-derived:
 - **Key locations:** `EXTRACTED/docs/` (~60 format documents), `EXTRACTED/decomp/`
   (round-trip C codecs), `EXTRACTED/mm2.capstone.asm` (68k disassembly — the
   repo's own "source of truth"), `tools/` (~250 RE tools), `wiki/`.
-- **No license file** in Vairn/MM2. crawl's `tools/mm2/` codecs are **original
-  TypeScript** informed by the format *documentation*, not ports of the C/Python
-  source. Format descriptions in `docs/mm2/amiga/data-structure.md` are ported
-  (with the per-format source doc cited) per Vairn's own doc headers.
+- **License / porting permission:** Vairn/MM2 has no license file, but the
+  project owner (Vairn — the author of that RE project, brother of this
+  repo's owner) has granted explicit permission to reimplement his findings
+  in this Seer project as TypeScript. crawl's `tools/mm2/` codecs may
+  therefore be **direct, faithful ports** of Vairn's C/Python reference
+  implementations (with attribution), not just re-derivations from the docs.
+  The original integration pass still wrote `tools/mm2/` as original TS
+  informed by the docs; later ports (e.g. the PC DOS `.4`/`.16` codecs) may
+  port the reference codecs directly. Format descriptions in
+  `docs/mm2/amiga/data-structure.md` cite the per-format source doc.
 
 The one caveat: Vairn's docs explicitly say *"docs can be wrong — the ASM is
 the source of truth."* Everything we port is marked **Confirmed / Observed /
@@ -39,8 +45,8 @@ Place flat files directly in `data/mm2/amiga/` if preferred; the pipeline
 | Layout | `data/mm2/amiga/`, `public/assets/mm2/amiga/`, `docs/mm2/` |
 | Framework registration | `src/game-id.ts`, `tools/shared/game-config.ts`, `tools/shared/viewer-config.ts` |
 | Docs | `docs/mm2/amiga/data-structure.md` (formats), this plan, `docs/mm2/TODO.md` |
-| Codecs (`tools/mm2/`) | `.32` image, `.anm` TV, items, monsters, roster, spells, str, map, attrib, event |
-| CLIs | `tools/mm2/export-data.ts` (dat → JSON), `tools/mm2/decode-graphics.ts` (.32/.anm → PNG atlases/strips) |
+| Codecs (`tools/mm2/`) | `.32` image, `.anm` TV, items, monsters, roster, spells, str, map, attrib, event, **PC DOS `.4`/`.16` (LZW + wall/monster)** |
+| CLIs | `tools/mm2/export-data.ts` (dat → JSON), `tools/mm2/decode-graphics.ts` (.32/.anm → PNG atlases/strips), `tools/mm2/decode-pc-graphics.ts` (.4/.16 → PNG atlases/monster strips) |
 | Verification | 47 unit tests + 11 real-data tests; the repo stays green |
 
 ## Quickstart
@@ -55,7 +61,10 @@ npm run mm2:gfx
 
 ## Next pass candidates
 
-See `docs/mm2/TODO.md`. Highest value: composed `.anm` walk sequences as GIFs
+See `docs/mm2/TODO.md`. The PC DOS `.4`/`.16` codecs are **done** (verified
+byte-exact against Vairn's reference on the GOG data at `data/mm2/dosega/`);
+remaining highest-value items: composed `.anm` walk sequences as GIFs
 (combat engine block selection is the only gap — the longest-block heuristic
-works for showcase), the PC DOS `.4`/`.16` graphics codecs (`54-pc-dos-graphics-formats.md`),
-and the copy-protection `globe.32` XOR decode (`20-copy-protection-table.md`).
+works for showcase), the copy-protection `globe.32` XOR decode
+(`20-copy-protection-table.md`), the GOG `*.DAT` LZW wrapper, and the
+event-script opcode VM.

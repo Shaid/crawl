@@ -84,6 +84,7 @@ export function decodeMonsters(data: Uint8Array): MonsterRecord[] {
     const nameBytes = data.subarray(off, off + 14);
     let name = '';
     for (let c = 0; c < 14; c++) name += String.fromCharCode(nameBytes[c] & 0x7f);
+    // eslint-disable-next-line no-control-regex
     name = name.replace(/[\u0000 ]+$/, '');
     const nameRaw = Uint8Array.from(nameBytes);
     const hpCode = data[off + 0x0e];
@@ -123,6 +124,7 @@ export function encodeMonsters(records: MonsterRecord[]): Uint8Array {
     const off = m.index * MONSTER_RECORD_SIZE;
     // Preserve the original 14-byte name field when unchanged; otherwise
     // re-encode as char+0x80 (space = 0xA0, NUL-padded tail = 0x80).
+    // eslint-disable-next-line no-control-regex
     const rawName = new TextDecoder('latin1').decode(m.nameRaw).replace(/[\u0000 ]+$/, '');
     if (rawName === m.name) {
       out.set(m.nameRaw, off);

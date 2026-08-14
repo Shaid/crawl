@@ -5,7 +5,7 @@
  * side contributes different asset groups in no fixed order.
  */
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 
 export const CATEGORIES = ['palettes', 'sprites', 'screens', 'textures', 'audio', 'data'] as const;
 export type AssetCategory = (typeof CATEGORIES)[number];
@@ -15,6 +15,10 @@ export interface ManifestEntry {
   sprites: number;
   hasPalette: boolean;
   png: string;
+  /** 'data' entries are JSON tables rendered by the viewer, not atlases. */
+  kind?: 'atlas' | 'data';
+  /** JSON path relative to the asset root; defaults to `${name}.json`. */
+  data?: string;
 }
 
 export function assetRoot(game: string, platform: string): string {
@@ -34,6 +38,36 @@ export function writeJson(path: string, data: unknown, pretty = true): void {
 
 export function manifestEntry(name: string, sprites: number, hasPalette = false): ManifestEntry {
   return { name, sprites, hasPalette, png: `${name}.png` };
+}
+
+/** Manifest entry for a data-table JSON (viewer renders it as a table). */
+export function dataManifestEntry(name: string, dataPath?: string): ManifestEntry {
+  return {
+    name,
+    sprites: 0,
+    hasPalette: false,
+    png: '',
+    kind: 'data',
+    data: dataPath ?? `${name}.json`,
+  };
+}
+
+/**
+ * Merge one `kind: 'data'` entry per JSON file found under
+ * `public/assets/<game>/<platform>/data/`, so the viewer's data-table
+ * section stays in sync with whatever the extractors wrote.
+ */
+export function syncDataManifest(game: string, platform: string): number {
+  const dataDir = resolve(assetRoot(game, platform), 'data');
+  if (!existsSync(dataDir)) return 0;
+  const entries: ManifestEntry[] = [];
+  for (const f of readdirSync(dataDir)) {
+    if (!f.endsWith('.json')) continue;
+    const name = `data/${f.replace(/\.json$/, '')}`;
+    entries.push(dataManifestEntry(name, `data/${f}`));
+  }
+  if (entries.length) writeManifest(entries, game, platform);
+  return entries.length;
 }
 
 /** Merge `entries` into manifest.json, upserting by name. */

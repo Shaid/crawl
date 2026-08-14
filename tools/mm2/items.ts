@@ -64,6 +64,7 @@ export function decodeItems(data: Uint8Array): ItemRecord[] {
     const rawName = new TextDecoder('latin1').decode(data.subarray(off, off + ITEM_NAME_SIZE));
     items.push({
       index: i,
+      // eslint-disable-next-line no-control-regex
       name: rawName.replace(/[\u0000 ]+$/, ''),
       separator: data[off + 0x0c],
       forbiddenClasses: data[off + 0x0d],

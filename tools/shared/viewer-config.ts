@@ -68,7 +68,7 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     gameId: 'mm2',
     name: GAME_DISPLAY_NAMES.mm2,
     defaultPlatform: 'amiga',
-    supportedPlatforms: [],
+    supportedPlatforms: ['amiga', 'dosega'],
   },
 };
 

@@ -25,6 +25,7 @@ import { decodeStr } from './str.ts';
 import { decodeMap } from './map.ts';
 import { decodeAttrib } from './attrib.ts';
 import { decodeEventFile } from './event.ts';
+import { syncDataManifest } from '../shared/asset-paths.ts';
 
 export interface ExportResult {
   game: 'mm2';
@@ -62,6 +63,8 @@ export function exportMm2Data(dataDir: string): ExportResult {
   dump('map.dat', dataDir, outDir, decodeMap, written, missing);
   dump('attrib.dat', dataDir, outDir, decodeAttrib, written, missing);
   dump('event.dat', dataDir, outDir, decodeEventFile, written, missing);
+
+  syncDataManifest('mm2', 'amiga');
 
   return { game: 'mm2', platform: 'amiga', dataDir, outDir, written, missing };
 }
