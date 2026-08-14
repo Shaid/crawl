@@ -2,7 +2,7 @@
  * Browser-safe canonical game and platform identifiers.
  */
 
-export const GAME_IDS = ['blackcrypt', 'wizardry6', 'eotb', 'eotb2', 'landsoflore', 'mm2'] as const;
+export const GAME_IDS = ['blackcrypt', 'wizardry6', 'eotb', 'eotb2', 'landsoflore', 'mm1', 'mm2'] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
 export const PLATFORM_IDS = ['amiga', 'dosvga', 'dosega', 'snes'] as const;
@@ -25,6 +25,7 @@ export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   eotb: 'Eye of the Beholder',
   eotb2: 'Eye of the Beholder II',
   landsoflore: 'Lands of Lore: The Throne of Chaos',
+  mm1: 'Might & Magic: The Secret of the Inner Sanctum',
   mm2: 'Might & Magic II: Gates to Another World',
 };
 

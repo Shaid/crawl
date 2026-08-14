@@ -58,6 +58,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'dosvga',
     supportedPlatforms: ['dosvga'],
   },
+  mm1: {
+    gameId: 'mm1',
+    name: GAME_DISPLAY_NAMES.mm1,
+    defaultPlatform: 'dosega',
+    supportedPlatforms: ['dosega'],
+  },
   mm2: {
     gameId: 'mm2',
     name: GAME_DISPLAY_NAMES.mm2,

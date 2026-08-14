@@ -227,6 +227,25 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'mm1',
+    displayName: 'Might & Magic: The Secret of the Inner Sanctum',
+    platforms: [{
+      platform: 'dosega',
+      dataDirs: ['mm1/dosega'],
+      executable: 'MM.EXE',
+      expectedFiles: ['MAZEDATA.DTA'],
+      supported: true,
+      assetDir: 'mm1',
+      features: {},
+
+      async buildAssets() {
+        const { exportMm1Maps } = await import('../mm1/export-maps.ts');
+        const result = exportMm1Maps(resolve('data/mm1/dosega'));
+        console.log(`  mm1/dosega: ${result.screens} maze screens decoded (slug-from-exe: ${result.slugFromExe}, ovr-match: ${result.ovrMatch})`);
+      },
+    }],
+  },
+  {
     id: 'mm2',
     displayName: 'Might & Magic II: Gates to Another World',
     platforms: [{
