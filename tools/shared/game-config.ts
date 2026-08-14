@@ -266,6 +266,52 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       features: {},
     }],
   },
+  {
+    id: 'mm3',
+    displayName: 'Might & Magic III: Isles of Terra',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['mm3/amiga'],
+      executable: 'Might&MagicIII',
+      expectedFiles: ['game.cc'],
+      supported: true,
+      assetDir: 'mm3',
+      features: {},
+
+      async buildAssets() {
+        // The Amiga container/sprite decoders are Python (scripts/mm3lib/).
+        // Run them, then merge the manifest through the shared helpers so the
+        // viewer's index stays in sync.
+        const { execFileSync } = await import('node:child_process');
+        const repo = process.cwd();
+        const py = process.env.PYTHON ?? 'python3';
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm3_amiga.py')], { stdio: 'inherit', cwd: repo });
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm3_amiga_sprites.py')], { stdio: 'inherit', cwd: repo });
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm3_amiga_screens.py')], { stdio: 'inherit', cwd: repo });
+        syncDataManifest('mm3', 'amiga');
+        writePlatformIndex([{ game: 'mm3', platform: 'amiga' }]);
+        console.log('  mm3/amiga: sprites + container extracted (python)');
+      },
+    }, {
+      platform: 'dosvga',
+      dataDirs: ['mm3/dosvga'],
+      executable: 'MM3.EXE',
+      expectedFiles: ['MM3.CC'],
+      supported: true,
+      assetDir: 'mm3',
+      features: {},
+
+      async buildAssets() {
+        const { execFileSync } = await import('node:child_process');
+        const repo = process.cwd();
+        const py = process.env.PYTHON ?? 'python3';
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm3_dos.py')], { stdio: 'inherit', cwd: repo });
+        syncDataManifest('mm3', 'dosvga');
+        writePlatformIndex([{ game: 'mm3', platform: 'dosvga' }]);
+        console.log('  mm3/dosvga: container extracted (python)');
+      },
+    }],
+  },
 ]);
 
 export const GAME_PLATFORMS = flattenConfigs(GAME_CONFIGS);

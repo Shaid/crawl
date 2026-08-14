@@ -70,6 +70,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga', 'dosega'],
   },
+  mm3: {
+    gameId: 'mm3',
+    name: GAME_DISPLAY_NAMES.mm3,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga', 'dosvga'],
+  },
 };
 
 export function getViewerConfig(gameId: GameId): ViewerConfig {
