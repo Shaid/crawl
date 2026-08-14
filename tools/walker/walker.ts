@@ -51,6 +51,7 @@ import type { AtlasMeta } from '@seer-project/core';
 import { getAssetBasePath } from '../shared/viewer-config.ts';
 import { BlackCryptView, Wizardry6View, bcEntrancePose, w6EntrancePose, type GameView } from './games.ts';
 import { loadMM1View, loadMM2View, mmLevelLists } from './games-mm.ts';
+import { loadMM3View, mm3LevelList } from './games-mm3.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
@@ -303,6 +304,7 @@ const GAMES = [
   { id: 'wizardry6', label: 'Wizardry 6', loader: loadWizardry6, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'mm1', label: 'Might & Magic I', loader: loadMM1View, defaultLevel: 0, platform: 'dosega' as const },
   { id: 'mm2', label: 'Might & Magic II', loader: loadMM2View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'mm3', label: 'Might & Magic III', loader: loadMM3View, defaultLevel: 1, platform: 'dosvga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
@@ -310,6 +312,7 @@ type GameId = (typeof GAMES)[number]['id'];
 async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: number; label: string }>> {
   if (game === 'mm1') return mmLevelLists.mm1();
   if (game === 'mm2') return mmLevelLists.mm2();
+  if (game === 'mm3') return mm3LevelList();
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
