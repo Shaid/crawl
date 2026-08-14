@@ -131,6 +131,12 @@ def parse_rsm_symbols(data: bytes) -> list[dict]:
                     'address': [seg, addr[1], off_lo, off_hi],
                     'farOffset': off_lo | (off_hi << 8),
                 })
+                # Skip the 4-byte address field too — it isn't part of the
+                # next name, and scanning into it byte-by-byte can spuriously
+                # match a fragment as a symbol if it happens to contain
+                # printable bytes ending in a null.
+                off = end + 5
+                continue
         off = end + 1
     return syms
 

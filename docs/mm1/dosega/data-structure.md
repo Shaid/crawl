@@ -31,9 +31,17 @@ MM2 codec (`tools/mm2/map.ts` → `tools/mm1/map.ts`).
 > cells whose four fields are all `3` (byte `0xFF`) are border/edge cells
 > (Vairn doc 23).
 
-Cell packing (both pages): `N = byte&3`, `E = (byte>>2)&3`, `S = (byte>>4)&3`,
-`W = (byte>>6)&3`. Grid is 16×16, row 0 on disk = **south** (automap renders
-north-up).
+Cell packing, **visual page**: `N = byte&3`, `E = (byte>>2)&3`,
+`S = (byte>>4)&3`, `W = (byte>>6)&3` (four 2-bit fields).
+
+Cell packing, **collision page**: `N/E/S` are 2-bit `(dark<<1)|wall`
+(`N = byte&3`, `E = (byte>>2)&3`, `S = (byte>>4)&3`), but `W` is a single
+wall-only bit (`W = (byte>>6)&1`, i.e. `byte & 0x40`) — its dark slot is
+reused as the event flag (`byte & 0x80`). `W` is **not** a 2-bit field on
+this page, unlike the visual page (`tools/mm2/map.ts` `decodeMapCell`,
+shared by MM1).
+
+Grid is 16×16, row 0 on disk = **south** (automap renders north-up).
 
 ### Overland caveat (screens 14–33, `area*`)
 
@@ -92,12 +100,18 @@ oracle — same strategy as the EOB/LoL kyralib pass). Decoders:
 | Offset | Size | Field |
 |--------|------|-------|
 | `0x000` | 2 | `u16LE` index byte-size (multiple of 4) |
-| `0x002` | index_size | `u32LE` offset table: one entry offset per entry **plus a sentinel** (last = payload end) |
+| `0x002` | index_size | `u32LE` offset table: **one start offset per entry**, `index_size / 4` entries — no sentinel |
 | after | — | entry payloads, back to back |
 
-`WALLPIX.DTA` has **17 entries**, `MONPIX.DTA` **75**. Each entry payload
-begins with its own `u16LE` size word (the compressed byte count of the
-rest of the entry — validated: holds 92/92 entries).
+`WALLPIX.DTA` has **18 entries**, `MONPIX.DTA` **76**. Each entry's end is
+the next entry's start offset, except the *last* entry, whose end is
+end-of-file (ported from ScummVM's `Gfx::DTA::load()`, `gfx/dta.cpp`). An
+earlier port read `index_size / 4` offsets as "N-1 entries + 1 end
+sentinel", silently dropping the true last entry of every `.DTA` file —
+that entry decodes byte-exact once the boundary is fixed (see `dta.py`'s
+`DtaContainer` docstring). Each entry payload begins with its own `u16LE`
+size word (the compressed byte count of the rest of the entry — validated:
+holds 92/92 entries).
 
 ### ScreenDecoder image format (per tile / per image)
 
@@ -118,7 +132,7 @@ standard 16-colour EGA palette:
 - Runs may overrun a tile's cell grid; excess bytes are discarded (the game
   never stores data that triggers the C++ out-of-bounds path).
 
-### WALLPIX — 17 wall sets, 12 frustum slices each
+### WALLPIX — 18 wall sets, 12 frustum slices each
 
 `Maps::loadTile()` (`maps/maps.cpp`): each entry skips its size word, then
 holds **12 sequential tiles** at fixed sizes — 4 left-wall slices near→far,
@@ -134,9 +148,9 @@ Per-entry colour remap: `TILE_COLORS[entry]` → `_indexes = [0, colors&0xf,
 colors>>4, 15]`. Overland biome labels (Vairn doc 24: entry+1 = wallNN):
 entries 6–13 = trees/mountains/lava/swamp/water/thick-forest horizons.
 Screens select their set via `TILE_AREAS`/`TILE_OFFSET` (towns/caves →
-entries 0–5; overland → 6–13; area 3 → 14–16).
+entries 0–5; overland → 6–13; area 3 → 14–17).
 
-### MONPIX — 75 monster portraits
+### MONPIX — 76 monster portraits
 
 `Monsters::getMonsterImage()` (`data/monsters.cpp`): each entry decodes to a
 single **104×96** image. Per-image remap: `PALETTE[imgNum]` u16 →
@@ -144,24 +158,25 @@ single **104×96** image. Per-image remap: `PALETTE[imgNum]` u16 →
 from ScummVM's static `monsters.txt` (195 monsters, last field = `_imgNum`);
 ~69 distinct images are shared by multiple monsters. All aquatic monsters
 (Giant Leech, Crocodile, Barracuda, Giant Squid, Electric Eel, Shark, Great
-Sea Beast) map to **imgNum 75, which has no MONPIX entry** (they get no
-portrait; ScummVM tolerates the empty stream).
+Sea Beast) map to **imgNum 75**, which **does** have a MONPIX entry — a
+real 104×96 portrait, decodes byte-exact with 0 remainder (see the DTA
+container note below; an earlier off-by-one made this entry look absent).
 
 ### Verification (real retail bytes)
 
 | Check | Result |
 |-------|--------|
-| Container: index sizes 72/304, entry counts 17/75 | exact |
-| Per-entry `u16LE` size word vs payload length | 92/92 match |
-| Decode consumption vs payload length | **92/92 entries, 0 remainder** (every byte accounted) |
+| Container: index sizes 72/304, entry counts 18/76 | exact |
+| Per-entry `u16LE` size word vs payload length | 94/94 match |
+| Decode consumption vs payload length | **94/94 entries, 0 remainder** (every byte accounted) |
 | WALLPIX symmetric wall sets (entries 0/2/9/14/15/16) | L/R agreement 0.65–0.93 |
 | WALLPIX asymmetric sets (overland horizons 3–6/8/10/12) | low L/R agreement — correct, landscapes aren't mirrored |
 | Biome-consistent colours | towns bright white/stone; entry 11 blue sky+yellow; entries 12/13 cold cyan/white; entry 6 green/brown |
-| MONPIX multi-colour content | 75/75 images use ≥2 of their 4 remap colours |
+| MONPIX multi-colour content | 76/76 images use ≥2 of their 4 remap colours |
 | Monster names | Flesh Eater→img4, Mummy→img61, Demon King→img73, Succubus Queen→img74 |
 
-Outputs (`public/assets/mm1/dosega/`): `textures/wallpix.png` (204-slice
-atlas + sidecar), `data/wallpix.json`, `sprites/monpix.png` (75-portrait
+Outputs (`public/assets/mm1/dosega/`): `textures/wallpix.png` (216-slice
+atlas + sidecar), `data/wallpix.json`, `sprites/monpix.png` (76-portrait
 atlas + sidecar), `data/monpix.json`.
 
 ## Misc data files — `ROSTER.DTA`, `SCREEN0-9`, `MM.RSM`, `GACARD.DTA` (**solved / documented**)
@@ -212,17 +227,27 @@ remainder on all 10. Colour remap `_indexes = [0,2,4,15]` (screen 2 uses
 
 ### `MM.RSM` — overlay-loader symbol table (6656 B, **hypothesis**, observed)
 
-Not consumed by ScummVM. Direct observation: 22 null-terminated symbol
-names — `$ovbgn`, `main_`, `ovloader_`, `Bpcomand`, `Zsetspell`, `mybuffer`,
-`scr_seg`, `scrb_seg`, `shpseg`, `grmovax`, `grmovsw`, `specerror`,
-`scr_width`, `adapter`, `adapter6`, `text`, `hertable`, `machine`, `opw`,
-`xoffset`, `color1`, `color2` — plus `readmaze_`, `readrost_`, `writrost_`,
-`readwall_`, `readmon_`, `readpix_`, `readscr_`, `chkopen_` etc. Each is
-followed by a 4-byte address field (`seg-byte, 0x28, u16LE offset`). The
-names are the game's own internal I/O + video routines, so the file is the
-`.OVR` overlay system's symbol/relocation table (MM1 loads its per-map
-scripts as overlays). The full address encoding is **not** confirmed (the
-`0x28` constant byte's role is unclear) — the symbol list itself is solid.
+Not consumed by ScummVM. `parse_rsm_symbols()` (`scripts/extract_mm1_misc.py`)
+scans null-terminated names, each followed by a 4-byte address field
+(`seg-byte, 0x28, u16LE offset`) — **412 symbols**, offsets 0x22–0x1281,
+all identifier-shaped (letters/digits/underscore): `$ovbgn`, `main_`,
+`ovloader_`, `loadabort_`, `readmaze_`, `readrost_`, `writrost_`,
+`chkopen_`, `readwall_`, `readmon_`, `readpix_`, `readscr_`, `mykbhit`,
+`clearkey`, `crit_err`, `cga_movsw`, `ega_movsw`, `to_ega`, `loadmaze`,
+… `machtype`, `gostartaddr`, `errad`, `esflag`, `swim1`, etc. — the game's
+own internal I/O + video-driver routines, so the file is the `.OVR`
+overlay system's symbol/relocation table (MM1 loads its per-map scripts
+as overlays).
+
+An earlier pass under-counted this at 22: after matching a symbol, the
+scanner resumed right after the name's null terminator instead of
+skipping the 4-byte address field, so it re-scanned those (mostly binary)
+bytes looking for the next null — usually desyncing from the true
+name/address boundary and missing most of the table. Fixed by advancing
+past the address field on every successful match.
+
+The full address encoding is **not** confirmed (the `0x28` constant byte's
+role is unclear) — the symbol list itself is solid.
 → `data/mm-rsm-symbols.json` (will inform the `*.OVR` script work).
 
 ### `GACARD.DTA` — copy-protection card state (**hypothesis**)

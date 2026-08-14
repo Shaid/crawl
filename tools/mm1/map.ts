@@ -11,7 +11,7 @@
  * below is imported from the MM2 codec rather than re-derived:
  *
  *   Page 0 (visual, +0x000): four 2-bit wall fields per cell, N/E/S/W:
- *       `0` open, `1` wall, `2` wall+torch, `3` door.
+ *       `0` open, `1` wall, `2` door, `3` wall+torch.
  *   Page 1 (collision, +0x100): per direction `(dark<<1)|wall`; the low bit
  *       is the wall, the high bit darkness. West's dark slot is reused:
  *       bit 0x80 is the event flag.
@@ -104,7 +104,7 @@ export function mm1EnvForSlug(slug: string): Mm1Env {
 }
 
 export interface Mm1MapCell {
-  /** Page-0 wall codes (0 open, 1 wall, 2 wall+torch, 3 door). */
+  /** Page-0 wall codes (0 open, 1 wall, 2 door, 3 wall+torch). */
   visual: { n: number; e: number; s: number; w: number };
   /** Page-1 collision: wall low bit, dark high bit (north/east/south/west). */
   collision: { n: number; e: number; s: number; w: number };

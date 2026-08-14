@@ -5,16 +5,18 @@ Both files use the shared `.DTA` container + 2bpp RLE screen format from
 `dta.py`. The per-entry colour remaps are hardcoded tables from ScummVM's
 `engines/mm/mm1` (GPL, oracle):
 
-  * WALLPIX — `maps/maps.cpp` `Maps::loadTile()`: 17 entries, each holding 12
+  * WALLPIX — `maps/maps.cpp` `Maps::loadTile()`: 18 entries, each holding 12
     sequential frustum slices at fixed sizes, coloured by `TILE_COLORS[entry]`
     (`_indexes = [0, colors&0xf, colors>>4, 15]`).
-  * MONPIX — `data/monsters.cpp` `Monsters::getMonsterImage()`: 75 entries,
+  * MONPIX — `data/monsters.cpp` `Monsters::getMonsterImage()`: 76 entries,
     each one 104x96 image, coloured by `PALETTE[imgNum]`
     (`_indexes = [pal&0xf, pal>>4&0xf, pal>>8&0xf, pal>>12&0xf]`).
 
 Monster names come from ScummVM's static `devtools/create_mm/files/mm1/
 monsters.txt` (195 monsters, last field = `_imgNum`). All aquatic monsters
-share imgNum 75, which has **no** MONPIX entry (they get no portrait).
+share imgNum 75, which decodes to a real MONPIX portrait (entry 75 — see
+`dta.py`'s `DtaContainer` docstring for the container off-by-one that used
+to make this entry look absent).
 """
 from __future__ import annotations
 
@@ -32,7 +34,7 @@ TILE_COLORS = [
 ]
 
 # Vairn/MM2 doc 24 lane labels for the overland biomes (entry index + 1 =
-# the wallNN sheet number); entries 0-5 and 14-16 are the indoor sets.
+# the wallNN sheet number); entries 0-5 and 14-17 are the indoor sets.
 BIOME_LABELS: dict[int, str] = {
     6: 'trees', 7: 'mountains', 8: 'trees', 9: 'lava',
     10: 'swamp', 11: 'water', 12: 'thick forest', 13: 'mountains',
@@ -56,14 +58,14 @@ def wallpix_indexes(entry: int) -> list[int]:
 
 
 def decode_wallpix(path: str) -> dict:
-    """Decode all 17 WALLPIX entries into per-slice CLUT8 index grids.
+    """Decode all 18 WALLPIX entries into per-slice CLUT8 index grids.
 
     Returns {"entries": [{entry, colors, biome, slices: [{w, h, pixels}]}]}
     after validating that every entry's payload is consumed with 0 remainder.
     """
     dta = read_dta(path)
-    if dta.count != 17:
-        raise ValueError(f"WALLPIX.DTA: expected 17 entries, got {dta.count}")
+    if dta.count != 18:
+        raise ValueError(f"WALLPIX.DTA: expected 18 entries, got {dta.count}")
     out = []
     for ei, raw in enumerate(dta.entries()):
         body = entry_payload(raw)
@@ -112,10 +114,10 @@ def monpix_indexes(img_num: int) -> list[int]:
 
 
 def decode_monpix(path: str) -> dict:
-    """Decode all 75 MONPIX entries into 104x96 CLUT8 grids (0 remainder)."""
+    """Decode all 76 MONPIX entries into 104x96 CLUT8 grids (0 remainder)."""
     dta = read_dta(path)
-    if dta.count != 75:
-        raise ValueError(f"MONPIX.DTA: expected 75 entries, got {dta.count}")
+    if dta.count != 76:
+        raise ValueError(f"MONPIX.DTA: expected 76 entries, got {dta.count}")
     out = []
     for mi, raw in enumerate(dta.entries()):
         body = entry_payload(raw)

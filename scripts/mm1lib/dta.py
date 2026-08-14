@@ -38,6 +38,17 @@ RUN_MARKER = 0x7B
 class DtaContainer:
     """A `.DTA` file: u16LE index byte-size, u32LE entry offset table, payloads.
 
+    One offset per entry (`index_size / 4` entries total) — there is no
+    trailing sentinel. Ported from ScummVM's `Gfx::DTA::load()`
+    (`gfx/dta.cpp`): entry `i`'s end is the next entry's start offset, except
+    for the *last* entry (`i == count - 1`), whose end is end-of-file. A
+    naive "N offsets = N-1 entries + 1 sentinel" reading (this file's
+    original port) silently drops that last entry — verified against retail
+    `WALLPIX.DTA` (18 real entries, not 17: `TILE_COLORS[18]` in
+    `maps.cpp`) and `MONPIX.DTA` (76, not 75: the dropped entry 75 is
+    imgNum 75's real portrait, decodes byte-exact with 0 remainder — the
+    "aquatic monsters get no portrait" reading was an artifact of this bug).
+
     Entries are returned as raw payload bytes **including** the per-entry
     leading `u16LE` size word (callers skip it, exactly like the ScummVM code
     does with `entry->skip(2)`).
@@ -51,18 +62,18 @@ class DtaContainer:
         n = self.index_size // 4
         self.offsets = struct.unpack_from(f'<{n}I', data, 2)
         self.payload_base = 2 + self.index_size
-        if len(self.offsets) < 2:
+        if len(self.offsets) < 1:
             raise ValueError("DTA index has no entries")
 
     @property
     def count(self) -> int:
-        return len(self.offsets) - 1
+        return len(self.offsets)
 
     def entry(self, i: int) -> bytes:
         if not (0 <= i < self.count):
             raise IndexError(f"DTA entry {i} out of range (0..{self.count - 1})")
         start = self.payload_base + self.offsets[i]
-        end = self.payload_base + self.offsets[i + 1]
+        end = len(self.data) if i == self.count - 1 else self.payload_base + self.offsets[i + 1]
         return self.data[start:end]
 
     def entries(self) -> list[bytes]:

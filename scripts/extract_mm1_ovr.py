@@ -56,8 +56,10 @@ def wallpix_entry(area_table: int, lane_id: int) -> int | None:
     for v in arr:
         if v == lane_id:
             if ctr >= 19:
-                return 0  # maps.cpp: ctr==19 -> reused entry 0
-            return ctr - 1 if False else ctr - 1
+                # maps.cpp: ctr==19 -> reused entry 0 (ctr>19 sets a distinct
+                # _loadFlag in the original but still resolves to entry 0)
+                return 0
+            return ctr - 1
         ctr += 1
     return None
 

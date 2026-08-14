@@ -1,11 +1,16 @@
 # MM1 — open work
 
 **MAZEDATA.DTA is SOLVED** (55/55 screens, byte-exact vs Vairn's independent
-decoder and the disk file). **WALLPIX.DTA + MONPIX.DTA are SOLVED** (17 wall
-sets / 204 frustum slices + 75 monster portraits, 92/92 entries 0-remainder,
-ported from ScummVM's mm1 engine). **ROSTER.DTA + SCREEN0-9 are SOLVED**
+decoder and the disk file). **WALLPIX.DTA + MONPIX.DTA are SOLVED** (18 wall
+sets / 216 frustum slices + 76 monster portraits, 94/94 entries 0-remainder,
+ported from ScummVM's mm1 engine — an earlier `.DTA` container off-by-one
+undercounted both files by one entry each, silently dropping WALLPIX entry
+17 and MONPIX entry 75 (the aquatic-monster portrait); fixed in `dta.py`).
+**ROSTER.DTA + SCREEN0-9 are SOLVED**
 (18 starter characters, 10 title screens); **MM.RSM documented** as the
-overlay-loader symbol table (22 symbols, address encoding open);
+overlay-loader symbol table (412 symbols — an earlier scan bug undercounted
+this at 22 by desyncing past each symbol's address field; address encoding
+still open);
 **GACARD.DTA documented** as copy-protection state (1 byte). **ITEM and
 MONSTER tables are SOLVED** (MM.EXE +0x19B2A 255×24 and +0x1B312 195×32,
 byte-exact 255/255 and 195/195 vs ScummVM's transcription); **spells are

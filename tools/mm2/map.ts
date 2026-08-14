@@ -26,7 +26,7 @@ export const MAP_GRID = 16;
 export const MAP_FILE_SIZE = MAP_SCREENS * MAP_SCREEN_SIZE;
 
 export interface MapCell {
-  /** Page-0 wall codes (0 open, 1 wall, 2 wall+torch, 3 door). */
+  /** Page-0 wall codes (0 open, 1 wall, 2 door, 3 wall+torch). */
   visual: { n: number; e: number; s: number; w: number };
   /** Page-1 collision: wall low bit, dark high bit (north/east/south/west). */
   collision: { n: number; e: number; s: number; w: number };

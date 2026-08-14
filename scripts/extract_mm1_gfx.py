@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extract MM1 (DOS) `WALLPIX.DTA` (17 wall sets) and `MONPIX.DTA` (75 monster
+Extract MM1 (DOS) `WALLPIX.DTA` (18 wall sets) and `MONPIX.DTA` (76 monster
 portraits) to `public/assets/mm1/dosega/`.
 
 Usage: python3 scripts/extract_mm1_gfx.py [dataDir]
@@ -11,10 +11,10 @@ and `docs/mm1/dosega/data-structure.md` for the format spec and the
 verification evidence).
 
 Outputs:
-  textures/wallpix.png + .json  — shelf-packed atlas of all 204 frustum slices
-                                  (17 entries x 12), frames wallNN_<role><d>
+  textures/wallpix.png + .json  — shelf-packed atlas of all 216 frustum slices
+                                  (18 entries x 12), frames wallNN_<role><d>
   data/wallpix.json             — per-entry colours, biome labels, slice rects
-  sprites/monpix.png + .json    — 75 monster portraits (104x96) grid atlas,
+  sprites/monpix.png + .json    — 76 monster portraits (104x96) grid atlas,
                                   named by img number + ScummVM monster names
   data/monpix.json              — per-image palettes + all monster names
 """
@@ -74,7 +74,7 @@ def main() -> None:
     (out / 'sprites').mkdir(parents=True, exist_ok=True)
     (out / 'data').mkdir(parents=True, exist_ok=True)
 
-    # ---------- WALLPIX: 17 entries x 12 frustum slices ----------
+    # ---------- WALLPIX: 18 entries x 12 frustum slices ----------
     wall = decode_wallpix(data_dir / 'WALLPIX.DTA')
     slices = [
         {'entry': e['entry'], 'i': i, 'w': s['w'], 'h': s['h'], 'pixels': s['pixels']}
@@ -110,7 +110,7 @@ def main() -> None:
     print(f"  WALLPIX: {len(wall['entries'])} entries, {n_slices} slices, "
           f"{total_px} px decoded, atlas {ATLAS_MAX_W}x{atlas_h}")
 
-    # ---------- MONPIX: 75 monster portraits at 104x96 ----------
+    # ---------- MONPIX: 76 monster portraits at 104x96 ----------
     mon = decode_monpix(data_dir / 'MONPIX.DTA')
     names = parse_monster_names(REPO / 'scripts' / 'mm1lib' / 'mm1_monsters.txt')
     mw, mh = mon['width'], mon['height']
