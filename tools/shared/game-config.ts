@@ -42,7 +42,7 @@ import {
   indicesToRGBA,
   readPaletteWords,
 } from './amiga-planar.ts';
-import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex } from './asset-paths.ts';
+import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex, syncDataManifest } from './asset-paths.ts';
 
 /** bcdfo portrait tiles: 32×24 @ 6bpp sequential planar, 96 bytes per plane. */
 const TILE_W = 32, TILE_H = 24, TILE_BYTES = 576, BPP = 6;

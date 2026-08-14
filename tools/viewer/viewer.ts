@@ -1,4 +1,5 @@
 import { setHidden, type AtlasMeta, type PaletteData, type AtlasFrame, type AssetGroup, type GroupsFile } from './shared.ts';
+import { renderDataTable } from './data-table.ts';
 import { getAssetBasePath, getViewerConfig } from '../shared/viewer-config.ts';
 import {
   DEFAULT_GAME,
@@ -18,6 +19,14 @@ interface ManifestEntry {
   hasPalette: boolean;
   png: string;
   groupsFile?: string;
+  /** 'data' entries are JSON tables rendered by renderDataTable, not atlases. */
+  kind?: 'atlas' | 'data';
+  /** JSON path relative to the asset base; defaults to `${name}.json`. */
+  data?: string;
+  /** Explicit atlas sidecar path (w6-style manifests); defaults to `${name}.json`. */
+  atlas?: string;
+  /** Explicit palette path (w6-style manifests); defaults to `${name}.pal.json` when hasPalette. */
+  palette?: string;
 }
 
 const listEl = document.getElementById('list')!;
@@ -188,7 +197,8 @@ function renderList() {
     item.className = 'item';
     if (selected === a && !selectedGroup) item.classList.add('selected');
     const caret = a.groupsFile ? `<span class="item-caret">${expandedAssets.has(a.name) ? '▾' : '▸'}</span>` : '';
-    item.innerHTML = `${caret}<span class="item-label">${a.name}</span><span class="item-dim">${a.sprites}sp${a.hasPalette ? ' · pal' : ''}</span>`;
+    const kindTag = a.kind === 'data' ? `<span class="tag">data</span>` : '';
+    item.innerHTML = `${caret}<span class="item-label">${a.name}</span>${kindTag}<span class="item-dim">${a.kind === 'data' ? '' : `${a.sprites}sp${a.hasPalette ? ' · pal' : ''}`}</span>`;
     item.addEventListener('click', () => {
       if (a.groupsFile) toggleExpanded(a);
       else selectAsset(a);
@@ -240,8 +250,18 @@ async function selectAsset(asset: ManifestEntry, opts: { keepGroup?: boolean } =
   selected = asset;
   currentFrame = 0;
   if (!opts.keepGroup) selectedGroup = null;
-  currentAtlas = await loadJSON<AtlasMeta>(`${asset.name}.json`);
-  currentPalette = asset.hasPalette ? await loadJSON<PaletteData>(`${asset.name}.pal.json`) : null;
+  if (asset.kind === 'data') {
+    currentAtlas = null;
+    currentPalette = null;
+    currentFrames = [];
+    const json = await loadJSON<unknown>(asset.data ?? `${asset.name}.json`);
+    renderList();
+    drawData(asset, json);
+    return;
+  }
+  currentAtlas = await loadJSON<AtlasMeta>(asset.atlas ?? `${asset.name}.json`);
+  currentPalette = asset.palette ? await loadJSON<PaletteData>(asset.palette)
+    : asset.hasPalette ? await loadJSON<PaletteData>(`${asset.name}.pal.json`) : null;
   const allFrames = currentAtlas?.frames ?? [];
   if (selectedGroup) {
     const byName = new Map(allFrames.map(f => [f.name, f]));
@@ -269,6 +289,29 @@ async function selectGroup(asset: ManifestEntry, _groupsData: GroupsFile, group:
 function frameLabel_(asset: ManifestEntry, frame: AtlasFrame): string | null {
   const data = groupsCache.get(asset.name);
   return data?.frameLabels?.[frame.name] ?? null;
+}
+
+function drawData(asset: ManifestEntry, json: unknown) {
+  titleEl.textContent = asset.name;
+  metaEl.textContent = describeData(json);
+  frameInfoEl.textContent = '';
+  setHidden(frameStrip, true);
+  paletteBar.innerHTML = '';
+  setHidden(paletteBar, true);
+  if (json === null) {
+    canvasWrap.innerHTML = '<div class="state-panel state-error"><span class="state-icon">⚠</span><span class="state-title">Failed to load data JSON</span></div>';
+    return;
+  }
+  canvasWrap.innerHTML = `<div class="data-wrap">${renderDataTable(json)}</div>`;
+}
+
+function describeData(json: unknown): string {
+  if (Array.isArray(json)) return `${json.length} rows`;
+  if (typeof json === 'object' && json !== null) {
+    const keys = Object.keys(json);
+    return `${keys.length} sections`;
+  }
+  return 'data';
 }
 
 function drawAsset() {
@@ -306,7 +349,7 @@ function drawAsset() {
     img.onerror = () => {
       canvasWrap.innerHTML = '<div class="state-panel state-error"><span class="state-icon">⚠</span><span class="state-title">Failed to load image</span></div>';
     };
-    img.src = `${assetBase}/${selected.name}.png`;
+    img.src = `${assetBase}/${selected.png || `${selected.name}.png`}`;
 
     renderPalette(currentPalette);
   } else {
@@ -343,7 +386,7 @@ function drawFullAtlas(asset: ManifestEntry, atlas: AtlasMeta, zoom: number) {
   img.onerror = () => {
     canvasWrap.innerHTML = '<div class="state-panel state-error"><span class="state-icon">⚠</span><span class="state-title">Failed to load image</span></div>';
   };
-  img.src = `${assetBase}/${asset.name}.png`;
+  img.src = `${assetBase}/${asset.png || `${asset.name}.png`}`;
 }
 
 function renderPalette(palette: PaletteData | null) {

@@ -15,14 +15,18 @@
     "extract-all": "npm run extract-data && python3 scripts/render_all.py && python3 scripts/extract_monsters.py && python3 scripts/extract_clipper.py",
     "extract-data:w6": "npx tsx tools/extract-game-data.ts --game wizardry6",
     "w6:levels": "npx tsx tools/wizardry6/export-dungeon-levels.ts data/wizardry6/amiga",
+    "w6:atlas": "npx tsx tools/wizardry6/export-mazedata-indexed.ts data/wizardry6/amiga",
+    "w6:slots": "npx tsx tools/wizardry6/export-dungeon-slots.ts data/wizardry6/amiga",
     "w6:corridor": "npx tsx tools/wizardry6/render-static-corridor.ts data/wizardry6/amiga",
     "w6:walk": "npx tsx tools/wizardry6/render-walk-sequence.ts",
+    "w6:through": "npx tsx tools/wizardry6/render-through-dungeon.ts",
     "mm1:maps": "npx tsx tools/mm1/export-maps.ts data/mm1/dosega",
     "mm2:data": "npx tsx tools/mm2/export-data.ts data/mm2/amiga/data",
     "mm2:gfx": "npx tsx tools/mm2/decode-graphics.ts data/mm2/amiga/data",
     "mm2:pcgfx": "npx tsx tools/mm2/decode-pc-graphics.ts data/mm2/dosega",
     "mm3:dos": "python3 scripts/extract_mm3_dos.py",
-    "mm3:amiga": "python3 scripts/extract_mm3_amiga.py"
+    "mm3:amiga": "python3 scripts/extract_mm3_amiga.py",
+    "sync-data-manifests": "npx tsx tools/sync-data-manifests.ts"
   },
   "dependencies": {
     "@seer-project/core": "file:../seer/packages/core",
@@ -37,6 +41,7 @@
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@types/node": "^26.0.1",
+    "@types/pngjs": "^6.0.5",
     "eslint": "^9.0.0",
     "prettier": "^3.5.0",
     "tsx": "^4.20.0",
