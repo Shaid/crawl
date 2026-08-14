@@ -69,4 +69,21 @@ describe('monsters.dat record codec', () => {
 
     expect(bytesEqual(encodeMonsters(decodeMonsters(all)), all)).toBe(true);
   });
+
+  it('combat initiative is byte 0x18 (speed2), not byte 0x14 (ASM-confirmed, 17-combat-system.md)', () => {
+    const rec = new Uint8Array(MONSTER_RECORD_SIZE);
+    rec[0x14] = 0x37; // speed=8, speedHigh=4 -- deliberately different from 0x18's decode
+    rec[0x18] = 0x25; // speed2/initiative: (5+1)*10 = 60
+
+    const all = new Uint8Array(256 * MONSTER_RECORD_SIZE);
+    all.set(rec, 0);
+    const [m] = decodeMonsters(all);
+
+    expect(m.speed).toBe(8);
+    expect(m.speedHigh).toBe(4);
+    expect(m.initiative).toBe(60);
+    expect(m.initiative).toBe(m.speed2);
+    expect(m.initiative).not.toBe(m.speed);
+    expect(m.initiative).not.toBe(m.speedHigh);
+  });
 });

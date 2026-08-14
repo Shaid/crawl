@@ -9,7 +9,9 @@
  * missing. Files currently decoded:
  *
  *   items.dat, monsters.dat, roster.dat, spells.dat, str.dat,
- *   map.dat, attrib.dat, event.dat
+ *   map.dat, attrib.dat, event.dat (also disassembled to event-vm.json, see
+ *   tools/mm2/event-vm.ts), globe.32 (XOR string blob, see
+ *   tools/mm2/copy-protection.ts)
  *
  * See `docs/mm2/amiga/data-structure.md` for the per-file field layouts and
  * `docs/mm2/TODO.md` for what is verified against real data vs documented-only.
@@ -25,6 +27,8 @@ import { decodeStr } from './str.ts';
 import { decodeMap } from './map.ts';
 import { decodeAttrib } from './attrib.ts';
 import { decodeEventFile } from './event.ts';
+import { disassembleEventFile } from './event-vm.ts';
+import { decodeGlobeBlob } from './copy-protection.ts';
 import { syncDataManifest } from '../shared/asset-paths.ts';
 
 export interface ExportResult {
@@ -43,7 +47,7 @@ function dump<T>(name: string, dataDir: string, outDir: string, decode: (d: Uint
     return;
   }
   const decoded = decode(readBinary(path));
-  const outPath = resolve(outDir, name.replace(/\.dat$/, '') + '.json');
+  const outPath = resolve(outDir, name.replace(/\.(dat|32)$/, '') + '.json');
   writeJson(outPath, decoded);
   written.push(outPath);
 }
@@ -63,6 +67,23 @@ export function exportMm2Data(dataDir: string): ExportResult {
   dump('map.dat', dataDir, outDir, decodeMap, written, missing);
   dump('attrib.dat', dataDir, outDir, decodeAttrib, written, missing);
   dump('event.dat', dataDir, outDir, decodeEventFile, written, missing);
+  {
+    // Opcode disassembly of every location's scripts (tools/mm2/event-vm.ts),
+    // written alongside the structural event.json rather than replacing it.
+    const eventPath = resolve(dataDir, 'event.dat');
+    if (existsSync(eventPath)) {
+      const disasm = disassembleEventFile(decodeEventFile(readBinary(eventPath)));
+      const outPath = resolve(outDir, 'event-vm.json');
+      writeJson(outPath, disasm);
+      written.push(outPath);
+    }
+  }
+  // globe.32 is a text blob, not an image chunk (see decode-graphics.ts /
+  // tools/mm2/copy-protection.ts) — decoded here alongside the .dat files.
+  // disk.32 is documented as a similar XOR blob but its table layout is not
+  // confirmed anywhere (Vairn's own docs don't give it either), so it is not
+  // decoded — it stays in `skipped` in the graphics export.
+  dump('globe.32', dataDir, outDir, (d) => decodeGlobeBlob(d), written, missing);
 
   syncDataManifest('mm2', 'amiga');
 

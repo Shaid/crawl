@@ -9,8 +9,9 @@
  * horizontal strip of composed frames in `sprites/` plus a JSON with the TV
  * header, sequence blocks, and frame metadata. Palette index 0 renders
  * transparent (the game's blit key). Files that are `.32`-named but not image
- * chunks (`globe.32`, `disk.32` are XOR-obfuscated blobs) are reported and
- * skipped.
+ * chunks (`globe.32`, `disk.32` are XOR-obfuscated text blobs, not planar
+ * pixel data) are reported and skipped here — `globe.32`'s string tables are
+ * decoded separately by `tools/mm2/copy-protection.ts` via `export-data.ts`.
  */
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';

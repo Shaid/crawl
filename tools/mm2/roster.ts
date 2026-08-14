@@ -23,9 +23,11 @@
  *   +$10..+$15  6B  current stats: might, int, personality, speed, accuracy, luck
  *   +$16   1B  thievery %
  *   +$17..+$19  3B  secondary skills
- *   +$1A..+$20  7B  quest / progress flags (not ASM-mapped)
+ *   +$1A..+$1F  6B  quest / progress flags (not ASM-mapped)
+ *   +$20   1B  working level — ASM-confirmed mirror of +$71 (level); see below
  *   +$21   1B  age
- *   +$22..+$23  u16le unknown
+ *   +$22   1B  unknown (still not ASM-mapped)
+ *   +$23   1B  working spell-level / caster flag — ASM-confirmed mirror of +$72
  *   +$24   1B  armor class (effective)
  *   +$25   1B  food
  *   +$26   1B  condition
@@ -40,6 +42,23 @@
  *   +$78   1B  script/work flag
  *   +$79   1B  class-quest / guild mask
  *   +$7A..+$81  10B  padding/unknown (mostly zero)
+ *
+ * **`$1A..$20` quest-flags TODO, resolved for `$20` (ASM-confirmed,
+ * `06-roster-format.md`):** bytes `$1A`-`$1F` remain genuine unknowns —
+ * Vairn's own doc still calls them "Likely class-quest and world-quest bits
+ * ... not ASM-mapped" (kept as `questFlags` below, 6 bytes). Byte `$20` is
+ * NOT a quest flag: it is ASM-confirmed as a **working-level mirror** of
+ * `+$71` (`level`) — seeded to 1 at character creation (`0x272D6`), synced
+ * `$20 -> $71` (not the reverse) by `sync_party_secondary_stats` (`0x4476`),
+ * and consumed as the SP multiplier by the Rest routine (`0x19C9A`,
+ * `mulu.w $20(a1),d0`). Same story for byte `$23` (paired with `$22`, the
+ * genuinely-unknown low byte of the old `$22/$23` LE word this codec used to
+ * expose as one field): `$23` is an ASM-confirmed working-spell-level/caster
+ * flag mirroring `+$72` (`secondaryLevel`), gated by `tst.b $23(a0)` at
+ * `0x19C34` and synced the same way as `$20`. Vairn's doc flags a real
+ * ROM/save-drift bug here (stock starters ship with `$20` stuck at `1` while
+ * `$71` is higher) — this codec only decodes/round-trips the on-disk bytes,
+ * it does not attempt to fix or resync them.
  */
 
 export const ROSTER_CHAR_RECORD_SIZE = 0x82;
@@ -62,9 +81,15 @@ export interface RosterCharacter {
   stats: { might: number; intelligence: number; personality: number; speed: number; accuracy: number; luck: number };
   thievery: number;
   skills: [number, number, number];
+  /** Bytes $1A-$1F (6 bytes). Still not ASM-mapped in Vairn's docs — likely class-quest/world-quest bits, but unresolved. */
   questFlags: number[];
+  /** Byte $20. ASM-confirmed working-level mirror of {@link level} (`+$71`), NOT a quest flag — see the module doc for the sync/drift details. */
+  workingLevel: number;
   age: number;
+  /** Byte $22. Genuinely unknown (low byte of the old combined `$22/$23` word) — not ASM-mapped. */
   unknown22: number;
+  /** Byte $23. ASM-confirmed working-spell-level/caster-flag mirror of {@link secondaryLevel} (`+$72`) — see the module doc. */
+  workingSpellLevel: number;
   armorClass: number;
   food: number;
   condition: number;
@@ -135,9 +160,11 @@ export function decodeRoster(data: Uint8Array): RosterFile {
       },
       thievery: d[0x16],
       skills: [d[0x17], d[0x18], d[0x19]],
-      questFlags: [...d.subarray(0x1a, 0x21)],
+      questFlags: [...d.subarray(0x1a, 0x20)],
+      workingLevel: d[0x20],
       age: d[0x21],
-      unknown22: u16le(d, 0x22),
+      unknown22: d[0x22],
+      workingSpellLevel: d[0x23],
       armorClass: d[0x24],
       food: d[0x25],
       condition: d[0x26],
@@ -216,9 +243,10 @@ export function encodeRoster(roster: RosterFile): Uint8Array {
     out[off + 0x16] = c.thievery;
     out.set(c.skills, off + 0x17);
     out.set(c.questFlags, off + 0x1a);
+    out[off + 0x20] = c.workingLevel;
     out[off + 0x21] = c.age;
-    out[off + 0x22] = c.unknown22 & 0xff;
-    out[off + 0x23] = (c.unknown22 >> 8) & 0xff;
+    out[off + 0x22] = c.unknown22;
+    out[off + 0x23] = c.workingSpellLevel;
     out[off + 0x24] = c.armorClass;
     out[off + 0x25] = c.food;
     out[off + 0x26] = c.condition;

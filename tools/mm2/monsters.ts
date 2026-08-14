@@ -15,15 +15,37 @@
  *   +0x12   1B   sabil    single attack: low5 = effect, bit5 misc, bit6 archer, bit7 undead
  *   +0x13   1B   oabil    low nibble+1 (×10 if bit4) = reinforcement count;
  *                         bits 5-6 = flee tier; bit7 = multiplies
- *   +0x14   1B   speed    low nibble+1, high nibble+1
+ *   +0x14   1B   speed    low nibble+1, high nibble+1 — NOT combat initiative (see below)
  *   +0x15   1B   picture  & 0x7F -> NN.anm; bit7 = placement/size flag
  *   +0x16   1B   ac       low5+1 (×10 if bit5), bit6/bit7 flags
  *   +0x17   1B   damage   low5+1 (×10 if bit5, capped 250)
- *   +0x18   1B   speed2   low5+1 (×10 if bit5, capped 250)
+ *   +0x18   1B   speed2   low5+1 (×10 if bit5, capped 250) — the combat initiative field
  *   +0x19   1B   mres     bits0-2 flags, bits3-4, bits5-7 -> table A4-$7464
  *
  * `hpmul`/`xpmul` = {1, 10, 100, 1000} (byte-verified for hpmul at data-hunk
  * offset 0xB92; xpmul uses the identical shape per the FAQ cross-check).
+ *
+ * **`0x14` vs `0x18` — which is combat initiative (ASM-confirmed, `17-combat-system.md`
+ * §Battle data model + §Round loop):** the round loop's initiative scan
+ * (`0x12A22`/`0x13282`, "scan monsters for the highest `-$50E[i]` among
+ * not-acted") compares battle array `-$50E[i]`, which the per-slot
+ * instantiation (`0x11C2C`) sets from unpacked field `-$11B1` — traced
+ * (`mm2.capstone.annotated.asm` @ `0x4FA2..0x4FD4`) directly to **record
+ * byte `0x18`** (this codec's `speed2`), the same byte the AC/damage-style
+ * `low5+1 (×10 if bit5, capped 250)` decode already applied. So **`0x18`
+ * (`speed2`) is THE combat initiative/turn-order stat**, not `0x14`.
+ *
+ * Record byte `0x14` is a *different* pair of fields, unpacked
+ * (`0x4EA0..0x4EC0`) from the SAME source byte's two nibbles: low
+ * nibble+1 feeds data-hunk field `-$5E2D` (`speedRaw`/`speed` here) — Vairn's
+ * own docs never name or trace its consumer, so its role is genuinely
+ * undocumented, not "action speed"; high nibble+1 feeds combat array
+ * `-$503[i]`, which `17-combat-system.md` names only **"secondary stat"** —
+ * confirmed to exist and confirmed NOT to be the initiative comparison
+ * (that's `-$50E[i]` / byte `0x18`), but its exact game-mechanical meaning
+ * (to-hit? extra attack?) is not characterized further in Vairn's docs
+ * either, so this codec does not invent a name for it beyond "secondary
+ * stat" (`speedHigh`/`speedHighRaw` below).
  */
 
 export const MONSTER_RECORD_SIZE = 26;
@@ -44,7 +66,9 @@ export interface MonsterRecord {
   pabil: number;
   sabil: number;
   oabil: number;
+  /** Byte 0x14 low nibble + 1. NOT combat initiative — its combat-engine consumer (data-hunk `-$5E2D`) is untraced/unnamed in Vairn's docs. */
   speed: number;
+  /** Byte 0x14 high nibble + 1. NOT combat initiative — ASM-confirmed as the combat array's "secondary stat" (`-$503[i]`, `17-combat-system.md`); exact game-mechanical role beyond that name is not documented. */
   speedHigh: number;
   picture: number;
   pictureFlag: boolean;
@@ -52,8 +76,11 @@ export interface MonsterRecord {
   acRaw: number;
   damage: number;
   damageRaw: number;
+  /** Byte 0x18, `low5+1 (x10 if bit5, capped 250)`. ASM-confirmed as THE combat initiative/turn-order stat (`-$50E[i]`, `17-combat-system.md` §Round loop) — see also {@link initiative}. */
   speed2: number;
   speed2Raw: number;
+  /** Alias of {@link speed2} — the ASM-confirmed combat initiative stat, named for discoverability (byte 0x14 is NOT this, despite its "speed" mnemonic). */
+  initiative: number;
   mres: number;
 }
 
@@ -112,6 +139,7 @@ export function decodeMonsters(data: Uint8Array): MonsterRecord[] {
       damageRaw: data[off + 0x17],
       speed2: decodeMonsterStat(data[off + 0x18]),
       speed2Raw: data[off + 0x18],
+      initiative: decodeMonsterStat(data[off + 0x18]),
       mres: data[off + 0x19],
     });
   }

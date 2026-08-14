@@ -19,7 +19,13 @@
  *   +0x0E  entry_coord   packed (Y<<4)|X spawn/safe square (asm-confirmed)
  *   +0x0F  era_gate      compared against current era index (asm-confirmed)
  *   +0x10  pad (0)
- *   +0x11..+0x14  sublayout params (observed)
+ *   +0x11  sublayout param (observed; role unclear, read/compared @ 0x12F58)
+ *   +0x12  door_strength — asm-confirmed: materialized to A4-$5608,
+ *          consumed by the door-bash handler @ 0x9C2A
+ *   +0x13  door_trap — asm-confirmed: materialized to A4-$5607, consumed
+ *          by the unlock handler @ 0x20D6E (NOT a second coordinate pair,
+ *          per a correction in Vairn's own doc)
+ *   +0x14  sublayout param (observed; role unclear, read/compared @ 0x1A8B4)
  *   +0x15  label / transition hi (outside label; interior complex_id high)
  *   +0x16  recall_coord  packed (Y<<4)|X (asm-confirmed)
  *   +0x17  level/floor   interior floor index
@@ -48,7 +54,14 @@ export interface AttribRecord {
   entryCoord: number;
   eraGate: number;
   pad10: number;
-  sublayout: [number, number, number, number];
+  /** Byte 0x11. "Observed" only in Vairn's docs — read/compared during screen setup (@0x12F58); no confirmed role. */
+  sublayoutParam11: number;
+  /** Byte 0x12. ASM-confirmed `door_strength`: materialized to A4-$5608, consumed by the door-bash handler @0x9C2A. */
+  doorStrength: number;
+  /** Byte 0x13. ASM-confirmed `door_trap`: materialized to A4-$5607, consumed by the unlock handler @0x20D6E. */
+  doorTrap: number;
+  /** Byte 0x14. "Observed" only in Vairn's docs — read/compared during screen setup (@0x1A8B4); no confirmed role. */
+  sublayoutParam14: number;
   labelOrTransitionHi: number;
   recallCoord: number;
   level: number;
@@ -82,7 +95,10 @@ export function decodeAttrib(data: Uint8Array): AttribRecord[] {
       entryCoord: d[0x0e],
       eraGate: d[0x0f],
       pad10: d[0x10],
-      sublayout: [d[0x11], d[0x12], d[0x13], d[0x14]],
+      sublayoutParam11: d[0x11],
+      doorStrength: d[0x12],
+      doorTrap: d[0x13],
+      sublayoutParam14: d[0x14],
       labelOrTransitionHi: d[0x15],
       recallCoord: d[0x16],
       level: d[0x17],
@@ -113,7 +129,10 @@ export function encodeAttrib(records: AttribRecord[]): Uint8Array {
     out[o + 0x0e] = r.entryCoord;
     out[o + 0x0f] = r.eraGate;
     out[o + 0x10] = r.pad10;
-    out.set(r.sublayout, o + 0x11);
+    out[o + 0x11] = r.sublayoutParam11;
+    out[o + 0x12] = r.doorStrength;
+    out[o + 0x13] = r.doorTrap;
+    out[o + 0x14] = r.sublayoutParam14;
     out[o + 0x15] = r.labelOrTransitionHi;
     out[o + 0x16] = r.recallCoord;
     out[o + 0x17] = r.level;

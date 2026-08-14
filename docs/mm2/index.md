@@ -63,11 +63,14 @@ npm run mm2:gfx
 
 See `docs/mm2/TODO.md`. The PC DOS `.4`/`.16` codecs are **done** (verified
 byte-exact against Vairn's reference on the GOG data at `data/mm2/dosega/`);
-remaining highest-value items: composed `.anm` walk sequences as GIFs
-(combat engine block selection is the only gap — the longest-block heuristic
-works for showcase), the copy-protection `globe.32` XOR decode
-(`20-copy-protection-table.md`), the GOG `STR.DAT`/`MONSTERS.DAT`/
+the `globe.32` copy-protection XOR decode and the `event.dat` opcode-VM
+disassembler are also **done** (see `docs/mm2/TODO.md` for both — the globe
+key needed a one-byte correction vs Vairn's own reference script, and the
+event script region turned out to be a sequence of per-handler segments
+rather than one flat stream, both found via this repo's own real-data
+verification). Remaining highest-value items: composed `.anm` walk sequences
+as GIFs (combat engine block selection is the only gap — the longest-block
+heuristic works for showcase), and the GOG `STR.DAT`/`MONSTERS.DAT`/
 `ATTRIB.DAT` LZW wrapper (confirmed byte-exact, not yet ported — `ITEMS.DAT`
 turns out not to be LZW-wrapped at all and is already decodable with the
-existing Amiga codec, see `docs/mm2/dosega/data-structure.md`), and the
-event-script opcode VM.
+existing Amiga codec, see `docs/mm2/dosega/data-structure.md`).

@@ -35,6 +35,27 @@ describe('attrib.dat codec', () => {
     expect(a.flags).toBe(0x80);
   });
 
+  it('decodes door_strength (0x12) and door_trap (0x13) as named ASM-confirmed fields, distinct from the still-unclear 0x11/0x14 sublayout params', () => {
+    const rec = new Uint8Array(64);
+    rec[0x11] = 0x01;
+    rec[0x12] = 0x0a; // door_strength
+    rec[0x13] = 0x14; // door_trap
+    rec[0x14] = 0x02;
+    const file = new Uint8Array(ATTRIB_FILE_SIZE);
+    file.set(rec, 0);
+    const [a] = decodeAttrib(file);
+    expect(a.doorStrength).toBe(0x0a);
+    expect(a.doorTrap).toBe(0x14);
+    expect(a.sublayoutParam11).toBe(0x01);
+    expect(a.sublayoutParam14).toBe(0x02);
+
+    const records = decodeAttrib(file);
+    for (let i = 0; i < 60; i++) records[i].areaId = i; // match the round-trip test's convention
+    const encoded = encodeAttrib(records);
+    expect(encoded[0x12]).toBe(0x0a);
+    expect(encoded[0x13]).toBe(0x14);
+  });
+
   it('round-trips a full file byte-exact', () => {
     const data = new Uint8Array(ATTRIB_FILE_SIZE);
     for (let i = 0; i < data.length; i++) data[i] = (i * 31) & 0xff;
