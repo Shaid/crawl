@@ -77,15 +77,40 @@ def main():
         json.dump({'file': 'MM3.CC', 'size': len(data), 'count': len(entries),
                    'entries': directory}, f, indent=1)
 
-    # monster stats: one table per stat, values indexed by monster id
+    # monster stats: one table per stat, values indexed by monster id.
+    # Each table is 90 monsters x a per-stat field width (1/2/4 bytes,
+    # inferred from payload length -- the game's own struct isn't
+    # documented, but every field is a whole number of 90-element LE
+    # integers). See docs/mm3/dosvga/data-structure.md "Asset formats (.dat)".
+    MONSTER_COUNT = 90
     stats = {}
     for name, payload in by_ext.get('dat', []):
         if name.startswith('Mon'):
             stat = name[3:-4]  # e.g. MonHP.dat -> HP
-            stats[stat] = [int(b) for b in payload]
+            width = len(payload) // MONSTER_COUNT
+            stats[stat] = [
+                int.from_bytes(payload[i:i + width], 'little')
+                for i in range(0, len(payload), width)
+            ]
+    names_path = os.path.join(HERE, 'mm3lib', 'mm3_monster_names.json')
+    monster_names = [None] * MONSTER_COUNT
+    try:
+        with open(names_path) as f:
+            for k, v in json.load(f)['names'].items():
+                monster_names[int(k)] = v
+    except OSError:
+        pass
     with open(os.path.join(OUT, 'data', 'monster-stats.json'), 'w') as f:
-        json.dump({'note': 'values are the raw per-stat table; monster id = index',
-                   'tables': stats}, f, indent=1)
+        json.dump({
+            'note': 'tables: decoded per-stat values, monster id = index. '
+                    'names: id -> name, cross-referenced from a community bestiary '
+                    '(https://shrines.rpgclassics.com/pc/mm3/monsters.shtml) by exact '
+                    '(HP,AC,Speed,NumAttacks) match; 61/90 resolved unambiguously, '
+                    'the rest are null -- see scripts/mm3lib/mm3_monster_names.json '
+                    'and docs/mm3/TODO.md `mm3-mon-stats`.',
+            'names': monster_names,
+            'tables': stats,
+        }, f, indent=1)
 
     # maze text (raw decoded byte strings)
     maze = {}

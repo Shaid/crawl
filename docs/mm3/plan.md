@@ -108,12 +108,15 @@ Run from the repo root: `python3 scripts/extract_mm3_dos.py` and
 - **Filename hashes**: DOS `rotl16(h,9)+upper(c)`; Amiga
   `fold16(rotl32(h,5)+upper(c))`. Verified: 541/558 DOS names, 420/449
   Amiga keys resolve to real filenames.
-- **Sprite container** (DOS `.vga/.mon/.fac/.icn/.pic`, Xeen-style):
+- **Sprite container** (DOS `.vga/.mon/.fac/.icn/.pic/.out/.til/.brd/.sky`):
   `u16 frameCount` + frameCount × `{u16 cell1, u16 cell2}` + cells
-  `{u16 xoff, u16 w, u16 yoff, u16 h}` + scanline RLE. Cell geometry
-  confirmed on hundreds of files; the scanline-RLE opcode semantics decode
-  cleanly for `.fac/.icn/.vga` cells but the `.mon` variant is not yet
-  byte-exact (open item `mm3-mon-rle`).
+  `{u16 xoff, u16 w, u16 yoff, u16 h}` + scanline RLE. **Fully solved**
+  (`mm3-mon-rle` closed) — the opcode grammar is a simple 3-command
+  scheme (literal/skip/run), *not* the MM4/5 Xeen grammar as earlier
+  assumed; found by disassembling the game's own blitter in the `MM3.CC`
+  `vga` display driver. Verified 157,330/157,330 lines and 3,823/3,823
+  cells exact across all 402 sprite-container files, 0 deviation
+  (`scripts/mm3lib/dos_sprite.py`, `scripts/verify_mm3_dos_sprites.py`).
 - **Screens**: DOS `.raw` = 320×200 raw 8-bit VGA (no palette in file);
   Amiga 40000-byte screens = 320×200 5-plane planar (tmp.scr is a saved
   screen) — rendered with the confirmed static Amiga palette
