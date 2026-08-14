@@ -222,12 +222,70 @@ scripts as overlays). The full address encoding is **not** confirmed (the
 this file likely stores the card variant the install uses. No consumer
 found in ScummVM (it bypasses the protection). No decode attempted.
 
+## Items / Monsters / Spells tables (**solved / documented**)
+
+`scripts/extract_mm1_tables.py` (`npm run mm1:tables`). MM1 has **no**
+items.dat/monsters.dat — the tables are embedded in **MM.EXE**. Both were
+located by searching the exe for known item/monster names, then verified
+byte-exact against ScummVM's static transcriptions (`devtools/create_mm/
+files/mm1/items.txt` 255/255, `monsters.txt` 195/195).
+
+### Items — MM.EXE file offset `0x19B2A`, 255 × 24 B (**confirmed**)
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 14 | name (uppercase, space-padded; e.g. `CLUB`, `BROAD SWORD +1`, `(USELESS ITEM)`) |
+| +0x0E | 1 | disablements (class/alignment bitmask) |
+| +0x0F | 1 | constBonus_id (stat id, or EquipMode specials 1/0xFF) |
+| +0x10 | 1 | constBonus_value |
+| +0x11 | 1 | tempBonus_id (0xFF = spell item) |
+| +0x12 | 1 | tempBonus_value / spellId |
+| +0x13 | 1 | maxCharges |
+| +0x14 | 2 | cost `u16` **big-endian** (the one non-LE field — reading it LE gives cost×256) |
+| +0x16 | 1 | damage |
+| +0x17 | 1 | AC_Dmg (AC bonus for armor, extra damage for weapons) |
+
+Category ranges: 1–60 weapon, 61–85 missile, 86–120 two-handed, 121–155
+armor, 156–170 shield, 171–255 special/quest. → `data/items.json`.
+
+### Monsters — MM.EXE file offset `0x1B312`, 195 × 32 B (**confirmed**)
+
+| Offset | Size | Field |
+|--------|------|-------|
+| +0x00 | 15 | name — **15 bytes**, not 14: for 15-char names the 15th byte is the real last letter (e.g. `12 HEADED HYDRA`), otherwise a space pad. Reading 14+10 misaligns every record by one field |
+| +0x0F | 1 | count |
+| +0x10 | 1 | fleeThreshold |
+| +0x11 | 1 | defaultHP |
+| +0x12 | 1 | defaultAC |
+| +0x13 | 1 | maxDamage |
+| +0x14 | 1 | numberOfAttacks |
+| +0x15 | 1 | speed |
+| +0x16 | 2 | experience `u16` **little-endian** |
+| +0x18 | 1 | loot |
+| +0x19 | 1 | resistUndead |
+| +0x1A | 1 | resistances |
+| +0x1B | 1 | bonusOnTouch |
+| +0x1C | 1 | specialAbility |
+| +0x1D | 1 | specialThreshold |
+| +0x1E | 1 | counterFlags |
+| +0x1F | 1 | imgNum (MONPIX portrait index) |
+
+→ `data/monsters.json`. `imgNum` links each monster to its MONPIX portrait.
+
+### Spells — no binary table (**documented**)
+
+MM1's spells are **code + string pool**, not a table: combat-effect strings
+(`A FIERY EXPLOSION ENGULFS...`, `LIGHTNING BOLT` etc.) are confirmed in
+MM.EXE's string pool (~0x12580–0x12780, 0x129E0–0x12A50), spell names are
+scattered UI/effect strings, and the SP cost is a formula (spell level,
+`spell_casting.cpp`). The canonical 47 cleric + 47 wizard + 32 monster spell
+lists are transcribed in `scripts/mm1lib/mm1_spells.json` (ScummVM
+`strings_en.yml` + `spells_monsters.cpp` SPELLS[] names) → `data/spells.json`.
+
 ## Still open (not part of this pass)
 
-- Items / monsters / spells / `*.OVR` event scripts — Vairn explicitly did
-  **not** decode these (doc 52). Likely sources: `MM.EXE` tables + per-map
-  OVR code/data segments. Oracle: ScummVM `engines/mm/mm1`. MM.RSM's
-  symbol table is a head start for the OVR loader.
+- `*.OVR` event scripts — ScummVM `maps/map00-55.cpp` are its hand-translated
+  per-map scripts; MM.RSM's symbol table is the head start for the loader.
 - `FLOORPIX.DTA`/`OBJPIX.DTA` — absent from this GOG install.
 - A live-game (DOSBox) screenshot comparison for the WALLPIX/MONPIX/title
   renders would be a stronger visual oracle than the structural checks

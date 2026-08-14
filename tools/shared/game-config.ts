@@ -248,6 +248,7 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         const py = process.env.PYTHON ?? 'python3';
         execFileSync(py, [resolve(repo, 'scripts/extract_mm1_gfx.py')], { stdio: 'inherit', cwd: repo });
         execFileSync(py, [resolve(repo, 'scripts/extract_mm1_misc.py')], { stdio: 'inherit', cwd: repo });
+        execFileSync(py, [resolve(repo, 'scripts/extract_mm1_tables.py')], { stdio: 'inherit', cwd: repo });
       },
     }],
   },
