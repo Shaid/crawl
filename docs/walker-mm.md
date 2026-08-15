@@ -105,3 +105,11 @@ cases, 0 mismatches — `tools/walker/__tests__/games-mm3.test.ts`), and a
 mocked-`CanvasRenderingContext2D` smoke test confirms `renderCanvas`
 actually produces sensible draw calls (correct tile dimensions at the
 expected screen positions, wall-rect counts varying sensibly by facing).
+
+## Known issues (user-reported, 2026-08-15, not yet triaged)
+
+The user flagged real issues with the MM1 and MM2 walkers from actually
+using them, without specifics yet. Flagged as a next priority — when
+specifics come in, reproduce live in the browser (not just the unit
+tests above, which cover specific mechanisms, not a full play-through)
+before making changes.
