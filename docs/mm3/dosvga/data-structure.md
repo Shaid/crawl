@@ -383,9 +383,102 @@ already-extracted sprite catalog — 0 missing across all 81 indoor mazes.
 → `scripts/mm3lib/dos_maze.py` `resolve_graphics()`, output in
 `data/mazes.json` per-maze `.graphics` (`wallSeries`, `wallFiles`, `tile`,
 `sky`, `music`, `areaName`). Wired into the walker
-(`tools/walker/games-mm3.ts`) for FRONT-wall rendering — see TODO
-`mm3-maze-wall-frames` for what's still open (which frame of a wall file
-to draw, and the `<series>wl4.vga` side/floor/ceiling composite).
+(`tools/walker/games-mm3.ts`).
+
+### Indoor 3-D view — which wall file/frame renders at each screen position — **SOLVED**
+
+A three-stage pipeline, all confirmed by disassembly and render-verified
+against real `MM3.CUR` data. All offsets are file offsets into
+`build/cache/mm3/MM3_original_reconstructed.exe` unless prefixed `vga+`
+(offsets into the decompressed `MM3.CC` `vga` driver, entry hash `0x8F99`
+— see "DOS 256-colour palette" above).
+
+**Stage 1 — `BuildWallFlags`, file `0xC395`–`0xDD3C`.** 44 hand-unrolled
+*view slots* (not the same slot numbering as this project's own
+MM1/MM2-derived frustum engine, `tools/walker-mm/maze3d.ts` — MM3's
+internal geometry is its own, richer system). Per slot: read a fixed
+`(dx, dy)` offset from the party's position (tables at file `0x12C8`
+dx / `0x1380` dy, indexed `facing*0x2E + slot`, facing order **N, S, E,
+W** — not the usual N,E,S,W), sample that cell's wall word with a
+per-slot mask/shift (`0x1438`/`0x1598`), and dispatch the wall's 3-bit
+graphic index (1–7) through a **per-slot** 7-arm jump table (44 separate
+tables, `0xDD2F` down to `0xDAD5`, step −14 — an earlier pass mistook
+slot 0's table for the only one). Each arm just sets small flag globals;
+nothing is drawn yet.
+
+**Stage 2 — `BuildWallList`, file `0xE607`–`0x105FD` (+`0xDD3D`–`0xE606`).**
+Turns the flags into a **variable-length command stream** in a BSS buffer
+at DS `0xD66E` (4000 B — name and capacity from the game's own overflow
+message, `"…WallList New Max = %u - %u"`, DS `0x125B`):
+
+```
+0xFFFF, ptrOff, ptrSeg     ; set current sprite (ptrSeg == 0 ends the list)
+x, y, flags, frame         ; blit current sprite (screen-absolute x/y)
+```
+
+**Stage 3 — the walker, `vga`+0x1BB8** (API entry 0, `vga`+0x0F3C
+`drawWallList(far*)` — **not in the exe at all**, which is why a
+whole-exe search for the list grammar found nothing). Reads the stream
+exactly as above; `frame*4 + 2` lands on the sprite container's own
+`cell1Offset` field (an independent cross-check of the container format
+documented above). Dispatches to the already-documented blit routine
+(`vga`+0x1D70) with `flags` bit 0 = horizontal mirror, bit 1 = **clip to
+the 3-D view window** (`vga`+0x2158, hard-codes x ∈ [8, 224) — 216 px —
+partially answers `mm3-dos-blit-variants`; bits 8–9/15 remain
+unidentified).
+
+**wl4 usage** (`<series>wl4.vga` — every series has 31 frames, not one
+216×71 sprite as an earlier pass's bounding-box read implied): frame 29
+(the only 216×71 cell) draws **once per screen** at (8, 67) as the floor
+backdrop, under a `<series>.sky` ceiling at (8, 8) (absent for `twn`/`cas`,
+which ship no `.sky`). wl4 is *also* the sprite for the two farthest view
+rows' oblique side pieces (25 more per-slot draws, small frames) — left
+and right are the same frames mirrored via flags bit 0.
+
+**Graphic index → frame**, front-facing walls (wl1 depth-0 / wl2 depth-1 /
+wl3 depth-2+3 / wl4 depth-3+4 oblique):
+
+| index | meaning | wl1 | wl2 | wl3 | wl4 |
+|---|---|---|---|---|---|
+| 1 | plain wall | 0 | 0 | 0 | 0 |
+| 2 | barred wooden door | 6 | 6 | 7 | 14 |
+| 3 | wall torch (animated, cycles 3 frames) | 1–3 | 1–3 | 1–3 | 1–3 |
+| 4 | studded door / grate | 8 | 8 | 9 | 16 |
+| 5 | cave mouth (never occurs in shipped indoor data) | 9 | 9 | 10 | 17 |
+| 6 | open doorway | 7 | 7 | 8 | 15 |
+| 7 | post / pillar | 10 | 10 | 11 | 18 |
+
+Side-wall slots (not front-facing) use a **2-entry alternating pair**
+instead of a fixed frame per index, indexed by a 1-bit toggle at DS
+`0x185` (flipped roughly once per redraw) — this is what makes a corridor
+wall appear to "slide past" as you walk. Right-side slots read the
+opposite bit (`1 - [0x185]`) from left, so the two sides alternate out of
+phase.
+
+**Verified**: reimplemented both builders directly from the binary and
+simulated all 81 indoor mazes × 256 cells × 4 facings × 2 alternator
+states × 3 torch phases (497,664 views) → 8,248,236 draw commands, **0
+out-of-range frame references** against the real sprite containers; 178
+of 178 kind-arm draw blocks matched to a slot with 0 unmatched. Rendered
+real positions from real `MM3.CUR` data with the confirmed palette and
+scanline decoder: a barred door, a studded door, a colonnaded post hall
+with correct depth progression, lit cave torches, and full castle/town/
+sci-fi/cave interiors — all coherent. Independently confirmed end-to-end
+in the walker itself: maze 16 ("Ancient Temple of Moo") cell (13,5)
+facing east has graphic index 2 and renders `dunwl1.vga` frame 6 (the
+barred-door frame), matching the table above exactly
+(`tools/walker/__tests__/games-mm3.test.ts`).
+
+**Wired into the walker** (`tools/walker/games-mm3.ts`) for **depth-0
+front walls only** — that position is exhaustively confirmed to
+correspond exactly to `wallBlocked`/`wallGraphicIndex` on the party's
+current cell, so there's no ambiguity about which cell/direction it
+represents. Depths 1–3 front, and all side walls, are not wired to this
+table yet: doing so means porting MM3's own 44-slot geometry (Stage 1
+above) instead of reusing the shared MM1/MM2 frustum engine, since that
+engine doesn't expose "which cell and direction does this particular
+screen slot sample" per blit the way MM3's own `dx`/`dy` tables do — see
+TODO `mm3-maze-wall-frames`.
 
 ### Verification
 

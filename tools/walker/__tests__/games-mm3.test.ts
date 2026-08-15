@@ -14,7 +14,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { wallBlocked, visualFromWalls } from '../games-mm3.ts';
+import { wallBlocked, wallGraphicIndex, visualFromWalls } from '../games-mm3.ts';
 import { StitchedVisual, buildIndoorScene, MAP_GRID } from '../../walker-mm/maze3d.ts';
 
 // Wall-word direction shifts (dos_maze.py WALL_SHIFT): west=0, south=4, east=8, north=12;
@@ -31,6 +31,18 @@ describe('wallBlocked', () => {
     expect(wallBlocked(walls, 0, 0, 1)).toBe(false); // E
     expect(wallBlocked(walls, 0, 0, 2)).toBe(true); // S
     expect(wallBlocked(walls, 0, 0, 3)).toBe(false); // W
+  });
+});
+
+describe('wallGraphicIndex', () => {
+  it('reads the 3-bit kind from each nibble, independent of the blocking bit', () => {
+    const walls = new Array(256).fill(0);
+    // N kind 5 blocked, E kind 2 open, S kind 7 blocked, W kind 0 (no wall).
+    walls[0] = (0x8 | 0x5) << 12 | (0x2 << 8) | ((0x8 | 0x7) << 4) | 0x0;
+    expect(wallGraphicIndex(walls, 0, 0, 0)).toBe(5); // N
+    expect(wallGraphicIndex(walls, 0, 0, 1)).toBe(2); // E
+    expect(wallGraphicIndex(walls, 0, 0, 2)).toBe(7); // S
+    expect(wallGraphicIndex(walls, 0, 0, 3)).toBe(0); // W
   });
 });
 
@@ -81,5 +93,17 @@ describe('MM3 wall packing vs. the frustum engine (real data)', { skip: !hasData
     }
     expect(total).toBeGreaterThan(0);
     expect(mismatches).toBe(0);
+  });
+
+  it('a known real door position resolves to graphic index 2 (barred door)', () => {
+    // maze 16 (Ancient Temple of Moo), cell (13,5), facing east — confirmed
+    // door via scripts/mm3lib/dos_maze.py, and confirmed end-to-end (this
+    // exact position renders dunwl1.vga frame 6, the barred-door frame) in
+    // a mocked-Image/fetch smoke test during development. This test pins
+    // just the data-layer half (the frame-selection table itself is a
+    // plain object literal, not worth re-testing).
+    const m16 = (mazes as Array<{ id: number; walls: number[] }>).find((m) => m.id === 16)!;
+    expect(m16).toBeDefined();
+    expect(wallGraphicIndex(m16.walls, 13, 5, 1)).toBe(2);
   });
 });

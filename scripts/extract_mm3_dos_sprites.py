@@ -137,18 +137,31 @@ def main() -> None:
         if not frames or cw <= 0 or ch <= 0:
             continue
 
-        # Dedupe identical frames -- the frame table can point multiple
-        # indices at the same cell pair (idle holds), same convention as
-        # the Amiga sprite extractor.
-        seen = set()
-        uniq = []
-        for fr in frames:
-            key = tuple(tuple(row) for row in fr)
-            if key not in seen:
-                seen.add(key)
-                uniq.append(fr)
-
         ext = name.rsplit('.', 1)[-1].lower()
+
+        if ext == 'vga':
+            # Do NOT dedupe .vga (wall) sprites: the indoor 3-D view's
+            # draw-list addresses wall frames by their literal game frame
+            # number (confirmed via disassembly of the vga driver's walker,
+            # see docs/mm3/dosvga/data-structure.md "Indoor 3-D view") --
+            # deduping here silently renumbers/drops frames and breaks that
+            # mapping. An earlier version deduped every extension uniformly
+            # (copying the Amiga sprite extractor's convention, where it's
+            # safe); 8/20 wall atlases were short as a result.
+            uniq = frames
+        else:
+            # Other extensions: dedupe identical frames -- the frame table
+            # can point multiple indices at the same cell pair (idle
+            # holds), same convention as the Amiga sprite extractor. No
+            # evidence (yet) that any consumer depends on their frame
+            # numbers the way the wall draw-list does.
+            seen = set()
+            uniq = []
+            for fr in frames:
+                key = tuple(tuple(row) for row in fr)
+                if key not in seen:
+                    seen.add(key)
+                    uniq.append(fr)
         sub = SUBDIR[ext]
         d = os.path.join(OUT, 'sprites', sub)
         strip = bytearray(len(uniq) * cw * ch * 4)

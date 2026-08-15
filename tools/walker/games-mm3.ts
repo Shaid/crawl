@@ -32,19 +32,21 @@
  *
  * Wall art: each maze's environment (`graphics.wallSeries` — `twn`/`cav`/
  * `dun`/`cas`/`sci`) is a 40-byte constant table in the game's own code
- * indexed by `mazeId - 1` (`mm3-maze-wall-textures`, closed — the 7-entry
- * per-maze "graphic-set" table in the maze record itself is unrelated:
- * it's outdoor-terrain-only and all-zero for every indoor maze). FRONT
- * blits use the real `<series>wl{1,2,3}.vga` sprites (near/mid/far
- * distance variants), always frame 0 (the plain wall — ~96.5% of real
- * wall faces; which of a tile's other ~13 frames — torch, door, grate,
- * cave mouth — a given position should use is still open, see TODO
- * `mm3-maze-wall-frames`). LEFT/RIGHT blits still render flat-shaded: the
- * real side art (`<series>wl4.vga`, a single 216x71 "oblique side pieces +
- * floor + ceiling" composite) doesn't map onto this engine's per-depth
- * per-side blit slots the way wl1-3 map onto FRONT depths, and guessing
- * its placement risked a worse (misaligned) result than the honest flat
- * placeholder.
+ * indexed by `mazeId - 1` (the 7-entry per-maze "graphic-set" table in the
+ * maze record itself is unrelated: it's outdoor-terrain-only and all-zero
+ * for every indoor maze). FRONT blits use the real `<series>wl{1,2,3}.vga`
+ * sprites (near/mid/far distance variants). The game's real per-position
+ * frame table (door/torch/grate/opening/post, not just the plain wall) is
+ * fully decoded (`docs/mm3/dosvga/data-structure.md` § "Indoor 3-D view")
+ * but only wired here for **depth-0** (`FRONT_WL1_FRAME_BY_KIND`) — that
+ * position is exhaustively confirmed to correspond exactly to
+ * `wallGraphicIndex` on the party's current cell, so there's no ambiguity
+ * about which cell/direction it represents. Depths 1-3 still always use
+ * frame 0 (plain wall), and LEFT/RIGHT blits still render flat-shaded:
+ * extending either needs porting MM3's own 44-slot view geometry, since
+ * this shared MM1/MM2 frustum engine doesn't expose "which cell+direction
+ * does this screen slot sample" per blit the way MM3's internal `dx`/`dy`
+ * tables do — see TODO `mm3-maze-wall-frames`'s "remaining" note.
  *
  * Outdoor mazes (ids 41-64) use the wall word as terrain *layers*, not
  * per-side walls, and aren't supported by this indoor frustum view — only
@@ -165,6 +167,27 @@ export function wallBlocked(walls: number[], x: number, y: number, dir: number):
   const v = walls[y * MAP_GRID + x]!;
   return ((v >> (DIR_SHIFT[dir & 3]! + 3)) & 1) !== 0;
 }
+
+/** The 3-bit wall-kind index (0 = no wall, 1-7 = a real kind — see `FRONT_FRAME_BY_KIND`). */
+export function wallGraphicIndex(walls: number[], x: number, y: number, dir: number): number {
+  const v = walls[y * MAP_GRID + x]!;
+  return (v >> DIR_SHIFT[dir & 3]!) & 7;
+}
+
+/**
+ * `<series>wl1.vga` (depth-0 front wall) frame per wall-kind index 1-7 —
+ * confirmed by disassembling the indoor view's draw-list builder (see TODO
+ * `mm3-maze-wall-frames`, closed): 1 plain, 2 barred door, 3 torch
+ * (animated, handled separately — see `frontWallFrame`), 4 studded
+ * door/grate, 5 cave mouth (never occurs in shipped indoor data), 6 open
+ * doorway, 7 post/pillar. wl2/wl3 (depth 1+) use a slightly different
+ * table — not wired here, only depth-0 is unambiguous without porting the
+ * game's full 44-slot geometry (each of the other depths needs knowing
+ * *which* nearby cell/direction a given screen position samples, which
+ * this engine's shared MM1/MM2 frustum code doesn't expose per-blit).
+ */
+const FRONT_WL1_FRAME_BY_KIND: Record<number, number> = { 1: 0, 2: 6, 4: 8, 5: 9, 6: 7, 7: 10 };
+const TORCH_KIND = 3;
 
 /**
  * MM1/MM2's page-0 "visual" byte shape, packed from MM3's wall-blocking
@@ -425,12 +448,32 @@ export class MM3View implements GameView {
     }
   }
 
-  /** FRONT blits only — real `<series>wl{1,2,3}.vga` near/mid/far art, frame 0 (plain wall). Returns false (falls back to flat shading) if the sheet/frame isn't loaded. */
+  /**
+   * FRONT blits only — real `<series>wl{1,2,3}.vga` near/mid/far art.
+   * Depth 0 (the immediate forward wall) picks its real frame — door,
+   * torch, grate, doorway, post — from the wall's own graphic index,
+   * since depth-0-front is exhaustively confirmed to correspond exactly
+   * to `wallBlocked(walls, x, y, facing)` on the party's current cell (no
+   * ambiguity about which cell/direction it represents). Depth 1-3 still
+   * use frame 0 (plain wall) — see `FRONT_WL1_FRAME_BY_KIND`'s doc for why
+   * that's not yet extended to farther depths. Returns false (falls back
+   * to flat shading) if the sheet/frame isn't loaded.
+   */
   private drawFrontSprite(ctx: CanvasRenderingContext2D, sheets: (Sheet | undefined)[], b: Blit): boolean {
     const fileIndex = b.depth === 0 ? 0 : b.depth === 1 ? 1 : 2; // wl1 near, wl2 mid, wl3 far (depths 2 and 3 both use wl3)
     const sheet = sheets[fileIndex];
-    const fr = sheet?.frame(0);
-    if (!sheet || !fr) return false;
+    if (!sheet) return false;
+    let frame = 0;
+    if (b.depth === 0) {
+      const kind = wallGraphicIndex(this.maze.walls, this.pose_.x, this.pose_.y, this.pose_.facing);
+      if (kind === TORCH_KIND) {
+        frame = 1 + (Math.floor(this.tick / 300) % 3);
+      } else if (kind in FRONT_WL1_FRAME_BY_KIND) {
+        frame = FRONT_WL1_FRAME_BY_KIND[kind]!;
+      }
+    }
+    const fr = sheet.frame(frame);
+    if (!fr) return false;
     ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
     return true;
   }
