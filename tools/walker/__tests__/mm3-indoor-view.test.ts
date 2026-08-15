@@ -38,13 +38,19 @@ interface FixtureCase {
   facing: number;
   alt: number;
   torch: number;
-  walls: number[];
   expected: Array<{ sprite: string; frame: number; x: number; y: number; flags: number }>;
+}
+
+interface Fixture {
+  /** mazeId (as a string key) -> that maze's 256-entry wall array — one copy per unique maze, not per case. */
+  mazeWalls: Record<string, number[]>;
+  cases: FixtureCase[];
 }
 
 describe('buildWallList vs. the verified Python reference (golden fixture)', { skip: !hasData }, () => {
   const table: IndoorViewTable = hasData ? JSON.parse(readFileSync(TABLE_PATH, 'utf8')) : ({} as IndoorViewTable);
-  const cases: FixtureCase[] = hasData ? JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) : [];
+  const fixture: Fixture = hasData ? JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) : { mazeWalls: {}, cases: [] };
+  const cases = fixture.cases;
 
   it('has fixture cases', () => {
     expect(cases.length).toBeGreaterThan(0);
@@ -53,11 +59,12 @@ describe('buildWallList vs. the verified Python reference (golden fixture)', { s
   it('matches the Python reference exactly on every fixture case', () => {
     let mismatches = 0;
     for (const c of cases) {
+      const walls = fixture.mazeWalls[String(c.mazeId)]!;
       const getWall = (dx: number, dy: number, mask: number): number => {
         const x = c.x + dx;
         const y = c.y + dy;
         if (x < 0 || x >= 16 || y < 0 || y >= 16) return 1;
-        return wallGraphicIndex(c.walls, x, y, MASK_TO_DIR[mask]!);
+        return wallGraphicIndex(walls, x, y, MASK_TO_DIR[mask]!);
       };
       const got = buildWallList(table, getWall, c.facing, c.alt, c.torch);
       const gotStr = JSON.stringify(got);
