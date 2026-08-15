@@ -28,6 +28,7 @@ sys.path.insert(0, HERE)
 from mm3lib import dos_cc  # noqa: E402
 from mm3lib.dos_maze import (  # noqa: E402
     GRID_H, GRID_W, MAZE_IDS, Maze, maze_name, parse_events, read_entry,
+    resolve_graphics,
 )
 
 REPO = os.path.abspath(os.path.join(HERE, '..'))
@@ -160,6 +161,8 @@ def main() -> None:
         if blob is not None:
             mazes[i] = Maze(i, blob)
 
+    graphics = resolve_graphics(mazes)
+
     records = []
     manifest: list[dict] = []
     for i, m in sorted(mazes.items()):
@@ -169,6 +172,8 @@ def main() -> None:
             'id': i,
             'storedId': m.stored_id,
             'kind': 'outdoor' if m.is_outdoor() else 'indoor',
+            'name': graphics[i]['areaName'],
+            'graphics': graphics[i],
             'width': GRID_W, 'height': GRID_H,
             'walls': list(m.walls),
             'cells': list(m.cells),

@@ -30,12 +30,21 @@
  *    that bit directly, rather than risking a silently-wrong reuse of the
  *    MM1/2 collision math.
  *
- * MM3's real per-wall texture art (`sprites/walls/*.vga`) isn't wired in
- * here yet — which named sprite a maze's 7 graphic-set ids resolve to is a
- * "global name table" inside the game's own code (Amiga exe file
- * 0x8E5C-0x8ED2) that hasn't been decoded (see TODO
- * `mm3-maze-wall-textures`). Walls render flat-shaded (kind + depth
- * tinting) instead — real geometry, no per-wall art yet.
+ * Wall art: each maze's environment (`graphics.wallSeries` — `twn`/`cav`/
+ * `dun`/`cas`/`sci`) is a 40-byte constant table in the game's own code
+ * indexed by `mazeId - 1` (`mm3-maze-wall-textures`, closed — the 7-entry
+ * per-maze "graphic-set" table in the maze record itself is unrelated:
+ * it's outdoor-terrain-only and all-zero for every indoor maze). FRONT
+ * blits use the real `<series>wl{1,2,3}.vga` sprites (near/mid/far
+ * distance variants), always frame 0 (the plain wall — ~96.5% of real
+ * wall faces; which of a tile's other ~13 frames — torch, door, grate,
+ * cave mouth — a given position should use is still open, see TODO
+ * `mm3-maze-wall-frames`). LEFT/RIGHT blits still render flat-shaded: the
+ * real side art (`<series>wl4.vga`, a single 216x71 "oblique side pieces +
+ * floor + ceiling" composite) doesn't map onto this engine's per-depth
+ * per-side blit slots the way wl1-3 map onto FRONT depths, and guessing
+ * its placement risked a worse (misaligned) result than the honest flat
+ * placeholder.
  *
  * Outdoor mazes (ids 41-64) use the wall word as terrain *layers*, not
  * per-side walls, and aren't supported by this indoor frustum view — only
@@ -63,6 +72,56 @@ import {
 // Data loading
 // ──────────────────────────────────────────────────────────────────────────
 
+interface AtlasFrame {
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  return img;
+}
+
+interface Sheet {
+  img: HTMLImageElement;
+  frame(name: string | number): AtlasFrame | undefined;
+}
+
+/** Loads a `<name>.vga` sprite sheet exported by `scripts/extract_mm3_dos_sprites.py` (`sprites/walls/<name>.vga.png` + `.json`). Missing files resolve to `undefined` rather than throwing — not every series/distance file matters to every render path. */
+async function loadWallSheet(base: string, name: string): Promise<Sheet | undefined> {
+  const png = `${base}/sprites/walls/${name}.vga.png`;
+  const json = `${base}/sprites/walls/${name}.vga.json`;
+  try {
+    const [img, sidecar] = await Promise.all([loadImage(png), fetch(json).then((r) => r.json())]);
+    const frames: AtlasFrame[] = sidecar.frames as AtlasFrame[];
+    return {
+      img,
+      frame(key: string | number) {
+        const s = String(key);
+        return frames.find((f) => f.name === s || f.name.endsWith(`frame${s}`));
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+interface MazeGraphicsJson {
+  graphicsMazeId: number;
+  env: number;
+  wallSeries: string;
+  wallFiles: string[];
+  tile: string;
+  sky: string | null;
+  music: string;
+  areaName: string;
+}
+
 interface MazeRecordJson {
   id: number;
   storedId: number;
@@ -77,6 +136,7 @@ interface MazeRecordJson {
   canSave: boolean;
   canRest: boolean;
   canDismiss: boolean;
+  graphics?: MazeGraphicsJson;
 }
 
 /** direction index (matches maze3d.ts FACE: 0=N,1=E,2=S,3=W) -> wall-word nibble shift (dos_maze.py WALL_SHIFT). */
@@ -91,10 +151,14 @@ interface Mm3Maze {
   neighbors: number[];
   /** ScreenLike view onto this maze's walls, for the shared frustum engine (collision unused — see module doc). */
   screen: ScreenLike;
+  /** `twn`/`cav`/`dun`/`cas`/`sci` — undefined for a maze the graphics extractor hasn't resolved yet (defensive; every shipped indoor maze has one). */
+  wallSeries: string | undefined;
 }
 
 interface Mm3Data {
   mazes: Mm3Maze[];
+  /** wallSeries -> [wl1, wl2, wl3, wl4] sheets (1-indexed distance variants, 0-indexed array). */
+  wallSheets: Record<string, (Sheet | undefined)[]>;
 }
 
 export function wallBlocked(walls: number[], x: number, y: number, dir: number): boolean {
@@ -150,16 +214,27 @@ function loadMm3(): Promise<Mm3Data> {
       const visual = visualFromWalls(m.walls);
       const neighborIds = [m.surrounding.north, m.surrounding.east, m.surrounding.south, m.surrounding.west];
       const neighbors = neighborIds.map((id) => (id !== 0 && idToIndex.has(id) ? idToIndex.get(id)! : -1));
+      const label = m.graphics ? `${m.id}: ${m.graphics.areaName}` : `${m.id}: maze${String(m.id).padStart(2, '0')}`;
       return {
         id: m.id,
-        label: `${m.id}: maze${String(m.id).padStart(2, '0')}`,
+        label,
         walls: m.walls,
         runPosition: m.runPosition,
         neighbors,
         screen: { index: m.id, visual, collision: dummyCollision, neighbors },
+        wallSeries: m.graphics?.wallSeries,
       };
     });
-    return { mazes };
+
+    const seriesList = [...new Set(mazes.map((m) => m.wallSeries).filter((s): s is string => !!s))];
+    const wallSheets: Record<string, (Sheet | undefined)[]> = {};
+    await Promise.all(
+      seriesList.map(async (series) => {
+        wallSheets[series] = await Promise.all([1, 2, 3, 4].map((n) => loadWallSheet(base, `${series}wl${n}`)));
+      }),
+    );
+
+    return { mazes, wallSheets };
   })();
   return mm3Promise;
 }
@@ -243,6 +318,7 @@ export class MM3View implements GameView {
   readonly slots: SlotTableFile = { schemaVersion: 1, banks: [], slotRows: [] } as unknown as SlotTableFile;
 
   private readonly mazes: Mm3Maze[];
+  private readonly wallSheets: Record<string, (Sheet | undefined)[]>;
   private pose_: Mm3Pose;
   private tick = 0;
   private noclip = false;
@@ -250,6 +326,7 @@ export class MM3View implements GameView {
 
   constructor(data: Mm3Data, startLevel: number, startPose: Pose | null) {
     this.mazes = data.mazes;
+    this.wallSheets = data.wallSheets;
     const idx = Math.max(0, this.mazes.findIndex((m) => m.id === startLevel));
     const maze = this.mazes[idx] ?? this.mazes[0]!;
     this.pose_ = startPose
@@ -334,15 +411,28 @@ export class MM3View implements GameView {
 
     const grid = new StitchedVisual(this.mazes.map((m) => m.screen), this.pose_.mazeIndex);
     const scene = buildIndoorScene(grid, this.pose_.x, this.pose_.y, this.pose_.facing);
+    const sheets = this.maze.wallSeries ? this.wallSheets[this.maze.wallSeries] : undefined;
     // Draw far-to-near so nearer walls correctly occlude farther ones.
     const blits = [...scene.blits].sort((a, b) => b.depth - a.depth);
     for (const b of blits) {
+      const drew = b.kind === 'front' && sheets ? this.drawFrontSprite(ctx, sheets, b) : false;
+      if (drew) continue;
       const [w, h] = blitSize(b);
       ctx.fillStyle = wallFillStyle(b.kind, b.depth);
       ctx.fillRect(b.x, b.y, w, h);
       ctx.strokeStyle = 'rgba(0,0,0,0.35)';
       ctx.strokeRect(b.x + 0.5, b.y + 0.5, w - 1, h - 1);
     }
+  }
+
+  /** FRONT blits only — real `<series>wl{1,2,3}.vga` near/mid/far art, frame 0 (plain wall). Returns false (falls back to flat shading) if the sheet/frame isn't loaded. */
+  private drawFrontSprite(ctx: CanvasRenderingContext2D, sheets: (Sheet | undefined)[], b: Blit): boolean {
+    const fileIndex = b.depth === 0 ? 0 : b.depth === 1 ? 1 : 2; // wl1 near, wl2 mid, wl3 far (depths 2 and 3 both use wl3)
+    const sheet = sheets[fileIndex];
+    const fr = sheet?.frame(0);
+    if (!sheet || !fr) return false;
+    ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
+    return true;
   }
 
   renderMinimap(ctx: CanvasRenderingContext2D, size = 224): void {

@@ -83,6 +83,10 @@ A 2x2 block of mazes forms one 32x32 area (castles, big dungeons): the
 engine keeps 4 records resident at once and resolves x/y in 0..31 by
 stepping through the +0x08 (north) and +0x09 (east) links -- Amiga loader
 at file 0x7F02, `muls.w #0x340` (= 832) and `cmpi.w #4`.
+
+Indoor wall-texture selection -- **confirmed** (see the "Graphics
+environment" section below): it is NOT a maze-record field at all. It is a
+40-byte constant table in the executable, indexed by `mazeId - 1`.
 """
 from __future__ import annotations
 
@@ -110,6 +114,185 @@ MAZE_IDS: tuple[int, ...] = tuple(list(range(1, 104)) + [105, 106])
 def maze_name(maze_id: int, ext: str = 'dat') -> str:
     """`maze%02u.<ext>` — the game's own sprintf template."""
     return f'maze{maze_id:02d}.{ext}'
+
+
+# =========================================================================
+# Graphics environment — which wall/tile/sky/music set a maze uses
+# =========================================================================
+#
+# **Confirmed** by disassembling the engine's `LoadMazeGraphics(mazeIndex)`
+# routine in BOTH ports (byte-for-byte the same logic and the same constant
+# tables):
+#
+#   Amiga  `data/mm3/amiga/Might&MagicIII` file 0x8D66..0x8FC2
+#          (reached only through the SAS/C A4 jump-table stub at file
+#          0x15C9C, i.e. `jsr -$7E7E(a4)`; sole call site file 0x1145C)
+#   DOS    `build/cache/mm3/MM3_original_reconstructed.exe` file
+#          0x34768..0x34978 (an FBOV overlay segment, not root code)
+#
+# The argument is a **0-based maze index** = `mazeId - 1`.  Proof, three
+# independent ways:
+#   * the routine's own outdoor cut-off is `index >= 40` (Amiga 0x8DBC
+#     `cmpi.w #$28,d4` / DOS 0x347B4 `cmp word [bp+6],0x28`), i.e.
+#     mazeId >= 41 — exactly the 24 outdoor world-map sections 41..64;
+#   * it stores `index + 1` into the "current graphics maze" byte (Amiga
+#     a4-0x1665, DOS [0xE8F7]) and the Corak's-Notes reader (Amiga 0x111BC,
+#     DOS 0x371E4) reads that byte back as `- 1` to index a 65-entry
+#     per-maze table whose entry 64 is reached when the byte is 105;
+#   * that same 65/66-entry table is the game's **maze name table** (DOS
+#     DS 0x5784, entry i = mazeId i+1) and its six name groups line up
+#     1:1 with the six runs of the environment table below.
+#
+# Environment table: 40 bytes, index = `mazeId - 1`.
+#   Amiga a4-0x3AAF  (file 0x1A06B)   DOS DS 0x30E2 (file 0x1B9D2)
+# Byte-identical between the two ports.
+MAZE_ENV: tuple[int, ...] = (
+    (0,) * 5      # mazeId  1..5   the five towns
+    + (1,) * 10   # mazeId  6..15  caverns
+    + (2,) * 8    # mazeId 16..23  dungeons
+    + (3,) * 5    # mazeId 24..28  castles
+    + (2,) * 5    # mazeId 29..33  castle dungeons
+    + (4,) * 7    # mazeId 34..40  the spaceship sectors
+)
+
+# Env id -> name-pointer table entries.  One contiguous pointer array holds
+# all three groups: wall prefixes at Amiga a4-0x43E6 / DOS DS 0x5A34,
+# minimap tiles at a4-0x43D2 / DS 0x5A3E, outdoor terrain at a4-0x43BE.
+ENV_WALL_PREFIX = ('twn', 'cav', 'dun', 'cas', 'sci')
+ENV_TILE_FILE = ('town.til', 'cave.til', 'dung.til', 'castle.til', 'scifi.til')
+# `<prefix>.sky` — built by the sky loader (Amiga 0x8A68 area / DOS 0x346F4,
+# `mov al,[si+0x30E1]` = the same env table).  Only three of the five ship in
+# MM3.CC: towns and castles have no ceiling texture.
+ENV_SKY_FILE = ('twn.sky', 'cav.sky', 'dun.sky', 'cas.sky', 'sci.sky')
+SHIPPED_SKY_FILES = frozenset({'cav.sky', 'dun.sky', 'sci.sky'})
+
+# The four wall files are loaded as `sprintf("%swl%u.vga", prefix, n)` with
+# n taken from a 4-byte order table (Amiga a4-0x5436 file 0x186E4, DOS
+# DS 0x310A file 0x1B9FA) = 01 02 04 03, and each handle is stored at
+# `spriteArray[n]` (Amiga a4+0xC6A-4+4n, DOS DS 0xC4A6+4n).  So the load
+# ORDER is 1,2,4,3 but the slot is always the file's own number: slot n
+# always holds `<prefix>wl<n>.vga`.
+WALL_LOAD_ORDER = (1, 2, 4, 3)
+WALL_FILE_NUMBERS = (1, 2, 3, 4)
+
+# Two maze indices are forced to index 15 (= mazeId 16, "Ancient Temple of
+# Moo", env 2 = dungeon) before the table lookup:
+#   Amiga 0x8D98 `cmpi.w #$69,d4 / cmpi.w #$68,d4 -> moveq #$f,d4`
+#   DOS   0x34794 `cmp word [bp+6],0x69 / 0x68 -> mov word [bp+6],0xF`
+# index 104/105 == mazeId 105/106 — the two ids above the 1..103 run, and
+# there is no maze 104 in the shipped data.
+GRAPHICS_ID_OVERRIDE = {105: 16, 106: 16}
+
+# Music, from the same routine (DOS 0x348E6..0x34925; the Amiga port uses
+# `.mx` names and substitutes `shop.mx` for the outdoor case).  The five
+# range boundaries are byte-for-byte the six runs of MAZE_ENV.
+MUSIC_BY_INDEX = ((5, 'medieval.m'), (15, 'caves.m'), (23, 'eerie.m'),
+                  (28, 'city.m'), (33, 'eerie.m'), (40, 'cyber.m'),
+                  (10 ** 9, 'venture.m'))
+
+# The engine's own maze-name table, DOS DS 0x5784 (file 0x1E074), entry
+# i = mazeId i+1; entries 64/65 are the two out-of-range mazes.
+MAZE_NAMES: dict[int, str] = {
+    1: 'Fountain Head', 2: 'Baywatch', 3: 'Wildabar', 4: 'Swamp Town',
+    5: 'Blistering Heights',
+    6: 'Fountain Head Cavern', 7: 'Baywatch Cavern', 8: 'Wildabar Cavern',
+    9: 'Swamp Town Cavern', 10: 'Blistering Heights Cavern',
+    11: 'Cyclops Cavern', 12: 'Arachnoid Cavern', 13: 'Cursed Cold Cavern',
+    14: 'Dragon Cavern', 15: 'The Magic Cavern',
+    16: 'Ancient Temple of Moo', 17: 'Slithercult Stronghold',
+    18: 'Fortress of Fear', 19: 'Halls of Insanity', 20: 'Dark Warrior Keep',
+    21: 'Cathedral of Carnage', 22: 'Tomb of Terror', 23: 'The Maze From Hell',
+    24: 'Castle Whiteshield', 25: 'Castle Bloodreign',
+    26: 'Castle Dragontooth', 27: 'Castle Greywind', 28: 'Castle Blackwind',
+    29: 'Whiteshield Dungeon', 30: 'Bloodreign Dungeon',
+    31: 'Dragontooth Dungeon', 32: 'Greywind Dungeon', 33: 'Blackwind Dungeon',
+    34: 'Alpha Engine Sector', 35: 'Main Engine Sector',
+    36: 'Beta Engine Sector', 37: 'Aft Storage Sector',
+    38: 'Central Control Sector', 39: 'Forward Storage Sector',
+    40: 'Main Control Sector',
+    105: "It's a Secret", 106: 'The Arena',
+}
+MAZE_NAMES.update({40 + 1 + i: f'{"ABCDEF"[i // 4]}{i % 4 + 1}' for i in range(24)})
+
+
+def block_primary(mazes: dict[int, 'Maze']) -> dict[int, int]:
+    """maze id -> the id whose graphics the maze renders with.
+
+    Mazes 65..103 are the extra quadrants of a 32x32 area; the engine only
+    ever calls `LoadMazeGraphics` with the area's *primary* id (all in
+    1..40, so all in range of MAZE_ENV).  The block membership is recovered
+    from the record's own +0x08 (north) / +0x09 (east) links, walked
+    transitively while the target id is above the world-map range.
+    """
+    out: dict[int, int] = {}
+    for pid in sorted(mazes):
+        if pid > 40:
+            continue
+        out.setdefault(pid, pid)
+        pending = [pid]
+        seen = {pid}
+        while pending:
+            cur = mazes.get(pending.pop())
+            if cur is None:
+                continue
+            for d in ('north', 'east'):
+                nxt = cur.surrounding[d]
+                if nxt > 64 and nxt not in seen:
+                    seen.add(nxt)
+                    out[nxt] = pid
+                    pending.append(nxt)
+    return out
+
+
+def graphics_maze_id(maze_id: int, primaries: dict[int, int] | None = None) -> int | None:
+    """The maze id the engine loads graphics for when `maze_id` is entered.
+
+    Returns None for the 24 outdoor sections (41..64), which have no wall
+    series at all.
+    """
+    if maze_id in GRAPHICS_ID_OVERRIDE:
+        return GRAPHICS_ID_OVERRIDE[maze_id]
+    if 41 <= maze_id <= 64:
+        return None
+    if maze_id <= 40:
+        return maze_id
+    if primaries and maze_id in primaries:
+        return primaries[maze_id]
+    return None
+
+
+def resolve_graphics(mazes: dict[int, 'Maze']) -> dict[int, dict]:
+    """Per-maze graphics resolution for the whole corpus.
+
+    {maze_id: {graphicsMazeId, env, wallSeries, wallFiles, tile, sky,
+               music, areaName}}  — outdoor mazes get `env=None`.
+    """
+    primaries = block_primary(mazes)
+    out: dict[int, dict] = {}
+    for mid in sorted(mazes):
+        gid = graphics_maze_id(mid, primaries)
+        if gid is None:
+            out[mid] = {
+                'graphicsMazeId': None, 'env': None, 'wallSeries': None,
+                'wallFiles': [], 'tile': 'out.til', 'sky': None,
+                'music': 'venture.m', 'areaName': MAZE_NAMES.get(mid),
+            }
+            continue
+        env = MAZE_ENV[gid - 1]
+        prefix = ENV_WALL_PREFIX[env]
+        sky = ENV_SKY_FILE[env]
+        music = next(name for bound, name in MUSIC_BY_INDEX if gid - 1 < bound)
+        out[mid] = {
+            'graphicsMazeId': gid,
+            'env': env,
+            'wallSeries': prefix,
+            'wallFiles': [f'{prefix}wl{n}.vga' for n in WALL_FILE_NUMBERS],
+            'tile': ENV_TILE_FILE[env],
+            'sky': sky if sky in SHIPPED_SKY_FILES else None,
+            'music': music,
+            'areaName': MAZE_NAMES.get(mid) or MAZE_NAMES.get(gid),
+        }
+    return out
 
 
 class Maze:

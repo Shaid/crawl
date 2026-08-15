@@ -323,6 +323,70 @@ The 7 stragglers desync in the object list (not the monster list) — the
 reader has a conditional branch implying some object records aren't a
 flat 3 bytes; see TODO `mm3-maze-bin`.
 
+### Graphics environment — which wall/tile/sky/music a maze uses — **SOLVED**
+
+Not a maze-record field at all — **the trailer's 7-entry graphic-set
+table (above) is outdoor-terrain-only** (all-zero for every one of the 81
+indoor mazes; only the 24 outdoor mazes populate it, values 1–18, used
+for terrain/overlay sprite layers per the outdoor union member). Indoor
+wall/tile/sky/music selection is a **40-byte constant table inside the
+game's own code**, indexed by `mazeId - 1`, read by `LoadMazeGraphics()`
+— confirmed byte-identical between both ports:
+
+| | Amiga (`Might&MagicIII`) | DOS (`MM3_original_reconstructed.exe`) |
+|---|---|---|
+| `LoadMazeGraphics` routine | file 0x8D66–0x8FC2 (via A4 jump-table stub file 0x15C9C) | file 0x34768–0x34978, an **FBOV overlay segment** (not root code — why a root-code string search for `%swl%u.vga` finds nothing) |
+| `ENV[40]` table | file 0x1A06B | file 0x1B9D2 |
+| `LOAD_ORDER[4]` = `{1,2,4,3}` | file 0x186E4 | file 0x1B9FA |
+| prefix/tile/terrain name tables | file 0x19734 | file 0x1E324 |
+| maze name table (65+ entries, index `mazeId-1`) | — | file 0x1E074 |
+
+`ENV[mazeId-1]` (0–4) selects a 5-entry prefix table `twn/cav/dun/cas/sci`
+and sprintfs `"%swl%u.vga"` (the 4 distance-variant wall files),
+`"<prefix>.til"` (minimap tileset) and `"<prefix>.sky"` (ceiling —
+`twn`/`cas` ship no `.sky`, per retail data). Outdoor mazes (`idx >= 40`,
+i.e. mazeId ≥ 41 — exactly the 24 world-map sections) instead load the
+trailer's 7 graphic-set ids through `TERRAIN_NAMES[18]` (`mount, ltree,
+dtree, higrass, snotree, snomtn, swmtree, mount, lavamtn, palms, mount,
+grass, dirt, snow, swamp, lava, desert, road`, index = id−1) plus
+`water.vga`.
+
+**Mapping** (`ENV` value → ids → series):
+
+| mazeId | env | wall series | tile | sky | music |
+|---|---|---|---|---|---|
+| 1–5 | 0 | `twn` (town) | `town.til` | *(none shipped)* | `medieval.m` |
+| 6–15 | 1 | `cav` (cavern) | `cave.til` | `cav.sky` | `caves.m` |
+| 16–23 | 2 | `dun` (dungeon) | `dung.til` | `dun.sky` | `eerie.m` |
+| 24–28 | 3 | `cas` (castle) | `castle.til` | *(none shipped)* | `city.m` |
+| 29–33 | 2 | `dun` (castle dungeons) | `dung.til` | `dun.sky` | `eerie.m` |
+| 34–40 | 4 | `sci` (spaceship sectors) | `scifi.til` | `sci.sky` | `cyber.m` |
+| 41–64 | — | *(outdoor, no walls)* | `out.til` | `day`/`night.vga` | `venture.m` |
+| 105, 106 | 2 | `dun` | `dung.til` | `dun.sky` | `eerie.m` |
+
+Mazes 65–103 (the extra 2×2-block quadrants of the 13 multi-block caverns
+and dungeons, ids 11–23) inherit their **primary** id's series — the
+engine only ever calls `LoadMazeGraphics` with the primary. `mazeId` 105
+and 106 are remapped to `mazeId` 16 (`dun`) by an explicit
+`idx==104||idx==105 → idx=15` special case in the loader (the only two
+ids shipped above the 1..103 run — there is no maze 104).
+
+**Verification, three independent encodings of the same six groups:**
+all six `ENV` run boundaries (5, 15, 23, 28, 33, 40) coincide exactly with
+(a) the engine's own maze-name-table group boundaries (e.g. entries
+16–23 are all named like dungeons: "Ancient Temple of Moo" … "The Maze
+From Hell"; 24–28 are "Castle Whiteshield" … "Castle Blackwind"), and (b)
+independently with the **music** table's range boundaries
+(`medieval → caves → eerie → city → eerie → cyber → venture`). Every
+`wallFiles` entry the resolved mapping emits is checked against the
+already-extracted sprite catalog — 0 missing across all 81 indoor mazes.
+→ `scripts/mm3lib/dos_maze.py` `resolve_graphics()`, output in
+`data/mazes.json` per-maze `.graphics` (`wallSeries`, `wallFiles`, `tile`,
+`sky`, `music`, `areaName`). Wired into the walker
+(`tools/walker/games-mm3.ts`) for FRONT-wall rendering — see TODO
+`mm3-maze-wall-frames` for what's still open (which frame of a wall file
+to draw, and the `<series>wl4.vga` side/floor/ceiling composite).
+
 ### Verification
 
 `scripts/verify_mm3_dos_mazes.py` (corpus invariants) and
