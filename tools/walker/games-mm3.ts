@@ -613,9 +613,21 @@ export class MM3View implements GameView {
    * view's left/right, so that mismatch reads as "the map shows this
    * closed, but the 3-D view shows it open" on exactly the side that's
    * actually correct — found from a user screenshot report.
+   *
+   * The `<canvas id="minimap">` element also carries no width/height
+   * attribute, so its native pixel buffer defaults to the browser's
+   * 300x150 unless set explicitly here — unset, every draw below (sized
+   * for a `size`x`size` square) was silently clipped past native row
+   * 150, hiding the map's northern third (post north-up-fix) entirely,
+   * including the party dot whenever it wandered there — reading as "the
+   * minimap doesn't move with the party" when it had actually walked off
+   * the bitmap. Same fix applied to MM1/MM2's `drawMinimap`/
+   * `drawTerrainMinimap` in `games-mm.ts`.
    */
   renderMinimap(ctx: CanvasRenderingContext2D, size = 224): void {
     const sc = this.maze.screen;
+    ctx.canvas.width = size;
+    ctx.canvas.height = size;
     const cell = size / MAP_GRID;
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = '#141420';

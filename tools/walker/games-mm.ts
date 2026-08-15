@@ -358,8 +358,27 @@ export abstract class MmWalkerView implements GameView {
     return this.screens[this.pose_.level];
   }
 
+  /**
+   * The `<canvas id="minimap">` element carries no width/height attribute
+   * and no CSS aspect-ratio, so its native pixel buffer defaults to the
+   * browser's 300x150 unless something sets it explicitly — nothing did,
+   * so every draw below (sized for a `size`x`size` square) was silently
+   * clipped past native row 150, hiding roughly the top third of the map
+   * (rows ~11-15 pre-flip) entirely, including the party dot whenever it
+   * wandered there. That's what read as "the minimap doesn't move with
+   * the party" — it wasn't frozen, it had walked off the actual bitmap.
+   *
+   * `y` increases **north** (shared `stepParty`/`STEP_DY`, facing N =
+   * `+1`), so a north-up canvas needs row `y` drawn `MAP_GRID-1-y` cells
+   * from the top, not `y` directly — matching the fix applied to MM3's
+   * `renderMinimap` (`tools/walker/games-mm3.ts`) for the same reason:
+   * the facing arrow below assumes ordinary north-up (`dy=-1` = up =
+   * facing N), so drawing walls/dot south-up made the two disagree.
+   */
   protected drawMinimap(ctx: CanvasRenderingContext2D, size = 224): void {
     const sc = this.sc();
+    ctx.canvas.width = size;
+    ctx.canvas.height = size;
     const cell = size / MAP_GRID;
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = '#141420';
@@ -371,18 +390,20 @@ export abstract class MmWalkerView implements GameView {
         const v = sc.visual[y * MAP_GRID + x];
         const nib = (dir: number) => (v >> (dir * 2)) & 3;
         const px = x * cell;
-        const py = y * cell;
-        // Field->edge mapping matches the view: facing 0 (move +y) blocks on
-        // field 3 -> bottom edge; 1 -> top, 2 -> right, 0 -> left.
+        const py = (MAP_GRID - 1 - y) * cell;
+        // bit-slot order is W,S,E,N (matches the frustum engine's own
+        // `visual` byte convention — see docs/walker-mm.md "Page-0 wall
+        // codes"): nib(0)=W -> left, nib(1)=S -> bottom, nib(2)=E ->
+        // right, nib(3)=N -> top.
         if (nib(0) !== 0) ctx.fillRect(px, py, wallW, cell);
-        if (nib(1) !== 0) ctx.fillRect(px, py, cell, wallW);
+        if (nib(1) !== 0) ctx.fillRect(px, py + cell - wallW, cell, wallW);
         if (nib(2) !== 0) ctx.fillRect(px + cell - wallW, py, wallW, cell);
-        if (nib(3) !== 0) ctx.fillRect(px, py + cell - wallW, cell, wallW);
+        if (nib(3) !== 0) ctx.fillRect(px, py, cell, wallW);
       }
     }
     const pose = this.pose_;
     const px = pose.x * cell + cell / 2;
-    const py = pose.y * cell + cell / 2;
+    const py = (MAP_GRID - 1 - pose.y) * cell + cell / 2;
     ctx.fillStyle = '#ff3030';
     ctx.beginPath();
     ctx.arc(px, py, Math.max(2, cell / 5), 0, Math.PI * 2);
@@ -527,9 +548,13 @@ export class MM2View extends MmWalkerView {
     this.drawMinimap(ctx);
   }
 
-  /** Overland minimap: draws the outb.32 terrain tile for each cell. */
+  /** Overland minimap: draws the outb.32 terrain tile for each cell. See
+   * `drawMinimap`'s doc for why the canvas size is set explicitly and why
+   * row `y` is drawn `MAP_GRID-1-y` cells from the top (north-up). */
   private drawTerrainMinimap(ctx: CanvasRenderingContext2D, sc: MmScreen): void {
     const size = 224;
+    ctx.canvas.width = size;
+    ctx.canvas.height = size;
     const cell = size / MAP_GRID;
     const outb = this.data.outdoor.outb;
     ctx.clearRect(0, 0, size, size);
@@ -540,7 +565,7 @@ export class MM2View extends MmWalkerView {
         const tid = sc.visual[y * MAP_GRID + x] & 0x1f;
         const fr = outb.frame(String(tid));
         if (!fr) continue;
-        ctx.drawImage(outb.img, fr.x, fr.y, fr.w, fr.h, x * cell, y * cell, cell, cell);
+        ctx.drawImage(outb.img, fr.x, fr.y, fr.w, fr.h, x * cell, (MAP_GRID - 1 - y) * cell, cell, cell);
       }
     }
     this.drawPlayerDot(ctx, cell);
@@ -549,7 +574,7 @@ export class MM2View extends MmWalkerView {
   private drawPlayerDot(ctx: CanvasRenderingContext2D, cell: number): void {
     const pose = this.pose_;
     const px = pose.x * cell + cell / 2;
-    const py = pose.y * cell + cell / 2;
+    const py = (MAP_GRID - 1 - pose.y) * cell + cell / 2;
     ctx.fillStyle = '#ff3030';
     ctx.beginPath();
     ctx.arc(px, py, Math.max(2, cell / 5), 0, Math.PI * 2);

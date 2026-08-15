@@ -130,27 +130,54 @@ The user also reported two MM3 issues from actually playing it:
   per accepted turn/step (`tools/walker/games-mm3.ts` `MM3View.update`),
   matching the documented "corridor slides past you as you walk" effect
   instead of flickering continuously.
-- **"the right-hand side-walls render as open corridors when they should
-  be closed"** — **fixed** (root cause found, not in the 3-D view). First
-  checked the underlying wall data/algorithm exhaustively (a synthetic
-  single-wall probe symmetric left/right at every depth and facing; a
-  corpus-wide real-data sweep across all 81 indoor mazes, filtered to
-  genuinely unobstructed corridors so occlusion doesn't confound the
-  count, showing 0% missing draws on either side at every depth) and a
-  live spot-check render — all correct, so the 3-D view itself was never
-  the bug. The user then supplied a screenshot: an east-facing position
-  where the **minimap** was being read as "closed" on a side the 3-D view
-  correctly rendered open. The bug was in `MM3View.renderMinimap`
-  (`tools/walker/games-mm3.ts`): maze `y` increases **north** (confirmed
-  by `STEP_DY`), but the minimap drew row `y` at canvas row `y` directly
-  — self-consistently south-up (drawing each cell's north wall at its own
-  *bottom* edge), while the facing-direction arrow a few lines later
+- **the minimap's north/south orientation was inverted** — **fixed**,
+  found while chasing the report below. `MM3View.renderMinimap`
+  (`tools/walker/games-mm3.ts`) drew maze row `y` at canvas row `y`
+  directly. Since `y` increases **north** (confirmed by `STEP_DY`), that's
+  self-consistently *south*-up (each cell's north wall drawn at its own
+  *bottom* edge) — but the facing-direction arrow a few lines later
   assumed the ordinary north-up convention (`dy=-1` = up = facing N). The
-  two halves of the same function disagreed about which way was up. For
-  an E/W-facing party the minimap's up/down axis maps to the first-person
-  view's left/right, so the mismatch reads exactly as "the map shows this
-  side closed, the view shows it open" — on whichever side is actually
-  correct. Fixed by drawing row `y` at `MAP_GRID-1-y` (north-up, matching
-  the arrow) instead of changing the arrow. Verified live: a party at the
-  maze's northernmost row (`y=15`) now renders at the top of the minimap,
-  not the bottom.
+  two halves of the same function disagreed about which way was up. Real,
+  worth fixing (an E/W-facing party's minimap up/down axis maps to the
+  first-person view's left/right, so this made the map actively
+  misleading for those facings) — but turned out **not** to be the cause
+  of the report below. Fixed by drawing row `y` at `MAP_GRID-1-y`
+  (north-up, matching the arrow) instead of changing the arrow.
+- **"the right-hand side-walls render as open corridors when they should
+  be closed"** — **root cause found**: a real gap in the frozen
+  `scripts/mm3lib/mm3_indoor_view.json` table, not a walker bug. A
+  corpus-wide real-data sweep (all 81 indoor mazes, checking every screen
+  position `buildWallList` can emit, not just the simple straight-ahead
+  columns) found the near-depth wide oblique "corner" slot at screen
+  `x=80,y=60` (sprite `wl4`) draws correctly ~86% of the time a wall is
+  there, but its mirror at `x=131,y=60` draws only ~4% of the time — and
+  two more pairs (`x=56`/`x=144`, `x=104`/`x=120`) show the same pattern.
+  Comparing the chain list directly: each of those 3 left-side positions
+  has an *unconditional* "default" chain (`pre: []`, covering plain
+  wall/door/torch/etc. — fires for almost any wall) that simply has no
+  counterpart chain on the right. Every *conditional* chain at those same
+  positions **is** correctly mirrored — only the wide-coverage defaults
+  are missing, and only on the right. This is an extraction gap from the
+  original disassembly trace, not something the walker's `buildWallList`
+  (verified byte-identical to the Python reference, and to a live-
+  disassembly oracle) can be blamed for or work around. Re-escalated
+  (2026-08-15) to trace the real guard-flag-ids and frame values for the
+  3 missing chains — see TODO `mm3-indoor-view-missing-chains` once filed.
+- **"the minimap doesn't move with the party" (MM1/MM2/MM3 alike)** —
+  **fixed**. None of the three games' minimap canvases
+  (`<canvas id="minimap">`, `tools/walker/index.html`) carry a
+  width/height attribute or CSS aspect-ratio, and none of `MM3View
+  .renderMinimap` / `MmWalkerView.drawMinimap` / `MM2View
+  .drawTerrainMinimap` (`games-mm3.ts`, `games-mm.ts`) ever set
+  `ctx.canvas.width`/`height` themselves — so the canvas stayed at the
+  browser's default **300x150** the whole time, while every one of those
+  methods draws into an assumed `size`x`size` (224x224) square. Anything
+  past native row 150 — roughly the map's northern third, post the
+  orientation fix above — was silently clipped off the actual pixel
+  buffer, including the party dot whenever it wandered there. Depending
+  where the party stood, this ranged from "the map looks squished" to
+  "the dot is completely invisible and the map looks frozen," matching
+  the report. The generic `Minimap` class (`@seer-project/dungeon`, used
+  by Black Crypt/Wizardry 6) already sizes its own canvas correctly and
+  was never affected. Fixed by setting `ctx.canvas.width = ctx.canvas
+  .height = size` at the top of all three methods.
