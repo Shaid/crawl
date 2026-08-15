@@ -588,3 +588,79 @@ fourth "static picture lookup" for Gold Box/Bard's Tale) — more variety than
 four games justified normalising around, not less. The concrete next step,
 if any of this is worth pursuing, is a real `game-re` pass on whichever one
 game is most wanted next, not a speculative schema change.
+
+---
+
+## EOB3 and Dungeon Hack (AESOP/16 engine) — already started here, wall model still open
+
+Not a new find like the two sweeps above — these two already have real decode
+work in this repo (`docs/eotb3/`, `docs/dungeonhack/`) — but neither has
+reached the actual maze/wall grid yet, so they don't have entries in the
+per-game survey table above. Worth stating precisely what's known vs. not,
+since it's a different shape of gap than anything else in this document.
+
+**Both run the same engine, confirmed, and it's a third engine family beyond
+this document's other two decoded franchises.** Eye of the Beholder III and
+Dungeon Hack (SSI/DreamForge, 1993 both) share **AESOP/16**, a bytecode VM —
+confirmed directly in both games' own docs (`docs/dungeonhack/TODO.md`:
+"Runs on the same AESOP/16 engine as EOB3"). This is **not** ScummVM's Kyra
+engine that covers EOB1/2 — `docs/eotb3/eotb3-formats-research.md` states
+this explicitly: "ScummVM's KYRA engine only covers EOB1 and EOB2... EOB3's
+AESOP engine is also used only by Dungeon Hack... Porting AESOP to ScummVM
+was deemed out of scope." So "Eye of the Beholder 3" shares a *name* with
+the already-decoded EOB1/2 but not their engine, format, or (confirmed:
+"Packed BMP... different rendering pipeline", no `.VCN`/`.VMP` pre-rendered
+wall tileset) their renderer — don't assume EOB3 inherits EOB1/2's per-cell/
+slot-table characterisation above without checking.
+
+**Unusually strong oracle, stronger than typical "external prior art."**
+Both games' existing docs cite the actual AESOP engine author's own publicly
+released source — John Miles' `AESOP_INTERPRETER_BUILD_2a` interpreter plus
+Mirek Luza's DAESOP decompiler, both recovered from a
+[VOGONS thread](https://www.vogons.org/viewtopic.php?t=20601) (see
+`docs/dungeonhack/TODO.md`'s header and `docs/dungeonhack/dosvga/
+data-structure.md` "Provenance"). This is a materially better starting point
+than the recalled-and-hedged Dungeon Master/Gold Box/Bard's Tale entries
+above — closer to the EOB1 tier (real source, not just fan RE) — worth
+knowing about for whenever the wall/maze grid itself gets tackled.
+
+**What's actually decoded so far is the resource/asset layer, not the
+dungeon grid.** Both passes confirmed containers, palettes, bitmap codecs,
+fonts, and (Dungeon Hack) the standalone `MAZE.EXE` generator's invocation
+and output filenames — genuinely useful, but none of it reaches the wall
+data itself:
+
+- **EOB3**: level data lives in `LVLnn.TMP` (one file per level, combining
+  layout + object placement + state — a different shape from EOB1/2's split
+  `.MAZ`/`.INF`/`.OUT`). `docs/eotb3/eotb3-formats-research.md`: "`LVLnn.TMP`
+  layout: Partially documented in ThirdEye; exact schema still incomplete."
+  **Wall-storage model (per-cell / shared-edge / type-derived / other):
+  genuinely unknown, not hypothesised even at Dungeon Master's confidence
+  tier.**
+- **Dungeon Hack**: `MAZE.EXE` is confirmed as "the standalone procedural
+  dungeon generator" (`docs/dungeonhack/dosvga/data-structure.md` §6,
+  confirmed), writing `LEVELS.DAT` (the generated maze) + per-level feature
+  files. The generator's internals and `LEVELS.DAT`'s record format are
+  explicitly out of scope in the existing pass (`dungeonhack-maze-exe-
+  algorithm`, deferred). Same as EOB3: **wall-storage model unknown.**
+
+**A genuinely new axis for this document: procedurally generated content.**
+Every other game surveyed (in this document and the two sweeps above) ships
+fixed, hand-authored dungeon data — decode the format once, walk the real
+maps forever. Dungeon Hack's dungeons are generated fresh each run by
+`MAZE.EXE` from a difficulty/settings profile; there is no fixed shipped
+instance to point a future walker at even once `LEVELS.DAT`'s byte format is
+known. Two ways around that, neither attempted yet: reproduce the generation
+algorithm itself (the `dungeonhack-maze-exe-algorithm` TODO row, currently
+deferred as out-of-scope — a materially bigger undertaking than decoding a
+static format), or treat one specific `SAVEGAME/` snapshot (present in
+`data/dungeonhack/dosvga/SAVEGAME`) as a frozen instance the way any other
+game's shipped maps are treated, accepting that it's one generated dungeon
+among infinitely many rather than "the" game's content. Worth deciding which
+before investing in the wall-format decode itself, since it changes what
+"decode this game's maze format" is even for.
+
+**Not added to the per-game survey table above, on purpose** — that table is
+for games whose wall-storage model is actually known. EOB3 and Dungeon Hack
+stay out of it until the `LVLnn.TMP`/`LEVELS.DAT` grid itself is decoded,
+same standard as the corpus-sweep games above.
