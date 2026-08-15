@@ -93,6 +93,12 @@ interface AtlasFrame {
   y: number;
   w: number;
   h: number;
+  /** The real DOS sprite cell's own width, distinct from `w` (which is
+   * padded to the container's max frame size so every atlas rect shares
+   * one width — fine for plain blits, since wall art is left-aligned
+   * within that padding, but wrong for mirrored ones). Only `.vga` wall
+   * sprites carry this; see `blitSprite`. */
+  cellW?: number;
 }
 
 async function loadImage(src: string): Promise<HTMLImageElement> {
@@ -534,13 +540,27 @@ export class MM3View implements GameView {
     ctx.restore();
   }
 
+  /**
+   * `fr.w` is padded to the sprite container's max cell size (every atlas
+   * rect for a given sheet shares one width) — harmless for a plain blit,
+   * since the real art is left-aligned within that padding, but wrong for
+   * a mirrored one: flipping about `dx + fr.w` displaces the real cell
+   * right by `fr.w - cellW`, throwing far-right draws (like the near-side
+   * wall panel) off past the clip window entirely. The real DOS blitter's
+   * mirrored path (`vga`+0x1E36) flips about the cell's own width, so the
+   * right edge lands at `dx + cellW - 1` — use `fr.cellW` (falls back to
+   * `fr.w` for sheets that don't carry it, i.e. anything but `.vga` wall
+   * sprites) to match. Found from a user screenshot report — see
+   * `docs/mm3/dosvga/data-structure.md` "Indoor 3-D view" correction.
+   */
   private blitSprite(ctx: CanvasRenderingContext2D, sheet: Sheet, fr: AtlasFrame, dx: number, dy: number, mirror: boolean): void {
     if (!mirror) {
       ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, dx, dy, fr.w, fr.h);
       return;
     }
+    const cellW = fr.cellW ?? fr.w;
     ctx.save();
-    ctx.translate(dx + fr.w, dy);
+    ctx.translate(dx + cellW, dy);
     ctx.scale(-1, 1);
     ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
     ctx.restore();

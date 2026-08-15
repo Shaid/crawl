@@ -468,6 +468,38 @@ partially answers `mm3-dos-blit-variants`).
 > unconfirmed for the indoor view specifically (not exercised by any
 > traced indoor call site).
 
+> **Correction (2026-08-15):** an earlier pass believed three right-side
+> `wl4 y=60` chains were missing from the extracted
+> `scripts/mm3lib/mm3_indoor_view.json` table. **Refuted.** Mirror
+> partners are located by `x_left + cellWidth + x_right == 232` (the
+> clip window `[8,224)`), where `cellWidth` is the *frame's own* declared
+> width, not a fixed pitch — confirmed from the driver's mirrored blit
+> `vga`+0x1E36, which reads the cell `width` field (the non-mirrored path
+> at `vga`+0x1DB3 skips it) and sets the rightmost drawn column to
+> `x + xOffset + width − 1`. Under that rule all 54 chains pair (25 pairs
+> + 4 self-centred at dead centre: chains 22, 33, 42, 49), 0 deviations.
+> The nine `pre:[]` 7-guard `wl4` chains are one complete 24px-pitch
+> front-facing wall row at `x = 8,32,…,200` (9 × 24 = 216 = the view
+> width); `x=144/131/120` are oblique-wedge positions with 32/21/8px
+> sprites, each already correctly paired with `x=56/80/104`'s own
+> obliques. Verified: 82,944 views (81 mazes × 256 cells × 4 facings) —
+> mirroring the world reproduces exactly the mirrored chain set, 0
+> mismatches; 23,328 views pixel-span reflection (using real cell
+> widths), 0 mismatches.
+>
+> The real bug was in the **walker**, not the table: `blitSprite`
+> (`tools/walker/games-mm3.ts`) mirrored sprites about the padded atlas
+> frame width instead of each frame's own cell width, displacing mirrored
+> draws right by `paddedWidth − cellWidth` — for `wl1` frames 4/5 (the
+> near-side wall panel, 24px real cell inside a 168px-padded sheet) that
+> pushed the draw completely outside the clip window, **always**
+> invisible (115,918/115,918 corpus draws for that one frame pair alone).
+> 36.7% of all mirrored indoor draws were affected corpus-wide. Fixed by
+> emitting each `.vga` frame's real cell width as `cellW` in the sprite
+> sidecar (`scripts/extract_mm3_dos_sprites.py`) and flipping about
+> `dx + cellW` instead of `dx + fr.w` in `blitSprite` — see TODO
+> `mm3-walker-mirror-origin`.
+
 **wl4 usage** (`<series>wl4.vga` — every series has 31 frames, not one
 216×71 sprite as an earlier pass's bounding-box read implied): frame 29
 (the only 216×71 cell) draws **once per screen** at (8, 67) as the floor

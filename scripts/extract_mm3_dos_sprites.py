@@ -33,7 +33,7 @@ import zlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from mm3lib.dos_cc import parse, extract_entry, hash_filename  # noqa: E402
-from mm3lib.dos_sprite import is_sprite_container, decode_frames, TRANSPARENT  # noqa: E402
+from mm3lib.dos_sprite import is_sprite_container, decode_frames, parse_container, cell_header, TRANSPARENT  # noqa: E402
 from mm3lib.dos_palette import load_dos_palette, scale_6_to_8  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, '..'))
@@ -177,6 +177,23 @@ def main() -> None:
         write_png(os.path.join(d, f'{name}.png'), bytes(strip), cw * len(uniq), ch)
         atlas_frames = [{'name': f'{name}.frame{k}', 'x': k * cw, 'y': 0, 'w': cw, 'h': ch}
                          for k in range(len(uniq))]
+        if ext == 'vga':
+            # Frames are padded to the container's max cell size (`cw`
+            # above) so every atlas rect shares one width -- fine for
+            # left-to-right blits (art is left-aligned, cell xOffset==0
+            # for every wall cell) but wrong for the walker's *mirrored*
+            # blits, which must flip about the frame's own real cell
+            # width, not the padded atlas width (confirmed from the DOS
+            # `vga` driver's mirrored-blit routine, `vga`+0x1E36 -- see
+            # docs/mm3/dosvga/data-structure.md "Indoor 3-D view"
+            # correction). `uniq is frames` for `.vga` (no dedup/reorder,
+            # see above), so frame index k maps directly to container
+            # index k.
+            _, cell_offsets = parse_container(payload)
+            for k, atlas_frame in enumerate(atlas_frames):
+                c1, _c2 = cell_offsets[k]
+                if c1:
+                    atlas_frame['cellW'] = cell_header(payload, c1)[1]
         json.dump({
             'source': name, 'palette': 'dos-vga',
             'width': cw * len(uniq), 'height': ch,

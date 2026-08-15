@@ -144,25 +144,31 @@ The user also reported two MM3 issues from actually playing it:
   of the report below. Fixed by drawing row `y` at `MAP_GRID-1-y`
   (north-up, matching the arrow) instead of changing the arrow.
 - **"the right-hand side-walls render as open corridors when they should
-  be closed"** — **root cause found**: a real gap in the frozen
-  `scripts/mm3lib/mm3_indoor_view.json` table, not a walker bug. A
-  corpus-wide real-data sweep (all 81 indoor mazes, checking every screen
-  position `buildWallList` can emit, not just the simple straight-ahead
-  columns) found the near-depth wide oblique "corner" slot at screen
-  `x=80,y=60` (sprite `wl4`) draws correctly ~86% of the time a wall is
-  there, but its mirror at `x=131,y=60` draws only ~4% of the time — and
-  two more pairs (`x=56`/`x=144`, `x=104`/`x=120`) show the same pattern.
-  Comparing the chain list directly: each of those 3 left-side positions
-  has an *unconditional* "default" chain (`pre: []`, covering plain
-  wall/door/torch/etc. — fires for almost any wall) that simply has no
-  counterpart chain on the right. Every *conditional* chain at those same
-  positions **is** correctly mirrored — only the wide-coverage defaults
-  are missing, and only on the right. This is an extraction gap from the
-  original disassembly trace, not something the walker's `buildWallList`
-  (verified byte-identical to the Python reference, and to a live-
-  disassembly oracle) can be blamed for or work around. Re-escalated
-  (2026-08-15) to trace the real guard-flag-ids and frame values for the
-  3 missing chains — see TODO `mm3-indoor-view-missing-chains` once filed.
+  be closed"** — **fixed**. First suspected (wrongly) a gap in the frozen
+  `mm3_indoor_view.json` table — a corpus-wide draw-rate comparison found
+  the near-depth wide oblique slot at screen `x=80,y=60` (sprite `wl4`)
+  drawing ~86% of the time a wall is there, its apparent mirror at
+  `x=131,y=60` only ~4%. **Refuted on escalation**: `x=131` isn't `x=80`'s
+  mirror — mirror partners are located by `x_left + cellWidth + x_right
+  == 232` using each frame's *own* real cell width (confirmed from the
+  DOS driver's mirrored blit, `vga`+0x1E36), not x-proximity, and by that
+  rule the table is 54/54 symmetric with zero deviations (verified via
+  82,944 mirrored-world simulations). The real bug was in the walker:
+  `blitSprite` (`tools/walker/games-mm3.ts`) mirrored sprites about the
+  *padded atlas frame width* (uniform per sheet — the extractor pads
+  every frame to the container's max cell size) instead of each frame's
+  real cell width, displacing mirrored draws right by
+  `paddedWidth − cellWidth`. For `wl1` frames 4/5 — the near-side wall
+  panel, a 24px real cell inside a 168px-padded sheet — that pushed the
+  draw completely outside the 216px clip window: **always** invisible,
+  115,918/115,918 corpus draws. 36.7% of all mirrored indoor draws were
+  affected. Fixed by emitting each `.vga` frame's real cell width as
+  `cellW` in the sprite sidecar (`scripts/extract_mm3_dos_sprites.py`)
+  and flipping about `dx + cellW` instead of `dx + fr.w`
+  (`blitSprite`). Verified: live re-render of the exact repro case (maze
+  16, cell (3,14), facing N) now shows a symmetric corridor with both
+  side walls present; a previously-correct asymmetric case (maze 4,
+  (7,1), facing N) unchanged.
 - **"the minimap doesn't move with the party" (MM1/MM2/MM3 alike)** —
   **fixed**. None of the three games' minimap canvases
   (`<canvas id="minimap">`, `tools/walker/index.html`) carry a
