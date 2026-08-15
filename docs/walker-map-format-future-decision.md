@@ -74,9 +74,15 @@ cover a gap in the base model.
 
 Shared-edge makes it **impossible** for the two faces of a wall to disagree: there
 is only one value. Per-cell models rely on the game never writing inconsistent data.
-In practice this never causes problems (every game in this corpus is read-only from
-the engine's perspective), but it is a genuine semantic advantage if you ever write
-map data back.
+
+> **Correction (2026-08-16):** this section previously claimed "every game
+> in this corpus is read-only from the engine's perspective" as the reason
+> this doesn't matter in practice. **Wrong for at least EOB1/2, and the real
+> games in this corpus are read-only only because of how *this walker*
+> currently uses them, not because their own engines never mutate the map.**
+> See "Runtime map mutation" below — the claim is corrected there, not
+> deleted here, so a reader who only skims this section still sees it's
+> stale.
 
 ### Query ergonomics — per-cell wins
 
@@ -84,6 +90,71 @@ Querying any face of any cell is a single array read with no branching.
 Shared-edge requires a four-case switch to decide whether to read from the current
 cell or a neighbour, plus bounds checks on the neighbour lookup. This is the entirety
 of `evalCellFace`'s complexity budget.
+
+### Runtime map mutation — a real gap, not a hypothetical one (2026-08-16)
+
+User observation, checked against real source rather than taken on faith:
+Black Crypt and EOB both have dungeon state that changes during play — a
+switch reveals a passage, a door opens. Two different questions bundled
+together here, worth separating because the games answer them differently.
+
+**Doors — confirmed NOT a geometry mutation, for Black Crypt at least.**
+Traced from two independent directions in the real disassembly (the
+action-opcode dispatcher and the dungeon-tile render loop; both landed on
+the same field, which is the verification): "door open/closed state is
+**not** a `wall_flags` mutation of the map array. It lives in the door's own
+20-byte structure record" (`docs/blackcrypt/amiga/data-structure.md` "Door
+State (open / closed)"). So for BC's doors specifically, the map's wall
+geometry never actually changes — only a separate entity record's state bit
+does, and the walker's existing `PatchedCellQuery`
+(`@seer-project/dungeon/src/model/PatchedCellQuery.ts`) already handles
+exactly this shape: it patches `entitiesAt`/`entityHandlesAt` in an overlay,
+while explicitly passing `wallAt`/`planeAt`/`inBounds` straight through
+unchanged — geometry is assumed permanently fixed once loaded. This is
+*why* the corpus has looked read-only so far: not because the games never
+mutate anything, but because the one mutable thing decoded and wired up so
+far (BC's doors) happens to live outside the wall-plane data entirely.
+
+**But EOB confirms real wall-geometry mutation exists, separate from
+doors.** ScummVM's decompiled EOB event-script opcode table (traced from
+`script_eob.cpp`, `docs/eotb/dosvga/data-structure.md` "event-script
+bytecode") includes, alongside `openDoor`/`closeDoor`: **`oeob_setWallType`**
+and **`toggleWallState`** — two distinct, named opcodes that mutate a wall's
+*type* directly. That's the "push a switch and walls move" mechanic exactly:
+a secret passage isn't a pre-existing gap dressed up to look like a wall
+(the BC illusionary-wall pattern, itself apparently *also* a structure-record
+trick rather than a `wall_flags` change, though that's not independently
+confirmed the way BC's doors are) — it's the `.MAZ` cell's own wall-type
+byte changing at runtime, for real, mid-game. Operand encoding isn't decoded
+yet (`docs/eotb/dosvga/data-structure.md`'s own hedge: "per-opcode operand
+byte-widths not individually decoded this pass"), so *which* wall, *which*
+new type, and what triggers it aren't nailed down — but the opcode's
+existence is ScummVM-source-confirmed, not a guess.
+
+**Why this matters for the two decisions in this document:**
+
+- **Map format**: a wall-storage model that can genuinely be rewritten at
+  runtime is exactly the scenario the "Data integrity" section above was
+  gesturing at hypothetically ("a genuine semantic advantage if you ever
+  write map data back") — and EOB confirms that scenario is real, not
+  speculative. Shared-edge's "impossible for two faces to disagree"
+  guarantee stops being a nice-to-have and starts being a real bug class to
+  worry about for a per-cell game whose engine can mutate one side of a wall
+  without the caller remembering to mutate the other. Doesn't change the
+  "defer" recommendation, but it does mean **the eventual decision needs a
+  mutation story, not just a read-time query story** — this document's
+  scope was implicitly narrower than the actual problem.
+- **Rendering engine / walker architecture**: `PatchedCellQuery` is real,
+  working infrastructure for entity-state mutation (doors, switches-as-
+  entities), but has **no equivalent for wall-plane mutation** — its own
+  module doc says so plainly ("geometry... passes straight through to the
+  wrapped level unchanged"). A walker for EOB (once one exists — see the
+  "already this repo's tier 1" section above) that wants `setWallType` to
+  actually work needs a `PatchedCellQuery`-shaped decorator for `wallAt`/
+  `planeAt` too, which doesn't exist yet in `@seer-project/dungeon`. Small,
+  well-scoped, additive (same shape as the existing entity-patch overlay) —
+  not a reason to revisit the "don't force a schema merge" stance, but a
+  concrete, real TODO for whenever a game that needs it gets a walker.
 
 ---
 
