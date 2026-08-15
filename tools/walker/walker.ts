@@ -438,7 +438,7 @@ async function main() {
       : 'no automap';
     setStatus(
       `${view.gameLabel} — ${view.levelLabel} @ (${pose.x},${pose.y}) facing ${'NESW'[pose.facing]} — ` +
-        `${view.items.length} draw items — tick ${Math.floor(view.currentTick)} — ${mapped}` +
+        `${view.items.length} draw items — ${mapped}` +
         (automapZoomedOut ? ' [automap: full]' : ''),
     );
   }
@@ -525,8 +525,6 @@ async function main() {
       }
       renderAutomapPanel();
       setStatusLine();
-    } else {
-      setStatusLine(); // keep the tick counter live without touching automap/minimap
     }
 
     requestAnimationFrame(frame);
