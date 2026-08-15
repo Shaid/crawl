@@ -385,6 +385,11 @@ export class MM3View implements GameView {
   private tick = 0;
   private noclip = false;
   private stepCooldown = 0;
+  /** Counts discrete screen redraws (one per accepted turn/step), not wall-clock time — mirrors DS
+   * `0x185`'s real cadence ("flipped roughly once per redraw", see `docs/mm3/dosvga/data-structure.md`
+   * "Indoor 3-D view"). Driving the side-wall alternation off `tick` instead made every wall/door/pillar
+   * flip several times a second even while standing still — not what the real game does. */
+  private redrawCount = 0;
 
   constructor(data: Mm3Data, startLevel: number, startPose: Pose | null) {
     this.mazes = data.mazes;
@@ -447,6 +452,7 @@ export class MM3View implements GameView {
       this.pose_ = { ...this.pose_, facing };
     }
     if (!changed) return null;
+    this.redrawCount++;
     return this.pose;
   }
 
@@ -515,7 +521,7 @@ export class MM3View implements GameView {
       return wallGraphicIndex(this.maze.walls, x, y, MASK_TO_DIR[mask]!);
     };
     const facing = FACING_NESW_TO_INDOOR[this.pose_.facing & 3]!;
-    const alt = Math.floor(this.tick / 220) % 2;
+    const alt = this.redrawCount % 2;
     const torch = Math.floor(this.tick / 300) % 3;
     const draws = buildWallList(this.indoorView!, getWall, facing, alt, torch);
     for (const d of draws) {

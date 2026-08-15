@@ -106,10 +106,43 @@ mocked-`CanvasRenderingContext2D` smoke test confirms `renderCanvas`
 actually produces sensible draw calls (correct tile dimensions at the
 expected screen positions, wall-rect counts varying sensibly by facing).
 
-## Known issues (user-reported, 2026-08-15, not yet triaged)
+A first live Playwright pass (2026-08-15, in response to user play-testing
+reports — see below) confirmed real indoor-view rendering in a browser for
+several mazes/positions/facings, including stepping through a corridor —
+still not a full sweep, but no longer purely numeric.
+
+## Known issues (user-reported, 2026-08-15)
 
 The user flagged real issues with the MM1 and MM2 walkers from actually
-using them, without specifics yet. Flagged as a next priority — when
-specifics come in, reproduce live in the browser (not just the unit
+using them, without specifics yet — **still open**, no repro details given.
+When specifics come in, reproduce live in the browser (not just the unit
 tests above, which cover specific mechanisms, not a full play-through)
 before making changes.
+
+The user also reported two MM3 issues from actually playing it:
+
+- **"doors, walls, pillars all keep mirroring"** — **fixed**. The
+  side-wall alternation (`alt` in `buildWallList`, DS `0x185` in the real
+  game — see "Indoor 3-D view" above) was tied to wall-clock time
+  (`Math.floor(tick / 220) % 2`, flipping ~4.5×/second even while
+  standing still) instead of the real game's own cadence, "flipped
+  roughly once per redraw". Now tied to a `redrawCount` incremented once
+  per accepted turn/step (`tools/walker/games-mm3.ts` `MM3View.update`),
+  matching the documented "corridor slides past you as you walk" effect
+  instead of flickering continuously.
+- **"the right-hand side-walls render as open corridors when they should
+  be closed"** — investigated, **not reproduced**, still open. Checked
+  the underlying data/algorithm exhaustively: a synthetic single-wall
+  probe is exactly symmetric left/right at every depth and facing; a
+  corpus-wide real-data sweep (all 81 indoor mazes, filtered to genuinely
+  unobstructed corridors so occlusion doesn't confound the count) shows
+  **0% missing draws on both sides at every depth** — left and right are
+  provably identical in the data/algorithm layer. A live Playwright
+  screenshot of a real one-sided corridor (maze 4 "Swamp Town" (7,1)
+  facing N — plain wall east/right, open west/left at depths 1-2) also
+  rendered correctly: right closed, left open. Possibly this was actually
+  the mirroring bug above (rapid alternation reads as "the wall keeps
+  changing/disappearing" at a glance) — now fixed, worth re-checking
+  live; if it still reproduces, the next step is a specific maze/position/
+  facing from the user, since exhaustive corpus + live spot-checks found
+  no data-layer bug to explain it.
