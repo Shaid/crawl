@@ -9,6 +9,8 @@ docs/mm3/dosvga/data-structure.md. Structural verification lives in
 
 Output (public/assets/mm3/dosvga/):
   data/mazes.json         — all 105 maze records, decoded
+  data/indoor-view.json   — static indoor 3-D view geometry/dispatch table
+                            (same for every maze; see dos_indoor_view.py)
   maps/maze<NN>.png       — indoor wall plot (16x16), one per indoor maze
   maps/world.png          — the 24 outdoor sections composited as the
                             96x64 world map (sections A1..F4 = mazes 41..64)
@@ -212,6 +214,17 @@ def main() -> None:
               open(os.path.join(OUT, 'data', 'mazes.json'), 'w'))
     manifest.append({'name': 'data/mazes', 'sprites': 0, 'hasPalette': False, 'png': '',
                      'kind': 'data', 'data': 'data/mazes.json'})
+
+    # Static indoor-3D-view geometry/dispatch table (not per-maze data --
+    # same table for every maze) -- publish the committed source table
+    # verbatim; see scripts/mm3lib/dos_indoor_view.py.
+    indoor_view_src = os.path.join(HERE, 'mm3lib', 'mm3_indoor_view.json')
+    with open(indoor_view_src) as f:
+        indoor_view = json.load(f)
+    json.dump(indoor_view, open(os.path.join(OUT, 'data', 'indoor-view.json'), 'w'))
+    manifest.append({'name': 'data/indoor-view', 'sprites': 0, 'hasPalette': False, 'png': '',
+                     'kind': 'data', 'data': 'data/indoor-view.json'})
+
     merge_manifest(manifest)
     print(f'mazes decoded: {len(records)} '
           f'(indoor {sum(1 for r in records if r["kind"] == "indoor")}, '

@@ -34,29 +34,42 @@
  * `dun`/`cas`/`sci`) is a 40-byte constant table in the game's own code
  * indexed by `mazeId - 1` (the 7-entry per-maze "graphic-set" table in the
  * maze record itself is unrelated: it's outdoor-terrain-only and all-zero
- * for every indoor maze). FRONT blits use the real `<series>wl{1,2,3}.vga`
- * sprites (near/mid/far distance variants). The game's real per-position
- * frame table (door/torch/grate/opening/post, not just the plain wall) is
- * fully decoded (`docs/mm3/dosvga/data-structure.md` § "Indoor 3-D view")
- * but only wired here for **depth-0** (`FRONT_WL1_FRAME_BY_KIND`) — that
- * position is exhaustively confirmed to correspond exactly to
- * `wallGraphicIndex` on the party's current cell, so there's no ambiguity
- * about which cell/direction it represents. Depths 1-3 still always use
- * frame 0 (plain wall), and LEFT/RIGHT blits still render flat-shaded:
- * extending either needs porting MM3's own 44-slot view geometry, since
- * this shared MM1/MM2 frustum engine doesn't expose "which cell+direction
- * does this screen slot sample" per blit the way MM3's internal `dx`/`dy`
- * tables do — see TODO `mm3-maze-wall-frames`'s "remaining" note.
+ * for every indoor maze).
+ *
+ * Rendering itself is MM3's own real indoor 3-D view — a 44-view-slot
+ * geometry/dispatch table, disassembly-decoded and ported to
+ * `tools/walker/mm3-indoor-view.ts` (`buildWallList`, backed by the
+ * frozen `data/indoor-view.json` table — see that module's doc and
+ * `docs/mm3/dosvga/data-structure.md` § "Indoor 3-D view" for the full
+ * citations). This is a genuinely different, richer screen-space geometry
+ * than the shared MM1/MM2 frustum engine (`tools/walker-mm/maze3d.ts`)
+ * this file otherwise reuses — real doors, animated torches, grates, and
+ * posts render at their correct real frames on every visible wall face,
+ * not just the one directly ahead. If the real table/sprites fail to
+ * load, `renderCanvas` falls back to the older MM1/MM2-frustum-based flat/
+ * partial-texture path (`renderCanvasFrustumFallback`) rather than
+ * showing nothing.
+ *
+ * A known simplification, inherited from the verified Python reference
+ * this was ported from: wall sampling for the 44 slots stays within the
+ * *current* 16x16 maze (off-map = "plain wall", matching the real
+ * accessor's off-map default) rather than reaching into a neighbouring
+ * maze the way a 2x2-block castle/cavern's other 3 resident quadrants
+ * would in the real engine. Doesn't affect movement (that already crosses
+ * maze boundaries correctly via `mm3StepParty`) — only means a view whose
+ * depth would extend past the current maze's edge sees a plain wall
+ * there instead of the neighbour's real geometry.
  *
  * Outdoor mazes (ids 41-64) use the wall word as terrain *layers*, not
- * per-side walls, and aren't supported by this indoor frustum view — only
- * the 81 indoor mazes are selectable.
+ * per-side walls, and aren't supported by this indoor view — only the 81
+ * indoor mazes are selectable.
  */
 import type { KeyStateLike } from '@seer-project/dungeon';
 import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/dungeon';
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import type { ScreenLike, Blit } from '../walker-mm/maze3d.ts';
+import { buildWallList, loadIndoorViewTable, type IndoorViewTable, type GetWall } from './mm3-indoor-view.ts';
 import {
   VIEW_W,
   VIEW_H,
@@ -94,10 +107,10 @@ interface Sheet {
   frame(name: string | number): AtlasFrame | undefined;
 }
 
-/** Loads a `<name>.vga` sprite sheet exported by `scripts/extract_mm3_dos_sprites.py` (`sprites/walls/<name>.vga.png` + `.json`). Missing files resolve to `undefined` rather than throwing — not every series/distance file matters to every render path. */
-async function loadWallSheet(base: string, name: string): Promise<Sheet | undefined> {
-  const png = `${base}/sprites/walls/${name}.vga.png`;
-  const json = `${base}/sprites/walls/${name}.vga.json`;
+/** Loads a `<fullName>` sprite sheet exported by `scripts/extract_mm3_dos_sprites.py` (`sprites/<subdir>/<fullName>.png` + `.json`, `fullName` already includes its extension, e.g. `dunwl1.vga` or `dun.sky`). Missing files resolve to `undefined` rather than throwing — not every series/distance/sky file matters to every render path. */
+async function loadSpriteSheet(base: string, subdir: string, fullName: string): Promise<Sheet | undefined> {
+  const png = `${base}/sprites/${subdir}/${fullName}.png`;
+  const json = `${base}/sprites/${subdir}/${fullName}.json`;
   try {
     const [img, sidecar] = await Promise.all([loadImage(png), fetch(json).then((r) => r.json())]);
     const frames: AtlasFrame[] = sidecar.frames as AtlasFrame[];
@@ -112,6 +125,9 @@ async function loadWallSheet(base: string, name: string): Promise<Sheet | undefi
     return undefined;
   }
 }
+
+const loadWallSheet = (base: string, name: string): Promise<Sheet | undefined> => loadSpriteSheet(base, 'walls', `${name}.vga`);
+const loadSkySheet = (base: string, name: string): Promise<Sheet | undefined> => loadSpriteSheet(base, 'skies', name);
 
 interface MazeGraphicsJson {
   graphicsMazeId: number;
@@ -144,6 +160,12 @@ interface MazeRecordJson {
 /** direction index (matches maze3d.ts FACE: 0=N,1=E,2=S,3=W) -> wall-word nibble shift (dos_maze.py WALL_SHIFT). */
 const DIR_SHIFT = [12, 8, 4, 0];
 
+/** Wall-nibble mask (dos_maze.py's graphic-index masks: 0x7000 N / 0x0700 E / 0x0070 S / 0x0007 W) -> `wallGraphicIndex`'s `dir` param (0=N,1=E,2=S,3=W). */
+const MASK_TO_DIR: Record<number, number> = { 0x7000: 0, 0x0700: 1, 0x0070: 2, 0x0007: 3 };
+
+/** Party facing (0=N,1=E,2=S,3=W, matching `maze3d.ts` FACE) -> the indoor 3-D view's own facing order (0=N,1=S,2=E,3=W — see `mm3-indoor-view.ts`). */
+const FACING_NESW_TO_INDOOR = [0, 2, 1, 3];
+
 interface Mm3Maze {
   id: number;
   label: string;
@@ -155,12 +177,18 @@ interface Mm3Maze {
   screen: ScreenLike;
   /** `twn`/`cav`/`dun`/`cas`/`sci` — undefined for a maze the graphics extractor hasn't resolved yet (defensive; every shipped indoor maze has one). */
   wallSeries: string | undefined;
+  /** e.g. `dun.sky` — undefined for `twn`/`cas` mazes, which ship no ceiling texture. */
+  sky: string | undefined;
 }
 
 interface Mm3Data {
   mazes: Mm3Maze[];
   /** wallSeries -> [wl1, wl2, wl3, wl4] sheets (1-indexed distance variants, 0-indexed array). */
   wallSheets: Record<string, (Sheet | undefined)[]>;
+  /** sky name (e.g. `dun.sky`) -> sheet. */
+  skySheets: Record<string, Sheet | undefined>;
+  /** The real indoor 3-D view geometry/dispatch table — undefined if it failed to load (falls back to the older frustum-based renderer). */
+  indoorView: IndoorViewTable | undefined;
 }
 
 export function wallBlocked(walls: number[], x: number, y: number, dir: number): boolean {
@@ -227,7 +255,10 @@ function loadMm3(): Promise<Mm3Data> {
   if (mm3Promise) return mm3Promise;
   mm3Promise = (async () => {
     const base = '/assets/mm3/dosvga';
-    const raw = await fetch(`${base}/data/mazes.json`).then((r) => r.json());
+    const [raw, indoorView] = await Promise.all([
+      fetch(`${base}/data/mazes.json`).then((r) => r.json()),
+      loadIndoorViewTable(base),
+    ]);
     const records = (raw.mazes as MazeRecordJson[]).filter((m) => m.kind === 'indoor');
     const idToIndex = new Map<number, number>();
     records.forEach((m, i) => idToIndex.set(m.id, i));
@@ -246,18 +277,24 @@ function loadMm3(): Promise<Mm3Data> {
         neighbors,
         screen: { index: m.id, visual, collision: dummyCollision, neighbors },
         wallSeries: m.graphics?.wallSeries,
+        sky: m.graphics?.sky ?? undefined,
       };
     });
 
     const seriesList = [...new Set(mazes.map((m) => m.wallSeries).filter((s): s is string => !!s))];
+    const skyList = [...new Set(mazes.map((m) => m.sky).filter((s): s is string => !!s))];
     const wallSheets: Record<string, (Sheet | undefined)[]> = {};
-    await Promise.all(
-      seriesList.map(async (series) => {
+    const skySheets: Record<string, Sheet | undefined> = {};
+    await Promise.all([
+      ...seriesList.map(async (series) => {
         wallSheets[series] = await Promise.all([1, 2, 3, 4].map((n) => loadWallSheet(base, `${series}wl${n}`)));
       }),
-    );
+      ...skyList.map(async (sky) => {
+        skySheets[sky] = await loadSkySheet(base, sky);
+      }),
+    ]);
 
-    return { mazes, wallSheets };
+    return { mazes, wallSheets, skySheets, indoorView };
   })();
   return mm3Promise;
 }
@@ -342,6 +379,8 @@ export class MM3View implements GameView {
 
   private readonly mazes: Mm3Maze[];
   private readonly wallSheets: Record<string, (Sheet | undefined)[]>;
+  private readonly skySheets: Record<string, Sheet | undefined>;
+  private readonly indoorView: IndoorViewTable | undefined;
   private pose_: Mm3Pose;
   private tick = 0;
   private noclip = false;
@@ -350,6 +389,8 @@ export class MM3View implements GameView {
   constructor(data: Mm3Data, startLevel: number, startPose: Pose | null) {
     this.mazes = data.mazes;
     this.wallSheets = data.wallSheets;
+    this.skySheets = data.skySheets;
+    this.indoorView = data.indoorView;
     const idx = Math.max(0, this.mazes.findIndex((m) => m.id === startLevel));
     const maze = this.mazes[idx] ?? this.mazes[0]!;
     this.pose_ = startPose
@@ -427,6 +468,80 @@ export class MM3View implements GameView {
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
+    const series = this.maze.wallSeries;
+    const sheets = series ? this.wallSheets[series] : undefined;
+    const ready = this.indoorView && sheets && sheets.every((s) => s !== undefined);
+    if (ready) {
+      this.renderIndoorView(ctx, sheets!);
+    } else {
+      this.renderCanvasFrustumFallback(ctx);
+    }
+  }
+
+  /**
+   * The real indoor 3-D view — MM3's own 44-slot geometry via
+   * `buildWallList` (`tools/walker/mm3-indoor-view.ts`), not the borrowed
+   * MM1/MM2 frustum. Draws in the exact order `buildWallList` returns
+   * (already correct back-to-front — it's a direct reproduction of the
+   * real game's own draw-list code order, not re-derived here).
+   */
+  private renderIndoorView(ctx: CanvasRenderingContext2D, sheets: (Sheet | undefined)[]): void {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+    const [wl1, wl2, wl3, wl4] = sheets;
+    const spriteSheet: Record<string, Sheet | undefined> = { wl1, wl2, wl3, wl4 };
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(8, 8, 216, 131); // the real game's own 3-D view window (view.py CLIP)
+    ctx.clip();
+
+    // Fixed head: ceiling then floor backdrop, drawn before the dynamic list (matches the real WallList's own fixed head records).
+    const skySheet = this.maze.sky ? this.skySheets[this.maze.sky] : undefined;
+    const skyFrame = skySheet?.frame(0);
+    if (skySheet && skyFrame) {
+      this.blitSprite(ctx, skySheet, skyFrame, 8, 8, false);
+    }
+    if (wl4) {
+      const floorFrame = wl4.frame(29);
+      if (floorFrame) this.blitSprite(ctx, wl4, floorFrame, 8, 67, false);
+    }
+
+    const getWall: GetWall = (dx, dy, mask) => {
+      const x = this.pose_.x + dx;
+      const y = this.pose_.y + dy;
+      if (x < 0 || x >= MAP_GRID || y < 0 || y >= MAP_GRID) return 1; // off the current maze -> plain wall, matches the verified reference
+      return wallGraphicIndex(this.maze.walls, x, y, MASK_TO_DIR[mask]!);
+    };
+    const facing = FACING_NESW_TO_INDOOR[this.pose_.facing & 3]!;
+    const alt = Math.floor(this.tick / 220) % 2;
+    const torch = Math.floor(this.tick / 300) % 3;
+    const draws = buildWallList(this.indoorView!, getWall, facing, alt, torch);
+    for (const d of draws) {
+      const sheet = spriteSheet[d.sprite];
+      if (!sheet) continue;
+      const fr = sheet.frame(d.frame);
+      if (!fr) continue;
+      this.blitSprite(ctx, sheet, fr, d.x, d.y, (d.flags & 1) !== 0);
+    }
+    ctx.restore();
+  }
+
+  private blitSprite(ctx: CanvasRenderingContext2D, sheet: Sheet, fr: AtlasFrame, dx: number, dy: number, mirror: boolean): void {
+    if (!mirror) {
+      ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, dx, dy, fr.w, fr.h);
+      return;
+    }
+    ctx.save();
+    ctx.translate(dx + fr.w, dy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
+    ctx.restore();
+  }
+
+  /** Falls back to when the real indoor-view table or wall sheets fail to load — the older MM1/MM2-frustum-based renderer (flat-shaded sides, depth-0-only real front frames). See the module doc. */
+  private renderCanvasFrustumFallback(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.fillStyle = '#181818';
@@ -449,12 +564,14 @@ export class MM3View implements GameView {
   }
 
   /**
-   * FRONT blits only — real `<series>wl{1,2,3}.vga` near/mid/far art.
-   * Depth 0 (the immediate forward wall) picks its real frame — door,
-   * torch, grate, doorway, post — from the wall's own graphic index,
-   * since depth-0-front is exhaustively confirmed to correspond exactly
-   * to `wallBlocked(walls, x, y, facing)` on the party's current cell (no
-   * ambiguity about which cell/direction it represents). Depth 1-3 still
+   * `renderCanvasFrustumFallback`'s helper — only reached when the real
+   * indoor-view table/sprites failed to load. FRONT blits only — real
+   * `<series>wl{1,2,3}.vga` near/mid/far art. Depth 0 (the immediate
+   * forward wall) picks its real frame — door, torch, grate, doorway,
+   * post — from the wall's own graphic index, since depth-0-front is
+   * exhaustively confirmed to correspond exactly to `wallBlocked(walls,
+   * x, y, facing)` on the party's current cell (no ambiguity about which
+   * cell/direction it represents). Depth 1-3 still
    * use frame 0 (plain wall) — see `FRONT_WL1_FRAME_BY_KIND`'s doc for why
    * that's not yet extended to farther depths. Returns false (falls back
    * to flat shading) if the sheet/frame isn't loaded.

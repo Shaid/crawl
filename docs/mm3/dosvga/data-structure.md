@@ -469,16 +469,49 @@ facing east has graphic index 2 and renders `dunwl1.vga` frame 6 (the
 barred-door frame), matching the table above exactly
 (`tools/walker/__tests__/games-mm3.test.ts`).
 
-**Wired into the walker** (`tools/walker/games-mm3.ts`) for **depth-0
-front walls only** — that position is exhaustively confirmed to
-correspond exactly to `wallBlocked`/`wallGraphicIndex` on the party's
-current cell, so there's no ambiguity about which cell/direction it
-represents. Depths 1–3 front, and all side walls, are not wired to this
-table yet: doing so means porting MM3's own 44-slot geometry (Stage 1
-above) instead of reusing the shared MM1/MM2 frustum engine, since that
-engine doesn't expose "which cell and direction does this particular
-screen slot sample" per blit the way MM3's own `dx`/`dy` tables do — see
-TODO `mm3-maze-wall-frames`.
+**Fully ported and wired into the walker.** The Stage 1+2 algorithm above
+(all 44 slots, all 54 chains) is reimplemented from the frozen extracted
+table — not re-derived from the binary at build/runtime, matching every
+other decoded format in this project — in two places that must be kept in
+sync:
+
+- `scripts/mm3lib/dos_indoor_view.py` (`build_wall_list`), a Python
+  reference reading `scripts/mm3lib/mm3_indoor_view.json` (the committed,
+  frozen table: 44 slots' `(dx,dy,mask,shift)` geometry × 4 facings plus
+  their 7-arm dispatch tables, and the 54 chains/178 items — extracted
+  once via the live-disassembly reference above, small integer ids
+  standing in for the raw flag-global addresses).
+- `tools/walker/mm3-indoor-view.ts` (`buildWallList`), the TS port the
+  walker (`tools/walker/games-mm3.ts`) actually calls, loading the same
+  table published to `data/indoor-view.json` by
+  `scripts/extract_mm3_dos_mazes.py`.
+
+Every visible wall face — front, both sides, floor, ceiling — now renders
+its real art and real per-position frame (doors, animated torches,
+grates, posts), not just the wall directly ahead. `renderCanvas` falls
+back to the older, partial MM1/MM2-frustum-based renderer if the real
+table or sprites fail to load.
+
+**Verified**: the TS port matches the Python reference exactly on a
+90-case golden fixture spanning 15 mazes (`tools/walker/__tests__/
+mm3-indoor-view.test.ts`), and on a live end-to-end check against real
+maze 16 data through the actual walker code path (not an isolated unit
+test) — see `docs/mm3/TODO.md` `mm3-maze-wall-frames` for the numeric
+verification totals. `scripts/verify_mm3_indoor_view.py` re-checks the
+frozen table against real maze data and the real extracted sprite files
+on every run (165,888 views, 0 missing sheets, 0 out-of-range frame
+refs) — the one-time 497,664-case disassembly comparison isn't
+reproducible without `capstone` and the reconstructed exe, so it isn't
+re-run automatically.
+
+A known simplification, inherited from the verified Python reference:
+wall sampling for the 44 slots stays within the *current* 16×16 maze
+(off-map = "plain wall," matching the real accessor's off-map default)
+rather than reaching into a neighbouring maze the way a 2×2-block
+castle/cavern's other 3 resident quadrants would in the real engine.
+Doesn't affect movement (already crosses maze boundaries correctly) —
+only a view whose depth extends past the current maze's edge sees a
+plain wall there instead of the neighbour's real geometry.
 
 ### Verification
 

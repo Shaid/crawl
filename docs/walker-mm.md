@@ -18,7 +18,7 @@ composite path the BC/W6 views use.
 
 | | MM1 (`mm1`) | MM2 (`mm2`) | MM3 (`mm3`) |
 |---|---|---|---|
-| Wall art | **Real `WALLPIX.DTA` slices** (18 sets × 12 frustum slices) — each screen's near/mid/far frustum depth lanes each pick their own set from the decoded `.OVR` selection fields (`wallEntries[0..2]`; overland lanes are biome entries, e.g. AREAA1 = near/mid/far wall07/wall14/wall13) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) | **FRONT depth-0 walls: real art, correct per-position frame** — each maze's environment (`twn`/`cav`/`dun`/`cas`/`sci`, resolved from a 40-byte constant table in the game's own code) picks a `<series>wl1.vga` sprite, and the immediate forward wall's frame is chosen from its real graphic index (door/torch/grate/opening/post — the full indoor 3-D view pipeline is decoded, `mm3-maze-wall-frames` closed). **FRONT depths 1-3: real art, always the plain-wall frame** — the game's own per-position frame table is known but not yet wired past depth-0, since that needs MM3's own 44-slot view geometry, not this engine's shared MM1/MM2 frustum. **LEFT/RIGHT walls: still flat-shaded**, same reason |
+| Wall art | **Real `WALLPIX.DTA` slices** (18 sets × 12 frustum slices) — each screen's near/mid/far frustum depth lanes each pick their own set from the decoded `.OVR` selection fields (`wallEntries[0..2]`; overland lanes are biome entries, e.g. AREAA1 = near/mid/far wall07/wall14/wall13) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) | **Real art on every visible face** — front, both sides, floor, and ceiling — through MM3's own real 44-slot indoor 3-D view (`tools/walker/mm3-indoor-view.ts`, ported from the disassembly-decoded `scripts/mm3lib/dos_indoor_view.py`), not the borrowed MM1/MM2 frustum. Each maze's environment (`twn`/`cav`/`dun`/`cas`/`sci`, resolved from a 40-byte constant table in the game's own code) picks its `<series>wl{1,2,3,4}.vga` + `<series>.sky` sprites; every wall's real per-position frame (door/torch/grate/opening/post) renders, not just a plain wall. Falls back to the older, partial depth-0-only MM1/MM2-frustum renderer if the real table/sprites fail to load |
 | Torch overlays | **none** — MM1 renders no torch overlay (the reference implementation draws code-3 faces as plain walls; WALLPIX has no torch frames) | authentic `*t.32` with 3-phase flicker | none — MM3 doesn't distinguish door/torch from plain wall yet |
 | Floor/sky bands | simple dark band | `*f.32` floor + `sky.32` (roof bit flips the sky frame) | simple dark band |
 | Screens | all 55 (indoor frustum everywhere; overland uses its biome wall art) | indoor: 0–4 town, 17–32 cavern, 45–59 castle; **overland (5–16, 33–44) renders the outdoor scene** (`outdoor3d.ts` port: outdoor1-3 horizon lanes + desert/ocean/swamp/tundra decor bands from the terrain ids, terrain minimap from `outb.32`) | the 81 **indoor** mazes only (ids 1-103/105/106 minus the 24 outdoor ids 41-64, which use the wall word as terrain layers, not walls — not supported by this indoor-only view yet) |
@@ -69,8 +69,12 @@ consequences, both documented in `tools/walker/games-mm3.ts`:
 - MM3: `public/assets/mm3/dosvga/data/mazes.json` (all 105 decoded maze
   records; the walker filters to the 81 `kind: 'indoor'` ones). Each
   record's `walls` (256 × u16), `surrounding` (N/E/S/W neighbour maze
-  ids), and `runPosition` (per-maze start cell) are used directly — no
-  texture sheets loaded yet (flat-shaded, see above).
+  ids), `runPosition` (per-maze start cell), and `graphics.wallSeries`/
+  `.sky` (which texture set the maze uses) are used directly. Plus
+  `data/indoor-view.json` — the static 44-slot view geometry/dispatch
+  table (same for every maze; not maze-specific data), and
+  `sprites/walls/<series>wl{1,2,3,4}.vga.*` + `sprites/skies/<series>.sky.*`
+  for the real art.
 
 ## Page-0 wall codes (corrected)
 
