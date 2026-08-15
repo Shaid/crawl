@@ -486,3 +486,118 @@ silently unconsidered.
 | Dungeon Master, Chaos Strikes Back | New category: **type-derived** (wall existence comes from cell type, stored on neither adjacent cell) | Slot-table family suspected (Black Crypt likely descends from this engine's design) | External prior art, not repo-verified |
 | Dungeon Master II | Probably type-derived like DM1/CSB, format likely diverges in specifics | Probably slot-table family, less certain than DM1/CSB | External prior art, lower confidence |
 | Elvira, Elvira II, Waxworks | Unknown | Unknown | Needs a real `game-re` pass against ScummVM's AGOS source before any claim |
+
+---
+
+## Second sweep (2026-08-15, part 2): what else did we miss
+
+Two follow-up questions: (a) are there other dungeon crawlers already sitting
+in `data/_unexplored_/` that the first pass didn't flag, and (b) are there
+other well-documented engines (ScummVM or otherwise) for the genre entirely
+missing from the corpus. Web-verified this time (not recalled-and-hedged like
+the Dungeon Master section above) — every genre claim below has a citation.
+
+### (a) Already in the corpus, missed by the first pass
+
+The first pass only looked at the games the user named. The rest of
+`data/_unexplored_/` wasn't screened for genre at all. Checked now, against
+each game's `ReadMe`/`Manual` locally plus external confirmation:
+
+| Directory | Game | Confirmed genre | Source |
+|---|---|---|---|
+| `abandonedplaces` | Abandoned Places: A Time for Heroes (1992, ArtGame) | Dungeon crawler, explicitly "plays similar to Dungeon Master" | [Wikipedia](https://en.wikipedia.org/wiki/Abandoned_Places:_A_Time_for_Heroes) |
+| `abandonedplaces2` | Abandoned Places 2 (1993, ICE) | Same engine family; local Manual text confirms ("five by five grid" inventory, repeated "dungeon" references) | [dungeoncrawlers.org](https://www.dungeoncrawlers.org/game/abandoned-places-2/); local `Manual` |
+| `CrystalDragon` | Crystal Dragon (1994, Magnetic Fields) | Dungeon crawler — "follows the same genre and setting as Dungeon Master" (my first-pass guess that this was a side-scroller was wrong; corrected here) | [OldGames.sk](https://www.oldgames.sk/en/game/crystal-dragon); [dungeoncrawlers.org](https://www.dungeoncrawlers.org/game/crystal-dragon/) |
+| `EvilsDoomAGA` | Evil's Doom (1996, Olympia Software) | Amiga dungeon crawler RPG (my first-pass guess that this was a Doom-style raycasting FPS was also wrong) | [dungeoncrawlers.org](https://dungeoncrawlers.org/game/evils-doom/) |
+| `HiredGuns` | Hired Guns (1993, DMA Design/Psygnosis) | RPG-shooter hybrid — 4 simultaneous first-person viewports, up to 4 players; grid-adjacent but a distinct split-screen multiplayer design, not a single-party crawler | [Wikipedia](https://en.wikipedia.org/wiki/Hired_Guns) |
+| `LiberationCD32` | Liberation: Captive II (1994, Mindscape) | Sci-fi RPG, sequel to *Captive* (1990) — "movements in the four directions in a pseudo-3D environment" (grid-stepped, not smooth/continuous) | [Wikipedia: Captive](https://en.wikipedia.org/wiki/Captive_%28video_game%29); [Wikipedia: Liberation](https://en.wikipedia.org/wiki/Liberation:_Captive_2) |
+| `Perihelion` | Perihelion: The Prophecy (1993, Morbid Visions/Psygnosis) | Cyberpunk RPG/dungeon-crawler | Wikipedia/MobyGames genre tags (search-confirmed, not independently re-checked) |
+| `Zombi` | Zombi (1990, Ubi Soft, Amiga port) | **Not** this genre — first-person action-adventure/survival (Dawn of the Dead-inspired mall exploration), not a grid-based combat dungeon crawler | [Wikipedia](https://en.wikipedia.org/wiki/Zombi_%281986_video_game%29) |
+
+Six of eight. Worth noting for calibration: two of my own first-pass guesses
+about these specific titles (Crystal Dragon as a side-scroller, Evil's Doom
+as a raycasting FPS) were wrong and caught only by actually checking —
+exactly the failure mode the rest of this document exists to avoid, so
+none of the six "confirmed dungeon crawler" rows above should be treated as
+more than "worth a `game-re` pass" until someone actually opens their data
+files. None are decoded here yet; none add a new row to either decision
+until that happens.
+
+### (b) Franchises not in the corpus at all, but documented (ScummVM or elsewhere)
+
+- **Might and Magic IV/V ("World of Xeen") — ScummVM, confirmed.** ScummVM
+  added a dedicated `xeen` engine; MM4 (*Clouds of Xeen*), MM5 (*Darkside of
+  Xeen*), the combined *World of Xeen*, and the fan expansion *Swords of
+  Xeen* are all playable through it — [ScummVM compatibility
+  page](https://www.scummvm.org/compatibility/2.1.2/mm:worldofxeen/),
+  [announcement](https://rpgwatch.com/news/world-of-xeen--supported-by-scummvm-40020.html).
+  Directly relevant to this project specifically: MM3's own maze-wall-word
+  decode this session already had to explicitly rule out "Xeen's `MazeData`"
+  as a false-cognate format (`docs/mm3/dosvga/data-structure.md`: "Xeen uses
+  a full 4-bit wall-type value where MM3 splits 3+1"), so Xeen's format is
+  already known to be **per-cell but differently packed** than MM1-3's — a
+  fifth per-cell variant if it's ever added, not a new category. Not present
+  in this corpus at all (no `data/_unexplored_/xeen`-style folder); would
+  need its own acquisition before any decode work.
+- **Ultima Underworld I/II — confirmed *not* ScummVM, but thoroughly
+  documented elsewhere.** The genre's other landmark title (1992, first
+  texture-mapped first-person dungeon crawler) was never a ScummVM target;
+  it has its own long-standing independent documentation instead — the
+  [Codex of Ultima Wisdom wiki's format
+  page](https://wiki.ultimacodex.com/wiki/Ultima_Underworld_internal_formats)
+  (`LEV.ARK`, level chunks, texture-list chunks — UW1 has "135 (0x87) entries,
+  9 levels × 15 blocks"), the independent [bootstrike.com format
+  spec](http://bootstrike.com/Ultima/Online/uwformat.php), and open-source
+  reimplementations/tools (`uwsav-dump`, the UWE map editor). Underworld's
+  engine is famous specifically for **not** being grid-locked the way every
+  game in the survey tables above is (smooth movement/rotation, tilted
+  floors, freeform texture mapping) — if it's ever added, it likely doesn't
+  fit *either* wall-storage category above, and its renderer almost
+  certainly doesn't fit either engine family in the rendering-engine section
+  (real texture-mapped 3-D, not a discrete-slot compositor at all). Flag
+  this as a probable **third+fourth** outlier alongside Dungeon Master's
+  type-derived wall model, not a trigger to force anything — same
+  "needs a second real consumer" caution as everywhere else in this doc.
+- **SSI "Gold Box" engine (Pool of Radiance, Curse of the Azure Bonds,
+  Secret of the Silver Blades, Pools of Darkness, the Krynn/Buck Rogers
+  spin-offs) — not ScummVM, real independent prior art exists.** An
+  [Amiga Development wiki reverse-engineering
+  project](http://amiga-dev.wikidot.com/project:pool-of-radiance) documents
+  Pool of Radiance's data files (`ByteKiller 2.0`-compressed, with a
+  cross-platform unpacker), and the [Gold Box
+  Companion](https://gbc.zorbus.net/)/Gold Box Explorer tools exist for
+  browsing the format generally. Recalled (not yet re-verified against these
+  specific sources' content), with the same hedge as the Dungeon Master
+  section: Gold Box's first-person view is primarily decorative — the
+  top-down auto-map is the real navigation tool, and the "3-D" window shows
+  one of a small library of static pre-drawn scene pictures selected by
+  matching the local wall pattern, not a per-depth composited render the way
+  DM/EOB/MM/BC are. If that holds up, Gold Box's renderer is **simpler than
+  every family in this document** — a single-picture lookup, not a
+  multi-slot compositor — and wouldn't need either existing family or the
+  MM3-compat superset. Map data storage model (per-cell vs. otherwise) not
+  established even at hypothesis level yet.
+- **Bard's Tale I/II/III — not ScummVM, deep independent community
+  documentation.** [Kroah's Game Reverse Engineering
+  page](http://bringerp.free.fr/RE/BardsTale/bard1.php5), a [Z80
+  disassembly on GitHub](https://github.com/Bedazzle/Bards-tale) (ZX
+  Spectrum port), and the [bardstale.brotherhood.de
+  wiki](https://bardstale.brotherhood.de/) collectively document walls,
+  doors, "specials" (spinners, teleporters), monster placement, and message
+  triggers; the IBM PC level data is Huffman-compressed. Predates Dungeon
+  Master (1985 vs. 1987) and, like Gold Box, is generally understood to use
+  a simpler nested-rectangle/static-picture first-person view rather than
+  DM-style real compositing — same "simpler than everything in this
+  document" hypothesis as Gold Box, same low confidence pending a real
+  pass. Not present in this corpus.
+
+**Net effect on the recommendation**: none of this changes the "don't force
+a merge yet" stance — if anything it reinforces it. The genre spans at least
+four structurally distinct wall-storage ideas now (per-cell redundant,
+shared-edge, Dungeon Master's type-derived, Ultima Underworld's freeform/
+non-grid) and at least three renderer shapes (slot-table, frustum, MM3's
+probe/chain dispatch, plus a plausible fourth "static picture lookup" for
+Gold Box/Bard's Tale, plus Underworld's real 3-D outside all of them) — more
+variety than four games justified normalising around, not less. The concrete
+next step, if any of this is worth pursuing, is a real `game-re` pass on
+whichever one game is most wanted next, not a speculative schema change.
