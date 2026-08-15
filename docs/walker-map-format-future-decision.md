@@ -2,7 +2,9 @@
 
 **Status: deferred** — more games need decoding before committing to one model.
 This document collects the findings so far so the decision can be made with full
-context when the time comes.
+context when the time comes. Scope grew 2026-08-15 to also cover **rendering
+engine** normalisation (not just wall-storage format) — see that section below;
+same "defer" conclusion, same reasoning.
 
 ---
 
@@ -153,3 +155,194 @@ normalise it on import and simplify the schema. If another game uses it, keep bo
 
 The conversion from shared-edge to per-cell is cheap (one pass, no information loss
 for read-only maps), so deferring costs nothing — the option remains open.
+
+---
+
+## Rendering engine normalisation (2026-08-15 survey)
+
+A parallel question to the map-*format* one above: are the walker's rendering
+engines themselves bespoke per game, or already normalised? Prompted by a user
+question during MM3 walker debugging. Findings:
+
+### Already two shared families, not five bespoke engines
+
+| Family | Games | Renderer | Art representation |
+|---|---|---|---|
+| Slot-table / `DrawItem` composite | Black Crypt, Wizardry 6 | `@seer-project/dungeon`: `buildViewList.ts` (BC) / `tools/wizardry6/view-model.ts` (W6) emit `DrawItem[]`, composited by `compositeDrawList`/`IndexedSurface`/`CanvasPresenter` | Indexed (EHB/VGA-ramp) palette raster |
+| Frustum blit engine | MM1, MM2 | `tools/walker-mm/maze3d.ts` (`buildIndoorScene`), draws `Blit`s straight to canvas via `drawImage` | Full-colour RGB sprite sheets |
+| Bespoke (unshared) | MM3 | `tools/walker/mm3-indoor-view.ts` `buildWallList`, own 44-slot chain/guard dispatch, straight to canvas | Full-colour RGB sprite sheets |
+
+So today's real shape is **two normalised engines covering four games, plus one
+holdout**, not five one-off renderers. Both existing normalisations already carry
+per-game config as *data*, matching exactly what was asked about (forward/lateral
+depth, animation speed):
+
+- Slot-table family: `SlotTableFile.depthCount`, `.lateralOffsets`,
+  `.frontWallMaxDepth` (view extent); `AnimRef.ticksPerFrame`/`.periodTicks`/
+  `.phase` (animation, e.g. Black Crypt's torches) — all in `slots.json`, none
+  hardcoded in `buildViewList.ts` or the compositor.
+- Frustum family: `maze3d.ts`'s depth-lane/blit-size tables are shared code, but
+  per-screen wall-art selection (which `.32`/WALLPIX slice per lane) is already
+  per-game/per-screen data (`wallEntries`, env lookup).
+
+### Why MM3 doesn't fit either existing family
+
+**Not the frustum family**: MM3 needs richer geometry than a few frustum lanes —
+every one of 44 real screen positions (not just depth-0-front) needs its own real
+per-position frame (confirmed against disassembly; using the frustum here was
+tried first and is still the walker's degraded fallback when MM3's own table
+fails to load — see `docs/walker-mm.md`).
+
+**Not the slot-table family, without extending it** — this is the more
+interesting gap, worth stating precisely. `SlotTableFile.slots` is a **direct
+lookup**: one fixed screen key (`"front:<lateral>:<depth>"` etc.) → one `Slot`
+(a fixed list of `PieceDraw`s), looked up unconditionally by `pushSlot`
+(`buildViewList.ts`). It has *no* concept of "draw different art depending on
+what kind of wall is here" built into the data — Black Crypt's own kind-varying
+features (open/closed doors, alcove orientation) are **not** expressed in
+`slots.json` at all; they're bespoke hardcoded TypeScript (`pushDoor`'s
+`DOOR_FRAME_SLOTS`/`DOOR_LEAF_SLOTS` tables, `pushProps`'s per-type gating) that
+sits *beside* the data-driven slot table, one function per feature class.
+
+MM3's own system is a genuine generalisation of that exact problem: 44
+geometry probes (`Slot.geom[facing] → (dx,dy,mask)`) each resolve a nearby
+cell's wall-kind (0–7) and, via a per-probe 7-way dispatch (`Slot.arms[kind]`),
+set a subset of a shared flag pool; a separate list of ~54 content **chains**
+(keyed by output sprite, not by screen position) each check a suppression
+precondition (`pre`: any of these flags active → don't fire — MM3's occlusion
+mechanism, since chains can spatially overlap) and then draw the first `item`
+whose `guards` intersect the active flags. That's expressive enough to cover
+"7 possible wall kinds × 44 positions × torch-flicker × side-alternation" as
+*data*, where Black Crypt currently needs one bespoke function per kind-varying
+feature. See `tools/walker/mm3-indoor-view.ts` and
+`docs/mm3/dosvga/data-structure.md` "Indoor 3-D view" for the real, verified
+shape this is generalising from.
+
+### Recommendation
+
+Same as the map-format question above: **don't force a merge yet.** Two
+normalisations already happened opportunistically, where the underlying games
+were similar enough that sharing cost nothing. MM3 needed its own fidelity-first
+decode instead of being bent to fit an existing engine, and that paid off
+directly — the real disassembly-traced chain table is what let the recent
+mirror-origin bug (`tools/walker/games-mm3.ts` `blitSprite`) be found and fixed
+precisely, instead of papering over a symptom. Forcing MM3 into the slot-table
+schema now, for a game family with no other members, would trade that fidelity
+for an abstraction with no second user yet.
+
+The concrete trigger to revisit: **a future game whose per-position art depends
+on more than one discrete "kind" value with real occlusion between pieces** (the
+thing MM3 needed and Black Crypt/W6 haven't). If one shows up, the superset
+schema below is the shape to build toward — until then it's a sketch, not a
+plan.
+
+---
+
+## MM3-compatible superset schema (sketch)
+
+Not a proposal to implement now — a concrete answer to "what would it take,"
+kept ready for the trigger condition above. Purely **additive** to
+`SlotTableFile` (`@seer-project/dungeon`'s `schema/slots.ts`): existing
+`slots`/`staticSlots`/`banks`/`ordering` fields, and every current consumer
+(`buildViewList.ts`, `view-model.ts`), are untouched. A game opts in by
+populating the two new fields instead of (or alongside) `slots`.
+
+```typescript
+/** One of the 44-style view-geometry probes MM3's `Slot.geom` represents,
+ * generalised: for a given facing, which nearby cell/edge to query, and how
+ * a raw wall-kind value there maps to flags in the shared pool below. */
+interface GeometryProbe {
+  id: string;
+  /** Per facing (index = Dir4): [dx, dy, edgeMask] — same shape as MM3's
+   * `Slot.geom[facing]`, `edgeMask` selecting which of the queried cell's
+   * edges/kind field to read (game-specific encoding, opaque to the schema —
+   * `CellQuery`-level, same abstraction `evalCellFace` already uses). */
+  geom: [dx: number, dy: number, edgeMask: number][];
+  /** Raw kind value (0..N) -> flag ids to activate. Index = kind. Mirrors
+   * MM3's `Slot.arms[kind]`. */
+  arms: string[][];
+}
+
+/** A conditional draw, generalising MM3's `Spec` (`imm`/`alt`/`alt2`/`pair`/
+ * `pairinv`/`torch`) — picks a concrete value from per-redraw state. Reuses
+ * `AnimRef`'s tick-driven idea for the common animated case instead of a
+ * bespoke enum; `pair`/`pairinv`/`alt2` cover MM3's side-wall-alternation
+ * idioms specifically (a 2-entry toggle keyed off a redraw counter, and its
+ * left/right-inverted sibling — see `docs/mm3/dosvga/data-structure.md`
+ * "Indoor 3-D view", DS `0x185`). */
+type ConditionalValue =
+  | number
+  | AnimRef
+  | { kind: 'toggle'; values: [number, number]; invert?: boolean };
+
+interface ConditionalItem {
+  /** Fires only if at least one of these flags is active. Empty = always. */
+  guards: string[];
+  destX: number;
+  destY: number;
+  frame: FrameRef | ConditionalValue;
+  mirrorX?: ConditionalValue | boolean;
+  blend?: BlendMode;
+}
+
+/** Generalises MM3's `Chain`: content keyed by what it draws, not by a fixed
+ * screen slot, because a chain's screen position can depend on which item
+ * fires (MM3: alternating left/right pair frames at the same x,y but a chain
+ * can also represent occlusion-gated variants at different positions). */
+interface ConditionalChain {
+  bank: string;
+  /** Suppresses the whole chain if any of these flags is active — MM3's
+   * occlusion mechanism (a nearer piece's flag blocks a farther chain that
+   * would otherwise overlap it). Empty = never suppressed. */
+  pre: string[];
+  /** Evaluated in order; the first item whose `guards` intersect the active
+   * flag set draws (mirrors MM3's `buildWallList`: "for each chain, for each
+   * item in order, first match wins, then move to the next chain"). */
+  items: ConditionalItem[];
+}
+
+interface SlotTableFile {
+  // ...existing fields unchanged...
+
+  /** Opt-in probe/chain dispatch (MM3-style). A consumer that populates this
+   * runs probes once per redraw to build the active flag set, then evaluates
+   * every chain against it — see `tools/walker/mm3-indoor-view.ts`
+   * `buildWallList` for the reference algorithm this generalises (keep them
+   * in sync if this is ever implemented for real; that function is verified
+   * against a live-disassembly oracle and should stay the source of truth
+   * for the dispatch order/semantics, not be redesigned from scratch here). */
+  probes?: GeometryProbe[];
+  chains?: ConditionalChain[];
+}
+```
+
+Notes on the design, not just the shape:
+
+- **Why chains key by content, not position** — a direct `Record<posKey,
+  Slot>` (like today's `slots`) can't express "this position's art depends on
+  a *combination* of nearby cells' kinds, and a nearer combination should
+  suppress a farther one" without either duplicating the position key per
+  kind-combination (combinatorial blow-up — MM3 has up to 7 kinds × several
+  contributing probes per screen position) or adding conditional logic
+  *inside* a slot (which is what `chains`/`pre`/`guards` are — just factored
+  out as their own list instead of nested inside `Record<string, Slot>`).
+- **Backward compatible by construction**: `probes`/`chains` are optional; a
+  consumer that doesn't set them (BC, W6 today) never evaluates them. A future
+  MM3-style consumer could *also* use plain `slots` for its simple fixed
+  pieces (ceiling/floor `staticSlots`, exactly as MM3's own walker already
+  does for its floor/sky backdrop) and only reach for `probes`/`chains` where
+  real kind-dependent dispatch is needed.
+- **What this would buy Black Crypt for free, if adopted retroactively**: its
+  door-frame/door-leaf open-vs-closed dispatch (`pushDoor`'s hardcoded
+  `DOOR_FRAME_SLOTS`/`DOOR_LEAF_SLOTS`) and alcove-orientation gating
+  (`pushProps`) are exactly the kind of "one screen position, several possible
+  contents selected by a discrete state" problem `chains`/`guards` generalise
+  — they could become data instead of one bespoke function per feature class.
+  Not a reason to do this now (nothing is broken there today), but a sign the
+  abstraction has a real second use, not just a fit-MM3-and-stop shape.
+- **Deliberately not attempted**: unifying `PieceDraw`/`ConditionalItem`
+  outright (they're kept as two related-but-separate shapes above) or folding
+  `probes`/`arms` into `CellQuery`/`evalCellFace` directly. Both are real
+  follow-on questions but need a second real consumer to design against —
+  guessing the right shape from one data point (MM3) risks the same trap this
+  whole document exists to avoid with the map-format question.
