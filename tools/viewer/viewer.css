@@ -42,7 +42,14 @@ button:focus-visible, select:focus-visible, input:focus-visible, .item:focus-vis
   display: flex; flex-direction: column; overflow: hidden;
 }
 #sidebar-header { padding: 10px; border-bottom: 1px solid var(--border); }
-#sidebar-header h1 { font-size: 14px; margin-bottom: 6px; color: var(--text-primary); }
+#sidebar-header h1 { font-size: 14px; color: var(--text-primary); }
+.sidebar-header-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.nav-link {
+  color: var(--text-secondary); font-size: 11px; text-decoration: none;
+  padding: 3px 8px; border: 1px solid var(--border-control); border-radius: var(--radius); background: var(--bg-input);
+  white-space: nowrap;
+}
+.nav-link:hover { border-color: var(--border-control-hover); }
 #game-selector {
   display: flex; gap: 6px; margin-bottom: 6px;
 }
