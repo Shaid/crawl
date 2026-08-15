@@ -266,15 +266,47 @@ and Xeen uses a full 4-bit wall-type value where MM3 splits 3+1.
 Assuming Xeen-compatibility here would silently produce a
 plausible-looking but 90°-rotated decode.
 
-**Outdoor mazes (ids 41–64) are a different union member**: the same u16
-is terrain layers (low nibble = surface variant, the other three =
-overlay/sprite layers), not per-side walls — detected via "graphic-set
-table at trailer +0x00 is nonzero" (true for exactly those 24 ids and no
-others). The 6x4 outdoor grid tiles as `section = 41 + 4*col + row`
-(A1=41 … F4=64), matching the world's `n+4 = east, n+1 = south` layout —
-see the world-map verification below. The individual overlay-layer roles
-(surface vs. the 3 higher layers) aren't code-traced yet — see TODO
-`mm3-maze-outdoor-layers`.
+**Outdoor mazes (ids 41–64) are a different union member — SOLVED.** The
+same u16 keeps its 4 blocking bits (bits 3/7/11/15, unchanged W/S/E/N —
+read by the party's own step check at file `0x30387` and by monster AI,
+with no outdoor guard, so `blocked()` stays valid outdoors even though
+asymmetric, ~72% reciprocal, authored data) but repurposes only the two
+3-bit index fields: **bits 0–2 = overlay/scenery sprite index** (tall art:
+`mount, ltree, dtree, higrass, snotree, snomtn, swmtree, lavamtn, palms`,
+always exactly 3 frames) and **bits 4–6 = ground/surface sprite index**
+(flat art: `grass, dirt, road, snow, swamp, lava, desert`, always exactly
+25 frames) — both indexing the maze trailer's 7 graphic-set slots the same
+way indoor walls index their 7 wall-file slots
+(`handle[N] = TERRAIN_NAMES[trailer[N-1]]`, filled by `LoadMazeGraphics`
+file `0x34847`–`0x348AE`). Index 0 in the ground field means ocean — the
+game draws nothing there and a fixed `water.vga` backdrop (216x73 at
+screen (8,67)) shows through underneath everything, `day`/`night.vga`
+(216x59 at (8,8), chosen by clock) fills the sky. Bits 8–10 and 12–14 are
+**dead**: exhaustively confirmed no code anywhere reads them (all 139
+wall-accessor call sites and all 4 direction-mask tables enumerated; the
+only masks that ever reach the accessor are
+`{7,70,700,7000,8,80,800,8000,7777}`). Bit 12 is non-zero on exactly the
+1062 ocean cells (816 of them shoreline) — map-authoring residue with no
+runtime consumer, not a decode gap.
+
+Rendering: `BuildOutdoorDrawList` (file `0x1065A`–`0x1269B`, segment
+`124F:006A`), dispatched at file `0xB869` on `[DS 0x15b]` (set true iff
+`mazeId` is 41–64), draws two fixed backdrops (sky, water) then 25 ground
+draws (mask `0x70>>4`, frame from a 2-entry step-alternator table or a
+literal for the centre column) then 25 overlay draws (mask `0x7`, literal
+frame 0/1/2, `flags` bits 8–9 selecting a 4-level decimating shrink — see
+the "Indoor 3-D view" section's blit note, same driver routine) — all at
+fixed `(dx,dy)` screen offsets shared with the indoor view's own 46-slot
+per-facing tables (file `0x12C8`/`0x1380`). The 6x4 outdoor grid tiles as
+`section = 41 + 4*col + row` (A1=41 … F4=64), matching the world's `n+4 =
+east, n+1 = south` layout — see the world-map verification below.
+Verified: 0/4717 cross-corpus violations of the flat/tall partition above;
+49,152 simulated views / 897,106 draws / 0 out-of-range frame refs / 0
+missing sprites; real per-facing renders (forest, road, shoreline, ocean,
+lava, snow) all coherent; a real-art top-down world map reproduces `World
+Map.jpg` down to per-cell mountain ridges and forest patches. See TODO
+`mm3-outdoor-view-port` for promoting this into the extraction pipeline
+(`scripts/mm3lib/`) and the walker.
 
 ### Trailer `0x300..0x33F` (confirmed unless noted)
 
@@ -424,8 +456,17 @@ exactly as above; `frame*4 + 2` lands on the sprite container's own
 documented above). Dispatches to the already-documented blit routine
 (`vga`+0x1D70) with `flags` bit 0 = horizontal mirror, bit 1 = **clip to
 the 3-D view window** (`vga`+0x2158, hard-codes x ∈ [8, 224) — 216 px —
-partially answers `mm3-dos-blit-variants`; bits 8–9/15 remain
-unidentified).
+partially answers `mm3-dos-blit-variants`).
+
+> **Correction (2026-08-15):** `flags` bits 8–9 are no longer
+> unidentified — found while tracing the outdoor renderer (same driver).
+> `vga`+0x1D70 masks `flags &= 0x303`; bits 8–9 select a **proportional
+> decimating blit** (`vga`+0x1EDC, 4-entry bit-pattern table at
+> `vga`+0xB6A = `{0xFFFF, 0xDB6D, 0xA529, 0x8421}` = 16/16, 11/16, 7/16,
+> 4/16 pixels kept, applied to both rows and columns) — the mechanism the
+> outdoor view uses for its per-depth overlay shrink. Bit 15 is still
+> unconfirmed for the indoor view specifically (not exercised by any
+> traced indoor call site).
 
 **wl4 usage** (`<series>wl4.vga` — every series has 31 frames, not one
 216×71 sprite as an earlier pass's bounding-box read implied): frame 29
