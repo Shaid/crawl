@@ -539,25 +539,13 @@ until that happens.
   fifth per-cell variant if it's ever added, not a new category. Not present
   in this corpus at all (no `data/_unexplored_/xeen`-style folder); would
   need its own acquisition before any decode work.
-- **Ultima Underworld I/II — confirmed *not* ScummVM, but thoroughly
-  documented elsewhere.** The genre's other landmark title (1992, first
-  texture-mapped first-person dungeon crawler) was never a ScummVM target;
-  it has its own long-standing independent documentation instead — the
-  [Codex of Ultima Wisdom wiki's format
-  page](https://wiki.ultimacodex.com/wiki/Ultima_Underworld_internal_formats)
-  (`LEV.ARK`, level chunks, texture-list chunks — UW1 has "135 (0x87) entries,
-  9 levels × 15 blocks"), the independent [bootstrike.com format
-  spec](http://bootstrike.com/Ultima/Online/uwformat.php), and open-source
-  reimplementations/tools (`uwsav-dump`, the UWE map editor). Underworld's
-  engine is famous specifically for **not** being grid-locked the way every
-  game in the survey tables above is (smooth movement/rotation, tilted
-  floors, freeform texture mapping) — if it's ever added, it likely doesn't
-  fit *either* wall-storage category above, and its renderer almost
-  certainly doesn't fit either engine family in the rendering-engine section
-  (real texture-mapped 3-D, not a discrete-slot compositor at all). Flag
-  this as a probable **third+fourth** outlier alongside Dungeon Master's
-  type-derived wall model, not a trigger to force anything — same
-  "needs a second real consumer" caution as everywhere else in this doc.
+  (Considered and deliberately excluded: **Ultima Underworld I/II**. It's a
+  landmark first-person dungeon game and well documented independently of
+  ScummVM (Codex of Ultima Wisdom's format page, `LEV.ARK` spec, `uwsav-dump`),
+  but it isn't a "blobber" — smooth movement/rotation, tilted floors, real
+  texture-mapped freeform 3-D, not a party-as-one-blob grid stepper. That's
+  a different genre from every game in this survey, not an outlier member of
+  it, so it doesn't belong in this document.)
 - **SSI "Gold Box" engine (Pool of Radiance, Curse of the Azure Bonds,
   Secret of the Silver Blades, Pools of Darkness, the Krynn/Buck Rogers
   spin-offs) — not ScummVM, real independent prior art exists.** An
@@ -593,11 +581,10 @@ until that happens.
 
 **Net effect on the recommendation**: none of this changes the "don't force
 a merge yet" stance — if anything it reinforces it. The genre spans at least
-four structurally distinct wall-storage ideas now (per-cell redundant,
-shared-edge, Dungeon Master's type-derived, Ultima Underworld's freeform/
-non-grid) and at least three renderer shapes (slot-table, frustum, MM3's
-probe/chain dispatch, plus a plausible fourth "static picture lookup" for
-Gold Box/Bard's Tale, plus Underworld's real 3-D outside all of them) — more
-variety than four games justified normalising around, not less. The concrete
-next step, if any of this is worth pursuing, is a real `game-re` pass on
-whichever one game is most wanted next, not a speculative schema change.
+three structurally distinct wall-storage ideas now (per-cell redundant,
+shared-edge, Dungeon Master's type-derived) and at least three renderer
+shapes (slot-table, frustum, MM3's probe/chain dispatch, plus a plausible
+fourth "static picture lookup" for Gold Box/Bard's Tale) — more variety than
+four games justified normalising around, not less. The concrete next step,
+if any of this is worth pursuing, is a real `game-re` pass on whichever one
+game is most wanted next, not a speculative schema change.
