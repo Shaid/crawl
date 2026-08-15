@@ -601,6 +601,19 @@ export class MM3View implements GameView {
     return true;
   }
 
+  /**
+   * `y` increases **north** (`docs/mm3/dosvga/data-structure.md` "x east /
+   * y north", confirmed by `STEP_DY`'s facing-N = `+1`), so a north-up
+   * canvas needs row `y` drawn `MAP_GRID-1-y` cells from the top — not
+   * `y` directly. Getting this wrong doesn't just flip the map: the walls
+   * still render (self-consistently) in a *south*-up orientation, while
+   * the facing arrow below is drawn with the ordinary north-up assumption
+   * (`dy=-1` = up = facing N) — the two disagreed about which way was up.
+   * For an E/W-facing party the minimap's up/down maps to the first-person
+   * view's left/right, so that mismatch reads as "the map shows this
+   * closed, but the 3-D view shows it open" on exactly the side that's
+   * actually correct — found from a user screenshot report.
+   */
   renderMinimap(ctx: CanvasRenderingContext2D, size = 224): void {
     const sc = this.maze.screen;
     const cell = size / MAP_GRID;
@@ -614,15 +627,15 @@ export class MM3View implements GameView {
         const v = sc.visual[y * MAP_GRID + x] as number;
         const nib = (dir: number) => (v >> (dir * 2)) & 3;
         const px = x * cell;
-        const py = y * cell;
-        if (nib(0) !== 0) ctx.fillRect(px, py, wallW, cell);
-        if (nib(1) !== 0) ctx.fillRect(px, py, cell, wallW);
-        if (nib(2) !== 0) ctx.fillRect(px + cell - wallW, py, wallW, cell);
-        if (nib(3) !== 0) ctx.fillRect(px, py + cell - wallW, cell, wallW);
+        const py = (MAP_GRID - 1 - y) * cell;
+        if (nib(0) !== 0) ctx.fillRect(px, py, wallW, cell); // W -> left edge
+        if (nib(1) !== 0) ctx.fillRect(px, py + cell - wallW, cell, wallW); // S -> bottom edge
+        if (nib(2) !== 0) ctx.fillRect(px + cell - wallW, py, wallW, cell); // E -> right edge
+        if (nib(3) !== 0) ctx.fillRect(px, py, cell, wallW); // N -> top edge
       }
     }
     const px = this.pose_.x * cell + cell / 2;
-    const py = this.pose_.y * cell + cell / 2;
+    const py = (MAP_GRID - 1 - this.pose_.y) * cell + cell / 2;
     ctx.fillStyle = '#ff3030';
     ctx.beginPath();
     ctx.arc(px, py, Math.max(2, cell / 5), 0, Math.PI * 2);

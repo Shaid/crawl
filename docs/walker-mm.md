@@ -131,18 +131,26 @@ The user also reported two MM3 issues from actually playing it:
   matching the documented "corridor slides past you as you walk" effect
   instead of flickering continuously.
 - **"the right-hand side-walls render as open corridors when they should
-  be closed"** — investigated, **not reproduced**, still open. Checked
-  the underlying data/algorithm exhaustively: a synthetic single-wall
-  probe is exactly symmetric left/right at every depth and facing; a
-  corpus-wide real-data sweep (all 81 indoor mazes, filtered to genuinely
-  unobstructed corridors so occlusion doesn't confound the count) shows
-  **0% missing draws on both sides at every depth** — left and right are
-  provably identical in the data/algorithm layer. A live Playwright
-  screenshot of a real one-sided corridor (maze 4 "Swamp Town" (7,1)
-  facing N — plain wall east/right, open west/left at depths 1-2) also
-  rendered correctly: right closed, left open. Possibly this was actually
-  the mirroring bug above (rapid alternation reads as "the wall keeps
-  changing/disappearing" at a glance) — now fixed, worth re-checking
-  live; if it still reproduces, the next step is a specific maze/position/
-  facing from the user, since exhaustive corpus + live spot-checks found
-  no data-layer bug to explain it.
+  be closed"** — **fixed** (root cause found, not in the 3-D view). First
+  checked the underlying wall data/algorithm exhaustively (a synthetic
+  single-wall probe symmetric left/right at every depth and facing; a
+  corpus-wide real-data sweep across all 81 indoor mazes, filtered to
+  genuinely unobstructed corridors so occlusion doesn't confound the
+  count, showing 0% missing draws on either side at every depth) and a
+  live spot-check render — all correct, so the 3-D view itself was never
+  the bug. The user then supplied a screenshot: an east-facing position
+  where the **minimap** was being read as "closed" on a side the 3-D view
+  correctly rendered open. The bug was in `MM3View.renderMinimap`
+  (`tools/walker/games-mm3.ts`): maze `y` increases **north** (confirmed
+  by `STEP_DY`), but the minimap drew row `y` at canvas row `y` directly
+  — self-consistently south-up (drawing each cell's north wall at its own
+  *bottom* edge), while the facing-direction arrow a few lines later
+  assumed the ordinary north-up convention (`dy=-1` = up = facing N). The
+  two halves of the same function disagreed about which way was up. For
+  an E/W-facing party the minimap's up/down axis maps to the first-person
+  view's left/right, so the mismatch reads exactly as "the map shows this
+  side closed, the view shows it open" — on whichever side is actually
+  correct. Fixed by drawing row `y` at `MAP_GRID-1-y` (north-up, matching
+  the arrow) instead of changing the arrow. Verified live: a party at the
+  maze's northernmost row (`y=15`) now renders at the top of the minimap,
+  not the bottom.
