@@ -346,3 +346,143 @@ Notes on the design, not just the shape:
   follow-on questions but need a second real consumer to design against —
   guessing the right shape from one data point (MM3) risks the same trap this
   whole document exists to avoid with the map-format question.
+
+---
+
+## Further prior-art survey (2026-08-15): games in `data/_unexplored_/`
+
+Asked directly: of the games sitting in `data/_unexplored_/` but not yet
+decoded here, which are "easy" because prior art (ScummVM, long-standing fan
+RE communities) already documents them, and how would they land in the two
+decisions above? Confidence is graded per game — **this repo** (actually
+decoded/verified against real files here) is a different tier from
+**external prior art** (well-established public documentation, not yet
+cross-checked against the specific files in this corpus) is a different tier
+again from **general recall, needs real RE**. Don't skip straight to treating
+any of these as settled the way the "Per-game survey" table above is — that
+table is repo-verified; this one mostly isn't yet.
+
+### Eye of the Beholder 1/2 and Lands of Lore — confirmed, already this repo's tier 1
+
+Not new findings, just closing the loop the user asked about: EOB1
+(`docs/eotb/`), EOB2 (`docs/eotb2/`), and Lands of Lore (`docs/landsoflore/`)
+are **already decoded in this repo**, sourced directly from ScummVM's engine
+source (`docs/eotb/TODO.md`'s "2026-08-02, ScummVM source" entries) and the
+public ModdingWiki EOB maze-format page. All three are per-cell redundant,
+and — a nice confirmation of the family resemblance already claimed in the
+survey table above — **Lands of Lore doesn't even have its own maze format**:
+its `.CMZ` is "just an LCW-compressed copy of the same MAZ grid format EOB
+uses" (`docs/landsoflore/landsoflore-formats-research.md:10-11`), `CHAR[N][4]`
+N/E/S/W bytes per tile, byte-for-byte the same shape as EOB's `.MAZ`
+(`docs/eotb/amiga/eotb-maze-spec.md`). These three add zero new rows to the
+map-format decision (already "per-cell redundant", already in the table) —
+their real relevance is to the **rendering-engine** question: no walker
+exists for any of them yet, so which family (if either) they'd join is still
+open. Given their per-cell wall storage and door/decoration-as-separate-flag
+model reads structurally close to Black Crypt's, the slot-table family is the
+first thing to try when a walker gets built — worth checking against the
+MM3-compat superset above only if that turns out not to be enough (their
+`.MAZ`/`.INF` door and decoration model looks close to Black Crypt's own
+prop/door mechanism, not MM3's richer per-position kind dispatch, but this is
+a hypothesis to test against real decode work, not yet a finding).
+
+### Dungeon Master, Chaos Strikes Back, Dungeon Master II — external prior art, likely a third wall model
+
+**Not decoded in this repo** (`data/_unexplored_/DungeonMaster{,2}`,
+`ChaosStrikesBack` — Amiga WHDLoad dumps, `Dungeon.DAT`/`DungeonF.DAT`/
+`DungeonG.DAT` headers spot-checked, not parsed). The map format itself is
+**exceptionally well documented publicly** — decades of community reverse
+engineering (the long-standing "Dungeon Master Encyclopaedia" fan site, plus
+open-source engine reimplementations) have produced a mature, widely-cited
+spec, distinct from ScummVM (DM was never a ScummVM target — it's not a
+SCUMM-family adventure game). Recalled from that public prior art, **not yet
+cross-checked against this repo's own dump**, so treat the specifics below as
+a hypothesis to verify, not a citation-grade fact the way the EOB/LoL section
+above is:
+
+- DM's dungeon grid doesn't store per-face wall bytes **at all** — each
+  square has a *type* (Wall, Open/Corridor/Room, Diagonal corner (4
+  variants), Pit, Stairs, Door, Teleporter, ...) and a square only ever
+  blocks movement/renders as a wall because *it itself* is Wall-typed, not
+  because a neighbouring Open square carries a "there's a wall here" byte.
+  Whether a given Open square shows a wall face on its north side is
+  computed by asking "is my north neighbour a Wall square", not stored
+  redundantly per-cell (per-cell model) or once per shared edge (shared-edge
+  model) — the wall's existence is *derived from cell type*, stored on
+  neither adjacent walkable cell. That's a **third category** neither of the
+  two models above describes cleanly: call it **type-derived** for this
+  document. It happens to guarantee the same consistency shared-edge does
+  (a wall can't disagree with itself since there's only one type value per
+  square, not per face), for a different structural reason.
+- Doors are their own square type with an orientation bit (does the door
+  bisect the square N-S or E-W) rather than a face value — closer in spirit
+  to Wizardry 6's `feature`/`orient` planes than to per-cell face bytes.
+  Items/monsters are a separate per-square linked list, same shape as EOB's
+  already-noted "objects in a separate linked list indexed by cell".
+- Chaos Strikes Back reuses DM1's engine and format essentially unchanged
+  (same developer, same year, positioned as an expansion) — high confidence
+  by genre/production-history reasoning, not independently checked here.
+  Dungeon Master II (1995, different era, adds diagonal movement and
+  higher-resolution VGA art) is likely a related but **not** byte-identical
+  format — lower confidence than the DM1/CSB claim, flagged separately in
+  case a future pass finds it diverges more than expected.
+
+**Rendering-engine hypothesis, same confidence caveat**: DM's classic
+first-person viewport is composited from a fixed set of named screen
+positions (per depth/lateral slot, plus static floor/ceiling, plus animated
+door-slab frames as the door slides open) — structurally the same shape as
+the slot-table family's `Slot`/`PieceDraw` model, *not* MM3's richer flag/
+chain dispatch (DM's per-position content is driven by one adjacent cell's
+type, not a multi-probe occlusion-gated combination). Worth stating plainly:
+**Black Crypt is a Dungeon-Master-styled dungeon crawler**, and the existing
+`SlotTableFile` shape (`schema/slots.ts`'s own doc comment: "This is the file
+M1 hand-authors from Black Crypt's fully-numeric front-wall/side-wall
+placement tables") reads as directly descended from this exact family of
+engine design. If that holds up under real decode work, DM/CSB (and possibly
+DM2) would be the slot-table family's **third and fourth members**, not a
+new bespoke engine and not a trigger for the MM3-compat superset — genuinely
+good news for the "don't force normalisation" stance above, since it'd mean
+the existing abstraction already covers more of the genre than the four
+currently-implemented games suggest.
+
+### Elvira, Elvira II, Waxworks (AGOS engine) — needs real RE, not just citation
+
+**Lowest confidence tier of this survey — do not treat anything below as
+established.** These three (plus Simon the Sorcerer 1/2, Personal Nightmare,
+The Feeble Files) are commonly grouped under Adventure Soft's "AGOS" engine,
+which ScummVM does support (`engines/agos/`) — but AGOS's ScummVM
+implementation is documented and battle-tested for its point-and-click
+adventure/puzzle mode, which is the bulk of what those games are. Elvira 1,
+Elvira 2, and Waxworks each *also* have a first-person real-time dungeon-
+crawl combat sub-mode (a comparatively minor feature of a much larger
+adventure game), and general recall does not extend to that sub-mode's map
+data format with any real confidence — unlike Dungeon Master above, this
+isn't "well-documented, just not cross-checked here," it's "plausibly
+documented somewhere in the ScummVM source or wiki, not established from
+memory." A quick look at the actual corpus here doesn't help narrow it down
+either: `data/_unexplored_/{Elvira,Elvira2,Waxworks}/data/*.pkd` are opaque
+packed/compressed resource blobs (no readable structure without AGOS's own
+decompressor), consistent with AGOS's known "VGA" resource-bundle
+convention but not informative on their own.
+
+**Before this franchise can be added to either survey table for real**, the
+next step is a proper `game-re` pass against ScummVM's actual `engines/agos/`
+source (the same approach that produced the EOB1 findings above, not a
+recall-and-hope pass like the DM section) — specifically the dungeon/combat
+sub-mode's room/grid data structure and its renderer, if ScummVM implements
+that mode at all (worth confirming first; it's possible ScummVM treats the
+combat sub-mode as out of scope the way it's historically deprioritised some
+minigames in other engines). Until then: **no claim about AGOS's wall model
+or rendering shape belongs in either decision** — this section exists to
+record that the gap was checked and found to need real work, not to leave it
+silently unconsidered.
+
+### Summary for the two decisions
+
+| Game | Map-format fit | Rendering-engine fit | Confidence |
+|---|---|---|---|
+| EOB1, EOB2 | Per-cell redundant (existing category) | Untested; slot-table family suspected | This repo (format); untested (renderer) |
+| Lands of Lore | Per-cell redundant, byte-identical to EOB's | Untested; slot-table family suspected | This repo (format); untested (renderer) |
+| Dungeon Master, Chaos Strikes Back | New category: **type-derived** (wall existence comes from cell type, stored on neither adjacent cell) | Slot-table family suspected (Black Crypt likely descends from this engine's design) | External prior art, not repo-verified |
+| Dungeon Master II | Probably type-derived like DM1/CSB, format likely diverges in specifics | Probably slot-table family, less certain than DM1/CSB | External prior art, lower confidence |
+| Elvira, Elvira II, Waxworks | Unknown | Unknown | Needs a real `game-re` pass against ScummVM's AGOS source before any claim |
