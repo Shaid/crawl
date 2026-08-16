@@ -55,6 +55,7 @@ import { loadMM3View, mm3LevelList } from './games-mm3.ts';
 import { loadWizardry6Snes, wizardry6SnesLevelList } from './games-w6-snes.ts';
 import { loadEotb1View, eotbLevelList } from './games-eotb.ts';
 import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
+import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
@@ -311,6 +312,7 @@ const GAMES = [
   { id: 'mm3', label: 'Might & Magic III', loader: loadMM3View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'eotb', label: 'Eye of the Beholder', loader: loadEotb1View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
+  { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
@@ -341,6 +343,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'mm3') return mm3LevelList();
   if (game === 'eotb') return eotbLevelList(assetBase);
   if (game === 'eotb2') return eotb2LevelList(assetBase);
+  if (game === 'landsoflore') return landsofloreLevelList(assetBase);
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
