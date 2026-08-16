@@ -95,15 +95,10 @@ interface OamEntry {
   y: number; // signed
 }
 
-/**
- * Parse the OAM entry list of the frame at `fileB + 5` (the header's own
- * `+5` byte offset -- frame 0, the first frame in the chain). Only frame 0
- * is composed by this extractor (see header comment); `countFrames` below
- * separately walks the full chain to report the animation length.
- */
-function parseFirstFrameEntries(data: Uint8Array, fileB: number): OamEntry[] {
+/** Parse the OAM entry list of the frame whose `[u16 nextPtr]` header sits at `frameOff`. */
+function parseFrameEntries(data: Uint8Array, frameOff: number): OamEntry[] {
   const entries: OamEntry[] = [];
-  let p = fileB + 5 + 2; // skip the 5-byte header, then this frame's own [u16 nextPtr]
+  let p = frameOff + 2; // skip this frame's own [u16 nextPtr]
   for (let i = 0; i < MAX_FRAME_ENTRIES; i++) {
     if (p >= data.length) break;
     const attr = data[p];
@@ -122,23 +117,21 @@ function parseFirstFrameEntries(data: Uint8Array, fileB: number): OamEntry[] {
   return entries;
 }
 
-/** Count frames in the chain starting at ptrB (bank-relative nextPtr resolution), with a visited guard. */
-function countFrames(data: Uint8Array, fileB: number, bank: number): number {
+/** Walk the full frame chain starting at `fileB + 5` (visited-guarded -- chains legitimately loop), returning each frame's file offset in chain order. */
+function walkFrames(data: Uint8Array, fileB: number, bank: number): number[] {
   let cur = fileB + 5;
   const seen = new Set<number>();
-  let count = 0;
+  const out: number[] = [];
   for (let hop = 0; hop < MAX_CHAIN_HOPS; hop++) {
     if (seen.has(cur) || cur + 1 >= data.length) break;
     seen.add(cur);
-    count++;
+    out.push(cur);
     const nextAddr = data[cur] | (data[cur + 1] << 8);
-    // Advance past this frame's own entries to make sure `cur` mapping stays meaningful for the guard,
-    // though we only need nextAddr to hop -- the entry walk itself isn't needed for counting.
     const nextFile = loromToFile(bank, nextAddr);
     if (nextFile === null) break;
     cur = nextFile;
   }
-  return count;
+  return out;
 }
 
 function main() {
@@ -185,7 +178,8 @@ function main() {
     ptrBMatchesFormula: boolean;
     tileCount: number;
     chr: Uint8Array;
-    entries: OamEntry[];
+    /** Per-frame OAM entry lists, full animation chain (frame 0 first). */
+    frames: OamEntry[][];
     frameCount: number;
     palOfsPrimary: number | null;
     palOfsAlternates: number[];
@@ -214,7 +208,7 @@ function main() {
         ptrBMatchesFormula: false,
         tileCount: 0,
         chr: new Uint8Array(0),
-        entries: [],
+        frames: [],
         frameCount: 0,
         palOfsPrimary: matchingPalOfs[0] ?? null,
         palOfsAlternates: matchingPalOfs.slice(1),
@@ -228,8 +222,9 @@ function main() {
     const ptrBMatchesFormula = fileB === fileA + 2 + streamLength;
 
     const bank = (ptrB >> 16) & 0xff;
-    const entries = parseFirstFrameEntries(data, fileB);
-    const frameCount = countFrames(data, fileB, bank);
+    const frameOffsets = walkFrames(data, fileB, bank);
+    const frames = frameOffsets.map((fo) => parseFrameEntries(data, fo));
+    const frameCount = frames.length;
 
     records.push({
       index: i,
@@ -242,7 +237,7 @@ function main() {
       ptrBMatchesFormula,
       tileCount,
       chr,
-      entries,
+      frames,
       frameCount,
       palOfsPrimary: matchingPalOfs[0] ?? null,
       palOfsAlternates: matchingPalOfs.slice(1),
@@ -252,9 +247,10 @@ function main() {
   const matchCount = records.filter((r) => r.ptrBMatchesFormula).length;
   console.log(`ptrB == ptrA + 2 + lzssStreamLength holds for ${matchCount}/${recordCount} records (expected ~84/100).`);
 
-  // Compose frame 0 of each record: compute a tight bounding box from its OAM entries, then draw.
+  // Compose EVERY frame of each record: per-frame tight bounding box, then draw.
   interface Composed {
     index: number;
+    frame: number;
     width: number;
     height: number;
     pixels: Uint8ClampedArray; // RGBA, width*height*4
@@ -262,7 +258,7 @@ function main() {
   const composed: Composed[] = [];
 
   for (const r of records) {
-    if (r.entries.length === 0 || r.palOfsPrimary === null) continue;
+    if (r.frames.length === 0 || r.palOfsPrimary === null) continue;
 
     const paletteBase = PALETTE_TABLE_BASE + r.palOfsPrimary;
     if (paletteBase + PALETTE_ROW_BYTES * 2 > data.length) continue;
@@ -275,12 +271,15 @@ function main() {
       }
     }
 
+    for (let fi = 0; fi < r.frames.length; fi++) {
+    const frameEntries = r.frames[fi]!;
+    if (frameEntries.length === 0) continue;
     // Bounding box across all entries (accounting for 8px vs 16px sprite size).
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const e of r.entries) {
+    for (const e of frameEntries) {
       const size = (e.attr >> 4) & 1 ? 16 : 8;
       minX = Math.min(minX, e.x);
       minY = Math.min(minY, e.y);
@@ -293,7 +292,7 @@ function main() {
     if (width > 512 || height > 512) continue; // sanity guard against a malformed chain producing an absurd canvas
 
     const pixels = new Uint8ClampedArray(width * height * 4);
-    for (const e of r.entries) {
+    for (const e of frameEntries) {
       const size16 = (e.attr >> 4) & 1;
       const palRow = (e.attr >> 1) & 1;
       const hflip = (e.attr >> 5) & 1;
@@ -329,18 +328,21 @@ function main() {
         }
       }
     }
-    composed.push({ index: r.index, width, height, pixels });
+    composed.push({ index: r.index, frame: fi, width, height, pixels });
+    }
   }
 
-  console.log(`Composed ${composed.length}/${recordCount} records into a real palette+pose render (frame 0 only).`);
+  const recordsComposed = new Set(composed.map((c) => c.index)).size;
+  console.log(`Composed ${composed.length} frames across ${recordsComposed}/${recordCount} records (full animation chains, primary palette).`);
 
-  const packItems: PackInput[] = composed.map((c) => ({ name: `creature_${String(c.index).padStart(3, '0')}`, width: c.width, height: c.height }));
+  const frameName = (c: Composed) => `creature_${String(c.index).padStart(3, '0')}_f${String(c.frame).padStart(2, '0')}`;
+  const packItems: PackInput[] = composed.map((c) => ({ name: frameName(c), width: c.width, height: c.height }));
   const packed = shelfPack(packItems, ATLAS_MAX_WIDTH, 2);
   const frameByName = new Map(packed.frames.map((f) => [f.name, f]));
 
   const rgba = new Uint8Array(packed.width * packed.height * 4);
   for (const c of composed) {
-    const frame = frameByName.get(`creature_${String(c.index).padStart(3, '0')}`);
+    const frame = frameByName.get(frameName(c));
     if (!frame) continue;
     for (let y = 0; y < c.height; y++) {
       for (let x = 0; x < c.width; x++) {
@@ -365,12 +367,15 @@ function main() {
     composedCount: composed.length,
     confidence: 'confirmed',
     note:
-      'Each frame is one creature/monster record\'s FIRST animation frame, composed via its OAM entry list ' +
-      '(real pose, real CGRAM palette baked in). frameCount in each record\'s metadata gives the full animation ' +
-      'length (not all frames are rendered here); palOfsAlternates lists other confirmed palette-swap variants of ' +
-      'the same CHR not rendered here. See docs/wizardry6/snes/data-structure.md section 3.11.',
+      'creature_NNN_fFF = record NNN, animation frame FF -- the FULL frame chain of every record is composed ' +
+      '(real poses, real CGRAM palette baked in). palOfsAlternates lists other confirmed palette-swap variants of ' +
+      'the same CHR (not separately rendered -- swap the two 16-colour rows at paletteFileOffset). ' +
+      'typeField semantics (confirmed, $00:F58E dispatch): 0/1 = formation-slot position (table $00:F3D8) + ' +
+      'randomized animation start frame; 2/3 = position from the frame-list header bytes; 4 = fixed position 0xF0. ' +
+      'See docs/wizardry6/snes/data-structure.md section 3.11.',
     frames: packed.frames.map((f) => {
-      const r = records.find((rec) => `creature_${String(rec.index).padStart(3, '0')}` === f.name)!;
+      const idx = Number(f.name.slice('creature_'.length, 'creature_'.length + 3));
+      const r = records.find((rec) => rec.index === idx)!;
       return {
         name: f.name,
         x: f.x,
@@ -378,6 +383,7 @@ function main() {
         w: f.width,
         h: f.height,
         recordIndex: r.index,
+        frameIndex: Number(f.name.slice(-2)),
         ptrA: `0x${r.ptrA.toString(16)}`,
         ptrB: `0x${r.ptrB.toString(16)}`,
         fileOffsetA: r.fileA,
@@ -407,7 +413,7 @@ function main() {
   });
   writeJson(manifestPath, withoutOld);
 
-  console.log(`Wrote a ${packed.width}x${packed.height} atlas of ${composed.length} posed, coloured creature sprites (frame 0 each).`);
+  console.log(`Wrote a ${packed.width}x${packed.height} atlas of ${composed.length} posed, coloured creature animation frames (full chains).`);
   console.log('Wrote public/assets/wizardry6/snes/sprites/creature-sprites.png, creature-sprites.json, and updated manifest.json');
 }
 

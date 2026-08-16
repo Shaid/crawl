@@ -1369,6 +1369,28 @@ effect art rather than a creature.
 > rendered (only frame 0, one palette per record) — see the TODO row for
 > what a fuller animation-atlas extractor would still need.
 
+> **Second upgrade + `type` field decoded (2026-08-16, closes the
+> remaining `snes-creature-sprite-details` sub-items):**
+>
+> - **All frames rendered**: the extractor now composes every record's
+>   full animation chain — **3,701 frames across 100/100 records**
+>   (`creature_NNN_fFF` atlas naming; chains are visited-guarded since
+>   they legitimately loop). Spot-check renders: record 1's knight cycles
+>   through spear-raised and arms-overhead attack poses; record 23's
+>   jellyfish animates its tentacles — coherent through every frame.
+> - **`type` semantics confirmed** (the `$00:F58E` dispatch's three
+>   handlers, disassembled at file `0x75C5`/`0x760A`/`0x7617`): types
+>   **0/1** = normal creature — screen position from a formation-slot
+>   table at `$00:F3D8` (with a −2 rank adjustment when `$0871[$d5]==4`)
+>   and a **randomized animation start phase** (`JSL $81E3DC` RNG, 0-15
+>   `+0x10`, accumulated in `$0bea`, applied by walking the frame chain
+>   that many hops); types **2/3** = position taken from the frame-list
+>   **header bytes** instead (`$d8+X`, X from `$0e`) — which is what
+>   §3.11's "header bytes 1-4, semantics open" bytes are for; type **4**
+>   = fixed position `0xF0` (the effect-art records). The word table
+>   directly after `$F617` (file `0x761E`: `0000 0040 0004 0048 ...`) is
+>   the per-slot staging-offset array those positions index.
+
 > **Correction to §3.7:** full-body monster/character sprites *do* exist in
 > this ROM and are now located. The prior sessions' negative was
 > methodological: every check looked for a directory resembling the
@@ -1456,6 +1478,29 @@ structural check).
 - `0x05A797`, `0x05428C`, `0x05718D` — Japanese text screen, menu/dialog
   frame graphics, and a small UI icon set respectively (prior session's
   readings, unchanged).
+
+> **Both remaining screens extracted (2026-08-16, closes
+> `snes-opening-screens-4-5-extras`):**
+> - **`0x058000` space scene** — the "1440 entries don't cleanly factor"
+>   puzzle resolves via the DMA destination itself: VRAM word `$7460` is
+>   `0x60` words = **3 rows into** the `$7400` 32x64 map, and
+>   `96 + 1440 = 1536 = 32*48` — the stored content is exactly **rows
+>   3-47**, i.e. a 32x45 image. Composed (flip bits honoured) it renders a
+>   complete 256x360 vertical space vista — nebula, three planets, dense
+>   starfield, and a planet-surface horizon across the bottom. Decisive,
+>   **confirmed**. `screens/space-scene.png`.
+> - **`0x05104b` gameplay screen** — extracted as its two **stored tilemap
+>   patches** (the honest static state, per §3.14.9's finding that the BG2
+>   rect is runtime-overwritten while the first-person view is up): BG2
+>   rows 3-14 (`screens/gameplay-sky.png` — a moon, a large planet, cloud
+>   banks and mountain silhouettes: the outdoor sky band) and BG1 rows
+>   14-17 (`screens/gameplay-bg1-strip.png`). BG2 patch **confirmed** by
+>   render; no full-screen composite is possible from ROM alone (the base
+>   tilemaps are CPU-composed at runtime, §3.12).
+>
+> Extractor: `decode-opening-sequence.ts` (`composeFlipped` — the new
+> screens need the tilemap flip bits, which the logo/copyright composer
+> never did).
 
 ### 3.14 First-person dungeon view composer — confirmed (`$03:E209`-`$03:E3B8`)
 
@@ -1640,6 +1685,13 @@ in the table**, exactly as on the Amiga):
 `x + w = 18`) and sit 0x4E bytes apart. A further ~30 tables cover the
 intermediate lateral columns at `x = 1,2,4,6,10,12,13,14,16`.
 
+> **All of those tables are now catalogued** — §3.14.12's handler table
+> lists every slot's art-record address (44 distinct tables incl. the
+> per-depth receding-edge `F3xx`/`F7xx`/`F8xx` families and slot 0's
+> own-cell `F356`/`F6C6`), and the "table = one entry per wallValue"
+> reading is refined there (39-word records, word index = code + variant
+> offset via `$80:DE4E`).
+
 #### 3.14.6 Verification — quantified
 
 - **Structural invariant, zero deviation:** every piece must fit the 18x15
@@ -1819,6 +1871,18 @@ bytes: `00 00 00 02 00 00 04 04 04 04 00 02 04 00 18 18`) whose output
 feeds `$80:CC40`/`$80:CC72`'s existing table-index lookup (§3.14.5) —
 the exact final field-to-`wallValue`-index arithmetic downstream of this
 point was not re-traced to full closure this session (see paths-tried).
+
+> **Now fully closed — see §3.14.12.** `$80:DE1B`'s output is not the
+> table index at all: it is the **second-draw selector** (`$42`) for an
+> *additional* piece drawn after the main one (e.g. `DE1B[3] = 2` gives
+> wall value 3 its doorway frame under the closed-door leaf). The main
+> index is simply `word = record[DE4E[(code*2 + variant) & 0xFE]]`, i.e.
+> word index = code for variant 0. Also corrected there: this section's
+> earlier note that "`$80:D700` does not exist at that address" was wrong
+> — `$DD4B` is the frustum table, but `$80:D700` is a real, separate
+> 6-word facing-rotated far-side-cell delta table used by the resolver.
+> And the `0x0D`/`0x0E` "no feature" sentinels are now identified as
+> **floor/ceiling style selectors** (§3.14.12's floor/ceiling pass).
 
 **Frustum offset table — confirmed, decisive structural match**
 (`$80:DD4B`, file `0x005d4b`, 26 signed i16, LE): per-slot cell offset
@@ -2219,14 +2283,16 @@ previous session could only produce.
 > as structured per-level metadata (`patchesPhase2`/`patchesPhase3` in
 > `data/maze.json`) — see the corrected phase-2/phase-3 write-up above.
 > They are not baked into the rendered base-layout maps (needs an assumed
-> save-file quest-flag state, out of scope for a static asset). Still
+> save-file quest-flag state, out of scope for a static asset). ~~Still
 > open: the exact non-zero wall sub-field *value* semantics (which of
-> 1-3 means "door" vs "solid wall" — this is a **genuine cross-platform
-> open question, not an SNES-only gap**: the Amiga port's own wall values
-> are equally unpinned, see `amiga/data-structure.md` §4.7's
-> `maze-plane-semantics` row) and the two SNES-only feature-byte flag
-> bits (6-7, no Amiga counterpart and no reader found this session either
-> — see `docs/wizardry6/TODO.md`).
+> 1-3 means "door" vs "solid wall")~~ — **CLOSED this session, on both
+> platforms at once**: `0 = open, 1 = open doorway, 2 = solid wall,
+> 3 = closed door`, confirmed by the full dispatch trace + decisive art
+> renders in **§3.14.12** (and transferring to the Amiga via the
+> byte-identical maze data + its structurally-matching dispatch). The
+> two SNES-only feature-byte flag bits (6-7) remain as before (bit 6:
+> level-8-gated reader only; bit 7: no reader) — see
+> `docs/wizardry6/TODO.md`.
 
 #### 3.14.9 `$7E:5000` → VRAM display path — confirmed (`re-codebreaker`)
 
@@ -2677,6 +2743,16 @@ even frames. Not a dungeon palette source.
 
 #### 3.14.11 Browser walker v1 — bank-`$89` "wallValue table" index-1 confirmed, full dispatch still open
 
+> **Superseded (this session): the full dispatch is now traced and the
+> walker upgraded to a faithful v2 — see §3.14.12.** v1's "index 1 =
+> generic wall" stand-in turned out to be the **wall value 1 (open
+> doorway)** art word — the correct-placement observation held because
+> words 1-3 share their placement rect; the real per-value mapping is
+> `word index = code (+ variant offset via $80:DE4E)`. The `0x101`
+> odd-sentinel reading is confirmed (it resolves to a degenerate record,
+> effectively "draw nothing"). Everything below is kept as the historical
+> v1 record.
+
 Wires the confirmed backdrop (§3.14.6) + palette (§3.14.10) into the shared
 `tools/walker/index.html` walker as a selectable "SNES" variant alongside
 the existing Amiga renderer (`tools/walker/games.ts` `Wizardry6View`). New
@@ -2772,6 +2848,296 @@ module comment and `docs/wizardry6/TODO.md`:
   table, not attempted this session for a static per-level asset).
 - No automap/minimap for the SNES variant.
 
+#### 3.14.12 The full view walk and wallValue dispatch — confirmed (this session)
+
+Closes the `snes-dungeon-view-walker` row's core open item (the true
+wallValue → art dispatch) **and**, jointly with the byte-identical Amiga
+maze data, the cross-platform wall-value-semantics unknown
+(`maze-plane-semantics` / `snes-maze-data-extractor`). Everything below is
+disassembly-traced with a flag-aware 65816 disassembler (fresh
+`dis65816.py`, self-tested byte-exact against §2.2's published RESET
+trace) and verified end-to-end by a faithful Python re-implementation of
+the whole walk whose renders are decisive (see "Verification" below).
+
+##### The walk (`$80:C69F`, file `0x0469F`)
+
+The 26-slot walk of §3.14.5/§3.14.7 is actually a **visibility-propagating
+handler cascade** plus a second floor/ceiling pass:
+
+- **Prologue** (`0x046a8`-`0x04756`): `$0e = $80:DB7F[level]` (the
+  per-level default **variant** byte — see below), `$bb = $0e & 0x60`;
+  `$8e = ((X ^ Y ^ facing) & 1) * 2` (the checkerboard parity, global
+  coordinates); `$52/$54/$56/$68` = the four facing-rotated wall-field
+  extractor entry points (window table at `0x04d28`; ahead reads the
+  sub-field for compass `facing`, left `(facing+3)%4`, right `(facing+1)%4`,
+  behind `(facing+2)%4`); `$58 = facing*52` (the `$80:DD4B` frustum table
+  is **4 × 26 entries**, one block per facing — §3.14.7 documented only the
+  facing-0 block; facing 1's block has a single authoring slip, slot 23 =
+  `-90` where the rotation gives `-92`, the other 78 rotated entries are
+  exact); the skip-flag array `$7E:3B00[1..26]` is initialised **all-ones**
+  (= skip).
+- **Slot 0** (`$00:C879`): evaluates the party's own cell's left/right/
+  front edges against tables `$89:F356`/`$89:F6C6`/`$89:EB1A` (so `EB1A`,
+  §3.14.5's "front depth 0", is really the *own-cell* front edge), enabling
+  slots 1/2/3 when an edge is open (or see-through, below). A party cell
+  whose feature byte is `>= 0xC0` increments `$c9` — a "darkness" marker
+  that suppresses every subsequent compose append.
+- **Slots 1-26** (dispatch `LDX $C829,Y; STX $00; JSR $CD07` =
+  `JMP ($0000)`): each handler runs **only if its `$7E:3B00` flag was
+  cleared** by a nearer slot. Three handler shapes (full catalog below):
+  *side* (adjacent-column cells: one ahead-face eval), *front* (the
+  dead-ahead chain: left-edge + right-edge + front-face evals, three
+  tables), *lateral* (off-axis cells: ahead-face ("perpendicular") +
+  receding-side evals, two tables). Handlers **enable** deeper slots by
+  clearing their flags when the evaluated edge is open **or see-through**.
+- **`$78` deferral**: front-face draws route through `$00:CC0F`, which
+  (for codes with `$80:DE3D[code] != 0` — codes 0,1,2,4,5) **stores** the
+  resolved piece word in `$78` instead of appending; the word is appended
+  at the next **depth-group boundary** (the `$80:C85E` per-slot flush-flag
+  table, nonzero at slots 2,3,5,8,12,18) so the front wall z-orders after
+  that group's side edges. Codes with `DE3D == 0` (3, 6-15) append
+  immediately.
+- **Post-walk** (`0x047b2`-`0x04828`): if `$094d` set, the last appended
+  word is overwritten with piece `0x02EC` (level-8-related, untraced);
+  then the **floor/ceiling pass** (below) re-walks all 27 slots; then the
+  catch-all backdrop piece **`0x834A`** is appended last (under §3.14.4's
+  near-to-far first-wins painter, "appended last" = drawn behind
+  everything). The `$8216` full-view portal piece the v1 walker used as a
+  backdrop is *not* part of the normal walk — it is the `$0850`-forced
+  scene piece (§3.14.10), **prepended** (frontmost) when a script sets it.
+
+##### The evaluator (`$00:CD36`-`$00:CDEF`)
+
+Per edge: extract the 2-bit wall value for the evaluated compass
+direction; read the cell's feature byte; then:
+
+```
+code = wallValue                       ; 0-3
+if (feature & 0x3f) != 0:
+    if (feature & 0x0f) == 6:          ; the fixed-door feature
+        if slot == 3: append 0x02E8    ; the §3.14.7 door piece
+        code = wallValue               ; wall value still renders
+    elif (feature >> 4) == evaluatedCompassDir and (feature & 0x0f) < 13:
+        code = (feature & 0x0f) + 3    ; feature replaces the wall code
+$42 = $80:DE1B[code]  (special: code 12 at slot < 6 -> 4)
+$43 = $80:DE2C[code] & 0x7f            ; see-through flag (0x81 at code 6 also
+                                       ;   fires sound/event $0139 = 0x85)
+```
+
+So the **combined code space is 0-15**: 0-3 = wall values, 4-15 = features
+1-12 (+3). This is the SNES analog of the Amiga's `CODE+0x964e`
+feature→code table, with a simpler `+3` mapping.
+
+##### The resolver (`$00:CC72`) — the actual wallValue → art dispatch
+
+Callers pass **`$0f = code*2`**. The resolver:
+
+1. Computes a **far-side cell**: `X = slotCell + delta`, where `delta` is
+   picked from the 6-word table at **`$80:D700`** (file `0x05700`, raw
+   `-1,-24,+1,+24,-1,-24`) indexed `facing*2 + Y` with `Y ∈ {0,2,4}` — a
+   facing-rotated (left, ahead, right) triple. Each eval passes the `Y`
+   matching its own edge, so the far-side cell is **the cell across the
+   evaluated edge**. (This corrects §3.14.7's earlier note that "`$80:D700`
+   does not exist at that address" — the *frustum* table is indeed at
+   `$DD4B`, but `$D700` is this real, separate delta-triple table.)
+2. If the far cell's feature byte is `>= 0xC0` and `code == 2`: appends the
+   record's word at byte offset `0x44` (a marked-cell extra piece).
+3. **Per-facing override** (record bytes `0x4C|facing`): when the byte for
+   the current facing is nonzero, code 10 (feature 7, the portcullis) uses
+   index `0x84` and code 3 (closed door) uses `0x86`/`0x88` (by variant) —
+   i.e. record words 33-37 hold **far-side/mirrored door and gate art**,
+   selected when the same physical edge is viewed from its other side.
+4. Final index: `idx = (code*2 + variantByte) & 0xFE`, then
+   **`pieceWord = record[ $80:DE4E[idx/2] ]`** — `$80:DE4E` (file
+   `0x05e4e`, 69 u16 entries) maps the combined index to a record byte
+   offset. With variant 0 it is the identity (`word index = code`); higher
+   variants shift into override word ranges with extensive sharing:
+
+   | variant | codes 0-15 → record words |
+   |---|---|
+   | `0x00` | 0-15 (identity) |
+   | `0x10` | 8-15 window (words 8-15) |
+   | `0x20` | 0x10,0x11,0x12,3,0x13,0x14,0x21,7,8,9,10,11,0x15,0x16,0x17,15 |
+   | `0x40` | 0x18,**1**,0x19,3,4,...,15 (walls/doors shared with variant 0) |
+   | `0x60` | 0x1a-0x1d,4-11,0x1e-0x20,15 |
+   | `0x80` | 0x21-0x25 (codes 0-4 only — the out-of-region default) |
+
+   The **variant byte** (`$7E:4780`, one per cell) is therefore an
+   **art-family selector** — castle (`0x00`), cave (`0x20`), forest
+   (`0x40`), etc. — with door/feature art shared across families where the
+   `DE4E` values coincide. Each bank-`$89` record is **39 words (0x4E
+   bytes)** — exactly the §3.14.5 table spacing — plus the 4 override
+   bytes at `0x4C`-`0x4F` (which overlap the next record's first word for
+   tables that never use them).
+5. The `$ccde` fork: if the *evaluated* cell's variant equals the level
+   default `$0e`, the far-side cell's variant is used instead; otherwise
+   the evaluated cell's own — an art-transition rule at variant borders.
+
+**Second-stage draws**: after the main draw, if `$42 = DE1B[code] != 0`
+(codes 3,6-9,11,12 → extra piece; codes 14,15 → `0x18`), the handler
+draws again with `$0f = $42` (with `$42 == 4` replaced by `$6e = $8e*2`,
+the parity), and for `$42 == 0x18` at slots < 6 a third draw with
+`$0f = 4`. **This is how wall value 3 gets its two-piece render**: word 3
+(the door leaf) plus — via `DE1B[3] = 2` → word 1 — the doorway frame.
+
+**Parity alternation**: the front handlers' left/right-edge draws and the
+lateral side draws substitute `code 2 → $8e` (0 or 2), so plain receding
+walls alternate between record words 0 and 2 per cell parity — a
+checkerboard texture variation. Side-adjacent handlers do *not*
+substitute.
+
+##### Wall-value semantics — CONFIRMED (closes the cross-platform unknown)
+
+With the dispatch known, the art words for the front-wall table `$89:EC04`
+(depth 1, variant 0) decode and render as:
+
+| wall value | record word | render (group-40 palette) |
+|---|---|---|
+| 0 | 0 (`0x101`, odd = draw nothing) | open |
+| 1 | 1 (`0x0080`) | **wall pierced by an open doorway** (stone frame, transparent opening) |
+| 2 | 2 (`0x007e`) | **solid masonry wall** |
+| 3 | 3 (`0x0088`) + deferred word 1 | **closed wooden door leaf** (planks, bands, handle) inside the word-1 doorway frame |
+
+and `$80:DE2C` (see-through) is 0 for codes 1 and 3, nonzero for 2 —
+doorways and closed doors keep the visibility recursion alive (the leaf
+occludes via the painter), solid walls stop it. Feature words in the same
+record: word 4 (feature 1) = an **arched opening**, word 5 (feature 2) = a
+larger cave-mouth arch, word 6 (feature 3) = a **globe lamp**, word 10
+(feature 7) = a **portcullis gate**, etc.
+
+> **So the 2-bit wall values are: 0 = open, 1 = open doorway, 2 = solid
+> wall, 3 = closed door.** The Amiga's `maze-levels.json` rendered guess
+> ("1 = door, 3 = secret") is corrected: 3 is a *visible closed door*, not
+> a secret; nothing in the wall planes encodes secret doors (on wall-2
+> edges the feature codes and/or runtime wall mutation must carry that
+> mechanic). Since the maze data is byte-identical across ports
+> (§3.14.8), this transfers to the Amiga wall planes directly — and the
+> Amiga's own dispatch structure matches: its codes 1/3 draw a shared
+> doorframe piece pair with code 3 adding extra pieces + deferred-queue
+> records (the leaf), and its occlusion updater `LAB_0538` fires only on
+> `code==2 || code>=5`, the same see-through split.
+> Supporting cross-tab (Amiga data, all 14 levels): feature 1 ("closed
+> door" per the DOS trace — really the curtained-arch portal) sits on
+> wall-value-**0** edges 102/102; features 3-5 and 7-12 sit on
+> wall-value-**2** edges (wall decorations); neither ever sits on 1/3.
+
+##### The floor/ceiling pass (`$00:CE4C`/`$00:CE4F`)
+
+After the wall walk, all 27 slots are re-walked (all of them when the
+party cell is unmarked — occluded slots' floors are clipped by the
+already-drawn walls under the painter): per slot cell, a **ceiling kind**
+`$3e` and **floor kind** `$40` are derived from the cell's feature byte
+and variant: normal cells use `Yv = ((variant & 0x60) >> 2) | $8e` for the
+ceiling and `Yv + 4` for the floor; the `0x0D` sentinel forces kinds
+`0x10`/`0x20`; `0x0E` keeps the variant ceiling but floor `0x20`; `0x4E`
+and `0x8E` select kind `0x24`; `0x8F` selects `0x10`/`0x26+parity`;
+`(feature & 0xC0) == 0x40` marks a **stairs/pit** cell (floor kind
+`0x1C`/`0x22` by the `$7E:DBC0` flag, plus event `$0139 |= 5`). Each kind
+is a byte offset into **`$80:DED8`** (file `0x05ed8`, 21 pointers), each
+pointing at a **27-word per-slot piece table** in bank `$89`
+(`$89:FA36`-`$89:FE38`); the slot's word is appended for ceiling and
+floor. **This is the SNES's floor/ceiling mechanism** — closing the "no
+floor/ceiling continuation piece" walker gap — and it finally explains
+the `0x0D` vs `0x0E` "empty" sentinels: they are **floor/ceiling style
+selectors**.
+
+##### Handler catalog (dispatch table `$80:C829`, slots 1-26)
+
+Frustum (ahead, lateral) per §3.14.7; `en` = the deeper slot(s) a handler
+enables. All table addresses bank `$89`.
+
+| slot | (ahead,lat) | kind | tables | enables |
+|---|---|---|---|---|
+| 0 | (0,0) | own cell | L `F356`, R `F6C6`, front `EB1A` | 1, 2, 3 |
+| 1 | (0,-1) | side L | `EB68` | 4 |
+| 2 | (0,+1) | side R | `EBB6` | 5 |
+| 3 | (1,0) | front | edges `F3A6`/`F716`, front `EC04` | 4, 5, 6 |
+| 4 | (1,-1) | side L | `EC52` | 7 |
+| 5 | (1,+1) | side R | `ECA0` | 8 |
+| 6 | (2,0) | front | `F3F6`/`F766`, front `ECEE` | 7, 8, 9 |
+| 7 | (2,-1) | lat L | perp `ED3C` (en 12), side `F446` (en 10) | |
+| 8 | (2,+1) | lat R | perp `ED8A` (en 13), side `F7B6` (en 11) | |
+| 9 | (3,0) | front | `F496`/`F806`, front `EE74` | 14, 12, 13 |
+| 10 | (2,-2) | side L | `EDD8` | 15 |
+| 11 | (2,+2) | side R | `EE26` | 17 |
+| 12 | (3,-1) | lat L | perp `EEC2` (en 16), side `F4E6` (en 15) | |
+| 13 | (3,+1) | lat R | perp `EF10` (en 18), side `F856` (en 17) | |
+| 14 | (4,0) | front | `F586`/`F8F6`, front `F096` | 16, 18 |
+| 15 | (3,-2) | lat L | perp `EF5E` (en 20), side `F536` (en 19) | |
+| 16 | (4,-1) | lat L | perp `F0E4`, side `F5D6` (en 20) | |
+| 17 | (3,+2) | lat R | perp `EFAC` (en 22), side `F8A6` (en 21) | |
+| 18 | (4,+1) | lat R | perp `F21C`, side `F946` (en 22) | |
+| 19 | (3,-3) | side L | `EFFA` | 23 |
+| 20 | (4,-2) | lat L | perp `F132`, side `F626` | |
+| 21 | (3,+3) | side R | `F048` | 25 |
+| 22 | (4,+2) | lat R | perp `F26A`, side `F996` (en 25) | |
+| 23 | (4,-3) | lat L | perp `F180`, side `F676` (en 24) | |
+| 24 | (4,-4) | side L | `F1CE` | |
+| 25 | (4,+3) | lat R | perp `F2B8`, side `F9E6` (en 26) | |
+| 26 | (4,+4) | side R | `F306` | |
+
+This resolves §3.14.5's "a further ~30 tables cover the intermediate
+lateral columns" note with the complete address set. Geometry: a *side*
+handler's ahead-face eval is the frontal wall segment of an adjacent-
+column cell; a *front* handler's left/right-edge evals (the `F3xx`/`F7xx`/
+`F8xx` tables) are the **receding** side walls of the dead-ahead chain —
+mapping 1:1 onto the Amiga's `9b58` lateral columns and `LAB_0506`
+perpendicular dispatcher respectively.
+
+##### The variant byte's source (partially traced; approximation documented)
+
+`$7E:4780` is seeded to `DB7F[level]` and overwritten per region by the
+`$80:D25B` blit from a 64-byte pattern buffer (`$7E:49C0`) built at
+`$80:D181` by unpacking 2-bit fields → `{0x00,0x20,0x40,0x60}` from 16-byte
+rows of **`$80:DB9B`**, row selected via **`$80:DA2E`**`[regionAttr]`
+(bit 7 set = pattern row `value & 0x7f`; clear = uniform fill with the
+value), where `regionAttr` is the `< 0x50` value family of §3.14.10's own
+region-attribute records (stored to `$0B19` — the same table that holds
+the `>= 0x50` palette selectors), all gated by runtime mode flags
+`$09F0`/`$09F1` not traced to closure. The walker approximates this as
+one uniform variant per level (`DB7F`, with `0x80` → `0x40`); still-open
+sub-item.
+
+##### Verification
+
+1. **Faithful Python re-implementation** (session scratchpad
+   `truewalk.py`): implements the entire walk + §3.14.4 painter from this
+   section's traces and renders real poses. **Decisive renders**: level 2
+   castle — a plain corridor; a **closed wooden door** dead ahead (wall
+   value 3); the same doorframe **open** (wall value 1) with the passage
+   and floor continuing through it; level 0 — an outdoor **forest path**
+   (variant `0x40` art: trees/hedges as walls) and a stone gatehouse with
+   closed door viewed from its far side (the override mechanism); level 4
+   — cave walls (variant `0x20`). Complete scenes with correct ceilings,
+   floors, and depth recession throughout — categorically beyond the v1
+   walker's output.
+2. **Cross-implementation identity**: the committed TS port
+   (`view-model.ts` v2) reproduces the Python oracle's compose-word lists
+   **word-for-word on 7/7 test poses** across levels 0/2/4, facings
+   0/1/2/3 (55-71 words per pose, zero deviations) — two independent
+   implementations of the same disassembly, no shared code.
+3. **Structural invariants** (exporter oracles, run on every export):
+   all 4 facings' frustum blocks decompose to identical (ahead, lateral)
+   pairs (104/104, with the one known ROM authoring slip at facing 1 slot
+   23 documented and normalised); 9/9 wall-table word-1 placements match
+   §3.14.5's cited rects; 1,557 distinct referenced compose words resolve
+   to valid in-viewport pieces (3 non-drawable sentinels).
+4. Golden-fixture unit test (`__tests__/view-model.test.ts`): the TS walk
+   must reproduce the Python oracle's word list for the closed-door pose
+   exactly (66/66); plus painter-order and seeding unit tests.
+
+Implementation: `tools/wizardry6/snes/view-model.ts` (v2 walk + painter),
+`export-dungeon-view.ts` (v2 data export: dispatch tables, all 44 art
+records, 21 floor/ceiling tables, resolved pieces; pool atlas extended to
+banks `$10`-`$1B`), `render-through-dungeon.ts`, browser wiring unchanged
+(`tools/walker/games-w6-snes.ts` updated to the new API).
+
+**Still open after this session** (tracked in `docs/wizardry6/TODO.md`):
+true per-cell variant + per-region palette selection (the `$09F0`/`$0B19`
+chain above); the `$7E:AC00` trigger-overlay draw pass (`$00:CE00`, runs
+before each handler — scripted decorations, not modelled); the `$7E:DBC0`
+stairs/pit flag array's writer; the `$094d`/`0x02EC` post-walk overwrite.
+
 ---
 
 ## 4. Text / font system
@@ -2804,6 +3170,47 @@ that happen to fall in valid SJIS lead/trail byte ranges (e.g. a
 tile-index data, not text). This approach is considered a dead end for
 finding *dialogue* text without a confirmed reader/loader; see the
 paths-tried table.
+
+### 4.1a The full 8-bit text encoding — confirmed (2026-08-16)
+
+Cracked via the monster-table genus headers (§6.2's "3rd record type"):
+their non-ASCII payloads are **glyph indices into the 256-tile dialogue
+font** (§3.8, file `0x04c653`) — i.e. the game's single-byte text
+encoding IS the font-tile layout:
+
+| Byte range | Meaning |
+|---|---|
+| `0x20`-`0x7E` | ASCII (glyph index = character code) |
+| `0x86` | を |
+| `0x87`-`0x8B` | ぁぃぅぇぉ (small vowels) |
+| `0x8C`-`0x8E` | ゃゅょ |
+| `0x8F` | っ |
+| `0x91`-`0x9F` | あいうえお かきくけこ さしすせそ |
+| `0xA1`-`0xDF` | standard JIS X 0201 half-width katakana (incl. `0xA5` ･ separator, `0xB0` ｰ, and `0xDE`/`0xDF` dakuten/handakuten as **trailing combining marks**, applying to hiragana too) |
+| `0xE0`-`0xFD` | たちつてと なにぬねの はひふへほ まみむめも やゆよ らりるれろ わん |
+| `0xA2` | doubles as an in-ASCII-name separator (e.g. `GUARDIAN·ROCK`) |
+
+So the scheme is JIS X 0201 (ASCII + half-width katakana) **extended
+with hiragana squeezed into the unused byte ranges** `0x86`-`0x9F` and
+`0xE0`-`0xFD` — one byte = one 8x8 glyph everywhere. Derivation:
+rendered the genus payloads' glyph sequences straight from the extracted
+`sprites/font.png` and read them — 18/18 fully legible, each the
+semantic Japanese translation of its paired English name (`VINE` →
+つるくさ, `STINKING CORPSE` → くさいしたい, `GHOST` → ゆうれい, `NATIVE` →
+げんじゅうみん, `UNDEAD PHARAOH` → ふしのファラオ, ...), then
+cross-verified positionally (く=0x98/さ=0x9B/し=0x9C/す=0x9D from
+independent words all landing in one gojūon run; た=0xE0 onward likewise;
+the small-kana block read directly off the font sheet's tiles
+`0x86`-`0x8F`). Implemented in `decode-monster-names.ts`'s
+`decodeGameText` (dakuten-combining included); the extractor now also
+emits all **79 genus headers** with decoded Japanese names
+(`monster-names.json`'s `genusHeaders`), closing
+`snes-monster-table-nonkana-field`.
+
+This resolves the *byte→glyph* half of `snes-text-dialogue-encoding` for
+all 8-bit text (names, menus). Still open there: the 16-bit token space
+of the script system (§6.6) — presumably indices into the 16x16 kanji
+font (§4.4) by an analogous convention, not yet traced.
 
 ### 4.2 Debug/internal English strings — confirmed present, extensive
 
@@ -2978,6 +3385,57 @@ some blocks?), or `0xF0919` isn't actually the start of the first
 or the format has a different leading structure before the repeating
 part). Not resolved this session — see the paths-tried table.
 
+> **Resolved (2026-08-16): the premise was wrong — `0xF0919` is not a
+> block stream at all, and both this row's question and §5.4's missing
+> sample directory close together. See §5.5.** The desync was structural:
+> `$9E:8919` is the **song → module-set table** (37 songs × 5 module
+> numbers, `0xFF` = unused — the first "size" 0x0b63 was really the
+> module-number pair `63 0b` of song 0), read by the driver's
+> song-request handler at file `0xF0740` (`LDA $9e8919,X`, X =
+> song*5, comparing each row byte against the currently-resident set at
+> `$0F00`-`$0F04` and uploading only the changed modules). The actual
+> block streams live behind a separate 151-entry far-pointer table
+> (§5.5); the SPC **driver** is module 150 (bootstrapped via the pointer
+> at `$A0:81C2`, 8 blocks into low SPC RAM `$00A2`-`$04xx`, file
+> `0x16EE88`-`0x16FCDF`, 3,671 B) plus module 149 (`#$95`, SPC
+> `$2E00`/`$2300`, file `0x18DEE6`-`0x18EB95`, 3,247 B).
+
+### 5.5 Sound-module directory — confirmed (151 modules + 37 songs; closes the BRR-directory and driver-size rows)
+
+**The per-sample/per-module directory §5.4 couldn't find is a 151-entry
+× 3-byte far-pointer table at `$A0:8000` (file `0x100000`):** each entry
+`[u16 CPU addr][u8 bank]` points at a **0-terminated chain of
+`[u16 size][u16 spcDestAddr][size payload bytes]` upload blocks** — the
+exact structure `$1E:8AB0` transfers over the IPL handshake. Found by
+reading the boot uploader's *sibling* entry `$1E:8AF8(A)` ("upload module
+#A"): `X = A*3; LDA $A0:8000,X` (addr), `$A0:8002,X` (bank).
+
+Verification (zero deviation):
+- **All 151 modules' block chains parse and terminate cleanly** inside
+  the ROM (0 failures), spanning file `0xF7000`-`0x18FFF3` — 622,540
+  bytes, which is §5.4's "620 KB BRR region" almost exactly, and refines
+  its start (bank `$1E`'s tail from `0xF7000`, not `0xF8000`).
+- The table is **self-describing**: its own end (`0x100000 + 151*3 =
+  0x1001C5`) equals the lowest module target inside bank `$A0` byte-exact
+  (module 99 starts at `0x1001C5`).
+- The song table's 37×5 rows all reference valid module numbers
+  (`< 151`) or `0xFF`, and the table ends at `0xF09D2` exactly where
+  driver code resumes.
+- Boot cross-check: song 0's row is `63 0b ff ff 29` — exactly the three
+  modules the RESET-path uploader loads by literal number
+  (`$1E:8A52`-`$1E:8A6F`: `#$63`, `#$0B`, `#$29`), plus the
+  separately-loaded `#$95` (module 149, driver data).
+
+Block destinations even classify content: modules landing at low SPC RAM
+(`< $0800`) are driver code/dispatch data (module 150); `$1200`-`$3400`
+regions are music sequences/instrument tables; large single blocks are
+BRR sample banks (e.g. module 99: one 0x6480-byte block at SPC `$3430`).
+
+Extractor: `tools/wizardry6/snes/decode-spc-modules.ts` (oracle-guarded
+on all three checks above) → `public/assets/wizardry6/snes/data/
+spc-modules.json` (all 151 modules with file offsets/lengths/SPC block
+maps + the 37-song table).
+
 ### 5.3 Reset-time call site — confirmed
 
 RESET (§2.2, file `0x8184`) calls `JSL $9E8A4A` (file offset `0xF0A4A`)
@@ -3132,6 +3590,20 @@ between the genus header and the first real `[0x80 English]`/`[0x81
 katakana]` monster-entry pair — confirming the "genus/category header"
 hypothesis at the structural level, though the binary payload's semantic
 meaning (icon/sprite-index? behaviour flags? colour?) is still unknown.
+
+> **Resolved (2026-08-16, closes `snes-monster-table-nonkana-field`):**
+> the "binary metadata" is the genus's **Japanese display name in the
+> game's own 8-bit text encoding** (§4.1a — font-tile indices; hiragana
+> live in custom ranges `0x86`-`0x9F`/`0xE0`-`0xFD`, which is exactly why
+> both the ASCII and half-width-katakana validators rejected these
+> payloads). A resync-tolerant census decodes **79 genus headers**, all
+> legible and semantically matching their English pair (`VINE` →
+> つるくさ, `CLOUD` → くも, `GIANT` → きょじん, ...). Regular monster
+> entries use pure katakana transliterations (tag `0x81`); genus headers
+> use real Japanese translations (tag `0x80` reused), often in hiragana —
+> the encoding difference, not a different data kind, was the whole
+> mystery. Extractor updated (`decode-monster-names.ts`,
+> `genusHeaders` in `monster-names.json`).
 Attempting to enumerate further instances by continuing a naive sequential
 scan past this record **cascades into desync** (a wrong assumed length at
 this one anomaly misaligns every subsequent tag/length read for the rest
@@ -3266,11 +3738,50 @@ Extractor: `tools/wizardry6/snes/decode-monster-names.ts`, output
 > value and addressing mode. Filed as a new pitfall,
 > `indexed-table-base-below-valid-rom-window.md`.
 >
-> **Palette — not confirmed.** The escalation tried the boot/main-screen
-> CGRAM snapshot (§3.5) against a sample frame and got a plausible but
-> unverified colour result (a green fireball, a gold cascade) — likely the
-> wrong palette source (combat screens probably have their own dedicated
-> palette, not yet located). Rendered in greyscale.
+> **Palette — CONFIRMED (2026-08-16, this session).** The answer was
+> hiding in the format itself: **mode-A frames are BG tilemap words, and
+> tilemap words carry their own per-cell palette field** (bits 10-12).
+> There is no separate "spell-animation palette" to locate — each cell
+> names its own BG sub-palette, and the colour source is the **boot CGRAM
+> shadow's BG rows** (the `$7E:3800` shadow's ROM initialiser at file
+> `0x127e4`, §3.5), which stay resident during combat. Evidence, three
+> independent legs:
+>
+> 1. **Corpus census** — decoding the palette field of every mode-A
+>    tilemap word across all 115 mode-A records (77,056 cells) gives
+>    histogram `{0: 3720, 1: 5999, 3: 15234, 4: 11478, 5: 25594,
+>    6: 888, 7: 14143}`. Sub-palettes are *deliberately* chosen per cell
+>    (7 distinct values in active use), which is only meaningful if the
+>    field is live — a "palette-agnostic, recoloured at upload" bank
+>    would leave it constant.
+> 2. **The designed hole** — sub-palette **2 is used by ZERO of 77,056
+>    cells**. Row 2 is exactly the slot the dungeon-region palette swap
+>    overwrites per-region (§3.14.10) — i.e. the artists avoided the one
+>    BG row whose contents are unstable at combat time. A random or dead
+>    field would not exhibit this precise avoidance.
+> 3. **Decisive render** — compositing record 11's three largest mode-A
+>    frames in colour, applying each cell's own palette field against the
+>    boot-shadow BG rows, produces a coherent **gold-and-blue magic
+>    casting circle** (concentric rings, radial spokes, blue gems)
+>    dissolving across the three frames — unmistakable spell-cast art
+>    with sane colour assignments (gold linework, blue accents, dark
+>    ground), not the arbitrary recolouring a wrong palette source
+>    yields.
+>
+> The `$ca=0x1e`/`0x23` candidate below is also now fully accounted for:
+> disassembly at file `0x6dc0`-`0x6e5d` shows the two records load the
+> **two combat monster groups' OBJ palettes** (X=`0x140` → OBJ rows 2-3
+> for group A; X=`0x180` → CGRAM 192/OBJ rows 4-5 for group B) from the
+> creature-palette staging buffer `$7e:3940` — creature sprites, not
+> spell animation, exactly as the ruling-out below suspected.
+>
+> Mode-B (2bpp) frames have no tilemap words, so their palette remains
+> tied to the unresolved blit-destination question (2bpp strongly
+> suggests the mode-1 BG3 text/overlay layer, whose 4-colour sub-palettes
+> also live in the boot shadow's first CGRAM rows — hypothesis).
+> `decode-spell-animations.ts` now exports the 8 boot-shadow BG rows as
+> `bgPalettes` in `spell-animations.json` so consumers can compose mode-A
+> frames in true colour.
 >
 > **Follow-up session attempt (still open, one lead ruled out).** Censused
 > the whole ROM for `STA $ca` (`85 ca`, the CGRAM-DMA record selector DP
@@ -3301,17 +3812,15 @@ Extractor: `tools/wizardry6/snes/decode-monster-names.ts`, output
 > established. Output: `public/assets/wizardry6/snes/sprites/
 > spell-animations.png` + `spell-animations.json` + `manifest.json`.
 >
-> **Still open** (not attempted this session, see
-> `docs/wizardry6/TODO.md`'s `snes-spell-anim-bank` row): the CGRAM palette
-> for these animations; the semantics of the `lead` byte's two derived
-> fields (`$0857 = lead & 0x0f`, `$0858 = (lead>>2)+1`, confirmed read
-> sites but not confirmed meaning); mode-B's per-target blit destination
-> (sprite vs. BG layer — hypothesis only); and the real dungeon/maze-
-> geometry art question, which is **back to unsolved** now that this
-> region is understood to be something else — no replacement lead exists
-> yet (not investigated further this session; graphics-extraction task
-> scope prioritized the opening sequence and the now-confirmed banks
-> above).
+> **Still open** (see `docs/wizardry6/TODO.md`'s `snes-spell-anim-bank`
+> row): the semantics of the `lead` byte's two derived fields (`$0857 =
+> lead & 0x0f`, `$0858 = (lead>>2)+1`, confirmed read sites but not
+> confirmed meaning); mode-B's per-target blit destination (sprite vs. BG
+> layer — 2bpp graphics point at mode-1 BG3, hypothesis only); and the
+> real dungeon/maze-geometry art question, which is **back to unsolved**
+> now that this region is understood to be something else — no
+> replacement lead exists yet. The palette question is **closed** (see
+> the confirmed block above).
 
 <details>
 <summary>Original "dungeon/maze data candidate" writeup (superseded above, kept for history — the false-positive pattern here is worth remembering even though the semantic conclusion was wrong)</summary>

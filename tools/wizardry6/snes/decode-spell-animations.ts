@@ -90,6 +90,7 @@ import { decodeLzss } from '../../shared/snes-lzss';
 import { shelfPack, type PackInput } from '../../shared/atlas-pack';
 
 const DIRECTORY_OFFSET = 0x190000; // file offset -- confirmed master directory (CPU $32:8000)
+const BOOT_CGRAM_SHADOW = 0x127e4; // the $7E:3800 CGRAM shadow's ROM initialiser (docs 3.5/3.14.10)
 const DIRECTORY_ENTRY_COUNT = 139;
 const BANK32_BASE = 0x190000; // file offset of ROM bank $32 (CPU bank $b2 mirror), addr $8000
 
@@ -250,8 +251,27 @@ function main() {
   mkdirSync(resolve(outDir, 'sprites'), { recursive: true });
 
   writePNG(resolve(outDir, 'sprites/spell-animations.png'), rgba, packed.width, packed.height);
+  // Mode-A palette -- CONFIRMED (2026-08-16): the mode-A frames' tilemap
+  // words carry real per-cell BG palette fields (bits 10-12; corpus census:
+  // sub-palettes 0,1,3,4,5,6,7 all used, and sub-palette 2 -- the
+  // region-swapped dungeon slot, docs 3.14.10 -- used by ZERO of 77,056
+  // cells, a designed avoidance). The colours are the boot CGRAM shadow's
+  // BG rows (ROM file 0x127e4). A colour composite of record 11 renders a
+  // decisive gold-and-blue magic casting circle. Exported here so a
+  // consumer can compose frames in real colour.
+  const bgPalettes: Array<Array<{ r: number; g: number; b: number }>> = [];
+  for (let p = 0; p < 8; p++) {
+    const row: Array<{ r: number; g: number; b: number }> = [];
+    for (let c = 0; c < 16; c++) {
+      const w = data[BOOT_CGRAM_SHADOW + p * 32 + c * 2]! | (data[BOOT_CGRAM_SHADOW + p * 32 + c * 2 + 1]! << 8);
+      row.push({ r: (w & 31) << 3, g: ((w >> 5) & 31) << 3, b: ((w >> 10) & 31) << 3 });
+    }
+    bgPalettes.push(row);
+  }
+
   writeJson(resolve(outDir, 'sprites/spell-animations.json'), {
     atlas: { width: packed.width, height: packed.height, tileSize: TILE_SIZE_PX },
+    bgPalettes,
     records: records.map((r) => ({
       ...r,
       tileIndexStart: (r as Record & { tileIndexStart: number }).tileIndexStart,
@@ -263,9 +283,10 @@ function main() {
         .map((f) => ({ x: f.x, y: f.y })),
     })),
     note:
-      'Greyscale render, palette unconfirmed. Tiles are packed per-record (tileIndexStart..+tileCount) into the shared atlas; ' +
-      'framesA/framesB describe how to compose them into actual animation frames at runtime -- not pre-rendered. ' +
-      'See docs/wizardry6/snes/data-structure.md section 6.4.',
+      'Atlas is greyscale; compose mode-A frames in colour via each tilemap cell word\'s own palette field (bits 10-12) ' +
+      'against bgPalettes (the boot CGRAM shadow\'s 8 BG rows, ROM 0x127e4) -- CONFIRMED, see docs section 6.4. ' +
+      'Tiles are packed per-record (tileIndexStart..+tileCount) into the shared atlas; ' +
+      'framesA/framesB describe how to compose them into actual animation frames at runtime -- not pre-rendered.',
   });
 
   const manifestPath = resolve(outDir, 'manifest.json');

@@ -246,6 +246,8 @@ export interface Wizardry6ViewOptions {
   level?: FlatGridLevel;
   /** Automap tile atlas (reuses Black Crypt's generic wall/floor/facing tiles for now). */
   automapBank?: PieceBank;
+  /** Absolute maze coordinate of grid (0,0) (level file `origin`) — phases the checkerboard parities (§4.7.8). */
+  origin?: { x: number; y: number };
 }
 
 export class Wizardry6View implements GameView {
@@ -262,8 +264,10 @@ export class Wizardry6View implements GameView {
   private noclip = false;
   private items_: DrawItem[] = [];
   private tick = 0;
+  private readonly origin: { x: number; y: number };
 
   constructor(opts: Wizardry6ViewOptions) {
+    this.origin = opts.origin ?? { x: 0, y: 0 };
     this.planes = opts.planes;
     this.palette_ = opts.palette;
     this.levelId_ = opts.levelId;
@@ -285,7 +289,7 @@ export class Wizardry6View implements GameView {
         this.noclip ||
         canStepDir(this.planes, pose.x, pose.y, dir, this.planes.width, this.planes.height),
     });
-    this.items_ = buildViewItems(this.planes, opts.startPose.x, opts.startPose.y, opts.startPose.facing, this.slots);
+    this.items_ = buildViewItems(this.planes, opts.startPose.x, opts.startPose.y, opts.startPose.facing, this.slots, this.origin);
   }
 
   get levelId(): number {
@@ -311,13 +315,13 @@ export class Wizardry6View implements GameView {
     const newPose = this.controller.update(dtMs, keys);
     this.tick += dtMs;
     if (newPose) {
-      this.items_ = buildViewItems(this.planes, newPose.x, newPose.y, newPose.facing, this.slots);
+      this.items_ = buildViewItems(this.planes, newPose.x, newPose.y, newPose.facing, this.slots, this.origin);
     }
     return newPose;
   }
   setPose(pose: Pose): void {
     this.controller.setPose(pose);
-    this.items_ = buildViewItems(this.planes, pose.x, pose.y, pose.facing, this.slots);
+    this.items_ = buildViewItems(this.planes, pose.x, pose.y, pose.facing, this.slots, this.origin);
   }
   setNoclip(on: boolean): void {
     this.noclip = on;

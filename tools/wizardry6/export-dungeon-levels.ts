@@ -70,6 +70,8 @@ interface DenseLevel {
   id: number;
   width: number;
   height: number;
+  originX: number;
+  originY: number;
   wallA: number[];
   wallB: number[];
   feature: number[];
@@ -122,7 +124,10 @@ function densifyLevel(lvl: MazeLevel): DenseLevel {
     }
   }
 
-  return { id: lvl.level, width, height, wallA, wallB, feature, orient, flagP, flagQ };
+  // originX/originY: the densified grid's (0,0) in absolute maze coordinates
+  // — needed by `view-model.ts`'s checkerboard parities (§4.7.8), which the
+  // game computes from the absolute party position (`-18338/-18336(A4)`).
+  return { id: lvl.level, width, height, originX: minX, originY: minY, wallA, wallB, feature, orient, flagP, flagQ };
 }
 
 /** Core export logic, reusable from a pipeline `buildAssets` step as well as the CLI below. */
@@ -140,7 +145,7 @@ export function exportDungeonLevels(dataDir: string): void {
   // file the party is currently on, per `levels-index.json`.
   const provenance = {
     source: 'scenario.dbs section 2 (file offset 0x9408, 1346 bytes/level, 14 levels)',
-    wallValues: 'RENDERED, not disassembly-confirmed: 0=open, 1=door, 2=wall, 3=secret (decode-scenario-maze.ts)',
+    wallValues: 'CONFIRMED cross-platform (snes/data-structure.md 3.14.12): 0=open, 1=open doorway, 2=solid wall, 3=closed door',
     sharedEdgeMapping: 'CONFIRMED: CODE+0x908c/0x90f6 -- facing 0 reads own wallA, facing 1 reads own wallB, facing 2/3 read the neighbour cell\'s wallA/wallB',
     fill: 'cells inside a level\'s bounding box not covered by any real 8x8 region are filled wallA=wallB=2 (wall) -- a rendering-safety default, not game data',
     notExported: 'scenario.dbs section 3 (per-level entity table) -- structure confirmed, field semantics open, see docs/wizardry6/amiga/data-structure.md section 4.7',
@@ -155,6 +160,9 @@ export function exportDungeonLevels(dataDir: string): void {
       game: 'wizardry6',
       platform: 'amiga',
       cellSpace: { kind: 'flat', width: lvl.width, height: lvl.height },
+      // absolute maze coordinate of grid (0,0) -- feeds view-model.ts's
+      // checkerboard parities (-11434/-11436(A4), section 4.7.8)
+      origin: { x: lvl.originX, y: lvl.originY },
       wallStorage: {
         kind: 'shared-edge',
         planes: ['wallA', 'wallB'],

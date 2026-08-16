@@ -4,33 +4,37 @@
  * harness (`tools/walker/games-w6-snes.ts`) share it -- same pattern as
  * the Amiga port's `view-model.ts`.
  *
- * This is a **v1, honestly-approximate** dispatch, not a full port of the
- * SNES engine's own 26-slot/wallValue render dispatch (`data-structure.md`
- * §3.14.5/§3.14.7) -- that dispatch's final wallValue -> table-index
- * mapping (`$80:DE1B`'s second-stage lookup) is not fully traced (see
- * `docs/wizardry6/TODO.md` row `snes-dungeon-view-wall-dispatch`). What
- * *is* newly confirmed this session (§3.14.11): every one of the 15
- * bank-`$89` per-depth/per-direction "wallValue table" addresses §3.14.5
- * already cites resolves its **index-1 entry** to the *exact* `(x,y,w,h)`
- * placement §3.14.5's own table gives for that direction/depth -- 15/15,
- * `resolveComposeWord` in `decode-dungeon-composer.ts`. That's decisive
- * confirmation of the table *shape* and geometry, even without the
- * wallValue -> index mapping: index 1 is always a real, correctly-placed
- * "this direction is blocked" wall piece, and index 0 is uniformly the
- * literal value `0x101` (an odd, non-decodable "open, draw nothing"
- * sentinel -- distinct from the ordinary `0xFFFF` "slot unused" marker
- * `parseLibrary` already handles) across all 15 tables, matching the raw
- * wall field's own `0 == open` convention exactly.
+ * v2: a **faithful port of the game's own 26-slot view walk**
+ * (`$80:C69F`, `data-structure.md` §3.14.12 -- disassembly-traced this
+ * session), replacing v1's "index-1 generic wall" approximation:
  *
- * **v1 dispatch, one rule per direction per depth:**
- * - raw 2-bit wall field `0` -> open, draw nothing.
- * - raw 2-bit wall field `1`/`2`/`3` -> draw that direction/depth's table
- *   **index-1** entry (the confirmed-placement generic wall). This does
- *   NOT distinguish door/torch/decorated-wall variants from a plain wall
- *   -- the real per-wallValue art selection remains open.
- * - **Exception, fully confirmed** (§3.14.7): feature nibble `== 6` at
- *   depth 1 dead ahead (frustum slot 3) always draws the fixed door piece
- *   (compose word `0x02E8`), overriding the generic-wall rule.
+ * - the evaluator (`$00:CD36` family): per-edge 2-bit wall value, feature/
+ *   orientation promotion (`code = feature+3` when the feature faces the
+ *   evaluated edge), the fixed door piece `0x02E8` at frustum slot 3 for
+ *   `feature==6`;
+ * - the resolver (`$00:CC72`): piece word = `record[DE4E[(code*2 + variant)
+ *   & 0xFE]]` -- so wall values 0-3 and features 1-12 each select their own
+ *   record word, and the per-cell variant byte (`$7E:4780`) shifts the
+ *   whole lookup into a different art family (castle/cave/forest/...);
+ * - `DE1B` second-stage draws (extra pieces for codes 3/6-9/11/12/14/15),
+ *   `DE2C` see-through flags (doorways and closed doors keep visibility
+ *   recursion alive; solid walls stop it), `DE3D`-gated `$78` deferral
+ *   (front-facing walls/doors appended at the `$c85e` depth-group
+ *   boundaries so they z-order after that group's side edges);
+ * - visibility propagation via the `$7E:3B00` skip-flag array (init
+ *   all-skip; slot 0 and each handler enable deeper slots as edges prove
+ *   open or see-through);
+ * - the floor/ceiling pass (`$00:CE4C`): per-slot ceiling+floor piece from
+ *   the `$80:DED8` kind tables, keyed by the cell's variant byte, the walk
+ *   parity `$8e`, and the `0x0D`/`0x0E` feature sentinels (which turn out
+ *   to be floor/ceiling style selectors, not just "no feature" markers);
+ * - the always-appended final backdrop piece `0x834A`.
+ *
+ * Known approximation (documented in `docs/wizardry6/TODO.md`): the
+ * per-cell variant byte is modelled as one uniform value per level
+ * (`walk.variants[level]`) -- the real value comes from a per-region
+ * attribute chain (`$0B19` -> `$80:DA2E` -> `$80:DB9B` 2-bit patterns)
+ * whose mode flags (`$09F0`/`$09F1`) are runtime state.
  */
 
 export interface DenseMazeGrid {
@@ -40,12 +44,18 @@ export interface DenseMazeGrid {
    * on the +Y (`facing===0`, north) side, 2-3 = +X (east), 4-5 = -Y
    * (south), 6-7 = -X (west) -- confirmed absolute mapping,
    * `data-structure.md` §3.14.8's cross-platform table. Off-map cells are
-   * filled `0xFF` (solid on all 4 sides). */
+   * filled with the game's own level-load seed (wall `0x00`). */
   wall: Uint8Array;
-  /** Raw SNES feature byte per cell (bits 0-3 feature code incl. the
-   * `0x0D`/`0x0E` "no feature" sentinels, 4-5 orientation, 6-7 SNES-only
-   * flags, §3.14.8). Off-map cells filled `0x0D`. */
+  /** Raw SNES feature byte per cell (§3.14.8); off-map cells are filled
+   * with the level's own `$80:DB8D` seed byte. */
   feature: Uint8Array;
+  /** Off-map/seed feature byte used beyond the grid bounds. */
+  seedFeature: number;
+  /** Global maze coordinate of grid cell (0,0) -- needed because the walk
+   * parity `$8e = ((globalX ^ globalY ^ facing) & 1) * 2` uses the game's
+   * own global coordinates, not grid-local ones. */
+  originX: number;
+  originY: number;
 }
 
 export interface MazeLevelRaw {
@@ -54,24 +64,18 @@ export interface MazeLevelRaw {
   cells: Array<{ region: number; major: number; minor: number; wall: number; feature: number }>;
 }
 
-const OFFMAP_WALL = 0xff; // all 4 packed 2-bit sub-fields = 3 (solid)
-const OFFMAP_FEATURE = 0x0d; // the confirmed "no feature" sentinel
-
 /**
  * Densify one level's region/major/minor cell list (raw `data/maze.json`
  * shape, `decode-maze.ts`) into a flat grid, tight-cropped to the active
- * regions' bounding box -- same convention as the Amiga port's
- * `export-dungeon-levels.ts` `densifyLevel`. `major`/`minor` place a cell
- * within its region: **global Y = originY + (7 - major)`, global X =
- * originX + minor`** (the confirmed major-axis reversal, §3.14.8 -- SNES
- * `major` runs opposite to the Amiga's `localY`).
+ * regions' bounding box. `major`/`minor` place a cell within its region:
+ * **global Y = originY + (7 - major)`, global X = originX + minor`** (the
+ * confirmed major-axis reversal, §3.14.8). Off-map cells hold the game's
+ * own level-load seeds (wall 0, feature `$80:DB8D[level]`) rather than a
+ * synthetic "solid" fill -- matching `$8B:DE64`/`$80:D2D3`.
  */
-export function densifyMazeLevel(level: MazeLevelRaw): DenseMazeGrid {
+export function densifyMazeLevel(level: MazeLevelRaw, seedFeature = 0x0d): DenseMazeGrid {
   const usedRegions = new Set(level.cells.map((c) => c.region));
   const origins = level.origins.filter((_, i) => usedRegions.has(i));
-  // A region spans originX..originX+7 in global X (minor 0..7 direct), and
-  // originY..originY+7 in global Y (major 7..0 after the confirmed reversal
-  // -- major=7 gives the SMALLEST global Y, major=0 the LARGEST).
   const minX = Math.min(...origins.map((o) => o.x));
   const minY = Math.min(...origins.map((o) => o.y));
   const maxX = Math.max(...origins.map((o) => o.x + 7));
@@ -79,8 +83,8 @@ export function densifyMazeLevel(level: MazeLevelRaw): DenseMazeGrid {
 
   const width = maxX - minX + 1;
   const height = maxY - minY + 1;
-  const wall = new Uint8Array(width * height).fill(OFFMAP_WALL);
-  const feature = new Uint8Array(width * height).fill(OFFMAP_FEATURE);
+  const wall = new Uint8Array(width * height); // seed: wall 0 (open), the game's own fill
+  const feature = new Uint8Array(width * height).fill(seedFeature);
 
   for (const cell of level.cells) {
     const origin = level.origins[cell.region];
@@ -93,10 +97,10 @@ export function densifyMazeLevel(level: MazeLevelRaw): DenseMazeGrid {
     feature[idx] = cell.feature;
   }
 
-  return { width, height, wall, feature };
+  return { width, height, wall, feature, seedFeature, originX: minX, originY: minY };
 }
 
-/** Extract the 2-bit wall sub-field for absolute compass `facing` (0=N/+Y, 1=E/+X, 2=S/-Y, 3=W/-X -- `@seer-project/dungeon`'s `Direction.ts` convention) directly from one cell's raw wall byte. No neighbour lookup needed -- the SNES stores all 4 absolute sides redundantly per cell (§3.14.7/§3.14.8), unlike the Amiga's shared-edge two-plane scheme. */
+/** Extract the 2-bit wall sub-field for absolute compass `facing` (0=N/+Y, 1=E/+X, 2=S/-Y, 3=W/-X) from one cell's raw wall byte. */
 export function wallForFacing(wallByte: number, facing: 0 | 1 | 2 | 3): number {
   return (wallByte >> (facing * 2)) & 0x3;
 }
@@ -109,10 +113,10 @@ export function featureOf(byte: number): { feature: number; orient: number } {
 }
 
 const FACING_DELTAS: ReadonlyArray<{ dx: number; dy: number }> = [
-  { dx: 0, dy: 1 }, // 0 = N
-  { dx: 1, dy: 0 }, // 1 = E
-  { dx: 0, dy: -1 }, // 2 = S
-  { dx: -1, dy: 0 }, // 3 = W
+  { dx: 0, dy: 1 }, // 0 = N (+Y)
+  { dx: 1, dy: 0 }, // 1 = E (+X)
+  { dx: 0, dy: -1 }, // 2 = S (-Y)
+  { dx: -1, dy: 0 }, // 3 = W (-X)
 ];
 
 export function stepForward(x: number, y: number, facing: number, depth: number): { x: number; y: number } {
@@ -125,76 +129,58 @@ function inBounds(grid: DenseMazeGrid, x: number, y: number): boolean {
 }
 
 function cellWallByte(grid: DenseMazeGrid, x: number, y: number): number {
-  return inBounds(grid, x, y) ? grid.wall[y * grid.width + x]! : OFFMAP_WALL;
+  return inBounds(grid, x, y) ? grid.wall[y * grid.width + x]! : 0;
 }
 
 function cellFeatureByte(grid: DenseMazeGrid, x: number, y: number): number {
-  return inBounds(grid, x, y) ? grid.feature[y * grid.width + x]! : OFFMAP_FEATURE;
+  return inBounds(grid, x, y) ? grid.feature[y * grid.width + x]! : grid.seedFeature;
 }
 
-/** Whether the party can step one cell in compass direction `dir` from `(x, y)` -- open iff that direction's wall sub-field is 0. */
+/** Whether the party can step one cell in compass direction `dir` from `(x, y)` -- open iff that direction's wall sub-field is 0 (in-grid only). */
 export function canStepSnes(grid: DenseMazeGrid, x: number, y: number, dir: 0 | 1 | 2 | 3): boolean {
   const dest = stepForward(x, y, dir, 1);
   if (!inBounds(grid, dest.x, dest.y)) return false;
   return wallForFacing(cellWallByte(grid, x, y), dir) === 0;
 }
 
-export const MAX_DEPTH = 3; // depths 0..2 -- matches the 3 confirmed bank-$89 table addresses this v1 uses (front0-2/left0-2/right0-2)
+// ─────────────────────────────────────────────────────────────────────────
+// The faithful view walk ($80:C69F, §3.14.12).
+// ─────────────────────────────────────────────────────────────────────────
 
-export type ViewOp =
-  | { kind: 'backdrop' }
-  | { kind: 'front' | 'left' | 'right'; depth: number }
-  | { kind: 'door' };
-
-/**
- * Resolve the v1 draw op list for one pose: always the backdrop, then a
- * generic-wall op per depth/direction wherever that direction's wall
- * sub-field is nonzero, with the confirmed depth-1/front door override.
- * Draw order is far-to-near (the caller composites back-to-front) so a
- * nearer wall overdraws whatever backdrop/farther-wall art it occludes.
- */
-export function resolveViewOps(grid: DenseMazeGrid, x: number, y: number, facing: number): ViewOp[] {
-  const ops: ViewOp[] = [{ kind: 'backdrop' }];
-
-  for (let depth = MAX_DEPTH - 1; depth >= 0; depth--) {
-    const cell = stepForward(x, y, facing, depth);
-    const wallByte = cellWallByte(grid, cell.x, cell.y);
-    const featByte = cellFeatureByte(grid, cell.x, cell.y);
-    const { feature } = featureOf(featByte);
-
-    const frontVal = wallForFacing(wallByte, facing as 0 | 1 | 2 | 3);
-    const leftVal = wallForFacing(wallByte, ((facing + 3) % 4) as 0 | 1 | 2 | 3);
-    const rightVal = wallForFacing(wallByte, ((facing + 1) % 4) as 0 | 1 | 2 | 3);
-
-    // Confirmed door override (§3.14.7): feature==6, frustum slot 3 == depth 1 dead ahead.
-    if (depth === 1 && feature === 6) {
-      ops.push({ kind: 'door' });
-    } else if (frontVal !== 0) {
-      ops.push({ kind: 'front', depth });
-    }
-    if (leftVal !== 0) ops.push({ kind: 'left', depth });
-    if (rightVal !== 0) ops.push({ kind: 'right', depth });
-  }
-
-  return ops;
+/** ROM dispatch tables exported by `export-dungeon-view.ts` (all byte/word arrays read straight from the ROM at the doc-cited offsets). */
+export interface WalkTables {
+  /** `$80:DD4B`: 4 facings x 26 frustum slot offsets, decomposed by the exporter into `(ahead, lateral)` pairs (grid-unit-free). */
+  frustum: Array<{ ahead: number; lateral: number }>;
+  de1b: number[]; // $80:DE1B second-stage byte per code 0-15
+  de2c: number[]; // $80:DE2C see-through/visibility byte per code (bit7 = sfx trigger, masked off by the exporter)
+  de3d: number[]; // $80:DE3D front-deferral gate per code
+  de4e: number[]; // $80:DE4E (code*2+variant)&0xFE -> record byte offset (69 entries)
+  db7f: number[]; // per-level default variant byte ($0e)
+  db8d: number[]; // per-level feature seed byte
+  c85e: number[]; // per-slot $78 flush flags (index 1-26)
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Pixel compositing -- pure array ops, shared by the Node verification
-// renderer (`render-through-dungeon.ts`) and the browser walker
-// (`tools/walker/games-w6-snes.ts`). Neither needs a DOM/canvas dependency
-// here: both decode their PNGs to RGBA however suits their environment
-// (pngjs in Node, `<canvas>` readback in the browser) and hand the raw
-// bytes to `extractPoolIndices`/`compositeSnesView`.
-// ─────────────────────────────────────────────────────────────────────────
+export type HandlerSpec =
+  | { kind: 'side'; side: 'L' | 'R'; table: string; enable: number }
+  | { kind: 'front'; edgeL: string; front: string; edgeR: string; enAhead: number; enLeft: number; enRight: number }
+  | { kind: 'lat'; side: 'L' | 'R'; perp: string; enPerp: number; sideTable: string; enSide: number };
+
+export interface WalkRecord {
+  /** The record's 39 u16 words (byte offsets 0-0x4C). */
+  words: number[];
+  /** The 4 per-facing override bytes at record offsets 0x4C-0x4F (door/gate far-side art swap, §3.14.12). */
+  override: number[];
+}
 
 export interface ViewPiece {
   x: number;
   y: number;
   w: number;
   h: number;
-  /** Row-major pool-tile index (0..10239) or `null` for an empty/out-of-pool cell. */
+  /** Row-major pool-tile index or `null` for an empty/out-of-pool cell. */
   cells: (number | null)[];
+  /** Per-cell alpha flag (cell word bit 15, §3.14.2): 1 = tile has transparent pixels, later pieces may merge behind it. Parallel to `cells`. */
+  alpha: number[];
 }
 
 export interface ViewPiecesFile {
@@ -202,91 +188,390 @@ export interface ViewPiecesFile {
   tileSize: number;
   poolAtlas: string;
   poolCols: number;
-  backdrop: ViewPiece;
-  door: ViewPiece;
-  wall: Record<'front' | 'left' | 'right', (ViewPiece | null)[]>;
+  tables: WalkTables;
+  /** Slot handlers 1-26 (index 0 unused -- slot 0 is the fixed own-cell handler below). */
+  handlers: Array<HandlerSpec | null>;
+  /** Slot 0's own-cell edge/front tables (`$c879`): left `$89:F356`, right `$89:F6C6`, front `$89:EB1A`. */
+  slot0: { left: string; right: string; front: string };
+  records: Record<string, WalkRecord>;
+  /** `$80:DED8` kind table: 21 entries, each the key of a 27-word per-slot floor/ceiling piece table. */
+  ded8: string[];
+  fcTables: Record<string, number[]>;
+  /** Every referenced compose word, resolved (hex-keyed). Words that resolve to nothing drawable (e.g. the odd `0x101` sentinel) are absent. */
+  pieces: Record<string, ViewPiece>;
+  doorWord: number; // 0x02E8
+  backdropWord: number; // 0x834A -- appended last (painter's-algorithm backstop)
+  /** Per-level uniform variant approximation (see module comment). */
+  variants: number[];
 }
 
-/** Recover the raw pool-tile index buffer (0-15 per pixel) from a decoded `dungeon-art-indexed.png` RGBA buffer -- the index was written into the R channel at export time (`export-dungeon-view.ts`). */
+interface WalkState {
+  grid: DenseMazeGrid;
+  t: WalkTables;
+  f: ViewPiecesFile;
+  facing: number;
+  level: number;
+  parity: number; // $8e: ((x^y^facing)&1)*2
+  variant: number; // uniform per-level approximation of $7E:4780
+  e0: number; // $0e = db7f[level]
+  words: number[];
+  vis: number[]; // $7e3b00 skip flags, 1 = skip
+  p78: number; // deferred front piece
+  slot: number;
+  slotX: number;
+  slotY: number;
+  v42: number;
+  v43: number;
+  /** $c9 != 0: the party's own cell carries the >=0xC0 marker ("darkness" zone) -- every $cc48 append is suppressed. */
+  partyMarked: boolean;
+}
+
+function slotCell(s: WalkState, px: number, py: number, slot: number): { x: number; y: number } {
+  const fr = s.f.tables.frustum[slot - 1]!;
+  const a = FACING_DELTAS[s.facing]!;
+  const r = FACING_DELTAS[(s.facing + 1) % 4]!;
+  return { x: px + fr.ahead * a.dx + fr.lateral * r.dx, y: py + fr.ahead * a.dy + fr.lateral * r.dy };
+}
+
+/** role offsets rotate the compass: ahead=+0, right=+1, behind=+2, left=+3. */
+const ROLE_OFFSET = { ahead: 0, right: 1, behind: 2, left: 3 } as const;
+type Role = keyof typeof ROLE_OFFSET;
+
+function evaluate(s: WalkState, x: number, y: number, role: Role): number {
+  const dir = ((s.facing + ROLE_OFFSET[role]) % 4) as 0 | 1 | 2 | 3;
+  const w = wallForFacing(cellWallByte(s.grid, x, y), dir);
+  const raw = cellFeatureByte(s.grid, x, y) & 0x3f;
+  let code = w;
+  if (raw !== 0) {
+    const lowf = raw & 0x0f;
+    if (lowf === 6) {
+      if (s.slot === 3) s.words.push(s.f.doorWord);
+    } else if ((raw >> 4) === dir && lowf < 13) {
+      code = lowf + 3;
+    }
+  }
+  s.v42 = s.t.de1b[code]!;
+  if (code === 12 && s.slot < 6) s.v42 = 4;
+  s.v43 = s.t.de2c[code]! & 0x7f;
+  return code;
+}
+
+/** $00:CC72 -- resolve one draw into a piece word. `a2x` = the doubled code ($0f); `farRole` = which neighbour of the slot cell supplies variant/marker state (left/ahead/right). */
+function resolveWord(s: WalkState, table: string, a2x: number, farRole: Role): number {
+  const rec = s.f.records[table];
+  if (!rec) return 0xffff;
+  const dir = ((s.facing + ROLE_OFFSET[farRole]) % 4) as 0 | 1 | 2 | 3;
+  const d = FACING_DELTAS[dir]!;
+  const fx = s.slotX + d.dx;
+  const fy = s.slotY + d.dy;
+  const farFeat = cellFeatureByte(s.grid, fx, fy);
+  // marked-cell extra ($cc8f): raw >= 0xC0 and code==2 -> append rec word at byte offset 0x44
+  if (farFeat >= 0xc0 && a2x === 4) {
+    const extra = rec.words[0x44 >> 1];
+    if (extra !== undefined && extra !== 0xffff) s.words.push(extra);
+  }
+  // per-facing override (door/gate far-side art swap)
+  let idx: number | null = null;
+  if (rec.override[s.facing]! !== 0) {
+    if (a2x === 0x14) idx = 0x84;
+    else if (a2x === 0x06) idx = s.variant === 0x60 ? 0x88 : 0x86;
+  }
+  if (idx === null) {
+    // both branches of $ccde collapse to code*2 + variant under the uniform-variant approximation
+    idx = (a2x + s.variant) & 0xff;
+  }
+  const k = (idx & 0xfe) >> 1;
+  const byteOff = s.t.de4e[k];
+  if (byteOff === undefined) return 0xffff;
+  const w = rec.words[byteOff >> 1];
+  return w === undefined ? 0xffff : w;
+}
+
+/** $cc48-style append (skipped when the party or slot cell carries the >=0xC0 marker). */
+function drawAppend(s: WalkState, table: string, a2x: number, farRole: Role): void {
+  if (s.partyMarked) return;
+  if (cellFeatureByte(s.grid, s.slotX, s.slotY) >= 0xc0) return;
+  const w = resolveWord(s, table, a2x, farRole);
+  if (w !== 0xffff) s.words.push(w);
+}
+
+/** $cc0f-style front draw: DE3D-gated deferral into $78, else append. */
+function drawFront(s: WalkState, table: string, a2x: number): void {
+  const code = a2x >> 1;
+  if (code < 16 && s.t.de3d[code]) {
+    const w = resolveWord(s, table, a2x, 'ahead');
+    if (w !== 0xffff) s.p78 = w;
+    return;
+  }
+  drawAppend(s, table, a2x, 'ahead');
+}
+
+/** The DE1B-driven second (and third) draws shared by every handler. */
+function secondDraws(s: WalkState, table: string, farRole: Role, front: boolean): void {
+  if (s.v42 === 0) return;
+  const a = s.v42 === 4 ? s.parity * 2 : s.v42;
+  if (front) drawFront(s, table, a);
+  else drawAppend(s, table, a, farRole);
+  if (s.v42 === 0x18 && s.slot < 6) {
+    if (front) drawFront(s, table, 4);
+    else drawAppend(s, table, 4, farRole);
+  }
+}
+
+/** Front-handler edge draw ($cc3b/$cc45 entries with the $8e parity substitution for code 2). */
+function edgeDraw(s: WalkState, table: string, code: number, farRole: Role): void {
+  const a = code === 2 ? s.parity : code;
+  drawAppend(s, table, a * 2, farRole);
+  secondDraws(s, table, farRole, false);
+}
+
+function runHandler(s: WalkState, spec: HandlerSpec): void {
+  if (spec.kind === 'side') {
+    const code = evaluate(s, s.slotX, s.slotY, 'ahead');
+    if (code === 0) {
+      if (spec.enable) s.vis[spec.enable] = 0;
+      return;
+    }
+    drawAppend(s, spec.table, code * 2, 'ahead');
+    if (s.v43 === 0 && spec.enable) s.vis[spec.enable] = 0;
+    secondDraws(s, spec.table, 'ahead', false);
+  } else if (spec.kind === 'front') {
+    let code = evaluate(s, s.slotX, s.slotY, 'left');
+    if (code === 0) {
+      if (spec.enLeft) s.vis[spec.enLeft] = 0;
+    } else edgeDraw(s, spec.edgeL, code, 'left');
+    code = evaluate(s, s.slotX, s.slotY, 'right');
+    if (code === 0) {
+      if (spec.enRight) s.vis[spec.enRight] = 0;
+    } else edgeDraw(s, spec.edgeR, code, 'right');
+    code = evaluate(s, s.slotX, s.slotY, 'ahead');
+    if (code === 0) {
+      if (spec.enAhead) s.vis[spec.enAhead] = 0;
+      return;
+    }
+    drawFront(s, spec.front, code * 2);
+    if (s.v43 === 0 && spec.enAhead) s.vis[spec.enAhead] = 0;
+    secondDraws(s, spec.front, 'ahead', true);
+  } else {
+    // lateral: perpendicular (ahead-face) eval + receding-side eval
+    let code = evaluate(s, s.slotX, s.slotY, 'ahead');
+    if (code === 0) {
+      if (spec.enPerp) s.vis[spec.enPerp] = 0;
+    } else {
+      drawAppend(s, spec.perp, code * 2, 'ahead');
+      if (s.v43 === 0 && spec.enPerp) s.vis[spec.enPerp] = 0;
+      secondDraws(s, spec.perp, 'ahead', false);
+    }
+    const role: Role = spec.side === 'L' ? 'left' : 'right';
+    code = evaluate(s, s.slotX, s.slotY, role);
+    if (code === 0) {
+      if (spec.enSide) s.vis[spec.enSide] = 0;
+      return;
+    }
+    const a = code === 2 ? s.parity : code;
+    drawAppend(s, spec.sideTable, a * 2, role);
+    secondDraws(s, spec.sideTable, role, false);
+  }
+}
+
+/** The floor/ceiling pass ($00:CE4C) for one slot. */
+function fcCell(s: WalkState, x: number, y: number, slot: number): void {
+  const raw = cellFeatureByte(s.grid, x, y);
+  const yv = ((s.variant & 0x60) >> 2) | s.parity;
+  let ceil: number;
+  let floor: number;
+  if (raw === 0x8f) {
+    ceil = 0x10;
+    floor = s.parity + 0x26;
+  } else if (raw === 0x8e) {
+    ceil = 0x24;
+    floor = yv + 4;
+  } else if (raw === 0x4e) {
+    ceil = 0x24;
+    floor = 0x20;
+  } else if ((raw & 0xc0) === 0x40 && raw >= 0x40) {
+    ceil = yv;
+    floor = 0x22; // stairs/pit family ($7E:DBC0 flag not modelled -> the non-flagged branch)
+  } else {
+    const lowf = raw & 0x0f;
+    if (lowf === 0x0d) {
+      ceil = 0x10;
+      floor = 0x20;
+    } else if (lowf === 0x0e) {
+      ceil = yv;
+      floor = 0x20;
+    } else {
+      ceil = yv;
+      floor = yv + 4;
+    }
+  }
+  for (const kind of [ceil, floor]) {
+    const key = s.f.ded8[kind >> 1];
+    if (!key) continue;
+    const tab = s.f.fcTables[key];
+    if (!tab) continue;
+    const w = tab[slot];
+    if (w !== undefined && w !== 0 && w !== 0xffff) s.words.push(w);
+  }
+}
+
+/**
+ * Resolve one pose into the game's own ordered compose-word list
+ * (near-to-far -- the FIRST piece to claim a cell wins, per §3.14.4's
+ * painter's algorithm; `compositeSnesView` implements that order).
+ */
+export function resolveViewWords(f: ViewPiecesFile, grid: DenseMazeGrid, level: number, x: number, y: number, facing: number): number[] {
+  const s: WalkState = {
+    grid,
+    t: f.tables,
+    f,
+    facing,
+    level,
+    parity: (((x + grid.originX) ^ (y + grid.originY) ^ facing) & 1) * 2,
+    variant: f.variants[level] ?? 0,
+    e0: f.tables.db7f[level] ?? 0,
+    words: [],
+    vis: new Array(27).fill(1),
+    p78: 0,
+    slot: 0,
+    slotX: x,
+    slotY: y,
+    v42: 0,
+    v43: 0,
+    partyMarked: cellFeatureByte(grid, x, y) >= 0xc0,
+  };
+  const marked = s.partyMarked;
+
+  // slot 0 ($c879): own-cell left/right edges + front edge
+  s.slot = 0;
+  s.slotX = x;
+  s.slotY = y;
+  let code = evaluate(s, x, y, 'left');
+  if (code === 0) s.vis[1] = 0;
+  else edgeDraw(s, f.slot0.left, code, 'left');
+  code = evaluate(s, x, y, 'right');
+  if (code === 0) s.vis[2] = 0;
+  else edgeDraw(s, f.slot0.right, code, 'right');
+  code = evaluate(s, x, y, 'ahead');
+  if (code === 0) s.vis[3] = 0;
+  else {
+    drawFront(s, f.slot0.front, code * 2);
+    if (s.v43 === 0) s.vis[3] = 0;
+    secondDraws(s, f.slot0.front, 'ahead', true);
+  }
+
+  // slots 1-26
+  for (let slot = 1; slot <= 26; slot++) {
+    s.slot = slot;
+    if (s.vis[slot] === 0) {
+      const spec = f.handlers[slot];
+      const c = slotCell(s, x, y, slot);
+      s.slotX = c.x;
+      s.slotY = c.y;
+      if (spec) runHandler(s, spec);
+    }
+    if (f.tables.c85e[slot]) {
+      const blocked = marked || cellFeatureByte(grid, s.slotX, s.slotY) >= 0xc0;
+      if (!blocked && s.p78) s.words.push(s.p78);
+      s.p78 = 0;
+    }
+  }
+
+  // floor/ceiling pass (all slots when the party cell is unmarked; §3.14.12)
+  if (!marked) {
+    s.slot = 0;
+    fcCell(s, x, y, 0);
+    for (let slot = 1; slot <= 26; slot++) {
+      const c = slotCell(s, x, y, slot);
+      fcCell(s, c.x, c.y, slot);
+    }
+  }
+
+  s.words.push(f.backdropWord);
+  return s.words;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pixel compositing -- pure array ops, shared by the Node verification
+// renderer (`render-through-dungeon.ts`) and the browser walker
+// (`tools/walker/games-w6-snes.ts`).
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Recover the raw pool-tile index buffer (0-15 per pixel) from a decoded `dungeon-art-indexed.png` RGBA buffer (index in the R channel). */
 export function extractPoolIndices(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): Uint8Array {
   const out = new Uint8Array(width * height);
   for (let i = 0; i < width * height; i++) out[i] = rgba[i * 4]!;
   return out;
 }
 
-/** One flat RGBA color, `[r,g,b]` (0-255 each); index 0 is always transparent (the confirmed BG-transparent slot, §3.14.10) and never sampled here since a pool index of 0 is skipped. */
 export type Palette16 = ReadonlyArray<{ r: number; g: number; b: number }>;
 
-function blitPiece(
-  dest: Uint8ClampedArray,
-  destW: number,
-  destH: number,
-  piece: ViewPiece,
-  tileSize: number,
+/**
+ * Composite one pose's resolved word list into an RGBA view. Implements
+ * §3.14.4's near-to-far painter's algorithm at cell granularity: the first
+ * piece to claim a cell owns it; later pieces may only fill pixels that
+ * are still palette-index 0 within cells whose owner had transparency.
+ */
+export function compositeSnesView(
+  f: ViewPiecesFile,
   pool: Uint8Array,
   poolW: number,
-  poolCols: number,
   palette: Palette16,
-): void {
-  for (let row = 0; row < piece.h; row++) {
-    for (let col = 0; col < piece.w; col++) {
-      const tileIdx = piece.cells[row * piece.w + col];
-      if (tileIdx === null || tileIdx === undefined) continue;
-      const srcTileX = (tileIdx % poolCols) * tileSize;
-      const srcTileY = Math.floor(tileIdx / poolCols) * tileSize;
-      const dstX0 = (piece.x + col) * tileSize;
-      const dstY0 = (piece.y + row) * tileSize;
-      for (let py = 0; py < tileSize; py++) {
-        const dy = dstY0 + py;
-        if (dy < 0 || dy >= destH) continue;
-        for (let px = 0; px < tileSize; px++) {
-          const dx = dstX0 + px;
-          if (dx < 0 || dx >= destW) continue;
-          const paletteIdx = pool[(srcTileY + py) * poolW + (srcTileX + px)]!;
-          if (paletteIdx === 0) continue; // transparent
-          const c = palette[paletteIdx];
-          if (!c) continue;
-          const o = (dy * destW + dx) * 4;
-          dest[o] = c.r;
-          dest[o + 1] = c.g;
-          dest[o + 2] = c.b;
-          dest[o + 3] = 255;
+  words: number[],
+): { rgba: Uint8ClampedArray; width: number; height: number } {
+  const vw = f.viewport.w;
+  const vh = f.viewport.h;
+  const ts = f.tileSize;
+  const width = vw * ts;
+  const height = vh * ts;
+  // per-pixel palette index buffer + per-cell ownership
+  const idxBuf = new Uint8Array(width * height); // 0 = unset/transparent
+  const owner = new Array<number>(vw * vh).fill(-1); // -1 = unclaimed; else 0 = opaque owner, 1 = alpha owner
+
+  for (const word of words) {
+    const piece = f.pieces[`0x${word.toString(16).padStart(4, '0')}`];
+    if (!piece) continue;
+    for (let row = 0; row < piece.h; row++) {
+      for (let col = 0; col < piece.w; col++) {
+        const tileIdx = piece.cells[row * piece.w + col];
+        if (tileIdx === null || tileIdx === undefined) continue;
+        const cx = piece.x + col;
+        const cy = piece.y + row;
+        if (cx < 0 || cy < 0 || cx >= vw || cy >= vh) continue;
+        const ci = cy * vw + cx;
+        const own = owner[ci]!;
+        if (own === 0) continue; // fully-opaque owner: skip
+        const merge = own === 1;
+        owner[ci] = piece.alpha[row * piece.w + col] ? 1 : 0;
+        const srcX = (tileIdx % f.poolCols) * ts;
+        const srcY = Math.floor(tileIdx / f.poolCols) * ts;
+        for (let py = 0; py < ts; py++) {
+          for (let px = 0; px < ts; px++) {
+            const o = (cy * ts + py) * width + cx * ts + px;
+            if (merge && idxBuf[o] !== 0) continue;
+            const v = pool[(srcY + py) * poolW + (srcX + px)]!;
+            if (merge) {
+              if (v !== 0) idxBuf[o] = v;
+            } else {
+              idxBuf[o] = v;
+            }
+          }
         }
       }
     }
   }
-}
 
-/** Composite one pose's resolved `ViewOp`s into a fresh `viewport.w*tileSize x viewport.h*tileSize` RGBA buffer. */
-export function compositeSnesView(
-  viewPieces: ViewPiecesFile,
-  pool: Uint8Array,
-  poolW: number,
-  palette: Palette16,
-  ops: ViewOp[],
-): { rgba: Uint8ClampedArray; width: number; height: number } {
-  const width = viewPieces.viewport.w * viewPieces.tileSize;
-  const height = viewPieces.viewport.h * viewPieces.tileSize;
   const rgba = new Uint8ClampedArray(width * height * 4);
-  // Fill black first: the confirmed backdrop piece (§3.14.6) has a real,
-  // legitimate transparent void where the corridor continues (the doorway
-  // opening / floor perspective) -- there is no confirmed always-drawn
-  // floor/ceiling-continuation piece for SNES yet (the Amiga port has an
-  // analogous, still-open gap of its own, `walker-user-reported-inaccuracy`
-  // in docs/wizardry6/TODO.md). A black fill reads as dungeon shadow rather
-  // than a broken/missing-texture hole.
-  for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
-
-  const blit = (piece: ViewPiece | null | undefined) => {
-    if (!piece) return;
-    blitPiece(rgba, width, height, piece, viewPieces.tileSize, pool, poolW, viewPieces.poolCols, palette);
-  };
-
-  for (const op of ops) {
-    if (op.kind === 'backdrop') blit(viewPieces.backdrop);
-    else if (op.kind === 'door') blit(viewPieces.door);
-    else blit(viewPieces.wall[op.kind][op.depth]);
+  for (let i = 0; i < width * height; i++) {
+    const v = idxBuf[i]!;
+    const c = palette[v];
+    const o = i * 4;
+    // index 0 (and any missing palette entry) renders as opaque black --
+    // matching the real screen, where CGRAM colour 0 shows the backdrop
+    rgba[o] = c && v !== 0 ? c.r : 0;
+    rgba[o + 1] = c && v !== 0 ? c.g : 0;
+    rgba[o + 2] = c && v !== 0 ? c.b : 0;
+    rgba[o + 3] = 255;
   }
-
   return { rgba, width, height };
 }

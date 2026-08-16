@@ -71,10 +71,13 @@
  *   origin produces recognisable dungeon architecture (rectangular rooms,
  *   corridors, doors, and on level 9 an unmistakable left-right
  *   mirror-symmetric room cluster) -- not noise. Value->meaning for the
- *   2-bit wall planes (0=open/1=door/2=wall/3=secret, used for rendering
- *   below) and the 4-bit feature codes is RENDERED, not confirmed by
- *   disassembly of a renderer/consumer -- see the open item in
- *   docs/wizardry6/TODO.md.
+ *   2-bit wall planes is now CONFIRMED cross-platform (the SNES port's
+ *   full render dispatch + decisive art renders, snes/data-structure.md
+ *   section 3.14.12, over byte-identical maze data): 0 = open,
+ *   1 = open doorway (frame, see-through), 2 = solid wall, 3 = closed
+ *   door (doorway + wooden leaf). The 4-bit feature-code meanings remain
+ *   RENDERED-level (several identified by art on the SNES side: 1/2 =
+ *   arched openings, 3 = globe lamp, 7 = portcullis gate).
  *
  * NOT decoded (open, tracked in docs/wizardry6/TODO.md):
  * - The `+0x000` 1-bit plane, the `+0x438` scalar, and the three
@@ -266,12 +269,15 @@ function verifyAgainstNewgame(dataDir: string, scenario: Uint8Array): { checked:
   return { checked: true, mismatches, totalBytes };
 }
 
-// Rendered (not disassembly-confirmed) colour key for the top-down map.
+// Colour key for the top-down map. Wall-value semantics confirmed
+// cross-platform (snes/data-structure.md section 3.14.12): 1 = open
+// doorway, 3 = closed door (the old "secret" label was wrong -- 3 is a
+// visible closed door; secret doors are not encoded in the wall planes).
 const WALL_COLOR: Record<number, [number, number, number]> = {
   0: [32, 32, 36], // open
-  1: [184, 122, 40], // door
+  1: [184, 122, 40], // open doorway
   2: [198, 198, 204], // wall
-  3: [156, 60, 186], // secret
+  3: [122, 78, 30], // closed door (darker wood tone)
 };
 const FEATURE_OUTLINE: [number, number, number] = [232, 200, 40];
 const CELL_PX = 6;
@@ -380,7 +386,7 @@ function main() {
       'scenario.dbs section 2: 14 dungeon maze levels (file offset 0x9408, 1346 bytes/level). CONFIRMED: ' +
       '13-field record partition (zero slack), region-placement invariant (zero overlaps among active regions), ' +
       'LSB-first bit-field packing (cross-checked byte-exact against the DOS/EGA release and against newgame.dbs). ' +
-      'RENDERED (not disassembly-confirmed): wall value 0/1/2/3 = open/door/wall/secret, feature code 0-15 meaning. ' +
+      'Wall values CONFIRMED cross-platform (snes/data-structure.md 3.14.12): 0=open, 1=open doorway, 2=solid wall, 3=closed door. Feature-code 0-15 meaning still rendered-level. ' +
       'See docs/wizardry6/amiga/data-structure.md section 4.7 for the full derivation and ' +
       'docs/wizardry6/TODO.md for what remains open (the +0x000 plane, +0x438 scalar, three per-region word ' +
       'arrays, section 3\'s entity-table semantics, and exact wall-plane-to-compass-direction mapping).',

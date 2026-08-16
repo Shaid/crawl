@@ -152,8 +152,68 @@ interface MonsterRecord {
   picFileIndex: number;
   picFile: string;
   picFileIndexSecondary: number;
+  /** Per-attack sub-records at +68/+84/+100 -- fully decoded 2026-08-16 (oracle: the published Zimlab bestiary, field-for-field on 9 monsters x up to 3 attacks). */
+  attacks: MonsterAttack[];
   empty: boolean;
   statBytesHex: string;
+}
+
+/**
+ * One 16-byte per-attack sub-record (record offsets +68/+84/+100; a
+ * monster has 1-3 attacks, all-zero sub-records are unused slots).
+ * Field map confirmed against the published bestiary
+ * (docs/wizardry6/amiga/data-structure.md section 7.1):
+ * +0-1 u16 BE damage bonus, +2 dice count, +3 dice sides (same encoding
+ * as the confirmed HP/stamina specs), +4 sleep%, +5 paralyze%,
+ * +6 poison%, +7 stone%, +9 drain%, +10 crit%, +11 KO%, +12 poison
+ * level (Pois-N), +13 range (0=[S]hort 1=[E]xtended 2=[T]hrown 3=[L]ong),
+ * +14 = 100 - toHit% (vs AC 0), +15 attack verb/type id. +8 is 0 in all
+ * 301 real attacks corpus-wide.
+ */
+interface MonsterAttack {
+  damageBonus: number;
+  diceCount: number;
+  diceSides: number;
+  damage: string;
+  sleepPct: number;
+  paralyzePct: number;
+  poisonPct: number;
+  stonePct: number;
+  drainPct: number;
+  critPct: number;
+  koPct: number;
+  poisonLevel: number;
+  range: 'short' | 'extended' | 'thrown' | 'long' | 'unknown';
+  hitPct: number;
+  verbId: number;
+}
+
+const ATTACK_OFFSETS = [68, 84, 100] as const;
+const ATTACK_RANGES = ['short', 'extended', 'thrown', 'long'] as const;
+
+function readAttack(rec: Uint8Array, off: number): MonsterAttack | null {
+  const sub = rec.subarray(off, off + 16);
+  if (sub.every((b) => b === 0)) return null;
+  const damageBonus = (sub[0]! << 8) | sub[1]!;
+  const diceCount = sub[2]!;
+  const diceSides = sub[3]!;
+  return {
+    damageBonus,
+    diceCount,
+    diceSides,
+    damage: `${diceCount}d${diceSides}${damageBonus ? `+${damageBonus}` : ''}`,
+    sleepPct: sub[4]!,
+    paralyzePct: sub[5]!,
+    poisonPct: sub[6]!,
+    stonePct: sub[7]!,
+    drainPct: sub[9]!,
+    critPct: sub[10]!,
+    koPct: sub[11]!,
+    poisonLevel: sub[12]!,
+    range: ATTACK_RANGES[sub[13]!] ?? 'unknown',
+    hitPct: 100 - sub[14]!,
+    verbId: sub[15]!,
+  };
 }
 
 function readNameSlot(rec: Uint8Array, slot: number): string {
@@ -212,6 +272,7 @@ function main() {
     const picFileIndex = rec[PIC_FILE_INDEX_OFFSET];
     const picFile = `mon${picFileIndex.toString().padStart(2, '0')}.pic`;
     const picFileIndexSecondary = rec[PIC_FILE_INDEX_SECONDARY_OFFSET];
+    const attacks = ATTACK_OFFSETS.map((o) => readAttack(rec, o)).filter((a): a is MonsterAttack => a !== null);
 
     records.push({
       index: i,
@@ -226,6 +287,7 @@ function main() {
       picFileIndex,
       picFile,
       picFileIndexSecondary,
+      attacks,
       empty,
       statBytesHex,
     });

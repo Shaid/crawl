@@ -255,10 +255,13 @@ async function loadBlackCrypt(assetBase: string, unitId: number, startPose: Pose
 
 /** Wizardry 6: one per-level `DungeonLevelFile` + the compose-list `slots.json` + the true-indexed atlas. `startPose` may be `null` to use the level's data-derived entrance tile. */
 async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose | null): Promise<GameView> {
-  const levelFile: DungeonLevelFile = validateDungeonLevelFile(
-    await fetchJSON<unknown>(`${assetBase}/dungeon/level${String(levelId).padStart(2, '0')}.json`),
-  );
+  const rawLevel = await fetchJSON<unknown>(`${assetBase}/dungeon/level${String(levelId).padStart(2, '0')}.json`);
+  const levelFile: DungeonLevelFile = validateDungeonLevelFile(rawLevel);
   const unit = levelFile.units[0]!;
+  // `origin` is a W6-specific extension (absolute maze coordinate of grid
+  // (0,0)) feeding the checkerboard parities (§4.7.8); not part of the
+  // shared DungeonLevelFile schema, so read off the raw JSON.
+  const origin = (rawLevel as { origin?: { x: number; y: number } }).origin ?? { x: 0, y: 0 };
   const planes: CellPlanes = {
     width: levelFile.cellSpace.kind === 'flat' ? levelFile.cellSpace.width : 16,
     height: levelFile.cellSpace.kind === 'flat' ? levelFile.cellSpace.height : 16,
@@ -297,6 +300,7 @@ async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose
     startPose: startPose ?? w6EntrancePose(planes, levelId),
     level,
     automapBank,
+    origin,
   });
 }
 

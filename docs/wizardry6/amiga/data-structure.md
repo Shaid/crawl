@@ -1723,6 +1723,27 @@ overlap** (`96+192+192+12+12+384+192+2+96+96+24+24+24 = 1346`) — derived
 independently from the buffer offsets in the evaluator's own disassembly,
 not fitted to the byte count.
 
+> **Wall-plane value semantics CONFIRMED (2026-08-16, cross-platform):
+> `0 = open, 1 = open doorway, 2 = solid wall, 3 = closed door`.** The
+> SNES port's view dispatch was traced to full closure
+> (`snes/data-structure.md` §3.14.12): its per-value art words render as —
+> value 1: a wall pierced by an **open doorway** (stone frame, transparent
+> opening); value 2: solid masonry; value 3: a **closed wooden door leaf**
+> drawn inside the same doorway frame. The maze data is byte-identical
+> across ports (§4.7.5's oracle), so the semantics transfer directly —
+> and the Amiga's own dispatch structure independently matches: codes 1/3
+> share a doorframe piece pair (`0x53`/`0x57`, rendered: a stone door
+> jamb) with code 3 adding extra pieces + deferred-queue records (the
+> leaf), and the occlusion updaters (`LAB_0538` etc.) fire only on
+> `code==2 || code>=5` — doorways and closed doors are see-through for
+> the visibility recursion on both platforms. **The earlier rendered
+> guess "1 = door, 3 = secret" is superseded: 3 is a visible closed door;
+> the wall planes encode no secret doors.** Supporting cross-tab over all
+> 14 levels: feature 1 sits on wall-value-0 edges 102/102 (the door
+> *feature* rides on open edges), features 3-5/7-12 sit on wall-value-2
+> edges exclusively (wall decorations — SNES art: 3 = globe lamp,
+> 7 = portcullis gate); no feature ever sits on a 1/3 edge.
+
 `cellIndex = region*64 + localY*8 + localX`, `localX = x - originX[region]`,
 `localY = y - originY[region]` (both `0..7`). Bit-field extraction is
 **LSB-first**, matching the game's own `GetBitField(base, i, n)` primitive
@@ -1915,9 +1936,13 @@ number exactly.
 
 **Still open** (tracked in `docs/wizardry6/TODO.md`): the `+0x000` 1-bit
 plane, the `+0x438` scalar, the `+0x52a` per-region word array, and the
-value→meaning mapping for the 16 feature codes and the wall values
-beyond the open/door/wall/secret rendered guess and feature-code `1`
-("closed door" working label). **Resolved this session**: the
+value→meaning mapping for the 16 feature codes beyond feature-code `1`
+("closed door"/portal working label) and the SNES-art-derived readings
+(features 1/2 arched openings, 3 globe lamp, 7 portcullis — §3.14.12
+there). **Resolved (2026-08-16): the wall-plane values** — see the
+confirmed-semantics block under §4.7.3's table (0 open / 1 open doorway /
+2 solid wall / 3 closed door; supersedes the "door/secret" rendered
+guess). **Resolved this session**: the
 facing↔coordinate-delta↔plane mapping is now fully confirmed via
 disassembly (facing 0 = own `+Y` side via plane A, facing 1 = own `+X`
 side via plane B, facing 2 = neighbour `(x,y-1)`'s plane A, facing 3 =
@@ -2458,6 +2483,190 @@ render already assumed. The previous `staticSlots` mixed the two (122/150
 direct, 123-125/151-153 mirrored via `LAB_036C`) — a combination the game
 never produces — so unifying on direct is a consistency fix, not a new
 approximation.
+
+#### 4.7.8 The deferred-draw queue decoded, `0x9b58`'s complete per-code dispatch, and the checkerboard parities (2026-08-16)
+
+**Confirmed** (direct `Bane.asm` read of the queue push `LAB_04B9` =
+`CODE+0x9a52`, its consumer `0x0afe6`-`0x0b1ca`, all 11 push call sites,
+and all five `9b58` call sites' full 35-word argument pushes — extracted
+mechanically, with the R sites verifying as exact member-swaps of the L
+sites, 15/15 pairs). Closes `dungeon-walker-m6-wiring` items (a)-(c) and
+`dungeon-walker-cell-render-dispatch`'s side-door/deferred-queue items.
+
+##### The queue record (12 B at `-11282(A4)[i*12]`, counter `-10922(A4)`, cap 30)
+
+| off | size | field | from push arg |
+|---|---|---|---|
+| `+0` | u16 | draw-1 own compose word | `10(A5)` (+ a section-8 byte when kind != `0xFF`, below) |
+| `+2` | u16 | draw-2 own compose word | `12(A5)` (+ section-8) |
+| `+4` | u16 | draw-1 mirror partner (`0xFFFF` = direct-only) | `16(A5)` |
+| `+6` | u16 | draw-2 mirror partner | `18(A5)` |
+| `+8` | u8 | kind — `0xFF` = `DrawMazePiece` record; else `.PIC`-cel token | `8(A5)` lo |
+| `+9` | u8 | mode (kind `0xFF`) / cel index (token) | `14(A5)` lo |
+| `+10` | u8 | depth tag | `20(A5)` lo |
+
+**Consumer** (after the whole depth loop, iterating `-11438(A4)` from the
+loop cap **down** to 0 — deferred pieces paint far-to-near, over the
+already-drawn walls/floors): per record matching the current depth, kind
+`0xFF` → up to two `DrawMazePiece` calls, each pair `(own, partner)`
+forked on the **per-record parity** `(-18338 + -18336 + -18328 +
+rec.depth) & 1` (`0x0b010`-`0x0b024`); kind != `0xFF` → the confirmed
+`.PIC` cel compositor (A4 entry 56, `jsr -32430(a4)` at `0x0b1b4`) with
+cel list `[rec+9, 0]` and screen coordinates from `rec+0/+2/+4/+6` — the
+**animated wall-decoration path** (torches etc.), §4.6's "monster/NPC
+token overlay" loop re-identified.
+
+##### The `-0x3adc`/`-0x3aaa(a4)` mystery tables ARE `scenario.dbs` section 8
+
+`LAB_04B9`'s kind != `0xFF` adjustment reads `-15068(A4)[kind*0x13a +
+(depth-1)*2]` and `-15018(A4)[kind*0x13a + (depth-1)]` — and `-15068` /
+`-15018` are `-0x3ae4(A4) + 8` / `+ 58`: **inside the section-8 resource
+cache** (base `-0x3ae4(A4)`, 314-byte slots, §7.1). This finally explains
+§4.6's "referenced from ~20 sites, zero writers anywhere" puzzle: the
+"tables" are section-8 record bytes `+8..` / `+58..`, populated by the
+generic bulk `ReadSection(8, kind)` — no field-level writer can exist.
+Verified against the raw file: section-8 records 1-3 hold real, in-range
+compose/screen values at those offsets (e.g. record 1 `+8..`: 152 152 152
+152 157 157... — screen-coordinate runs; `+58..`: 61 61 65 65 68 68... ),
+records 0 and 4+ are zero. **Section 8's first real semantic content:
+per-kind, per-depth screen-position/cel tables for the deferred
+decoration draws.** Similarly, the `-0x7c5e`/`-0x7c6e(a4)` "no writer"
+tables (§4.6) are **statically initialised DATA-hunk content** (data
+offsets `0x3a0`/`0x390`, inside the 2392 real payload bytes — read
+directly: `-0x7c6e`: 0, 104, 128, 144, 0, 216, 192, 176, ...): the
+kind-token screen-position tables indexed `depth*6 + side*2` at the
+`9b58` push sites.
+
+##### `0x9b58`'s complete dispatch (all 15 codes, from the case bodies)
+
+Parity flags — **both now fully resolved**: `-18338(A4)` = party
+**absolute maze X** (written by `LoadLevel` at `CODE+0x100b2` as
+`originX[region] + localX` — reading the §4.7.3 record's own `+0x1e0`
+origin table — and stepped ±delta by the movement dispatcher at
+`0x11322`-`0x11350`), `-18336(A4)` = **absolute maze Y** (`0x100cc`,
+`+0x1ec` table), `-18328(A4)` = **facing** (turn handler `0x140be`:
+`(facing + delta) mod 4`). These are the *same* globals §4.7.2 already
+named `-0x47a2/-0x47a0/-0x4798(a4)` — the decimal spelling in §4.7.6's
+notes hid the identity. Hence:
+
+- **`-11434(A4)` = `(partyX + partyY + facing) & 1`** — the pose
+  checkerboard parity (identical in role to the SNES port's `$8e`,
+  `snes/data-structure.md` §3.14.12), used by the ceiling/floor draws
+  (`18/20(A5)`, `70/72(A5)`) and `LAB_0506`'s pairs.
+- **`-11436(A4)` = `(partyX + partyY + facing + depth) & 1`**
+  (`0x0a9b2`-`0x0a9ca`, byte-exact) — the per-depth parity, used by every
+  pair draw inside `0x9b58`'s own dispatch and by the deferred records.
+
+The **mirror-equivalence hypothesis is refuted, measured**: rendering
+each documented pair both ways (direct vs. partner-mirrored, faithful
+§4.4 port) gives **0/166 identical results** — e.g. the front wall's
+mirror-of-self differs on 5,216 of 7,863 drawn pixels. The parity fork is
+a real **texture-phase alternation** (the art pairs are not
+mirror-symmetric), the Amiga's equivalent of the SNES's parity-selected
+record words 0/2.
+
+Per-code behaviour (jump table `LAB_04F6` at `0x0a04c`; preamble = the
+solid wall pair `22/24(A5)+depth`, mode 1, `-11436` parity, fires for
+`code==2 || code>=7`):
+
+| code | meaning (§4.7.2/§3.14.12) | draws |
+|---|---|---|
+| 0 | open | nothing (floor tail only) |
+| 1 | **open doorway** | two deferred 2-pair records `(28,30)/(32,34)` and `(36,38)/(40,42)` `+depth`, mode 0; depth>0 or front-depth-0 → also a kind-2 cel token (cel `depth+13`); depth-0 lateral → falls into the door pair `44/46` |
+| 2 | solid wall | preamble only |
+| 3 | **closed door** | single deferred direct draw `26(A5)+depth` mode 0 (**the door leaf**) + everything code 1 does; front-depth-0 with `-11728(A4)>0` → kind-2 token (cel `-11728+15`) instead of the leaf |
+| 4 | feature 7 (portcullis) | code 1's records/token (cel `depth+10`), no leaf |
+| 5 | feature 1 (door/portal) | pair `44/46(A5)+depth` mode 1 — **the side-door pairs are `0xb5/0xbe` (L1), `0xb8/0xbb` (L2), `0xbb/0xb8` (R1), `0xbe/0xb5` (R2)**, resolving the "side-door baseIndex not extracted" TODO item |
+| 6 | feature 2 | pair `48/50(A5)+depth` mode 1 |
+| 7 | feature 8 | single, parity picks WHICH record: `52(A5)+d` or `54(A5)+d`, both direct, mode 0; + kind-1 token (cel `-11736(A4) + depth*2 + 1`, the animation counter) |
+| 8/9 | features 3/4 | kind-2/1 cel tokens only (position from the `-0x7c5e` static table + section-8) |
+| 10/11/12 | features 9/10/11 | pairs `56/58`, `60/62`, `64/66` mode 0 |
+| 13 | feature 12 | single `68(A5)+depth` mode 0, always direct |
+| 14 | feature 5 | front depth-0 only: compose `0x158`, mirror-self parity |
+
+Full per-site argument maps (all five sites, mechanically extracted,
+mirror-consistent): see `SITE_ARGS` in
+`tools/wizardry6/export-dungeon-slots.ts` — e.g. front `26(A5)` = `0x5b`
+(the front door-leaf run 91-93), L1 `26` = `0x5e`, L2 `0x61`, R1 `0x64`,
+R2 `0x67`.
+
+##### Rendered proof (cross-platform pincer)
+
+With codes 1/3 wired into the walker, the Amiga now renders — on the
+byte-identical cells the SNES side used for its own §3.14.12 verification
+(level 2, global (123,122) and (121,140) facing 0) — **a closed
+red-panelled wooden door with a handle inside a stone doorframe** (value
+3) and **an open doorway with the passage and cobbled floor continuing
+through it** (value 1). Two independent engines, two independent art
+sets, one maze byte stream, the same scene — the strongest confirmation
+this corpus has for the wall-value semantics.
+
+##### Implementation (shipped)
+
+`export-dungeon-slots.ts`: `SITE_ARGS` + `mirroredDraw` (re-instated) +
+new slot families `wall-open:*`, `door-leaf:*`, `door:{L1,L2,R1,R2}:*`,
+`feat6/7/10/11/12/13/14:*`, and `:alt` (mirrored/parity) variants of
+every pair slot incl. the seven ceiling/floor lanes (458 slots total).
+`view-model.ts`: full per-code dispatch (`frontKeys`), deferred-item
+emission after the depth loop in descending-depth order, and both
+parities computed from the pose (+ the level file's new `origin` field —
+`export-dungeon-levels.ts` — since the game uses absolute maze
+coordinates). Verified: 298,744 pose-facing sweep, 0 exceptions;
+24 dispatch/lane unit tests incl. new doorway/leaf/side-door/parity
+cases; `tsc`/lint/`vitest` all clean.
+
+**Still open after this pass**: the kind-1/2 cel-token draws (animated
+torch/decoration `.PIC` cels — the walker has no cel-resource resolution;
+which `.PIC`-format resource the cel indices address is untraced);
+`-11728(A4)`/`-11736(A4)` (the token id/animation-counter globals'
+writers). ~~the `-11364/65/66(A4)` occlusion-override writer and
+`-18340(A4)`'s exact value space~~ — **both closed in §4.7.9 below.**
+
+#### 4.7.9 The flagP/flagQ overlay dispatches decoded — fog cells, open sky, pits, and the alt floor (2026-08-16)
+
+**Confirmed** (disassembly; the two 14-way dispatch jump tables at
+`CODE+0x9434`/`0x949e` decoded from raw bytes — the tables live at
+`CODE+0x9418`/`0x9482`, brief-extension PC-relative form). Two big
+corrections fall out first:
+
+> **Correction: `-18340(A4)` = `-0x47A4(A4)` = the current maze LEVEL** —
+> the same global §4.7.2 already confirmed via `SetLevel`. §4.7.6.5's
+> "game mode 10 or 12" reading of the boundary special-case was the same
+> decimal-vs-hex notation gap as §4.7.8's parity globals: the "modes" are
+> **levels 10 and 12**, and the 14-way dispatches §4.7.2 described as
+> "dispatch on `-0x47a4(a4)`" are per-LEVEL handlers for the flagP/flagQ
+> overlay bits. (Also refined: at EvalCellFace's own off-map path, level
+> **10** returns 2/solid while level **12** writes the skip-ceiling +
+> alt-floor gates and returns 0/open — the two levels differ, unlike the
+> `LAB_055A` boundary case which treats 10 and 12 alike.)
+
+**flagP (`levelBuf+0x43A`, §4.7.3) per-level semantics** (dispatch
+`CODE+0x9434`; the corpus has flagP bits set on 12 of 14 levels, so
+these fire routinely in real gameplay):
+
+| levels | handler | meaning |
+|---|---|---|
+| 0, 4, 5 (and 12 outside regions 0-8) | `0x9308` | **fog/view-blocker cell**: sets the §4.7.6 occlusion-override array `-11366/-11365/-11364(A4)[depth*3+side]` (**its writer — found**), clears that side's visibility lanes at this depth (`0x932c`/`0x9352`/`0x9360` by lateral), and evaluates as **code 0 (open)** — an open-looking cell that blocks sight (forest edge / darkness) |
+| 12 (regions 0-8) | `0x92d6`→`0x92e6` | **alt-floor gate** (`-11330`) — the compose 214-241 family is real art for level 12's outdoor floor |
+| 8, 10 | `0x93f8` | **alt-floor gate** |
+| 1 | `0x93a0` | **skip floor AND ceiling** (`-11342` + `-11354`) — a void/chasm cell |
+| 2, 3, 6, 11, 13 | `0x93da` | **skip floor** (`-11342`) — pit/water cells |
+| 7, 9 | `0x9446` | nothing — falls straight into the flagQ test |
+
+**flagQ (`levelBuf+0x49A`) per-level semantics** (dispatch `CODE+0x949e`):
+most levels → `0x9464`: **skip ceiling** (`-11354`) — an open-sky cell;
+levels 2, 5, 7, 9 → `0x94b0`: a further **facing-indexed** handler
+(`-18328(A4)` dispatch, reading the wall planes with modified arguments —
+a per-facing wall override, not traced to closure).
+
+**Net effect on the walker** (`view-model.ts`'s "gates assumed clear"
+note): the assumption is now precisely characterized as an
+approximation — on flagged cells the real game skips floors (levels
+1/2/3/6/11/13), skips ceilings (flagQ, most levels), draws the alt floor
+(levels 8/10/12), or blocks visibility entirely (fog cells, levels
+0/4/5/12). The exported level JSON already carries the flagP/flagQ
+planes, so wiring these is implementable follow-up; left unimplemented
+this pass and recorded in `TODO.md`.
 
 ---
 
@@ -3328,8 +3537,46 @@ confirmed):
 | `+0xbe` (190) | 1 (signed) | **AC (armor class)** — overall; see the 8-byte block row above | **confirmed** — read at `CODE+0x1fce2`/`0x1fe88`, added into a to-hit-style roll computation. Independently re-verified this session: raw disassembly at both cited sites matches exactly. Statistical cross-check across 183 named records, independently reproduced: signed range **-14..+12**, Pearson r = **-0.566** vs `log(XP)` (tougher monsters trend lower/more-negative AC, the correct direction; `WILL O' WISP`, XP 170518, is the best at -14, `CREEPING VINE`, XP 59, is the worst at +12) |
 | `+0xd4` (212) | 1 | **monster level (coarse 4-tier class, not a literal level number)** | **confirmed** structure, medium-confidence semantics — written at `CODE+0x29114` from `pcfile.dbs` character offset `+425` (a source independently confirmed elsewhere in the binary, `CODE+0x3ae08`-`0x3ae3e`, to be a classic "level from XP" formula). Only 4 distinct raw values (1-4) occur; independently re-verified median XP per tier is monotonic: tier1=5154, tier2=10477, tier3=59947, tier4=91860 (a handful of unique late bosses sit at tier1, plausibly deliberate design rather than a decode error) |
 | `+0xd6` (214) | 1 | **gender / pronoun class** — `0`=male (52), `1`=female (23), `2`=neuter/beast (108) | **confirmed** (semantics via exhaustive name census; no reader exists in `Bane`) — supersedes both the "alignment" and the "creature-type tier" readings, see the "HP found / alignment refuted" note below |
-| `+68`–`+69`, `+84`–`+85`, `+100`–`+101` | 2 each | three further BE u16 fields, each the first field of a **16-byte sub-record** at `+68`/`+84`/`+100` (stride 16) | **confirmed** as u16 (cross-port endian test, 0 counterexamples); semantics open |
+| `+68`, `+84`, `+100` | 16 each | **the three per-attack sub-records — FULLY DECODED (2026-08-16)**, see the attack-record table below | **confirmed** — field-for-field against the published Zimlab bestiary's per-attack columns (9 monsters × up to 3 attacks, every field exact) |
 | `+68`–`+221` (excl. above) | | HP **found** (`+0x78`); alignment **refuted as nonexistent** | see the "HP found / alignment refuted" note below |
+
+> **The per-attack sub-records — decoded and oracle-confirmed
+> (2026-08-16).** A monster has 1-3 attacks (corpus: 98×1, 48×2, 37×3 =
+> 301 real attacks across the 183 named records; all-zero sub-records are
+> unused slots). Each 16-byte sub-record:
+>
+> | off | field | oracle evidence (Zimlab bestiary column) |
+> |---|---|---|
+> | `+0`-`+1` | u16 BE damage bonus | `PIT FIEND` 4d4**+4**, `ISLAND GIANT` stomp 4d5**+20**, `PIRATE` dirk 1d4**+1** — exact |
+> | `+2` | dice count | same encoding as the confirmed HP/stamina specs |
+> | `+3` | dice sides | `GIANT RAT` claws **2d2**/bites **1d7+1**, `LICHE` touches **4d3**, `SLIME` stings 2d1 (= flat "2") — exact |
+> | `+4` | sleep % | `SPIRIT` **Sleep 25%** |
+> | `+5` | paralyze % | `BANSHEE` **Para 50%**, `LICHE` **Para 20%** |
+> | `+6` | poison % | `POISON SLIME` **Pois-1 25%** |
+> | `+7` | stone (petrify) % | `WRAITH` **Stone 15%** |
+> | `+8` | (unused — 0 in all 301 attacks) | |
+> | `+9` | drain % | `BANSHEE` **Drain 50%**, `LICHE` **Drain 100%** |
+> | `+10` | crit % | `AMAZULU QUEEN` **Crit 5%**, `SEA SERPENT` **Crit 2%** |
+> | `+11` | KO % | `ISLAND GIANT` **KO 10%**/**KO 35%** |
+> | `+12` | poison level (`Pois-N`) | `POISON SLIME` Pois-**1** |
+> | `+13` | range: 0=`[S]`hort, 1=`[E]`xtended, 2=`[T]`hrown, 3=`[L]`ong | `AMAZULU` [E] thrust=1, `ROGUE` [T] dirk=2, `AMAZULU ARCHER` [L] arrow=3 — exact incl. the Rogue-vs-Pirate same-verb different-range pair |
+> | `+14` | **100 − toHit%** (vs AC 0) | `85`→15%, `95`→5%, `105`→−5%, `65`→35% — exact on every sampled attack |
+> | `+15` | attack verb/type id (1=claws, 2=bites/touches, 3=swings/thrusts-cutlass, 4=punches/bashes, 16=throws-dirk, 64=stings, ...; ids up to 128 observed) | consistent per verb across monsters |
+>
+> Even the published table's oddity reproduces: `ISLAND GIANT` lists its
+> `[E]` sledge attack **twice** — and the record's third sub-record is a
+> byte-identical duplicate of the first. Exported by
+> `decode-scenario-monsters.ts` as each record's `attacks` array.
+>
+> **`+0xb1`-`+0xb5` and `+0xb9`-`+0xbd` (the two 5-byte percent tables) —
+> upgraded to a structured reading:** both are **5-way percent
+> distributions summing to (≤)100** (`LICHE` 15/40/30/10/5 both;
+> `SLIME` 0/**100**/0/0/0 and 0/10/30/5/55; `PIT FIEND` 10/65/15/10/0) —
+> almost certainly **hit-location distributions over the 5 physical body
+> parts** (Head/Body/Legs/Hands/Feet, matching the armour model's 5
+> non-shield/spell slots; a slime being 100% "body" is the give-away).
+> Which table is incoming vs. outgoing (where the monster gets hit vs.
+> where its attacks land) is not determined — hypothesis, not confirmed.
 
 > **Session note (`re-codebreaker`, 2026-08-03): HP FOUND at `+0x78`;
 > alignment REFUTED as a field that exists at all; `+0x74` and `+0xd6`
@@ -4193,6 +4440,32 @@ see §6.4's correction above).
 > text during message-box rendering (a window frame or portrait template
 > are the obvious candidates) — hypothesis only, not traced further this
 > session.
+>
+> **SOLVED (2026-08-16): section 5 is the NPC / special-encounter NAME
+> table, and the "literal 94" is the ASCII caret `'^'`, not a byte
+> offset.** Resolving the accessor: `-0x7faa(a4)` = A4 jump-table entry
+> **14** = `CODE+0x6AC`, a **string template substitution**
+> `SpliceAtMarker(dest@8, insert@12, marker@17)` — it scans the
+> NUL-terminated `dest` string for the marker byte, splices the `insert`
+> string in its place (via the confirmed entry-103 `strcpy`), and clears
+> the marker. So the section-6 message cases splice **the section-5
+> record's own name string** into the loaded message text wherever `'^'`
+> (94) appears. And the records ARE names, in plain uncompressed ASCII —
+> the earlier "no legible strings" impression was never actually checked
+> against section 5's raw bytes: all 32 records open with an unmistakable
+> NUL-terminated NPC/special-encounter name (`CAPTAIN MATEY`, `QUEEQUEG`,
+> `COSMIC FORGE`, `* B E L A *`, `L'MONTES`, `SMITTY`, `TOLL TROLL`,
+> `MYSTAPHAPHAS`, `* XORPHITUS *`, `VICAR'S GHOST`, `AMAZULU QUEEN`,
+> `CHARRON` (x2), `THE SIREN`, `?? BANE KING ??` (x3), `R E B E C C A`
+> (x2), `VISION`, `S.S.VAMPIRER`, `DELPHI`, `QUEEN=FAERIES`, ...),
+> followed by a sparse binary tail (a dense `0x191`-`0x1B6` id run plus
+> `0x01xx`/`0x03xx`/`0x07xx`-shaped tuples — dialogue/encounter link
+> data, characterized but not field-decoded). Extractor:
+> `tools/wizardry6/decode-scenario-npcs.ts` →
+> `public/assets/wizardry6/amiga/data/npc-names.json`. The
+> `snes-...`/`scenario-sections-5-6-7-8` row's last open section is
+> hereby closed at the identification level (the tail tuples remain a
+> documented hypothesis).
 >
 > **Section 8 (`file 0x290b4`-`0x2df34`, 64 x 314-byte records) — CONFIRMED
 > CLOSED: a generic resource cache, content is per-use, not a fixed

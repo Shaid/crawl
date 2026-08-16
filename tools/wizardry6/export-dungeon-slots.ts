@@ -91,23 +91,41 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
     };
   };
 
-  // Two helpers used to live here and are both retired now:
-  //
-  // - `mirroredDraw` (graphic from `compose[src+depth]`, placement from
-  //   `compose[dst+depth]`, horizontally mirrored), for the "18-24(A5) are
-  //   mirrored (src,dst) pairs" reading of `0x9b58`'s arg blocks. §4.7.1's
-  //   second correction retired that reading — every wall site draws
-  //   directly via `composeDraw`.
-  // - `staticDraw`, which resolved a `STATIC_CORRIDOR_CALLS` triple (and was
-  //   the last consumer of the mirrored path) for the "static ceiling/floor
-  //   backdrop". §4.7.7 retired *that*: `LAB_036C`'s 16 calls are not a
-  //   backdrop pass, they are an unrolled fully-open-corridor replica of the
-  //   real renderer's own per-lane calls, so the ceiling/floor now comes
-  //   from the real seven-lane runs below.
-  //
-  // Both remain reachable in git history and are documented in
-  // `data-structure.md` §4.4 / §4.7.7 if a `-11434(A4) != 0` (mirrored
-  // parity) variant is ever needed.
+  /**
+   * `DrawMazePiece`'s **mirrored** path (§4.4): graphic from
+   * `compose[src+depth]`'s dir record, placement (destX/destY/srcClip/
+   * widthBytes) from `compose[dst+depth]`, blitted horizontally mirrored —
+   * the source bytes walk backwards from `offset + widthUnits - 1 - srcClip`
+   * through the bit-reversal LUT, i.e. source columns
+   * `[widthUnits - srcClip - widthBytes, widthUnits - srcClip)` reversed.
+   *
+   * Re-instated (2026-08-16): the parity flags that pick this branch are now
+   * fully resolved (`-11434(A4) = (partyX+partyY+facing) & 1`, `-11436(A4)`
+   * the same `+ depth` — §4.7.8), and a pixel diff shows the two branches
+   * are NOT equivalent (e.g. the front wall's mirror-of-self differs on
+   * 5,216 of 7,863 drawn pixels — the stone texture is asymmetric), so every
+   * pair-driven slot now also gets a `:alt` variant holding this branch.
+   */
+  const mirroredDraw = (srcBase: number, dstBase: number, depth: number, mode: 0 | 1 = 1) => {
+    const dstRec = maze.composeList[dstBase + depth];
+    const srcRec = maze.composeList[srcBase + depth];
+    if (!dstRec || dstRec.widthBytes === 0 || !srcRec) return null;
+    const gfx = maze.dirRecords[srcRec.dirIndex]!;
+    const frame = frameByName(`mazedata_dir${String(srcRec.dirIndex).padStart(3, '0')}`);
+    return {
+      bank: 'mazedata',
+      frame: `mazedata_dir${String(srcRec.dirIndex).padStart(3, '0')}`,
+      destX: (dstRec.destXByte + dstRec.srcClip) * 8,
+      destY: dstRec.destY,
+      srcX: frame.x + (gfx.widthUnits - dstRec.srcClip - dstRec.widthBytes) * 8,
+      srcY: frame.y,
+      srcW: dstRec.widthBytes * 8,
+      srcH: gfx.heightPx,
+      mirrorX: true,
+      blend: (mode === 0 ? 'replace' : 'or') as 'replace' | 'or',
+      origin: `mazedata-composelist[${srcBase + depth}] mirrored onto [${dstBase + depth}]`,
+    };
+  };
 
   // The 4 far-end archway pieces (STATIC_CORRIDOR_CALLS 12-15, srcIdx 25/28/31/34)
   // are NOT part of the always-drawn static backdrop — verified against real
@@ -139,12 +157,15 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
   // those are compose 16/17/18, i.e. the run's depths **1-3**, so every
   // strip landed one depth too far away. `LAB_0506`'s own base is 0x0f/0x13.
   //
-  // `LAB_0506` picks direct-vs-mirrored per draw off `-11434(A4)`, a
-  // once-per-render facing-parity flag (§4.7.6.2). A static slot table can't
-  // switch on it — but it doesn't need to: the pair's two indices are the
-  // left/right mirror images of each other, so the mirrored branch draws the
-  // opposite side's art flipped back, which is the same picture. The direct
-  // branch (`-11434 == 0`) is emitted here.
+  // `LAB_0506` picks direct-vs-mirrored per draw off `-11434(A4)`.
+  // > **Correction (2026-08-16):** this comment used to claim the mirrored
+  // > branch "draws the same picture" — refuted by a pixel diff (the pair
+  // > art is not mirror-symmetric; see `mirroredDraw`'s doc). `-11434(A4)`
+  // > is now resolved as the pose checkerboard parity
+  // > `(partyX + partyY + facing) & 1` (§4.7.8) — the Amiga analog of the
+  // > SNES port's `$8e` — so both branches are emitted: the direct one
+  // > under the plain key, the mirrored one under `<key>:alt`, picked per
+  // > pose by `view-model.ts`.
   const SIDE_BASE: Record<string, { L: number; R: number; mode: 0 | 1 }> = {
     // preamble pair `16/18(A5)` — the plain receding side wall.
     'wall-side': { L: 0x0f, R: 0x13, mode: 1 },
@@ -219,30 +240,119 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
     'side:R': { ceil: 146, floor: 174, alt: 238 },
   };
 
+  /**
+   * `0x9b58`'s five call sites' full 35-word argument maps, extracted
+   * mechanically from the push sequences before each `JSR LAB_04BD`
+   * (`0x0ab92`/`0x0ad52`/`0x0ae10`/`0x0aed0`/`0x0af90`) — §4.7.8. Each
+   * value is a compose-list base index (`+ depth` at draw time). The R
+   * sites are exact member-swaps of the L sites (internal consistency
+   * check, holds 15/15 pairs). Beyond the already-documented slots
+   * (ceiling 18/20, wall 22/24, door 44/46, floor 70/72, alt floor 74/76):
+   *
+   *   26        code-3 single deferred draw (the closed-door leaf, mode 0,
+   *             always direct)
+   *   28-34     deferred pair-record #1 for codes 1/3/4 (doorway art):
+   *             draw (28,30) and (32,34), mode 0, `-11436` parity
+   *   36-42     deferred pair-record #2, same codes: (36,38) and (40,42)
+   *   48/50     code 6 pair (mode 1)
+   *   52/54     code 7 — parity picks WHICH record draws (54 is its own
+   *             placement, not a mirror partner), mode 0
+   *   56-66     codes 10/11/12 pairs (mode 0)
+   *   68        code 13 single (mode 0, always direct)
+   *
+   * (14/16 hold the kind-1/2 `.PIC`-cel token screen coordinates — the
+   * animated-decoration path, not modelled in the walker; §4.7.8.)
+   */
+  const SITE_ARGS: Record<string, Record<number, number>> = {
+    front: { 18: 0x7a, 20: 0x7a, 22: 0x0, 24: 0x0, 26: 0x5b, 28: 0x17, 30: 0x17, 32: 0x1a, 34: 0x1a, 36: 0x1d, 38: 0x20, 40: 0x20, 42: 0x1d, 44: 0xb2, 46: 0xb2, 48: 0xc7, 50: 0xc7, 52: 0xf2, 54: 0x101, 56: 0x116, 58: 0x116, 60: 0x12b, 62: 0x12b, 64: 0x13a, 66: 0x13a, 68: 0x149, 70: 0x96, 72: 0x96, 74: 0xd6, 76: 0xd6 },
+    L1: { 18: 0x82, 20: 0x8e, 22: 0x3, 24: 0xc, 26: 0x5e, 28: 0x23, 30: 0x3e, 32: 0x29, 34: 0x44, 36: 0x2f, 38: 0x50, 40: 0x35, 42: 0x4a, 44: 0xb5, 46: 0xbe, 48: 0xca, 50: 0xd3, 52: 0xf5, 54: 0x104, 56: 0x119, 58: 0x122, 60: 0x12e, 62: 0x137, 64: 0x13d, 66: 0x146, 68: 0x14c, 70: 0x9e, 72: 0xaa, 74: 0xde, 76: 0xea },
+    L2: { 18: 0x86, 20: 0x8a, 22: 0x6, 24: 0x9, 26: 0x61, 28: 0x26, 30: 0x3b, 32: 0x2c, 34: 0x41, 36: 0x32, 38: 0x4d, 40: 0x38, 42: 0x47, 44: 0xb8, 46: 0xbb, 48: 0xcd, 50: 0xd0, 52: 0xf8, 54: 0x107, 56: 0x11c, 58: 0x11f, 60: 0x131, 62: 0x134, 64: 0x140, 66: 0x143, 68: 0x14f, 70: 0xa2, 72: 0xa6, 74: 0xe2, 76: 0xe6 },
+    R1: { 18: 0x8a, 20: 0x86, 22: 0x9, 24: 0x6, 26: 0x64, 28: 0x3b, 30: 0x26, 32: 0x41, 34: 0x2c, 36: 0x47, 38: 0x38, 40: 0x4d, 42: 0x32, 44: 0xbb, 46: 0xb8, 48: 0xd0, 50: 0xcd, 52: 0xfb, 54: 0x10a, 56: 0x11f, 58: 0x11c, 60: 0x134, 62: 0x131, 64: 0x143, 66: 0x140, 68: 0x152, 70: 0xa6, 72: 0xa2, 74: 0xe6, 76: 0xe2 },
+    R2: { 18: 0x8e, 20: 0x82, 22: 0xc, 24: 0x3, 26: 0x67, 28: 0x3e, 30: 0x23, 32: 0x44, 34: 0x29, 36: 0x4a, 38: 0x35, 40: 0x50, 42: 0x2f, 44: 0xbe, 46: 0xb5, 48: 0xd3, 50: 0xca, 52: 0xfe, 54: 0x10d, 56: 0x122, 58: 0x119, 60: 0x137, 62: 0x12e, 64: 0x146, 66: 0x13d, 68: 0x155, 70: 0xaa, 72: 0x9e, 74: 0xea, 76: 0xde },
+  };
+
   const slot = (draw: ReturnType<typeof composeDraw>) => (draw ? { draws: [draw] } : null);
+  const multiSlot = (draws: Array<ReturnType<typeof composeDraw>>) => {
+    const real = draws.filter((d): d is NonNullable<typeof d> => d !== null);
+    return real.length ? { draws: real } : null;
+  };
 
   // Ceiling/floor run to depth 3 (the `0x9b58` ceiling draw precedes its own
   // depth gate, and `LAB_04F8` is that gate's jump target), unlike the wall
-  // slots which stop at depth 2.
+  // slots which stop at depth 2. `:alt` = the `-11434(A4) != 0` mirrored
+  // branch (pair art at this lane's placement, mirrored).
+  const BACKDROP_PAIR: Record<string, { ceil: number; floor: number }> = {
+    front: { ceil: 122, floor: 150 },
+    'side:L': { ceil: 146, floor: 174 },
+    'lat:L1': { ceil: 142, floor: 170 },
+    'lat:L2': { ceil: 138, floor: 166 },
+    'lat:R1': { ceil: 134, floor: 162 },
+    'lat:R2': { ceil: 130, floor: 158 },
+    'side:R': { ceil: 126, floor: 154 },
+  };
   for (let depth = 0; depth < 4; depth++) {
     for (const [lane, { ceil, floor }] of Object.entries(BACKDROP_BASE)) {
       slots[`ceil:${lane}:${depth}`] = slot(composeDraw(ceil, depth));
       slots[`floor:${lane}:${depth}`] = slot(composeDraw(floor, depth));
+      const pair = BACKDROP_PAIR[lane]!;
+      slots[`ceil:${lane}:${depth}:alt`] = slot(mirroredDraw(pair.ceil, ceil, depth));
+      slots[`floor:${lane}:${depth}:alt`] = slot(mirroredDraw(pair.floor, floor, depth));
     }
   }
 
+  // `0x9b58`'s per-site dispatch families (§4.7.8): the main wall (preamble
+  // pair 22/24), the door pair (44/46), the codes-1/3/4 "open doorway"
+  // deferred records (28-42) and code 3's closed-door leaf (26), and the
+  // feature pieces (48-68). Site keys: front / L1 / L2 / R1 / R2, matching
+  // the wall-lat naming for the four lateral columns.
+  const siteWallKey = (site: string, depth: number) =>
+    site === 'front' ? `wall:front:${depth}` : `wall-lat:${site}:${depth}`;
   for (let depth = 0; depth < 3; depth++) {
     for (const [key, { L, R, mode }] of Object.entries(SIDE_BASE)) {
       slots[`${key}:L:${depth}`] = slot(composeDraw(L, depth, mode));
       slots[`${key}:R:${depth}`] = slot(composeDraw(R, depth, mode));
+      // extras 24/26(A5) are always-direct (no parity fork, §4.7.6.2)
+      if (key !== 'wall-side-extra3' && key !== 'wall-side-extra4') {
+        slots[`${key}:L:${depth}:alt`] = slot(mirroredDraw(R, L, depth, mode));
+        slots[`${key}:R:${depth}:alt`] = slot(mirroredDraw(L, R, depth, mode));
+      }
     }
-    slots[`wall-lat:L1:${depth}`] = slot(composeDraw(3, depth));
-    slots[`wall-lat:L2:${depth}`] = slot(composeDraw(6, depth));
-    slots[`wall-lat:R1:${depth}`] = slot(composeDraw(9, depth));
-    slots[`wall-lat:R2:${depth}`] = slot(composeDraw(12, depth));
-    slots[`wall:front:${depth}`] = slot(composeDraw(0x00, depth));
-    slots[`door:front:${depth}`] = slot(composeDraw(0xb2, depth));
+    for (const [site, a] of Object.entries(SITE_ARGS)) {
+      const wallKey = siteWallKey(site, depth);
+      slots[wallKey] = slot(composeDraw(a[22]!, depth));
+      slots[`${wallKey}:alt`] = slot(mirroredDraw(a[24]!, a[22]!, depth));
+      slots[`door:${site}:${depth}`] = slot(composeDraw(a[44]!, depth));
+      slots[`door:${site}:${depth}:alt`] = slot(mirroredDraw(a[46]!, a[44]!, depth));
+      slots[`door-leaf:${site}:${depth}`] = slot(composeDraw(a[26]!, depth, 0));
+      slots[`wall-open:${site}:${depth}`] = multiSlot([
+        composeDraw(a[28]!, depth, 0),
+        composeDraw(a[32]!, depth, 0),
+        composeDraw(a[36]!, depth, 0),
+        composeDraw(a[40]!, depth, 0),
+      ]);
+      slots[`wall-open:${site}:${depth}:alt`] = multiSlot([
+        mirroredDraw(a[30]!, a[28]!, depth, 0),
+        mirroredDraw(a[34]!, a[32]!, depth, 0),
+        mirroredDraw(a[38]!, a[36]!, depth, 0),
+        mirroredDraw(a[42]!, a[40]!, depth, 0),
+      ]);
+      slots[`feat6:${site}:${depth}`] = slot(composeDraw(a[48]!, depth));
+      slots[`feat6:${site}:${depth}:alt`] = slot(mirroredDraw(a[50]!, a[48]!, depth));
+      // code 7: parity picks WHICH record draws, both direct (§4.7.8)
+      slots[`feat7:${site}:${depth}`] = slot(composeDraw(a[52]!, depth, 0));
+      slots[`feat7:${site}:${depth}:alt`] = slot(composeDraw(a[54]!, depth, 0));
+      slots[`feat10:${site}:${depth}`] = slot(composeDraw(a[56]!, depth, 0));
+      slots[`feat10:${site}:${depth}:alt`] = slot(mirroredDraw(a[58]!, a[56]!, depth, 0));
+      slots[`feat11:${site}:${depth}`] = slot(composeDraw(a[60]!, depth, 0));
+      slots[`feat11:${site}:${depth}:alt`] = slot(mirroredDraw(a[62]!, a[60]!, depth, 0));
+      slots[`feat12:${site}:${depth}`] = slot(composeDraw(a[64]!, depth, 0));
+      slots[`feat12:${site}:${depth}:alt`] = slot(mirroredDraw(a[66]!, a[64]!, depth, 0));
+      slots[`feat13:${site}:${depth}`] = slot(composeDraw(a[68]!, depth, 0));
+    }
   }
+  // code 14: front depth 0 only, literal compose 0x158 (§4.7.1's table)
+  slots['feat14:front:0'] = slot(composeDraw(0x158, 0, 0));
+  slots['feat14:front:0:alt'] = slot(mirroredDraw(0x158, 0x158, 0, 0));
 
   // `LAB_0506`'s preamble also fires at depth 3 (`0x0a178`: `depth == 3 &&
   // code != 0`), where its 14-entry jump table is skipped — so the plain

@@ -70,6 +70,13 @@ function minimalSlots(): SlotTableFile {
     slots[`wall-lat:L2:${d}`] = slot(`latL2_${d}`, 104, 40);
     slots[`wall-lat:R1:${d}`] = slot(`latR1_${d}`, 192, 40);
     slots[`wall-lat:R2:${d}`] = slot(`latR2_${d}`, 216, 40);
+    // §4.7.8's per-site dispatch families (doorway/closed-door/side-door).
+    for (const site of ['front', 'L1', 'L2', 'R1', 'R2']) {
+      slots[`wall-open:${site}:${d}`] = slot(`open_${site}_${d}`, 104, 40);
+      slots[`door-leaf:${site}:${d}`] = slot(`leaf_${site}_${d}`, 104, 40);
+      if (site !== 'front') slots[`door:${site}:${d}`] = slot(`door_${site}_${d}`, 72, 40);
+      slots[`wall:front:${d}:alt`] = slot(`front${d}_alt`, 104, 40);
+    }
   }
   slots['wall-side:L:3'] = slot('sideL3', 72, 40);
   slots['wall-side:R:3'] = slot('sideR3', 216, 40);
@@ -117,6 +124,40 @@ describe('buildViewItems: wall-type dispatch -> slots.json keys', () => {
     const wallA = new Array(81).fill(0);
     wallA[at(4, 6)] = 2;
     expect(frames(makePlanes({ wallA }))).toEqual(['front2']);
+  });
+
+  it('routes wall value 1 (open doorway) to the deferred wall-open slot, not the solid wall', () => {
+    const wallA = new Array(81).fill(0);
+    wallA[at(4, 5)] = 1; // doorway one step ahead (depth 1)
+    expect(frames(makePlanes({ wallA }))).toEqual(['open_front_1']);
+  });
+
+  it('routes wall value 3 (closed door) to door-leaf + wall-open, deferred after everything else', () => {
+    const wallA = new Array(81).fill(0);
+    wallA[at(4, 5)] = 3;
+    // door leaf first, then the doorway record -- the LAB_04B9 push order
+    expect(frames(makePlanes({ wallA }))).toEqual(['leaf_front_1', 'open_front_1']);
+  });
+
+  it('draws the big side-door art for a doorway in the near lateral column (depth-0 fall-in, 0x9d84)', () => {
+    // wall value 1 on the RIGHT lateral neighbour's forward face at depth 0
+    const wallA = new Array(81).fill(0);
+    wallA[at(5, 4)] = 1; // (x+1, y) -- right column cell, its own +Y face
+    const got = frames(makePlanes({ wallA }));
+    expect(got).toContain('door_R1_0');
+    expect(got).toContain('open_R1_0');
+  });
+
+  it('flips the front wall to its :alt (mirrored) variant on odd checkerboard parity', () => {
+    const wallA = new Array(81).fill(0);
+    wallA[at(4, 6)] = 2;
+    // pose (4,4) facing 0 -> parity 0 -> direct; origin shift flips it
+    expect(frames(makePlanes({ wallA }))).toEqual(['front2']);
+    const items = buildViewItems(makePlanes({ wallA }), 4, 4, 0, slots, { x: 1, y: 0 })
+      .map((i) => i.frame as string)
+      .filter((f) => !f.startsWith('ceil_') && !f.startsWith('floor_'));
+    // depth 2 + odd pose parity -> even depth-parity? -11436 = (x+y+f+depth)&1 = (9+2)&1 = 1 -> alt
+    expect(items).toEqual(['front2_alt']);
   });
 
   it('maps dispatch 5 (door) to the door slot at the front only', () => {

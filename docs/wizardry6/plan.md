@@ -2809,3 +2809,35 @@ refuses to move (logged, position unchanged) on both attempts.
   `render-walk-sequence.ts` (new), `docs/wizardry6/TODO.md`
   (`dungeon-walker-cell-render-dispatch` row condensed and updated),
   `docs/wizardry6/plan.md` (this entry).
+
+## Cross-platform — Session (2026-08-16) — TODO sweep: 7 rows closed, 8 narrowed (re-oracle)
+
+One long Fable session worked the whole open-row list across Amiga + SNES
+(DOS/EGA out of scope). Findings live in the two `data-structure.md` files
+— this is only the index.
+
+**Closed rows** (deleted from `TODO.md`): scenario sections 5-8 (section 5
+= NPC name table, `'^'` splice consumer, `decode-scenario-npcs.ts`);
+walker-user-reported-inaccuracy (parity + deferred queue + `:alt`
+variants shipped); SNES genus-header field (§6.2 — Japanese genus names
+in the game's own 8-bit encoding); SNES SPC driver size + BRR directory
+(both subsumed by §5.5's 151-module sound directory,
+`decode-spc-modules.ts`); SNES opening screens 4-5 (space scene + gameplay
+screen composed, `decode-opening-sequence.ts`); SNES creature-sprite
+details (type dispatch semantics + all 3,701 frames,
+`decode-creature-sprites.ts`).
+
+**Big narrows**: SNES wallValue→art dispatch fully traced and shipped as
+walker v2 (§3.14.12, `resolveViewWords`, verified 7/7 poses against an
+independent Python oracle + decisive door/doorway renders) — which also
+**confirmed the cross-platform wall-value semantics** (0=open, 1=open
+doorway, 2=solid wall, 3=closed door) both maze rows had carried as a
+shared unknown; Amiga deferred-draw queue + full `0x9b58` per-code
+dispatch + side doors implemented (§4.7.8, 298,744-pose sweep clean);
+flagP/flagQ overlay dispatches decoded (§4.7.9, new `walker-flag-overlays`
+row tracks the wiring); monster per-attack sub-records solved
+(Zimlab-exact, §7.1); SNES 8-bit text encoding solved (§4.1a); spell-anim
+palette solved (§6.4 — per-cell BG sub-palette fields against the boot
+CGRAM shadow, never sub-palette 2, magic-circle render).
+
+Green: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` 283/283.

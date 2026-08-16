@@ -13,7 +13,7 @@ import { PNG } from 'pngjs';
 import { writePNG } from '@seer-project/pipeline';
 import {
   densifyMazeLevel,
-  resolveViewOps,
+  resolveViewWords,
   extractPoolIndices,
   compositeSnesView,
   type ViewPiecesFile,
@@ -41,10 +41,10 @@ function main() {
   const maze: MazeLevelRaw[] = JSON.parse(readFileSync(resolve(base, 'data/maze.json'), 'utf8'));
   const lvl = maze.find((l) => l.level === level);
   if (!lvl) throw new Error(`no level ${level} in data/maze.json`);
-  const grid = densifyMazeLevel(lvl);
-  console.log(`Level ${level} densified: ${grid.width}x${grid.height}`);
 
   const viewPieces: ViewPiecesFile = JSON.parse(readFileSync(resolve(base, 'dungeon/view-pieces.json'), 'utf8'));
+  const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[level] ?? 0x0d);
+  console.log(`Level ${level} densified: ${grid.width}x${grid.height}`);
   const { rgba: poolRgba, width: poolW } = loadPNG(resolve(base, `dungeon/${viewPieces.poolAtlas}`));
   const pool = extractPoolIndices(poolRgba, poolW, poolRgba.length / poolW / 4);
 
@@ -55,10 +55,10 @@ function main() {
   );
   const palette: Palette16 = paletteFile.colors;
 
-  const ops = resolveViewOps(grid, x, y, facing);
-  console.log(`Pose (${x},${y}) facing ${'NESW'[facing]}: ${ops.length} draw ops -> ${JSON.stringify(ops)}`);
+  const words = resolveViewWords(viewPieces, grid, level, x, y, facing);
+  console.log(`Pose (${x},${y}) facing ${'NESW'[facing]}: ${words.length} compose words -> ${words.map((w) => `0x${w.toString(16)}`).join(' ')}`);
 
-  const { rgba, width, height } = compositeSnesView(viewPieces, pool, poolW, palette, ops);
+  const { rgba, width, height } = compositeSnesView(viewPieces, pool, poolW, palette, words);
 
   const outDir = resolve('build/cache/wizardry6-snes-renders');
   mkdirSync(outDir, { recursive: true });

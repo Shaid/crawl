@@ -22,7 +22,7 @@ import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import {
   densifyMazeLevel,
-  resolveViewOps,
+  resolveViewWords,
   extractPoolIndices,
   compositeSnesView,
   canStepSnes,
@@ -57,15 +57,18 @@ function decodePNGToRGBA(url: string): Promise<{ rgba: Uint8ClampedArray; width:
 
 /** Find a data-derived, guaranteed-walkable, corridor-facing entrance pose -- same convention as `w6EntrancePose` (Amiga). */
 function snesEntrancePose(grid: DenseMazeGrid, levelId: number): Pose {
+  // Prefer a cell with at least one wall (real authored content) that can
+  // still step north -- off-map/seed cells are all-open (wall 0) in the v2
+  // grid, so a bare "wall===0" test would pick a seed cell outside the maze.
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
       const i = y * grid.width + x;
-      if (grid.wall[i] === 0 && canStepSnes(grid, x, y, 0)) return { level: levelId, x, y, facing: 0 };
+      if (grid.wall[i] !== 0 && canStepSnes(grid, x, y, 0)) return { level: levelId, x, y, facing: 0 };
     }
   }
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
-      if (grid.wall[y * grid.width + x] !== 0xff) return { level: levelId, x, y, facing: 0 };
+      if (grid.wall[y * grid.width + x] !== 0) return { level: levelId, x, y, facing: 0 };
     }
   }
   return { level: levelId, x: 0, y: 0, facing: 0 };
@@ -161,8 +164,8 @@ export class Wizardry6SnesView implements GameView {
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const pose = this.pose;
-    const ops = resolveViewOps(this.grid, pose.x, pose.y, pose.facing);
-    const { rgba, width, height } = compositeSnesView(this.viewPieces, this.pool, this.poolW, this.palette_, ops);
+    const words = resolveViewWords(this.viewPieces, this.grid, this.levelId_, pose.x, pose.y, pose.facing);
+    const { rgba, width, height } = compositeSnesView(this.viewPieces, this.pool, this.poolW, this.palette_, words);
 
     const canvas = ctx.canvas;
     ctx.imageSmoothingEnabled = false;
@@ -194,7 +197,7 @@ export async function loadWizardry6Snes(assetBase: string, levelId: number, star
   ]);
   const lvl = maze.find((l) => l.level === levelId);
   if (!lvl) throw new Error(`wizardry6 (SNES): no level ${levelId} in data/maze.json`);
-  const grid = densifyMazeLevel(lvl);
+  const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[levelId] ?? 0x0d);
 
   const poolImg = await decodePNGToRGBA(`${assetBase}/dungeon/${viewPieces.poolAtlas}`);
   if (!poolImg) throw new Error(`wizardry6 (SNES): failed to load ${assetBase}/dungeon/${viewPieces.poolAtlas} -- run npm run w6:snes:view`);

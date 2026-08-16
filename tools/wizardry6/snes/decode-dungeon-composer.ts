@@ -152,6 +152,8 @@ export interface CellRef {
   tile: number;
   bank: number;
   sourceOffset: number;
+  /** Cell word bit 15 -- "tile contains transparent pixels" (§3.14.2): later pieces may still merge behind this cell in the painter's algorithm. */
+  hasAlpha: boolean;
 }
 
 export interface PieceRecord {
@@ -218,7 +220,7 @@ function parsePieceAt(data: Uint8Array, table: 'C1' | 'C2', base: number, index:
       const bankSel = ((word >> 8) & 0x3c) >> 2;
       const bank = 0x90 + bankSel;
       const sourceOffset = (bank & 0x7f) * 0x8000 + tile * TILE_BYTES_4BPP;
-      cells.push({ tile, bank, sourceOffset });
+      cells.push({ tile, bank, sourceOffset, hasAlpha: (word & 0x8000) !== 0 });
     }
   }
 

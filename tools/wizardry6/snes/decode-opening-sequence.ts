@@ -273,6 +273,76 @@ function composeEndingScreen(rom: Uint8Array): { rgba: Uint8Array; width: number
   return { rgba, width, height };
 }
 
+// --- Space scene + gameplay-screen stored patches (closes the last two
+// snes-opening-screens-4-5-extras sub-items, data-structure.md §3.13) ---
+//
+// Space scene (file 0x058000): §3.13's "1440 stored entries don't cleanly
+// factor to the nominal 32x64 BG size" puzzle resolves via the DMA
+// descriptor's own destination: the tilemap is uploaded to VRAM word $7460
+// = 0x60 words INTO the $7400 32x64 map = 3 full rows down. 96 + 1440 =
+// 1536 = 32*48, i.e. the stored content is exactly rows 3-47 of the 64-row
+// map: a 32x45 image. Composed with tilemap flip bits honoured, it renders
+// a complete vertical space vista -- nebula, three planets, starfield, and
+// a planet-surface horizon across the bottom. CONFIRMED by render.
+//
+// Gameplay screen (file 0x05104b): the stored BG1/BG2 tilemaps are partial
+// PATCHES (BG2: 384 entries -> $7860 = rows 3-14; BG1: 128 entries ->
+// $75C0 = rows 14-17), and §3.14.9 established the BG2 rect is overwritten
+// at runtime whenever the first-person view is up -- so what's stored is
+// the NON-view (outdoor) state, and rendering the patches alone is the
+// honest static extraction. BG2 renders the outdoor sky band (moon, a
+// large planet, clouds, mountain silhouettes), BG1 its lower strip.
+// CONFIRMED by render (BG2), the BG1 strip rendered.
+const SPACE_OFFSET = 0x058000;
+const SPACE_TILEMAP_BYTES = 0xb40; // 1440 entries
+const SPACE_CHR_OFFSET = 0xb40;
+const SPACE_CHR_BYTES = 0x2420; // 289 4bpp tiles
+const SPACE_COLS = 32;
+const SPACE_ROWS = 45;
+
+const GAMEPLAY_OFFSET = 0x05104b;
+const GAMEPLAY_BG2_TILEMAP = { off: 0x0000, bytes: 0x300, cols: 32, rows: 12 }; // -> VRAM $7860 (rows 3-14)
+const GAMEPLAY_BG1_TILEMAP = { off: 0x0300, bytes: 0x100, cols: 32, rows: 4 }; // -> VRAM $75C0 (rows 14-17)
+const GAMEPLAY_BG2_CHR = { off: 0x0400, bytes: 0x14c0 }; // 166 tiles -> $2000
+const GAMEPLAY_BG1_CHR = { off: 0x18c0, bytes: 0x800 }; // 64 tiles -> $4000
+
+/** Compose a 4bpp tilemap region honouring the h/v flip bits (bits 14/15) -- unlike `composeScreen`, which the confirmed logo/copyright screens never needed flips for. */
+function composeFlipped(
+  tilemap: Uint8Array,
+  chr: Uint8Array,
+  cols: number,
+  rows: number,
+): { rgba: Uint8Array; width: number; height: number } {
+  const tileCount = Math.floor(chr.length / 32);
+  const width = cols * TILE_SIZE_PX;
+  const height = rows * TILE_SIZE_PX;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let idx = 0; idx < cols * rows; idx++) {
+    const word = tilemap[idx * 2]! | (tilemap[idx * 2 + 1]! << 8);
+    const tileNum = word & 0x3ff;
+    if (tileNum >= tileCount) continue;
+    const flipX = (word >> 14) & 1;
+    const flipY = (word >> 15) & 1;
+    const tile = decodeTile4bpp(chr, tileNum * 32);
+    const tx = (idx % cols) * TILE_SIZE_PX;
+    const ty = Math.floor(idx / cols) * TILE_SIZE_PX;
+    for (let r = 0; r < TILE_SIZE_PX; r++) {
+      for (let c = 0; c < TILE_SIZE_PX; c++) {
+        const sr = flipY ? TILE_SIZE_PX - 1 - r : r;
+        const sc = flipX ? TILE_SIZE_PX - 1 - c : c;
+        const paletteIdx = tile[sr * TILE_SIZE_PX + sc]!;
+        const grey = paletteIdx * 17;
+        const px = ((ty + r) * width + (tx + c)) * 4;
+        rgba[px] = grey;
+        rgba[px + 1] = grey;
+        rgba[px + 2] = grey;
+        rgba[px + 3] = paletteIdx === 0 ? 0 : 255;
+      }
+    }
+  }
+  return { rgba, width, height };
+}
+
 function main() {
   const romPath = process.argv[2];
   if (!romPath) {
@@ -331,6 +401,43 @@ function main() {
     manifest = manifest.filter((e) => e.name !== 'opening-ending');
     manifest.push({ name: 'opening-ending', group: 'screens', png: 'screens/ending.png', atlas: null, palette: null, sprites: 1 });
     console.log(`Wrote screens/ending.png (${width}x${height}px, BG2 layer only, confirmed -- legible "To Be Continued..." text)`);
+  }
+
+  // Space-scene cutscene (file 0x058000): 32x45 rows at map rows 3-47.
+  {
+    const full = decodeLzss(rom, SPACE_OFFSET).data;
+    const tilemap = full.slice(0, SPACE_TILEMAP_BYTES);
+    const chr = full.slice(SPACE_CHR_OFFSET, SPACE_CHR_OFFSET + SPACE_CHR_BYTES);
+    const { rgba, width, height } = composeFlipped(tilemap, chr, SPACE_COLS, SPACE_ROWS);
+    writePNG(resolve(outDir, 'screens/space-scene.png'), rgba, width, height);
+    manifest = manifest.filter((e) => e.name !== 'opening-space-scene');
+    manifest.push({ name: 'opening-space-scene', group: 'screens', png: 'screens/space-scene.png', atlas: null, palette: null, sprites: 1 });
+    console.log(`Wrote screens/space-scene.png (${width}x${height}px, confirmed -- nebula/planets/starfield/planet-surface vista)`);
+  }
+
+  // Gameplay screen's stored (non-view) tilemap patches (file 0x05104b).
+  {
+    const full = decodeLzss(rom, GAMEPLAY_OFFSET).data;
+    const bg2 = composeFlipped(
+      full.slice(GAMEPLAY_BG2_TILEMAP.off, GAMEPLAY_BG2_TILEMAP.off + GAMEPLAY_BG2_TILEMAP.bytes),
+      full.slice(GAMEPLAY_BG2_CHR.off, GAMEPLAY_BG2_CHR.off + GAMEPLAY_BG2_CHR.bytes),
+      GAMEPLAY_BG2_TILEMAP.cols,
+      GAMEPLAY_BG2_TILEMAP.rows,
+    );
+    writePNG(resolve(outDir, 'screens/gameplay-sky.png'), bg2.rgba, bg2.width, bg2.height);
+    const bg1 = composeFlipped(
+      full.slice(GAMEPLAY_BG1_TILEMAP.off, GAMEPLAY_BG1_TILEMAP.off + GAMEPLAY_BG1_TILEMAP.bytes),
+      full.slice(GAMEPLAY_BG1_CHR.off, GAMEPLAY_BG1_CHR.off + GAMEPLAY_BG1_CHR.bytes),
+      GAMEPLAY_BG1_TILEMAP.cols,
+      GAMEPLAY_BG1_TILEMAP.rows,
+    );
+    writePNG(resolve(outDir, 'screens/gameplay-bg1-strip.png'), bg1.rgba, bg1.width, bg1.height);
+    manifest = manifest.filter((e) => e.name !== 'gameplay-sky' && e.name !== 'gameplay-bg1-strip');
+    manifest.push({ name: 'gameplay-sky', group: 'screens', png: 'screens/gameplay-sky.png', atlas: null, palette: null, sprites: 1 });
+    manifest.push({ name: 'gameplay-bg1-strip', group: 'screens', png: 'screens/gameplay-bg1-strip.png', atlas: null, palette: null, sprites: 1 });
+    console.log(
+      `Wrote screens/gameplay-sky.png (${bg2.width}x${bg2.height}px, BG2 rows 3-14 stored patch -- moon/planet/clouds/mountains) and screens/gameplay-bg1-strip.png (${bg1.width}x${bg1.height}px, BG1 rows 14-17 stored patch)`,
+    );
   }
 
   // Dialogue font: flat, uncompressed 2bpp tile bank, individually addressable glyphs.

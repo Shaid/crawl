@@ -67,10 +67,11 @@ export function renderThroughDungeon(
   facing: number,
   slots: SlotTableFile,
   bank: PieceBank,
+  origin: { x: number; y: number } = { x: 0, y: 0 },
 ): IndexedSurface {
   const surface = new IndexedSurface(slots.surface.width, slots.surface.height);
   surface.clear(0);
-  const items = buildViewItems(planes, x, y, facing, slots);
+  const items = buildViewItems(planes, x, y, facing, slots, origin);
   compositeDrawList(surface, { [slots.banks[0]!.id]: bank }, slots, items);
   return surface;
 }
@@ -104,7 +105,8 @@ function main() {
 
   const slots = loadSlots();
   const bank = loadIndexedBank();
-  const surface = renderThroughDungeon(planes, x, y, facing, slots, bank);
+  const origin = levelData.origin ?? { x: 0, y: 0 };
+  const surface = renderThroughDungeon(planes, x, y, facing, slots, bank, origin);
 
   const rgba = new Uint8Array(surface.width * surface.height * 4);
   for (let i = 0; i < surface.width * surface.height; i++) {

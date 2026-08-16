@@ -19,12 +19,20 @@
  * cross-referenced in the Amiga corpus) -- see the doc for the full list
  * and the byte-exact decode evidence.
  *
- * The scan is tolerant of single-byte resync gaps (a handful of records,
- * e.g. the genus-header entry "VINE", have a second field that is NOT
- * valid half-width katakana -- likely a different field type such as a
- * sprite/category index rather than translated text; these are skipped
- * and not included in the output). This is an open item, see the doc's
- * "paths tried" table for the monster-name table.
+ * **Genus headers decoded (2026-08-16, closes
+ * `snes-monster-table-nonkana-field`):** the "3rd record type" (an
+ * `0x80`-tagged field whose payload is not ASCII) is the genus's
+ * **Japanese display name in the game's own 8-bit text encoding** --
+ * font-tile indices into the 256-glyph dialogue font (docs section 4.1a):
+ * ASCII 0x20-0x7E, small kana 0x86-0x8F (0x86 = wo), hiragana a-so at
+ * 0x91-0x9F, standard JIS X 0201 half-width katakana 0xA1-0xDF (dakuten
+ * 0xDE / handakuten 0xDF as trailing combining marks), and hiragana
+ * ta-n at 0xE0-0xFD. Confirmed by rendering the payload glyph sequences
+ * straight from the extracted font bank: e.g. VINE -> tsurukusa,
+ * STINKING CORPSE -> kusai shitai, GHOST -> yuurei, NATIVE -> genjuumin
+ * (18/18 legible, semantically matching their English pair). A few
+ * English fields also carry 0xA2 as an internal separator
+ * ("GUARDIAN(0xA2)ROCK"), decoded here as a middle dot.
  *
  * Usage: npx tsx tools/wizardry6/snes/decode-monster-names.ts <path-to-sfc>
  */
@@ -43,7 +51,71 @@ function isHalfKana(b: number): boolean {
 }
 
 function isAsciiPrintable(b: number): boolean {
-  return b >= 0x20 && b < 0x7f;
+  return (b >= 0x20 && b < 0x7f) || b === 0xa2; // 0xA2 = in-name separator (e.g. "GUARDIAN\u00b7ROCK")
+}
+
+// ── The game's own 8-bit text encoding (font-tile indices; docs §4.1a) ──
+const HIRA_LO = 'あいうえおかきくけこさしすせそ'; // 0x91-0x9F
+const HIRA_HI = 'たちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわん'; // 0xE0-0xFD
+const SMALL_KANA = 'をぁぃぅぇぉゃゅょっ'; // 0x86-0x8F
+const DAKUTEN: Record<string, string> = {
+  か: 'が', き: 'ぎ', く: 'ぐ', け: 'げ', こ: 'ご', さ: 'ざ', し: 'じ', す: 'ず', せ: 'ぜ', そ: 'ぞ',
+  た: 'だ', ち: 'ぢ', つ: 'づ', て: 'で', と: 'ど', は: 'ば', ひ: 'び', ふ: 'ぶ', へ: 'べ', ほ: 'ぼ',
+};
+const HANDAKUTEN: Record<string, string> = { は: 'ぱ', ひ: 'ぴ', ふ: 'ぷ', へ: 'ぺ', ほ: 'ぽ' };
+
+/** Is `b` a valid byte of the game's 8-bit text encoding? */
+function isGameText(b: number): boolean {
+  return (
+    isAsciiPrintable(b) ||
+    (b >= 0x86 && b <= 0x8f) ||
+    (b >= 0x91 && b <= 0x9f) ||
+    (b >= 0xa1 && b <= 0xdf) ||
+    (b >= 0xe0 && b <= 0xfd)
+  );
+}
+
+/** Decode a run of game-text bytes, combining trailing dakuten/handakuten into hiragana where a precomposed form exists (half-width katakana keep their own combining-mark convention, matching `decodeHalfKana`). */
+function decodeGameText(bytes: Uint8Array): string {
+  let out = '';
+  for (const b of bytes) {
+    let ch: string;
+    if (b >= 0x20 && b < 0x7f) ch = String.fromCharCode(b);
+    else if (b === 0xa2) ch = '\u00b7';
+    else if (b >= 0x86 && b <= 0x8f) ch = SMALL_KANA[b - 0x86]!;
+    else if (b >= 0x91 && b <= 0x9f) ch = HIRA_LO[b - 0x91]!;
+    else if (b >= 0xe0 && b <= 0xfd) ch = HIRA_HI[b - 0xe0]!;
+    else if (b >= 0xa1 && b <= 0xdf) {
+      const last = out.slice(-1);
+      if (b === 0xde && DAKUTEN[last]) {
+        out = out.slice(0, -1) + DAKUTEN[last];
+        continue;
+      }
+      if (b === 0xdf && HANDAKUTEN[last]) {
+        out = out.slice(0, -1) + HANDAKUTEN[last];
+        continue;
+      }
+      ch = HALFWIDTH_KANA_TABLE[b - 0xa1] ?? '?';
+    } else ch = '?';
+    out += ch;
+  }
+  return out;
+}
+
+/** Try a genus Japanese-name field: `[0x80][len][game-text bytes]` that is NOT plain ASCII. */
+function tryGenusJapaneseField(data: Uint8Array, pos: number): { text: string; end: number } | null {
+  if (data[pos] !== EN_SEP) return null;
+  const len = data[pos + 1];
+  if (!len || len > 0x20) return null;
+  const start = pos + 2;
+  const bytes = data.subarray(start, start + len);
+  let nonAscii = false;
+  for (const b of bytes) {
+    if (!isGameText(b)) return null;
+    if (!(b >= 0x20 && b < 0x7f)) nonAscii = true;
+  }
+  if (!nonAscii) return null;
+  return { text: decodeGameText(bytes), end: start + len };
 }
 
 // Node has no built-in half-width-katakana decoder; map the CP932
@@ -65,7 +137,8 @@ function tryAsciiField(data: Uint8Array, pos: number): { text: string; end: numb
   const start = pos + 2;
   const bytes = data.subarray(start, start + len);
   for (const b of bytes) if (!isAsciiPrintable(b)) return null;
-  return { text: Buffer.from(bytes).toString('ascii'), end: start + len };
+  const text = Array.from(bytes, (b) => (b === 0xa2 ? '\u00b7' : String.fromCharCode(b))).join('');
+  return { text, end: start + len };
 }
 
 function tryKanaField(data: Uint8Array, pos: number): { text: string; end: number } | null {
@@ -87,6 +160,7 @@ function main() {
 
   const data = readBinary(romPath);
   const pairs: { fileOffset: string; english: string; kana: string }[] = [];
+  const genusHeaders: { fileOffset: string; english: string; japanese: string }[] = [];
   let pos = SCAN_START;
   let consecutiveFail = 0;
 
@@ -99,26 +173,37 @@ function main() {
       continue;
     }
     const kanaField = tryKanaField(data, enField.end);
-    if (!kanaField) {
-      pos++;
-      consecutiveFail++;
+    if (kanaField) {
+      pairs.push({ fileOffset: `0x${pos.toString(16)}`, english: enField.text, kana: kanaField.text });
+      pos = kanaField.end;
+      consecutiveFail = 0;
       continue;
     }
-    pairs.push({ fileOffset: `0x${pos.toString(16)}`, english: enField.text, kana: kanaField.text });
-    pos = kanaField.end;
-    consecutiveFail = 0;
+    // genus header: [0x80][English name][0x80][Japanese name in game text encoding]
+    const genusField = tryGenusJapaneseField(data, enField.end);
+    if (genusField) {
+      genusHeaders.push({ fileOffset: `0x${pos.toString(16)}`, english: enField.text, japanese: genusField.text });
+      pos = genusField.end;
+      consecutiveFail = 0;
+      continue;
+    }
+    pos++;
+    consecutiveFail++;
   }
 
-  console.log(`Decoded ${pairs.length} English/katakana name pairs, file 0x${SCAN_START.toString(16)}-0x${SCAN_END.toString(16)} scan range`);
+  console.log(
+    `Decoded ${pairs.length} English/katakana name pairs + ${genusHeaders.length} genus headers, file 0x${SCAN_START.toString(16)}-0x${SCAN_END.toString(16)} scan range`,
+  );
   console.log('Sample:', pairs.slice(0, 5).map((p) => `${p.english} -> ${p.kana}`).join(', '));
 
   const outDir = resolve('public/assets/wizardry6/snes/data');
   mkdirSync(outDir, { recursive: true });
   writeJson(resolve(outDir, 'monster-names.json'), {
     note:
-      'Confirmed encoding: [0x80][len][ASCII English name][0x81][len][half-width katakana transliteration]. 102 pairs decode with zero garbage bytes; every transliteration is a grammatically-correct phonetic rendering of its paired English name. A handful of genus-header records (e.g. "VINE") are skipped -- their second field is not valid half-width katakana. See docs/wizardry6/snes/data-structure.md.',
+      'Confirmed encoding: [0x80][len][ASCII English name][0x81][len][half-width katakana transliteration]. genusHeaders: [0x80][English genus name][0x80][Japanese genus name in the game 8-bit text encoding] (font-tile indices: ASCII + small kana 0x86-0x8F + hiragana 0x91-0x9F/0xE0-0xFD + half-width katakana 0xA1-0xDF). See docs/wizardry6/snes/data-structure.md sections 4.1a/6.2.',
     scanRange: [SCAN_START, SCAN_END],
     pairs,
+    genusHeaders,
   });
 
   console.log('Wrote public/assets/wizardry6/snes/data/monster-names.json');
