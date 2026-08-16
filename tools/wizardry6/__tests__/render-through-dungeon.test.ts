@@ -71,6 +71,16 @@ function minimalSlots(): SlotTableFile {
     slots[`wall-lat:R1:${d}`] = slot(`latR1_${d}`, 192, 40);
     slots[`wall-lat:R2:${d}`] = slot(`latR2_${d}`, 216, 40);
   }
+  slots['wall-side:L:3'] = slot('sideL3', 72, 40);
+  slots['wall-side:R:3'] = slot('sideR3', 216, 40);
+  // §4.7.7's per-lane ceiling/floor runs, depths 0-3.
+  for (let d = 0; d < 4; d++) {
+    for (const lane of ['front', 'side:L', 'lat:L1', 'lat:L2', 'lat:R1', 'lat:R2', 'side:R']) {
+      const tag = lane.replace(':', '');
+      slots[`ceil:${lane}:${d}`] = slot(`ceil_${tag}_${d}`, 72, 32);
+      slots[`floor:${lane}:${d}`] = slot(`floor_${tag}_${d}`, 72, 128);
+    }
+  }
   return {
     schemaVersion: 1,
     surface: { width: 320, height: 200 },
@@ -86,9 +96,16 @@ function minimalSlots(): SlotTableFile {
 
 describe('buildViewItems: wall-type dispatch -> slots.json keys', () => {
   const slots = minimalSlots();
-  /** Every emitted item's frame name, which identifies the slot it came from. */
+  /**
+   * Every emitted *wall* item's frame name, which identifies the slot it came
+   * from. The per-lane ceiling/floor runs (§4.7.7) are filtered out here so
+   * these dispatch cases stay about the wall dispatch alone; they get their
+   * own describe block below.
+   */
   const frames = (planes: CellPlanes, x = 4, y = 4, facing = 0) =>
-    buildViewItems(planes, x, y, facing, slots).map((i) => i.frame as string);
+    buildViewItems(planes, x, y, facing, slots)
+      .map((i) => i.frame as string)
+      .filter((f) => !f.startsWith('ceil_') && !f.startsWith('floor_'));
   const at = (x: number, y: number) => x + y * 9;
 
   it('emits no wall items for a fully open corridor', () => {
@@ -156,9 +173,18 @@ describe('buildViewItems: wall-type dispatch -> slots.json keys', () => {
 
   it('routes a right-hand neighbour\'s forward face to wall-lat, not wall-side', () => {
     // The cell to the party's right, (5,4), has a wall on its own +Y side.
+    // Only the *inner* right column (`-11408`) draws at depth 0: the outer
+    // one's lane is cleared at init (`CLR.B -11400(A4)`, `0x0a948`), which is
+    // also why its compose record (12) is zero-width.
     const wallA = new Array(81).fill(0);
     wallA[at(5, 4)] = 2;
-    expect(frames(makePlanes({ wallA }))).toEqual(['latR1_0', 'latR2_0']);
+    expect(frames(makePlanes({ wallA }))).toEqual(['latR1_0']);
+  });
+
+  it('draws both right column faces once past the init-cleared depth-0 outer lane', () => {
+    const wallA = new Array(81).fill(0);
+    wallA[at(5, 5)] = 2; // the right neighbour's forward face at depth 1
+    expect(frames(makePlanes({ wallA }))).toEqual(['latR1_1', 'latR2_1']);
   });
 
   it('routes a perpendicular left-hand wall to wall-side (the x-1 neighbour\'s wallB)', () => {
@@ -195,14 +221,86 @@ describe('buildViewItems: wall-type dispatch -> slots.json keys', () => {
   it('a perpendicular side wall hides the inner column at its own depth', () => {
     // `LAB_053B` clears `-11416`[depth] — same depth, and it runs *between*
     // the side-wall draw and the column draws, so ordering is load-bearing.
+    // (The outer-left lane can't be the control here: it is cleared at init
+    // at depth 0 (`CLR.B -11424(A4)`) *and* by this same `LAB_053B` at
+    // depth 1 — so the control is the inner lane one depth further on.)
     const wallB = new Array(81).fill(0);
     wallB[at(3, 4)] = 2; // perpendicular wall on the party's left at depth 0
     const wallA = new Array(81).fill(0);
     wallA[at(3, 4)] = 2; // that same neighbour's forward face
+    wallA[at(3, 5)] = 2; // and at depth 1
     const emitted = frames(makePlanes({ wallA, wallB }));
     expect(emitted).toContain('sideL0');
-    expect(emitted).toContain('latL1_0'); // outer lane still open at depth 0
     expect(emitted).not.toContain('latL2_0'); // inner lane cleared by LAB_053B
+    expect(emitted).toContain('latL2_1'); // …only at that depth, not beyond
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// §4.7.7: the seven per-lane ceiling/floor runs.
+//
+// These are the pieces that cover an *open* lateral side — over an opening
+// there is no wall, so nothing else paints there. Before they were modelled
+// the walker left a solid-black wedge over any open side (`TODO.md`
+// `walker-user-reported-inaccuracy`).
+// ─────────────────────────────────────────────────────────────────────────
+describe('buildViewItems: per-lane ceiling/floor continuation', () => {
+  const slots = minimalSlots();
+  const backdrop = (planes: CellPlanes, x = 4, y = 4, facing = 0) =>
+    buildViewItems(planes, x, y, facing, slots)
+      .map((i) => i.frame as string)
+      .filter((f) => f.startsWith('ceil_') || f.startsWith('floor_'));
+  const at = (x: number, y: number) => x + y * 9;
+
+  it('draws every live lane\'s ceiling and floor in a fully open cell, honouring the init-cleared lanes', () => {
+    const f = backdrop(makePlanes());
+    // Front lane: all four depths, ceiling before floor (`0x9b58` draws the
+    // ceiling at its top and the floor at `LAB_04F8`).
+    for (let d = 0; d < 4; d++) {
+      expect(f).toContain(`ceil_front_${d}`);
+      expect(f).toContain(`floor_front_${d}`);
+    }
+    expect(f.indexOf('ceil_front_0')).toBeLessThan(f.indexOf('floor_front_0'));
+    // The five init clears at `0x0a944`-`0x0a958`.
+    expect(f).not.toContain('ceil_latL1_0'); // CLR.B -11424(A4)
+    expect(f).not.toContain('ceil_latR2_0'); // CLR.B -11400(A4)
+    expect(f).not.toContain('ceil_sideL_0'); // CLR.B -11392(A4)
+    expect(f).not.toContain('ceil_sideL_1'); // CLR.B -11391(A4)
+    expect(f).not.toContain('ceil_sideR_0'); // CLR.B -11384(A4)
+    expect(f).not.toContain('ceil_sideR_1'); // CLR.B -11383(A4)
+    // …and the depths those lanes *do* reach.
+    expect(f).toContain('ceil_latL1_1');
+    expect(f).toContain('ceil_sideL_2');
+    expect(f).toContain('ceil_sideR_3');
+    expect(f).toContain('floor_sideR_3');
+  });
+
+  it('is left/right symmetric: a wall on one side emits the mirror lanes of a wall on the other', () => {
+    const wallB = new Array(81).fill(0);
+    wallB[at(3, 4)] = 2; // perpendicular wall on the left
+    const left = backdrop(makePlanes({ wallB }));
+    const wallB2 = new Array(81).fill(0);
+    wallB2[at(4, 4)] = 2; // perpendicular wall on the right
+    const right = backdrop(makePlanes({ wallB: wallB2 }));
+    // `LAB_0506`/`LAB_053B` and `LAB_053E` are exact mirrors, and so are the
+    // lane->compose-base pairs (126<->146, 130<->142, 134<->138 and the
+    // matching floor runs), so the two emissions must map onto each other.
+    const mirror = (s: string) =>
+      s.replace(/_(sideL|sideR|latL1|latL2|latR1|latR2)_/, (_m, lane: string) =>
+        `_${({ sideL: 'sideR', sideR: 'sideL', latL1: 'latR2', latR2: 'latL1', latL2: 'latR1', latR1: 'latL2' } as Record<string, string>)[lane]!}_`,
+      );
+    expect(new Set(left.map(mirror))).toEqual(new Set(right));
+  });
+
+  it('a blocking front wall stops the ceiling/floor beyond it (lane -11432 + the -11440 loop cap)', () => {
+    const wallA = new Array(81).fill(0);
+    wallA[at(4, 4)] = 2; // solid wall straight ahead at depth 0
+    const f = backdrop(makePlanes({ wallA }));
+    expect(f).toContain('ceil_front_0');
+    expect(f).not.toContain('ceil_front_1');
+    expect(f).not.toContain('floor_front_3');
+    // `LAB_0538`'s tail caps `-11440(A4)` at depth+3, so depth 3 never runs.
+    expect(f.filter((s) => s.endsWith('_3'))).toEqual([]);
   });
 });
 

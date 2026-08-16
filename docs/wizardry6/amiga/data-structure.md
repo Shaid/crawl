@@ -1086,6 +1086,14 @@ module-local static, never exposed through the A4 jump table, which is
 exactly why the previous session's census of A4 entries 57/58 could not
 find it.
 
+> **Correction (2026-08-16):** the 16 calls below are byte-accurate, but they
+> are **not the ceiling/floor mechanism**. `LAB_036C` is a hardcoded replica
+> of the real renderer's own per-lane calls for a fully-open corridor at the
+> `-11434(A4) != 0` (mirrored) parity — its 123/124/125 and 151/152/153 are
+> the *front* lane's ceiling and floor at depths 1-3, and its `16↔20` pairs
+> are `LAB_0506`'s preamble at depths 1-3. See **§4.7.7**, which supersedes
+> the "static backdrop" reading and gives the real seven-lane tables.
+
 > **Correction (disassembly extraction pass, 2026-08-07):** `CODE+0x632c`–
 > `0x6552` is **not** one contiguous 16-call block as stated above — it
 > spans two adjacent functions. `CODE+0x632c` (`LAB_036C`) is a whole
@@ -2291,6 +2299,165 @@ return polarity; and the map-boundary special-case mechanism for
   mirror-pair pattern the other 10 slots follow; their exact role inside
   the (still-undecoded) queue consumer isn't pinned down beyond "per-side
   base index into whatever the consumer resolves against."
+
+#### 4.7.7 The ceiling and floor are **per-lane**, not a static backdrop
+
+> **Correction (2026-08-16):** §4.4's "static corridor frame" reading — that
+> `CODE+0x632c`/`LAB_036C`'s 16 `DrawMazePiece` calls are an unconditional
+> ceiling/floor backdrop drawn every frame — was wrong about what those calls
+> *are*. `LAB_036C` is a **hardcoded, fully-open-corridor replica** of the
+> real renderer's own per-lane calls: its 123/124/125 are `0x9b58`'s
+> front-lane ceiling draw at depths 1/2/3, its 151/152/153 the same lane's
+> floor, and its 16/17/18↔20/21/22 pairs are `LAB_0506`'s preamble at
+> depths 1/2/3 — all taken with `-11434(A4) != 0` (the mirrored parity). The
+> extracted call list in `tools/wizardry6/static-corridor-calls.ts` is still
+> byte-accurate and `render-static-corridor.ts` still reproduces it; what was
+> wrong was treating it as *the* ceiling/floor mechanism. Doing so drew only
+> the **front** lane's copy, so an open lateral side — which has no wall to
+> paint over it — was left as a solid-black wedge (`TODO.md`
+> `walker-user-reported-inaccuracy`). The real mechanism is below.
+
+Each of the seven visibility lanes of §4.7.6.3 carries its own **ceiling**
+and **floor** compose run, drawn by the same routine that draws that lane's
+wall and gated on the same lane byte. Two routines carry them:
+
+- **`LAB_04BD` = `CODE+0x9b58`** (the wall dispatcher). Its *first* block,
+  `0x9b5c`-`0x9bac`, runs **before** its own `CMPI.W #3,8(a5); BGE LAB_04F8`
+  depth gate and draws the ceiling from `18(a5)`. Its *last* block,
+  `LAB_04F8` at `0x0a05e`-`0x0a0ce` — which is also that gate's jump target —
+  draws the floor from `70(a5)`. Both are **unconditional**: they do not
+  consult the wall dispatch code at all.
+- **`LAB_0528` = `CODE+0x0a3b0`**, a small two-draw routine that exists only
+  for these pieces. The two receding-side lanes have no wall of their own at
+  this call site (that is `LAB_0506`'s job), so they get a dedicated drawer:
+  ceiling from `12(a5)`, floor from `16(a5)`.
+
+Both follow §4.7.6.2's direct-vs-mirror fork on `-11434(A4)` exactly:
+
+```
+own  = <ceiling-or-floor arg> ; pair = <the next arg>
+if -11434(A4) == 0:  DrawMazePiece(src = own  + depth, mode = 1, dst = 0xffff)   # direct
+else:                DrawMazePiece(src = pair + depth, mode = 1, dst = own + depth)  # mirrored
+```
+
+##### 4.7.7.1 The three 7 × 4 tables
+
+Collecting the literals pushed at the seven call sites in the depth loop
+`LAB_055A` gives three exact 7-lane × 4-depth tables:
+
+| lane | `A4` lane byte | call site | routine | ceiling | floor | alt floor |
+|---|---|---|---|---|---|---|
+| front | `-11432` | `0x0ab92` | `0x9b58` | 122 | 150 | 214 |
+| side L | `-11392` | `0x0aca2` | `LAB_0528` | 126 | 154 | 218 |
+| lat L1 (outer left) | `-11424` | `0x0ad52` | `0x9b58` | 130 | 158 | 222 |
+| lat L2 (inner left) | `-11416` | `0x0ae10` | `0x9b58` | 134 | 162 | 226 |
+| lat R1 (inner right) | `-11408` | `0x0aed0` | `0x9b58` | 138 | 166 | 230 |
+| lat R2 (outer right) | `-11400` | `0x0af90` | `0x9b58` | 142 | 170 | 234 |
+| side R | `-11384` | `0x0afd6` | `LAB_0528` | 146 | 174 | 238 |
+
+Ceiling 122-149, floor 150-177, alt floor 214-241 — stride 4, **28 = 7 × 4
+records each, contiguous, no gaps, no overlap, nothing left over**. That
+closure is the structural proof the lane→base assignment is complete and
+correctly ordered; it is not inferred from placement plausibility.
+
+The `20(a5)` / `18(a5)` / `72(a5)` / `76(a5)` mirror-partner args confirm the
+left/right pairing independently: `(126,146)`, `(130,142)`, `(134,138)` for
+the ceiling and the matching `(154,174)`, `(158,170)`, `(162,166)` for the
+floor — i.e. **outer-left mirrors outer-right and inner-left mirrors
+inner-right**, and the front lane is its own mirror (`18(a5) == 20(a5) ==
+122`, which is why `LAB_036C`'s front-lane calls have `dstIdx == srcIdx`).
+
+Placement cross-check (each run is `composeList[base + depth]`, decoded via
+§4.4): the left ceiling run 126-129 is the three-way horizontal split of the
+same four graphics `dir048`-`dir051` that 130-133 and 134-137 also split —
+`srcClip` selects each lane's slice, and the three lanes' slices tile the
+graphic exactly (band 2: `dir050` is 72 px, drawn as `[0:32]`→x 72, `[32:56]`→
+x 104, `[56:72]`→x 128, i.e. dest = `72 + srcClip*8` with a constant
+`destXByte = 9`). The right runs 138-149 are the exact x-mirrors
+(`dir052`-`dir055`), and their composited opaque regions mirror the left ones
+with **0 differing pixels** across the ceiling band.
+
+##### 4.7.7.2 Gates
+
+`LAB_0528` and `0x9b58` share the same three per-`(depth, side)` gate arrays,
+where `side` is `12(a5)` for `0x9b58` / `10(a5)` for `LAB_0528`, taking the
+same 0/1/2 = left/front/right encoding `EvalCellFace` uses for `18(A5)+1`:
+
+| array | index | effect |
+|---|---|---|
+| `byte[-11354(A4)]` | `depth*3 + side` | non-zero → skip the ceiling draw |
+| `byte[-11342(A4)]` | `depth*3 + side` | non-zero → skip the floor draw entirely |
+| `word[-11330(A4)]` | `depth*6 + side*2` | non-zero → draw the **alt floor** (`74/76(a5)` / `20/22(a5)`) instead of the normal one |
+
+All three are memset to zero once per render at `0x0a8f6`-`0x0a91e` (12/12/24
+bytes) and are only written by `EvalCellFace`'s special-map-mode paths
+(`0x9258`, `0x92e6`, `0x93f8`) and by `LAB_055A`'s own `-18340(A4)∈{10,12}`
+boundary case at `0x0aa04`-`0x0aa26` (which writes `side == 1`, the front).
+`view-model.ts` takes them as clear, the same conservative assumption
+`evaluate-cell.ts` already makes for `EvalCellFace`'s `TestBit`-gated overlay
+dispatches. The alt-floor family 214-241 is therefore never emitted yet.
+
+##### 4.7.7.3 Corrections to §4.7.6's lane model
+
+Three details of §4.7.6.3's occlusion table were incomplete or off by one and
+mattered only once the ceiling/floor lanes were modelled:
+
+1. **The lane initialisation is not "all lanes, depths 0-3".** `0x0a892`'s
+   loop does set all seven lanes to 1 for depths 0-3, but `0x0a944`-`0x0a958`
+   then re-clears **six specific entries**: `left1[0]`, `right2[0]`,
+   `sideL[0]`, `sideL[1]`, `sideR[0]`, `sideR[1]`. The two column clears are
+   independently confirmed by the data: `wall-lat:L1:0` and `wall-lat:R2:0`
+   resolve to compose records 3 and 12, the **only two zero-width records** in
+   the whole generated slot table. The four `LAB_0528` clears are why the near
+   ceiling margin comes from the *column* lanes (130+0, 138+0) rather than
+   from 126/146, whose runs only ever contribute depths 2 and 3.
+2. **`LAB_0541`/`LAB_054A` are not no-ops.** They clear `sideL[d+1]` /
+   `sideR[d+1]` — previously dismissed because the two lanes they touch were
+   unmodelled. Likewise `LAB_053B`/`LAB_0544` clear `sideL[d+2]` and
+   `LAB_053E`/`LAB_0547` clear `sideR[d+2]`.
+3. **`LAB_0538`'s tail is load-bearing at a 4-depth budget.** `0x0a578`-
+   `0x0a58c` lowers the loop bound `-11440(A4)` (initialised to 4 at
+   `0x0a984`) to `depth + 3` when it is currently larger. With walls only
+   drawn to depth 2 this was invisible; with the ceiling/floor running to
+   depth 3 it is what stops the far ceiling band being painted behind a
+   blocking front wall.
+
+`LAB_0506` also has a depth-3 arm that §4.7.6.1 missed: its preamble gate is
+`(depth == 3 && code != 0) || code == 2 || code >= 7` (`0x0a178`-`0x0a194`),
+while its 14-entry jump table is skipped at depth >= 3 (`LAB_050D`,
+`0x0a1ce`). So the far side-wall sliver (compose 18 / 22) draws for *any*
+non-open perpendicular code.
+
+##### 4.7.7.4 What this does and does not fix
+
+Implemented in `tools/wizardry6/export-dungeon-slots.ts` (`ceil:<lane>:<depth>`
+/ `floor:<lane>:<depth>`, 56 slots, plus `wall-side:{L,R}:3`) and
+`tools/wizardry6/view-model.ts` (all seven lanes, the six init clears, the
+`-11440` loop cap, `LAB_0506`'s depth-3 arm). `staticSlots` is now empty.
+
+Verified: a 298,744-pose × 4-facing sweep over all 14 levels emits 2,140,905
+draw items with **zero exceptions** and every requested key resolving; the
+left/right emission sets are **exact mirrors** under the lane-pairing map
+(unit test); and the real-data `render-through-dungeon` pixel-identity tests
+against the §4.4 reference composite still pass. The repro pose (level 01,
+`(17,0)` facing north, right side open) now paints ceiling and floor across
+the whole open side instead of a solid-black wedge.
+
+What is still black at that pose is the **opening itself** — the screen area a
+side wall would have occupied. That is the game's own art: the wedge graphics
+`dir048`-`dir055` / `dir060`-`dir067` are index-0 (transparent under the `or`
+blend) below their diagonal, so nothing paints there when the wall is absent.
+It is left/right symmetric and matches the far-end void the hand-verified
+`static-corridor.png` already shows at the vanishing point.
+
+One knowingly-unmodelled detail: `-11434(A4)` = `(-18338 + -18336 + -18328)
+% 2` flips every draw in the frame between the direct and mirrored branch, and
+a static slot table cannot switch on it. The port emits the **direct** branch
+throughout, which is what `render-corridor-frame.ts`'s pixel-verified wall
+render already assumed. The previous `staticSlots` mixed the two (122/150
+direct, 123-125/151-153 mirrored via `LAB_036C`) — a combination the game
+never produces — so unifying on direct is a consistency fix, not a new
+approximation.
 
 ---
 

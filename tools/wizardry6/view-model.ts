@@ -47,15 +47,43 @@
  * The game does not paint every depth unconditionally: it keeps **seven
  * parallel per-depth visibility lanes** (`-11432/-11424/-11416/-11408/
  * -11400/-11392/-11384(A4)`, 8 bytes each, all set to 1 for depths 0-3 at
- * `0x0a892`), gates every draw site on `lane[depth] == 1`, and clears
- * lanes ahead whenever a face blocks. `blockers` below is a direct port; see
- * each function's own doc comment for its file offset. This matters because
- * every W6 wall piece blits with `blend: 'or'` — an unoccluded far piece does
- * not get painted over by a nearer one, it bleeds *through* it.
+ * `0x0a892` and then selectively re-cleared at `0x0a944`-`0x0a958`), gates
+ * every draw site on `lane[depth] == 1`, and clears lanes ahead whenever a
+ * face blocks. `blockers` below is a direct port; see each function's own
+ * doc comment for its file offset. This matters because every W6 wall piece
+ * blits with `blend: 'or'` — an unoccluded far piece does not get painted
+ * over by a nearer one, it bleeds *through* it.
  *
- * The two lanes this module does not model (`-11392`/`-11384`) gate the
- * `LAB_0528` draw sites, which the walker doesn't implement yet; the clears
- * targeting them are noted but skipped.
+ * ## Ceiling and floor are per-lane, not a static backdrop (§4.7.7)
+ *
+ * All seven lanes also carry a **ceiling** and a **floor** compose run, and
+ * that is what fills the view outside the corridor's own trapezoid — over an
+ * open lateral side there is no wall, so only these pieces cover the gap.
+ *
+ * | lane | `A4` offset | draw site | ceiling | floor | alt floor |
+ * |---|---|---|---|---|---|
+ * | front  | `-11432` | `0x0ab92` -> `0x9b58` | 122 | 150 | 214 |
+ * | side L | `-11392` | `0x0aca2` -> `LAB_0528` | 126 | 154 | 218 |
+ * | lat L1 | `-11424` | `0x0ad52` -> `0x9b58` | 130 | 158 | 222 |
+ * | lat L2 | `-11416` | `0x0ae10` -> `0x9b58` | 134 | 162 | 226 |
+ * | lat R1 | `-11408` | `0x0aed0` -> `0x9b58` | 138 | 166 | 230 |
+ * | lat R2 | `-11400` | `0x0af90` -> `0x9b58` | 142 | 170 | 234 |
+ * | side R | `-11384` | `0x0afd6` -> `LAB_0528` | 146 | 174 | 238 |
+ *
+ * Three exact 7x4 tables (122-149, 150-177, 214-241) with no record left
+ * over. `0x9b58` draws its ceiling *before* its own `CMPI.W #3,8(a5); BGE`
+ * depth gate and its floor at `LAB_04F8`, which is that gate's jump target,
+ * so both run for depths 0-3 while walls stop at depth 2 — hence the loop
+ * below runs to `MAX_LOOP_DEPTH` (`-11440(A4)`, initialised to 4) rather
+ * than to `MAX_WALL_DEPTH`. `LAB_0528` exists only to draw this pair for
+ * the two receding-side lanes, which have no wall of their own here.
+ *
+ * The alt-floor column is selected instead of the floor when
+ * `word[-11330(A4) + depth*6 + side*2] != 0`, and both draws are skipped
+ * entirely when `byte[-11354(A4)]` / `byte[-11342(A4)]` at `depth*3 + side`
+ * is set. Those three arrays are memset to 0 per render (`0x0a8f6`-`0x0a91e`)
+ * and only written by `EvalCellFace`'s special-map-mode paths, so — like
+ * `evaluate-cell.ts`'s other overlay assumptions — they are taken as clear.
  */
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { DrawItem, DrawItemKind } from '@seer-project/dungeon';
@@ -63,12 +91,14 @@ import { evalCellFace, stepForward, type CellPlanes } from './evaluate-cell.ts';
 
 /** Lanes are 8 bytes but only depths 0-3 are initialised (`CODE+0xa86a`, `CMP.W #4,D4`). */
 const LANE_DEPTHS = 4;
-/** `0x9b58`'s own entry gate — `CMPI.W #3,8(a5); BGE` — so nothing draws at depth >= 3. */
-const MAX_DRAW_DEPTH = 3;
+/** `-11440(A4)`'s initial value (`0x0a984`, `MOVE.W #4,-11440(A4)`) — the depth loop's bound. */
+const MAX_LOOP_DEPTH = 4;
+/** `0x9b58`'s and `LAB_0506`'s shared entry gate — `CMPI.W #3,8(a5); BGE` — so no *wall* draws at depth >= 3. */
+const MAX_WALL_DEPTH = 3;
 
-/** The five per-depth visibility lanes this module models, by the draw site each gates. */
+/** All seven per-depth visibility lanes, by the draw site each gates. */
 interface Lanes {
-  /** `-11432(A4)` — gates the front wall *and* both receding side walls. */
+  /** `-11432(A4)` — gates the front wall, both receding side walls, and the front ceiling/floor. */
   front: boolean[];
   /** `-11424(A4)` — gates the outer left column face (compose baseIndex 3). */
   left1: boolean[];
@@ -78,11 +108,43 @@ interface Lanes {
   right1: boolean[];
   /** `-11400(A4)` — gates the outer right column face (compose baseIndex 0xc). */
   right2: boolean[];
+  /** `-11392(A4)` — gates `LAB_0528`'s left ceiling/floor continuation (`0x0aca2`). */
+  sideL: boolean[];
+  /** `-11384(A4)` — gates `LAB_0528`'s right ceiling/floor continuation (`0x0afd6`). */
+  sideR: boolean[];
 }
 
+/**
+ * Lane state at the top of a render: `0x0a892`'s loop sets every lane to 1
+ * for depths 0-3, then `0x0a944`-`0x0a958` immediately re-clears five
+ * specific entries — `left1[0]`, `right2[0]`, `sideL[0]`, `sideL[1]`,
+ * `sideR[0]`, `sideR[1]`.
+ *
+ * The two column clears are self-evidently right: `wall-lat:L1:0` and
+ * `wall-lat:R2:0` resolve to compose records 3 and 12, both `widthBytes == 0`
+ * (draw nothing). The four `LAB_0528` clears are the reason the near ceiling
+ * margin comes from the *column* lanes (130+0 = 130, 138+0 = 138, both
+ * x 72..104 / x 216..248 in band 0) rather than from 126/146 — those two
+ * runs only ever contribute their depth-2 and depth-3 entries.
+ */
 function freshLanes(): Lanes {
   const lane = () => new Array<boolean>(LANE_DEPTHS).fill(true);
-  return { front: lane(), left1: lane(), left2: lane(), right1: lane(), right2: lane() };
+  const v: Lanes = {
+    front: lane(),
+    left1: lane(),
+    left2: lane(),
+    right1: lane(),
+    right2: lane(),
+    sideL: lane(),
+    sideR: lane(),
+  };
+  v.left1[0] = false; // CLR.B -11424(A4)  0x0a944
+  v.right2[0] = false; // CLR.B -11400(A4)  0x0a948
+  v.sideL[0] = false; // CLR.B -11392(A4)  0x0a94c
+  v.sideL[1] = false; // CLR.B -11391(A4)  0x0a950
+  v.sideR[0] = false; // CLR.B -11384(A4)  0x0a954
+  v.sideR[1] = false; // CLR.B -11383(A4)  0x0a958
+  return v;
 }
 
 function hide(lane: boolean[], depth: number): void {
@@ -109,22 +171,26 @@ const perpBlocks = (code: number): boolean => code !== 0;
 
 /**
  * `LAB_0506`'s dispatch (`data-structure.md` §4.7.6.1-§4.7.6.2) — which
- * side-wall slot keys a perpendicular face's code draws, at depth 0-2.
+ * side-wall slot keys a perpendicular face's code draws.
  *
  * Two stages, both ported here:
- * - the **preamble** (`16/18(A5)`, the plain receding side wall), which
- *   fires for `code == 2 || code >= 7`;
+ * - the **preamble** (`16/18(A5)`, the plain receding side wall). Its gate
+ *   is `(depth == 3 && code != 0) || code == 2 || code >= 7` — the depth-3
+ *   arm (`0x0a178`-`0x0a184`) draws the far sliver for *any* non-open code,
+ *   including the ones the jump table would otherwise handle;
  * - the **14-entry jump table** on code 0-13, adding a variant piece. Code
  *   14+ falls outside the table's `CMP.L #$e,D0; BCC` bound and adds
- *   nothing — a real asymmetry with `0x9b58`, which does handle 14.
+ *   nothing — a real asymmetry with `0x9b58`, which does handle 14. The
+ *   table is skipped entirely at depth >= 3 (`LAB_050D`, `0x0a1ce`).
  *
  * Codes 8 and 9 push to the deferred-draw queue (`LAB_04B9` =
  * `CODE+0x9a52`) instead of drawing, and that queue's consumer is still
  * untraced — so they contribute only their preamble here.
  */
-function sideKeys(code: number): string[] {
+function sideKeys(code: number, depth: number): string[] {
   const keys: string[] = [];
-  if (code === 2 || code >= 7) keys.push('wall-side');
+  if ((depth === MAX_WALL_DEPTH && code !== 0) || code === 2 || code >= 7) keys.push('wall-side');
+  if (depth >= MAX_WALL_DEPTH) return keys;
   if (code === 1 || code === 3 || code === 4) keys.push('wall-side-partial');
   if (code === 3) keys.push('wall-side-extra3');
   if (code === 4) keys.push('wall-side-extra4');
@@ -134,9 +200,14 @@ function sideKeys(code: number): string[] {
   return keys;
 }
 
-/** `LAB_0538` (file `0x0a4d0`), called at `0x0aba2` with the front dispatch code. */
-function blockFront(v: Lanes, d: number, code: number): void {
-  if (!blocks(code)) return;
+/**
+ * `LAB_0538` (file `0x0a4d0`), called at `0x0aba2` with the front dispatch
+ * code. Returns the new depth-loop bound: the routine's tail
+ * (`0x0a578`-`0x0a58c`) also lowers `-11440(A4)` to `d + 3` when it is
+ * currently larger, which matters now that the loop runs to depth 3.
+ */
+function blockFront(v: Lanes, d: number, code: number, loopBound: number): number {
+  if (!blocks(code)) return loopBound;
   hide(v.front, d + 1);
   hide(v.front, d + 2);
   hide(v.front, d + 3);
@@ -146,8 +217,7 @@ function blockFront(v: Lanes, d: number, code: number): void {
   hide(v.left2, d + 2);
   hide(v.right1, d + 2);
   hide(v.right2, d + 2);
-  // Also caps the loop bound `-11440(A4)` to d+3 (`0x0a57e`-`0x0a58c`) — a
-  // no-op at this module's 3-depth budget, so not modelled.
+  return Math.min(loopBound, d + 3);
 }
 
 /** `LAB_053B` (file `0x0a594`), called at `0x0ac08` with the left perpendicular code. */
@@ -155,7 +225,7 @@ function blockPerpLeft(v: Lanes, d: number, code: number): void {
   if (!perpBlocks(code)) return;
   hide(v.left2, d);
   hide(v.left1, d + 1);
-  // + `-11392(A4)`[d+2], an unmodelled lane.
+  hide(v.sideL, d + 2);
 }
 
 /** `LAB_053E` (file `0x0a5dc`), called at `0x0ac6e` — `LAB_053B`'s exact mirror. */
@@ -163,34 +233,44 @@ function blockPerpRight(v: Lanes, d: number, code: number): void {
   if (!perpBlocks(code)) return;
   hide(v.right1, d);
   hide(v.right2, d + 1);
-  // + `-11384(A4)`[d+2], an unmodelled lane.
+  hide(v.sideR, d + 2);
+}
+
+/** `LAB_0541` (file `0x0a628`), called at `0x0ad62` after the outer-left draw. */
+function blockLeft1(v: Lanes, d: number, code: number): void {
+  if (!blocks(code)) return;
+  hide(v.sideL, d + 1);
 }
 
 /** `LAB_0544` (file `0x0a662`), called at `0x0ae20` after the inner-left draw. */
 function blockLeft2(v: Lanes, d: number, code: number): void {
   if (!blocks(code)) return;
   hide(v.left1, d + 1);
-  // + `-11392(A4)`[d+2].
+  hide(v.sideL, d + 2);
 }
 
 /** `LAB_0547` (file `0x0a6aa`), called at `0x0aee0` — `LAB_0544`'s mirror. */
 function blockRight1(v: Lanes, d: number, code: number): void {
   if (!blocks(code)) return;
   hide(v.right2, d + 1);
-  // + `-11384(A4)`[d+2].
+  hide(v.sideR, d + 2);
 }
 
-// `LAB_0541` (`0x0a628`, after the outer-left draw) and `LAB_054A`
-// (`0x0a6f2`, after the outer-right draw) only clear `-11392`/`-11384`, the
-// two lanes this module doesn't model — so they are deliberately no-ops here.
+/** `LAB_054A` (file `0x0a6f2`), called at `0x0afa0` — `LAB_0541`'s mirror. */
+function blockRight2(v: Lanes, d: number, code: number): void {
+  if (!blocks(code)) return;
+  hide(v.sideR, d + 1);
+}
 
 /**
- * Emit the `DrawItem`s for one pose, following the game's own per-depth
- * order: front wall, then the two receding side walls, then the four lateral
- * column faces — each gated on its visibility lane, with the lane-clearing
- * blockers applied *between* draws exactly where the game applies them
- * (`blockPerpLeft` hides the inner-left column at the **current** depth, so
- * the ordering is load-bearing, not cosmetic).
+ * Emit the `DrawItem`s for one pose, following `LAB_055A`'s own per-depth
+ * order: the front lane, then the two receding side walls, then the left
+ * `LAB_0528` lane, the four lateral column lanes, and the right `LAB_0528`
+ * lane — each gated on its visibility lane, each of the seven carrying its
+ * own ceiling/floor run (§4.7.7), with the lane-clearing blockers applied
+ * *between* draws exactly where the game applies them (`blockPerpLeft` hides
+ * the inner-left column at the **current** depth, so the ordering is
+ * load-bearing, not cosmetic).
  */
 export function buildViewItems(
   planes: CellPlanes,
@@ -217,41 +297,88 @@ export function buildViewItems(
     }
   };
 
-  for (let depth = 0; depth < MAX_DRAW_DEPTH; depth++) {
+  /**
+   * One lane's ceiling + floor continuation (§4.7.7). `0x9b58` draws the
+   * ceiling from `18(a5)` at its very top and the floor from `70(a5)` at
+   * `LAB_04F8`, with the lane's wall in between; `LAB_0528` draws the same
+   * pair with nothing in between. `body` fills that gap so this helper can
+   * express both, in the game's own order.
+   */
+  const emitLane = (
+    lane: string,
+    depth: number,
+    lateral: number,
+    side: 'L' | 'R' | undefined,
+    cell: { x: number; y: number },
+    body?: () => void,
+  ) => {
+    emit(`ceil:${lane}:${depth}`, 'side', depth, lateral, side, cell);
+    body?.();
+    emit(`floor:${lane}:${depth}`, 'side', depth, lateral, side, cell);
+  };
+
+  let loopBound = MAX_LOOP_DEPTH;
+  for (let depth = 0; depth < loopBound && depth < LANE_DEPTHS; depth++) {
     const cell = stepForward(x, y, facing, depth);
 
-    // Front wall — `0x9202` straight ahead, lane `-11432`.
+    // Front wall — `0x9202` straight ahead, lane `-11432` (`0x0ab92`).
     const front = evalCellFace(planes, cell.x, cell.y, facing, 0);
     if (v.front[depth]) {
-      if (front === 5) emit(`door:front:${depth}`, 'front', depth, 0, undefined, cell);
-      else if (front !== 0) emit(`wall:front:${depth}`, 'front', depth, 0, undefined, cell);
+      emitLane('front', depth, 0, undefined, cell, () => {
+        if (depth >= MAX_WALL_DEPTH) return;
+        if (front === 5) emit(`door:front:${depth}`, 'front', depth, 0, undefined, cell);
+        else if (front !== 0) emit(`wall:front:${depth}`, 'front', depth, 0, undefined, cell);
+      });
     }
-    blockFront(v, depth, front);
+    loopBound = blockFront(v, depth, front, loopBound);
 
     // Receding side walls — the perpendicular faces (`0x969a`/`0x9876`) run
     // through `LAB_0506`'s own dispatch, both gated on the same `-11432`
-    // lane as the front wall.
+    // lane as the front wall. `LAB_0506` carries no ceiling/floor of its own.
     const perpL = evalCellFace(planes, cell.x, cell.y, (facing + 3) % 4, 0);
-    if (v.front[depth]) for (const k of sideKeys(perpL)) emit(`${k}:L:${depth}`, 'side', depth, -1, 'L', cell);
+    if (v.front[depth]) for (const k of sideKeys(perpL, depth)) emit(`${k}:L:${depth}`, 'side', depth, -1, 'L', cell);
     blockPerpLeft(v, depth, perpL);
 
     const perpR = evalCellFace(planes, cell.x, cell.y, (facing + 1) % 4, 0);
-    if (v.front[depth]) for (const k of sideKeys(perpR)) emit(`${k}:R:${depth}`, 'side', depth, 1, 'R', cell);
+    if (v.front[depth]) for (const k of sideKeys(perpR, depth)) emit(`${k}:R:${depth}`, 'side', depth, 1, 'R', cell);
     blockPerpRight(v, depth, perpR);
 
+    // `LAB_0528` left (`0x0aca2`, lane `-11392`) — ceiling/floor only.
+    if (v.sideL[depth]) emitLane('side:L', depth, -1, 'L', cell);
+
     // Lateral column faces — one evaluation per side (`0x9202` at lateral
-    // ∓1), two draw sites each, one lane per site.
+    // ∓1), two draw sites each, one lane per site, each carrying its own
+    // ceiling/floor run.
     const latL = evalCellFace(planes, cell.x, cell.y, facing, -1);
-    if (v.left1[depth] && latL !== 0) emit(`wall-lat:L1:${depth}`, 'side', depth, -1, 'L', cell);
-    // `LAB_0541` here — clears an unmodelled lane only.
-    if (v.left2[depth] && latL !== 0) emit(`wall-lat:L2:${depth}`, 'side', depth, -1, 'L', cell);
+    if (v.left1[depth]) {
+      emitLane('lat:L1', depth, -1, 'L', cell, () => {
+        if (depth < MAX_WALL_DEPTH && latL !== 0) emit(`wall-lat:L1:${depth}`, 'side', depth, -1, 'L', cell);
+      });
+    }
+    blockLeft1(v, depth, latL);
+    if (v.left2[depth]) {
+      emitLane('lat:L2', depth, -1, 'L', cell, () => {
+        if (depth < MAX_WALL_DEPTH && latL !== 0) emit(`wall-lat:L2:${depth}`, 'side', depth, -1, 'L', cell);
+      });
+    }
     blockLeft2(v, depth, latL);
 
     const latR = evalCellFace(planes, cell.x, cell.y, facing, 1);
-    if (v.right1[depth] && latR !== 0) emit(`wall-lat:R1:${depth}`, 'side', depth, 1, 'R', cell);
+    if (v.right1[depth]) {
+      emitLane('lat:R1', depth, 1, 'R', cell, () => {
+        if (depth < MAX_WALL_DEPTH && latR !== 0) emit(`wall-lat:R1:${depth}`, 'side', depth, 1, 'R', cell);
+      });
+    }
     blockRight1(v, depth, latR);
-    if (v.right2[depth] && latR !== 0) emit(`wall-lat:R2:${depth}`, 'side', depth, 1, 'R', cell);
-    // `LAB_054A` here — clears an unmodelled lane only.
+    if (v.right2[depth]) {
+      emitLane('lat:R2', depth, 1, 'R', cell, () => {
+        if (depth < MAX_WALL_DEPTH && latR !== 0) emit(`wall-lat:R2:${depth}`, 'side', depth, 1, 'R', cell);
+      });
+    }
+    blockRight2(v, depth, latR);
+
+    // `LAB_0528` right (`0x0afd6`, lane `-11384`) — ceiling/floor only.
+    if (v.sideR[depth]) emitLane('side:R', depth, 1, 'R', cell);
   }
 
   return items;

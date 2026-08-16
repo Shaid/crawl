@@ -42,7 +42,6 @@ import { resolve } from 'node:path';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { readBinary, writeJson } from '@seer-project/pipeline';
 import { parseMazeData, type MazeData } from './decode-maze.ts';
-import { STATIC_CORRIDOR_CALLS, type DrawMazePieceCall } from './static-corridor-calls.ts';
 
 const SCREEN_WIDTH = 320;
 const SCREEN_HEIGHT = 200;
@@ -92,38 +91,23 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
     };
   };
 
-  // A `mirroredDraw` helper (graphic from `compose[src+depth]`, placement
-  // from `compose[dst+depth]`, horizontally mirrored) used to live here, for
-  // the "18-24(A5) are mirrored (src,dst) pairs" reading of `0x9b58`'s arg
-  // blocks. §4.7.1's second correction retired that reading — every wall
-  // site draws directly via `composeDraw` — and the helper went unused; the
-  // mirrored path survives only in `staticDraw`, which genuinely needs it.
-
-  // staticDraw: resolve one DrawMazePieceCall into a PieceDraw for use in
-  // both the static backdrop and the conditional far-end archway.
-  const staticDraw = (call: DrawMazePieceCall) => {
-    const direct = call.dstIdx === 0xffff;
-    const placementRec = maze.composeList[direct ? call.srcIdx : call.dstIdx]!;
-    const graphicRec = maze.composeList[call.srcIdx]!;
-    const gfx = maze.dirRecords[graphicRec.dirIndex]!;
-    const frame = frameByName(`mazedata_dir${String(graphicRec.dirIndex).padStart(3, '0')}`);
-    const srcByteStart = direct
-      ? placementRec.srcClip
-      : gfx.widthUnits - placementRec.srcClip - placementRec.widthBytes;
-    return {
-      bank: 'mazedata',
-      frame: `mazedata_dir${String(graphicRec.dirIndex).padStart(3, '0')}`,
-      destX: (placementRec.destXByte + placementRec.srcClip) * 8,
-      destY: placementRec.destY,
-      srcX: frame.x + srcByteStart * 8,
-      srcY: frame.y,
-      srcW: placementRec.widthBytes * 8,
-      srcH: gfx.heightPx,
-      mirrorX: !direct,
-      blend: (call.mode === 0 ? 'replace' : 'or') as 'replace' | 'or',
-      origin: `static-corridor call (${call.srcIdx},${call.mode},${call.dstIdx})`,
-    };
-  };
+  // Two helpers used to live here and are both retired now:
+  //
+  // - `mirroredDraw` (graphic from `compose[src+depth]`, placement from
+  //   `compose[dst+depth]`, horizontally mirrored), for the "18-24(A5) are
+  //   mirrored (src,dst) pairs" reading of `0x9b58`'s arg blocks. §4.7.1's
+  //   second correction retired that reading — every wall site draws
+  //   directly via `composeDraw`.
+  // - `staticDraw`, which resolved a `STATIC_CORRIDOR_CALLS` triple (and was
+  //   the last consumer of the mirrored path) for the "static ceiling/floor
+  //   backdrop". §4.7.7 retired *that*: `LAB_036C`'s 16 calls are not a
+  //   backdrop pass, they are an unrolled fully-open-corridor replica of the
+  //   real renderer's own per-lane calls, so the ceiling/floor now comes
+  //   from the real seven-lane runs below.
+  //
+  // Both remain reachable in git history and are documented in
+  // `data-structure.md` §4.4 / §4.7.7 if a `-11434(A4) != 0` (mirrored
+  // parity) variant is ever needed.
 
   // The 4 far-end archway pieces (STATIC_CORRIDOR_CALLS 12-15, srcIdx 25/28/31/34)
   // are NOT part of the always-drawn static backdrop — verified against real
@@ -178,7 +162,75 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
     'wall-side-extra4': { L: 0x72, R: 0x76, mode: 0 },
   };
 
+  // ---------------------------------------------------------------------
+  // Ceiling / floor **continuation** runs — §4.7.7.
+  //
+  // The corridor's ceiling and floor are NOT one static backdrop: they are
+  // seven parallel `baseIndex + depth` runs, one per draw *lane*, each drawn
+  // by the same routine that draws that lane's wall, gated on the same
+  // visibility lane. Two routines carry them:
+  //
+  //   `LAB_04BD` = `CODE+0x9b58`, the wall dispatcher. Its FIRST block
+  //     (`0x9b5c`-`0x9bac`, before its own `CMPI.W #3,8(a5); BGE` depth gate)
+  //     unconditionally draws `composeList[18(a5) + depth]`; its LAST block
+  //     (`LAB_04F8`, `0x0a05e`-`0x0a0ce`, which is also the depth>=3 jump
+  //     target) draws `composeList[70(a5) + depth]`. Five call sites in the
+  //     depth loop `LAB_055A` supply those two arg slots: front (`0x0ab92`),
+  //     left1 (`0x0ad52`), left2 (`0x0ae10`), right1 (`0x0aed0`), right2
+  //     (`0x0af90`).
+  //   `LAB_0528` = `CODE+0x0a3b0`, a small two-draw routine that exists ONLY
+  //     for these pieces — the two receding-side lanes have no wall of their
+  //     own here (that's `LAB_0506`'s job). Called at `0x0aca2` (left,
+  //     side arg 0) and `0x0afd6` (right, side arg 2); ceiling from
+  //     `12(a5) + depth`, floor from `16(a5) + depth`.
+  //
+  // Collecting the literals pushed at those seven call sites gives three
+  // exact 7x4 tables — ceiling 122-149, floor 150-177, "alt floor" 214-241,
+  // stride 4, zero gaps, zero overlap. That closure (28 = 7 lanes x 4 depths
+  // for each of the three families, with no record left over) is the
+  // structural proof that the lane->base assignment below is complete.
+  //
+  // Every one of these draws has the same direct-vs-mirrored fork on
+  // `-11434(A4)` as the wall sites (§4.7.6.2): `-11434 == 0` draws
+  // `composeList[own + depth]` directly, otherwise it draws the *paired*
+  // lane's graphic at this lane's placement, mirrored. As with the wall
+  // slots, the static table emits the direct branch.
+  //
+  // The third family (`74/76(a5)` for `0x9b58`, `20/22(a5)` for `LAB_0528`)
+  // is an ALTERNATE floor selected when `word[-11330(A4) + depth*6 + side*2]`
+  // is non-zero — a per-cell override written only by `EvalCellFace`'s
+  // special-map-mode paths (`0x9258`/`0x92e6`/`0x93f8`). Like
+  // `evaluate-cell.ts`'s other overlay assumptions, those arrays are taken
+  // as clear here, so only the normal floor is emitted.
+  const BACKDROP_BASE: Record<string, { ceil: number; floor: number; alt: number }> = {
+    // `0x0ab92`: 18/20(a5)=122/122, 70/72(a5)=150/150, 74/76(a5)=214/214.
+    'front': { ceil: 122, floor: 150, alt: 214 },
+    // `0x0aca2` (LAB_0528, side 0): 12/14=126/146, 16/18=154/174, 20/22=218/238.
+    'side:L': { ceil: 126, floor: 154, alt: 218 },
+    // `0x0ad52`: 18/20=130/142, 70/72=158/170, 74/76=222/234.
+    'lat:L1': { ceil: 130, floor: 158, alt: 222 },
+    // `0x0ae10`: 18/20=134/138, 70/72=162/166, 74/76=226/230.
+    'lat:L2': { ceil: 134, floor: 162, alt: 226 },
+    // `0x0aed0`: 18/20=138/134, 70/72=166/162, 74/76=230/226.
+    'lat:R1': { ceil: 138, floor: 166, alt: 230 },
+    // `0x0af90`: 18/20=142/130, 70/72=170/158, 74/76=234/222.
+    'lat:R2': { ceil: 142, floor: 170, alt: 234 },
+    // `0x0afd6` (LAB_0528, side 2): 12/14=146/126, 16/18=174/154, 20/22=238/218.
+    'side:R': { ceil: 146, floor: 174, alt: 238 },
+  };
+
   const slot = (draw: ReturnType<typeof composeDraw>) => (draw ? { draws: [draw] } : null);
+
+  // Ceiling/floor run to depth 3 (the `0x9b58` ceiling draw precedes its own
+  // depth gate, and `LAB_04F8` is that gate's jump target), unlike the wall
+  // slots which stop at depth 2.
+  for (let depth = 0; depth < 4; depth++) {
+    for (const [lane, { ceil, floor }] of Object.entries(BACKDROP_BASE)) {
+      slots[`ceil:${lane}:${depth}`] = slot(composeDraw(ceil, depth));
+      slots[`floor:${lane}:${depth}`] = slot(composeDraw(floor, depth));
+    }
+  }
+
   for (let depth = 0; depth < 3; depth++) {
     for (const [key, { L, R, mode }] of Object.entries(SIDE_BASE)) {
       slots[`${key}:L:${depth}`] = slot(composeDraw(L, depth, mode));
@@ -192,22 +244,26 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
     slots[`door:front:${depth}`] = slot(composeDraw(0xb2, depth));
   }
 
-  // Static background — only ceiling and floor, drawn every frame.
-  // (Assuming no level has gaps in floor or roof; if that proves wrong,
-  // these will also need to become conditional.)
-  // Ceiling: record 122 (depth=0 centre bar, 144×7 at x=88,y=32) plus the
-  // three perspective strips 123-125 (CODE+0x632c STATIC_CORRIDOR_CALLS[0-2]).
-  // Record 122 confirmed drawn by the outer renderer CODE+0xa72c via its first
-  // unconditional batch (0xab32-0xabba), base index 0x7a=122, depth=0.
-  const ceilDraw122 = composeDraw(122, 0);
-  // Floor: record 150 (depth=0 centre bar, 144×16 at x=88,y=128) plus strips
-  // 151-153.  Record 150 confirmed by the same outer-renderer batch.
-  const floorDraw150 = composeDraw(150, 0);
+  // `LAB_0506`'s preamble also fires at depth 3 (`0x0a178`: `depth == 3 &&
+  // code != 0`), where its 14-entry jump table is skipped — so the plain
+  // receding side wall, and only that, gets a depth-3 slot.
+  slots['wall-side:L:3'] = slot(composeDraw(SIDE_BASE['wall-side']!.L, 3));
+  slots['wall-side:R:3'] = slot(composeDraw(SIDE_BASE['wall-side']!.R, 3));
 
-  const staticSlots = [
-    { draws: [ceilDraw122, ...STATIC_CORRIDOR_CALLS.slice(0, 3).map(staticDraw)].filter((d): d is NonNullable<typeof d> => d !== null) },  // ceiling
-    { draws: [floorDraw150, ...STATIC_CORRIDOR_CALLS.slice(9, 12).map(staticDraw)].filter((d): d is NonNullable<typeof d> => d !== null) }, // floor
-  ];
+  // > **Correction (2026-08-16):** there is no static ceiling/floor backdrop.
+  // > `staticSlots` used to hold compose 122 + 123-125 (ceiling) and 150 +
+  // > 151-153 (floor), taken from `CODE+0x632c`/`LAB_036C`'s unrolled
+  // > 16-call list. Those calls are not a backdrop pass at all — `LAB_036C`
+  // > is a hardcoded, fully-open-corridor replica of the *real* renderer's
+  // > own calls (its 123/124/125 are `0x9b58`'s front-lane ceiling draw at
+  // > depths 1/2/3, and its 16/17/18↔20/21/22 pairs are `LAB_0506`'s
+  // > preamble at depths 1/2/3, both taken with `-11434(A4) != 0`). Emitting
+  // > only the front lane's copy left every other lane's ceiling/floor
+  // > unpainted, which is the black wedge over an open lateral side
+  // > (`TODO.md` `walker-user-reported-inaccuracy`). All seven lanes are now
+  // > emitted above as `ceil:*`/`floor:*`, gated by `view-model.ts` on the
+  // > same visibility lane as that lane's wall, so `staticSlots` is empty.
+  const staticSlots: Array<{ draws: NonNullable<ReturnType<typeof composeDraw>>[] }> = [];
 
   return {
     schemaVersion: 1,
