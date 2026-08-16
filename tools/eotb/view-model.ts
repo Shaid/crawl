@@ -67,19 +67,33 @@ export interface ResolvedSlot {
  * NOT always a direct 0-6 wallType: most of the corpus is clean 0/1/2
  * (open/solid-type-1/solid-type-2), but some cells carry much larger
  * values (58, 62, ... seen in `data/eotb/amiga/LEVEL1.MAZ` at (16,16)).
- * `docs/eotb/amiga/eotb-inf-spec.md`'s `WallMapping` struct (`.INF`'s
- * `0xFB` decoration command: `{wallMappingIndex, wallType, decorationID,
- * ...}`) is almost certainly the real translation -- the `.MAZ` byte is
- * a per-level `wallMappingIndex`, not a global wallType, and each level's
- * `.INF` supplies its own index -> wallType table. This session did not
- * reverse that table: the Amiga `.INF` layout is confirmed (this
- * session) to NOT match the ModdingWiki DOS-era fixed-12-byte-field
- * struct -- it uses variable-length NUL-terminated strings instead
- * (`level1.maz\0` is 11 bytes, `brick\0` is 6, not 12+12) -- so a
- * from-scratch Amiga-specific `.INF` parse (header preamble + decoration
- * command stream) is real follow-on work, not done here. Until then:
- * pass 0-6 through unchanged (the common case, verified clean over most
- * of the corpus), clamp anything else to 1 (generic solid wall) so doors/
+ *
+ * **The real mechanism is now identified (2026-08-16 follow-up, ScummVM
+ * source), just not implemented yet.** `engines/kyra/engine/scene_eob.cpp`
+ * (`EoBCoreEngine::initLevelData`/`resetWallData`/`assignWallsAndDecorations`,
+ * shared by EOB1 and EOB2) confirms `docs/eotb/amiga/eotb-inf-spec.md`'s
+ * `WallMapping`/`0xFB` hypothesis: `resetWallData()` seeds a default
+ * wallType->vmpRunIndex table (`{1:1, 2:2, 3..22:3, 23:4, 24:5}`, else 0),
+ * and each level's `.INF` decoration-command stream can override entries
+ * via a 5-byte record `[wallIndex][vmpIndex][decIndex][specialType][flags]`.
+ * **Why this clamp is still here rather than a real lookup**: reaching
+ * that record stream requires sequentially replicating everything
+ * `initLevelData` reads before it (door-shape params, script timers,
+ * monster-shape loads, `loadActiveMonsterData`), and a first attempt at
+ * walking this by hand against real `LEVEL1.INF` bytes drifted out of
+ * alignment with known string anchors ("kobold\0"/"leech\0", the
+ * monster-shape filenames) partway through -- most likely the Amiga
+ * port's on-disk layout diverges from ScummVM's DOS-oriented reads the
+ * same way `mazStem`/`wallSetStem` already do (see `decode-inf.ts`'s own
+ * module doc). Shipping a guessed offset table risked silently mis-mapped
+ * wall art, so this is left as real follow-on work (full details and the
+ * exact struct/function citations: `docs/eotb/TODO.md`
+ * `eotb1-amiga-walker-wallmapping`) -- either trace the Amiga executable's
+ * own disassembly (a more reliable oracle for Amiga-specific layout than
+ * DOS-oriented ScummVM source) or carefully re-verify each intervening
+ * field against real file bytes one at a time. Until then: pass 0-6
+ * through unchanged (the common case, verified clean over most of the
+ * corpus), clamp anything else to 1 (generic solid wall) so doors/
  * stairs/decorated cells still render as *a* wall (correct topology,
  * approximate art) instead of a decode error or nonsense tile index.
  */

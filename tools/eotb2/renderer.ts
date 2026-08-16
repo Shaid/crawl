@@ -55,9 +55,9 @@ export function drawBackdrop(surface: IndexedSurface, vcn: VcnData, vmp: VmpData
   }
 }
 
-/** Draw one of the 25 fixed wall positions for a given wallType (1-6; 0 = no wall, caller should skip). See `tools/eotb/renderer.ts`'s `drawWallSlot` doc for the `flipX`-sense derivation this reuses verbatim. */
+/** Draw one of the 25 fixed wall positions for a given wallType (1..vmp.wallTiles.length; 0 = no wall, caller should skip). Wall sets vary in how many wall-type runs their VMP carries (`decode-vmp.ts`'s module doc), so the bound is per-VMP, not a fixed 6. See `tools/eotb/renderer.ts`'s `drawWallSlot` doc for the `flipX`-sense derivation this reuses verbatim. */
 export function drawWallSlot(surface: IndexedSurface, vcn: VcnData, vmp: VmpData, slotIndex: number, wallType: number): void {
-  if (wallType < 1 || wallType > 6) return;
+  if (wallType < 1 || wallType > vmp.wallTiles.length) return;
   const slot = WALL_RENDER_SLOTS[slotIndex]!;
   const run = vmp.wallTiles[wallType - 1]!;
   let offset = slot.baseOffset;

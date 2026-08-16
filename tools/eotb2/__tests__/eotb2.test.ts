@@ -73,9 +73,20 @@ describe('decodeVcn', () => {
 });
 
 describe('decodeVmp', () => {
-  it('rejects a non-standard entry count (e.g. FOREST-shaped) rather than guessing a split', () => {
+  it('decodes real FOREST.VMP as a 2-wall-type set (1192 = 330 backdrop + 2*431), not a rejected non-standard layout', () => {
     const data = readFileSync(resolve(DATA_DIR, 'FOREST.VMP'));
-    expect(() => decodeVmp(new Uint8Array(data), 10000)).toThrow(/non-standard entry count/);
+    const vmp = decodeVmp(new Uint8Array(data), 906);
+    expect(vmp.backdrop).toHaveLength(22);
+    expect(vmp.backdrop[0]).toHaveLength(15);
+    expect(vmp.wallTiles).toHaveLength(2);
+    expect(vmp.wallTiles[0]).toHaveLength(431);
+  });
+
+  it('rejects a genuinely non-standard entry count that does not divide evenly by 431', () => {
+    const bogus = new Uint8Array(2 + 331 * 2); // 331 != 330 + N*431 for any integer N
+    bogus[0] = 331 & 0xff;
+    bogus[1] = (331 >> 8) & 0xff;
+    expect(() => decodeVmp(bogus, 10000)).toThrow(/non-standard entry count/);
   });
 
   it('rejects a resolved tile index >= numTiles (endianness/layout guard)', () => {

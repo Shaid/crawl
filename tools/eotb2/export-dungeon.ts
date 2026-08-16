@@ -15,13 +15,15 @@
  * level 15's grid rather than needing a cross-file reference, a small
  * space cost accepted for consumer simplicity.
  *
- * `FOREST` and `AZURE` wall sets are skipped: `FOREST.VMP` has a
- * non-standard 1192-entry layout `decode-vmp.ts` doesn't support (see its
- * module doc), and `AZURE` has no `.VCN`/`.VMP` at all (confirmed by
- * design -- no level ever references it as a navigable wall set). Neither
- * gap is silent: any level that *did* reference them would throw here
+ * `AZURE` is the one wall set still skipped: it has no `.VCN`/`.VMP` at
+ * all (confirmed by design -- no level ever references it as a navigable
+ * wall set). Not silent: a level that *did* reference it would throw here
  * loudly rather than fall back to something else, but per the cited doc,
- * no level in this corpus actually does.
+ * no level in this corpus actually does. `FOREST` (`count=1192`,
+ * previously also skipped as "non-standard") is no longer special-cased --
+ * `decode-vmp.ts` derives its wall-type-run count from the file's own
+ * byte size instead of assuming a fixed 6, so it decodes and renders like
+ * any other wall set now.
  *
  * Usage: npx tsx tools/eotb2/export-dungeon.ts <dataDir>
  */
@@ -35,7 +37,7 @@ import { decodeInf } from './decode-inf.ts';
 import { decodePal } from './palette.ts';
 
 const LEVEL_COUNT = 16;
-const SKIP_WALL_SETS = new Set(['azure', 'forest']);
+const SKIP_WALL_SETS = new Set(['azure']);
 
 function main() {
   const dataDir = process.argv[2];

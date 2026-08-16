@@ -85,16 +85,25 @@ set instead of a `.CPS`-embedded base palette). New decoders:
 fixed offsets didn't hold, worked around with a token scan), `palette.ts`
 (DOS VGA 6-bit-to-8-bit `.PAL` reader).
 
-**5 of 6 wall sets exported and walkable**: DUNG, MEZZ, SILVER, CRIMSON
-(all standard 2916-entry VMPs). **FOREST is skipped** — its `.VMP` has a
-non-standard 1192-entry layout (an outdoor-terrain set needing fewer
-viewport-layer mappings, per `docs/eotb2/dosvga/data-structure.md`'s own
-note) that doesn't fit the confirmed backdrop+6*wallType split;
-`decode-vmp.ts` throws rather than guessing a different split, and
-`export-dungeon.ts` skips the one level (`LEVEL4`) that references it —
-documented gap, not a silent wrong render. **AZURE is also skipped**
+**All 5 real wall sets exported and walkable, including FOREST** (closed
+this follow-up session, 2026-08-16): the "FOREST is non-standard" premise
+above was wrong, not just under-implemented. `tools/landsoflore/decode-
+vmp.ts` (written in the Lands of Lore session, same day) found the real
+pattern for its own varying wall-type counts: `count` is `330 + N*431`,
+`N` derived from the file's own byte size, not a hardcoded 6.
+`1192 - 330 = 862 = 2*431` divides exactly — FOREST is just an `N=2` set
+(fewer distinct wall appearances needed for outdoor terrain), the same
+shape as LoL's own `FOREST1` (identical 1192-entry count, already
+confirmed rendering correctly there). `tools/eotb2/decode-vmp.ts` now
+uses the same derivation; `tools/eotb2/renderer.ts`'s `drawWallSlot`
+bound-checks against `vmp.wallTiles.length` instead of a hardcoded 6.
+Verified: `LEVEL4` (the one level using FOREST) renders coherent
+green vine/foliage textures (`render-through-dungeon.ts`, visually
+inspected, not garbage), full repo test suite green. **AZURE remains
+skipped**, for its own separate, unrelated, already-settled reason
 (confirmed by the existing `eotb2-dos-azure-vcn-missing` closed item: no
-`.VCN`/`.VMP` pair exists for it at all).
+`.VCN`/`.VMP` pair exists for it at all — not another instance of this
+bug).
 
 **Verified**: 15 new unit tests (`tools/eotb2/__tests__/eotb2.test.ts`),
 including real-corpus oracle checks against `docs/eotb2/dosvga/
