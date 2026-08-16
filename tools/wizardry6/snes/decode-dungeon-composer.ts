@@ -136,25 +136,25 @@ function loadPaletteRGB(data: Uint8Array, selector: number): number[] {
   return decodeCgramPalette(data, offset, 16); // flat [r,g,b, r,g,b, ...] x16
 }
 
-const C1_BASE = 0x208000; // file offset, CPU $C1:8000
-const C2_BASE = 0x210000; // file offset, CPU $C2:8000
-const C2_TABLE_LEN = 632; // re-derived this session -- see header comment; 630 non-null
+export const C1_BASE = 0x208000; // file offset, CPU $C1:8000
+export const C2_BASE = 0x210000; // file offset, CPU $C2:8000
+export const C2_TABLE_LEN = 632; // re-derived this session -- see header comment; 630 non-null
 const VIEWPORT_W = 18;
 const VIEWPORT_H = 15;
 const DECISIVE_TABLE = 'C2';
 const DECISIVE_INDEX = 267; // CPU $C2:8216 -- the full-viewport "backdrop" piece
 
-function u16(data: Uint8Array, off: number): number {
+export function u16(data: Uint8Array, off: number): number {
   return data[off] | (data[off + 1] << 8);
 }
 
-interface CellRef {
+export interface CellRef {
   tile: number;
   bank: number;
   sourceOffset: number;
 }
 
-interface PieceRecord {
+export interface PieceRecord {
   table: 'C1' | 'C2';
   index: number;
   cpuAddr: number; // address of the table slot itself
@@ -168,80 +168,111 @@ interface PieceRecord {
   cells: (CellRef | null)[]; // row-major, length w*h
 }
 
-function parseLibrary(data: Uint8Array, base: number, n: number, table: 'C1' | 'C2'): PieceRecord[] {
+/** Parse one piece record body at `recOff` (already resolved from a table slot's pointer) -- shared by `parseLibrary` (iterating every table slot) and `resolveComposeWord` (resolving one arbitrary compose-list word, e.g. a raw byte read straight out of the bank-`$89` per-depth wallValue tables, docs §3.14.5). */
+function parsePieceAt(data: Uint8Array, table: 'C1' | 'C2', base: number, index: number, ptr: number, recOff: number): PieceRecord {
+  const x = data[recOff];
+  const y = data[recOff + 1];
+  const w = data[recOff + 2];
+  const h = data[recOff + 3];
+  const marker = u16(data, recOff + 4);
+
+  let cellBase: number;
+  let rowStrideExtra = 0;
+  let startByteOffset = 0;
+  let extType: PieceRecord['extType'] = 'plain';
+  if (marker === 0xfffe) {
+    // Confirmed this session ($03:E29B-$03:E2E4): the word at recOff+6 is
+    // [strideExtraLo][startOffsetHi] LE -- high byte seeds the initial
+    // byte cursor into the redirected array, low byte is added to the
+    // row cursor after each row on top of the w*2 the column loop already
+    // consumed. See the header comment for full derivation + verification.
+    const word = u16(data, recOff + 6);
+    startByteOffset = (word >> 8) & 0xff;
+    rowStrideExtra = word & 0xff;
+    const newPtr = u16(data, recOff + 8);
+    cellBase = base + (newPtr - 0x8000);
+    extType = 'redirect-strided';
+  } else if (marker === 0xffff) {
+    const newPtr = u16(data, recOff + 6);
+    cellBase = base + (newPtr - 0x8000);
+    extType = 'redirect';
+  } else {
+    cellBase = recOff + 4;
+  }
+
+  const rowBytes = w * 2 + rowStrideExtra;
+  const cells: (CellRef | null)[] = [];
+  for (let row = 0; row < h; row++) {
+    for (let col = 0; col < w; col++) {
+      const wordOff = cellBase + startByteOffset + row * rowBytes + col * 2;
+      if (wordOff < 0 || wordOff + 2 > data.length) {
+        cells.push(null);
+        continue;
+      }
+      const word = u16(data, wordOff);
+      if (word === 0) {
+        cells.push(null);
+        continue;
+      }
+      const tile = word & 0x03ff;
+      const bankSel = ((word >> 8) & 0x3c) >> 2;
+      const bank = 0x90 + bankSel;
+      const sourceOffset = (bank & 0x7f) * 0x8000 + tile * TILE_BYTES_4BPP;
+      cells.push({ tile, bank, sourceOffset });
+    }
+  }
+
+  return {
+    table,
+    index,
+    cpuAddr: 0x8000 + index * 2,
+    recordCpuAddr: ptr,
+    fileOffset: recOff,
+    x,
+    y,
+    w,
+    h,
+    extType,
+    cells,
+  };
+}
+
+export function parseLibrary(data: Uint8Array, base: number, n: number, table: 'C1' | 'C2'): PieceRecord[] {
   const out: PieceRecord[] = [];
   for (let i = 0; i < n; i++) {
     const slotOff = base + i * 2;
     const ptr = u16(data, slotOff);
     if (ptr === 0xffff || ptr < 0x8000) continue; // unused slot
     const recOff = base + (ptr - 0x8000);
-    const x = data[recOff];
-    const y = data[recOff + 1];
-    const w = data[recOff + 2];
-    const h = data[recOff + 3];
-    const marker = u16(data, recOff + 4);
-
-    let cellBase: number;
-    let rowStrideExtra = 0;
-    let startByteOffset = 0;
-    let extType: PieceRecord['extType'] = 'plain';
-    if (marker === 0xfffe) {
-      // Confirmed this session ($03:E29B-$03:E2E4): the word at recOff+6 is
-      // [strideExtraLo][startOffsetHi] LE -- high byte seeds the initial
-      // byte cursor into the redirected array, low byte is added to the
-      // row cursor after each row on top of the w*2 the column loop already
-      // consumed. See the header comment for full derivation + verification.
-      const word = u16(data, recOff + 6);
-      startByteOffset = (word >> 8) & 0xff;
-      rowStrideExtra = word & 0xff;
-      const newPtr = u16(data, recOff + 8);
-      cellBase = base + (newPtr - 0x8000);
-      extType = 'redirect-strided';
-    } else if (marker === 0xffff) {
-      const newPtr = u16(data, recOff + 6);
-      cellBase = base + (newPtr - 0x8000);
-      extType = 'redirect';
-    } else {
-      cellBase = recOff + 4;
-    }
-
-    const rowBytes = w * 2 + rowStrideExtra;
-    const cells: (CellRef | null)[] = [];
-    for (let row = 0; row < h; row++) {
-      for (let col = 0; col < w; col++) {
-        const wordOff = cellBase + startByteOffset + row * rowBytes + col * 2;
-        if (wordOff < 0 || wordOff + 2 > data.length) {
-          cells.push(null);
-          continue;
-        }
-        const word = u16(data, wordOff);
-        if (word === 0) {
-          cells.push(null);
-          continue;
-        }
-        const tile = word & 0x03ff;
-        const bankSel = ((word >> 8) & 0x3c) >> 2;
-        const bank = 0x90 + bankSel;
-        const sourceOffset = (bank & 0x7f) * 0x8000 + tile * TILE_BYTES_4BPP;
-        cells.push({ tile, bank, sourceOffset });
-      }
-    }
-
-    out.push({
-      table,
-      index: i,
-      cpuAddr: 0x8000 + i * 2,
-      recordCpuAddr: ptr,
-      fileOffset: recOff,
-      x,
-      y,
-      w,
-      h,
-      extType,
-      cells,
-    });
+    out.push(parsePieceAt(data, table, base, i, ptr, recOff));
   }
   return out;
+}
+
+/**
+ * Resolve one raw **compose-list word** (bit 15 selects `C1`/`C2`, the low
+ * 15 bits are a byte offset into that table -- docs §3.14.3) directly into
+ * a `PieceRecord`, without needing a pre-built library array. This is what
+ * the per-depth/per-direction wallValue tables in bank `$89` (§3.14.5) and
+ * `$80:CC40`/`$80:CC72`'s "append `table[wallValue]` to the compose list"
+ * mechanism (§3.14.5, §3.14.7) actually store per entry -- confirmed this
+ * session by resolving all 15 of the doc's cited front/left/right per-depth
+ * table addresses' own index-1 entry and finding every one lands on the
+ * *exact* `(x,y,w,h)` placement §3.14.5's table already cites, 15/15 (see
+ * `docs/wizardry6/snes/data-structure.md` §3.14.11). Returns `null` for the
+ * unused-slot sentinel (`0xFFFF`, or a target pointer `< 0x8000`) exactly
+ * like `parseLibrary` does for a table slot.
+ */
+export function resolveComposeWord(data: Uint8Array, word: number): PieceRecord | null {
+  const table: 'C1' | 'C2' = word & 0x8000 ? 'C2' : 'C1';
+  const base = table === 'C2' ? C2_BASE : C1_BASE;
+  const byteOffset = word & 0x7fff;
+  const slotOff = base + byteOffset;
+  if (slotOff + 2 > data.length) return null;
+  const ptr = u16(data, slotOff);
+  if (ptr === 0xffff || ptr < 0x8000) return null;
+  const recOff = base + (ptr - 0x8000);
+  return parsePieceAt(data, table, base, byteOffset / 2, ptr, recOff);
 }
 
 function main() {
@@ -458,4 +489,10 @@ function main() {
   );
 }
 
-main();
+// Guarded per `cli-script-main-fires-on-import.md` -- `export-dungeon-view.ts`
+// imports `resolveComposeWord`/`parseLibrary` from this module and must not
+// re-trigger this file's own CLI pipeline as a side effect of that import.
+const isStandalone =
+  process.argv[1]?.endsWith('decode-dungeon-composer.ts') || process.argv[1]?.endsWith('decode-dungeon-composer');
+
+if (isStandalone) main();

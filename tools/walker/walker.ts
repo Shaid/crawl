@@ -52,12 +52,14 @@ import { getAssetBasePath } from '../shared/viewer-config.ts';
 import { BlackCryptView, Wizardry6View, bcEntrancePose, w6EntrancePose, type GameView } from './games.ts';
 import { loadMM1View, loadMM2View, mmLevelLists } from './games-mm.ts';
 import { loadMM3View, mm3LevelList } from './games-mm3.ts';
+import { loadWizardry6Snes, wizardry6SnesLevelList } from './games-w6-snes.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
 const confidenceEl = document.getElementById('confidence')!;
 const gameSelect = document.getElementById('game') as HTMLSelectElement;
 const levelSelect = document.getElementById('level') as HTMLSelectElement;
+const variantSelect = document.getElementById('variant') as HTMLSelectElement;
 const noclipCheck = document.getElementById('noclip') as HTMLInputElement;
 const canvas = document.getElementById('surface') as HTMLCanvasElement;
 const minimapCanvas = document.getElementById('minimap') as HTMLCanvasElement;
@@ -309,6 +311,26 @@ const GAMES = [
 
 type GameId = (typeof GAMES)[number]['id'];
 
+/**
+ * Wizardry 6 graphics-variant plumbing (the `#variant` selector, anticipated
+ * by `index.html` but unwired until this session). Amiga is the existing
+ * default; SNES (`games-w6-snes.ts`) is the compose-piece-library-driven v1
+ * dungeon-view renderer -- see its module doc comment for what's confirmed
+ * vs. approximate. Only `wizardry6` currently has more than one variant, so
+ * this stays a small local map rather than a generalized per-game axis.
+ */
+const W6_VARIANTS = [
+  { id: 'amiga', label: 'Amiga', platform: 'amiga' as const },
+  { id: 'snes', label: 'SNES', platform: 'snes' as const },
+] as const;
+type W6VariantId = (typeof W6_VARIANTS)[number]['id'];
+let w6Variant: W6VariantId = 'amiga';
+
+function platformFor(game: GameId): (typeof GAMES)[number]['platform'] | (typeof W6_VARIANTS)[number]['platform'] {
+  if (game === 'wizardry6') return W6_VARIANTS.find((v) => v.id === w6Variant)!.platform;
+  return GAMES.find((g) => g.id === game)!.platform;
+}
+
 async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: number; label: string }>> {
   if (game === 'mm1') return mmLevelLists.mm1();
   if (game === 'mm2') return mmLevelLists.mm2();
@@ -317,6 +339,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
   }
+  if (game === 'wizardry6' && w6Variant === 'snes') return wizardry6SnesLevelList(assetBase);
   const index = await fetchJSON<{ levels: Array<{ id: number; file: string }> }>(`${assetBase}/dungeon/levels-index.json`);
   return index.levels.map((l) => ({ id: l.id, label: `Level ${String(l.id).padStart(2, '0')}` }));
 }
@@ -325,7 +348,11 @@ async function main() {
   const params = parsePoseParams();
   const urlGame = params?.game as GameId | undefined;
   const startGame: GameId = GAMES.some((g) => g.id === urlGame) ? urlGame! : 'blackcrypt';
-  const startLevel = params?.level ?? GAMES.find((g) => g.id === startGame)!.defaultLevel;
+  const urlVariant = new URLSearchParams(window.location.search).get('variant');
+  if (W6_VARIANTS.some((v) => v.id === urlVariant)) w6Variant = urlVariant as W6VariantId;
+  const startLevel =
+    params?.level ??
+    (startGame === 'wizardry6' && w6Variant === 'snes' ? 0 : GAMES.find((g) => g.id === startGame)!.defaultLevel);
 
   for (const g of GAMES) {
     const opt = document.createElement('option');
@@ -334,6 +361,14 @@ async function main() {
     gameSelect.appendChild(opt);
   }
   gameSelect.value = startGame;
+  for (const v of W6_VARIANTS) {
+    const opt = document.createElement('option');
+    opt.value = v.id;
+    opt.textContent = v.label;
+    variantSelect.appendChild(opt);
+  }
+  variantSelect.value = w6Variant;
+  variantSelect.style.display = startGame === 'wizardry6' ? '' : 'none';
   noclipCheck.checked = false;
 
   let view: GameView;
@@ -350,11 +385,21 @@ async function main() {
 
   async function loadGame(game: GameId, levelId: number, pose: Pose | null): Promise<void> {
     const g = GAMES.find((x) => x.id === game)!;
-    const assetBase = getAssetBasePath(game, g.platform);
+    const assetBase = getAssetBasePath(game, platformFor(game));
     setStatus(`loading ${g.label}…`);
 
-    view = await g.loader(assetBase, levelId, pose);
-    setConfidenceBanner(view.id === 'blackcrypt' ? 'confirmed' : 'rendered', `${g.label} (W6 wall values are a rendered key)`);
+    view =
+      game === 'wizardry6' && w6Variant === 'snes'
+        ? await loadWizardry6Snes(assetBase, levelId, pose)
+        : await g.loader(assetBase, levelId, pose);
+    const confidenceNote =
+      game === 'wizardry6' && w6Variant === 'snes'
+        ? 'SNES: confirmed backdrop + door, approximate generic wall art -- see tools/wizardry6/snes/view-model.ts'
+        : 'W6 wall values are a rendered key';
+    setConfidenceBanner(view.id === 'blackcrypt' ? 'confirmed' : 'rendered', `${g.label} (${confidenceNote})`);
+
+    variantSelect.style.display = game === 'wizardry6' ? '' : 'none';
+    variantSelect.value = w6Variant;
 
     levelSelect.innerHTML = '';
     const levels = await listLevels(game, assetBase);
@@ -457,12 +502,21 @@ async function main() {
   gameSelect.addEventListener('change', () => {
     const game = gameSelect.value as GameId;
     const g = GAMES.find((x) => x.id === game)!;
+    if (game !== 'wizardry6') w6Variant = 'amiga'; // reset so switching away and back doesn't stick on SNES silently
+    variantSelect.style.display = game === 'wizardry6' ? '' : 'none';
+    variantSelect.value = w6Variant;
+    const defaultLevel = game === 'wizardry6' && w6Variant === 'snes' ? 0 : g.defaultLevel;
     // Entrance pose: `null` makes the loader place the viewer at the map's
     // data-derived entrance tile.
-    loadGame(game, g.defaultLevel, null);
+    loadGame(game, defaultLevel, null);
   });
   levelSelect.addEventListener('change', () => {
     loadGame(gameSelect.value as GameId, Number(levelSelect.value), null);
+  });
+  variantSelect.addEventListener('change', () => {
+    w6Variant = variantSelect.value as W6VariantId;
+    const defaultLevel = w6Variant === 'snes' ? 0 : GAMES.find((g) => g.id === 'wizardry6')!.defaultLevel;
+    loadGame('wizardry6', defaultLevel, null);
   });
   noclipCheck.addEventListener('change', () => view.setNoclip(noclipCheck.checked));
 

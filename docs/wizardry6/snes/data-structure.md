@@ -2675,6 +2675,103 @@ alternates it with `JSL $82867F` on odd/even frames of a `$0B6B` countdown
 — a **damage/spell screen-flash**, restoring the region palette on the
 even frames. Not a dungeon palette source.
 
+#### 3.14.11 Browser walker v1 — bank-`$89` "wallValue table" index-1 confirmed, full dispatch still open
+
+Wires the confirmed backdrop (§3.14.6) + palette (§3.14.10) into the shared
+`tools/walker/index.html` walker as a selectable "SNES" variant alongside
+the existing Amiga renderer (`tools/walker/games.ts` `Wizardry6View`). New
+files: `tools/wizardry6/snes/view-model.ts` (pure pose -> draw-ops model,
+shared by Node and browser), `export-dungeon-view.ts` (asset export),
+`render-through-dungeon.ts` (offline verification renderer),
+`tools/walker/games-w6-snes.ts` (`GameView` + loader, wired into
+`tools/walker/walker.ts` via a new `#variant` select — previously present
+in `index.html` but unwired).
+
+**New this session: the bank-`$89` per-depth/per-direction "wallValue
+table" addresses §3.14.5 already cites are not just placement metadata —
+they are literal tables of raw **compose-list words** (`resolveComposeWord`
+in `decode-dungeon-composer.ts`, the same word format §3.14.3 already
+confirmed), one entry per wallValue 0-15.** Confirmed by resolving all 15
+tables' own **index-1** entry and finding every single one decodes to the
+*exact* `(x,y,w,h)` placement §3.14.5's own table cites for that
+direction/depth — **15/15, zero deviation** (`front0`-`front4`,
+`left0`-`left4`, `right0`-`right4`). Index 0 is uniformly the literal value
+`0x101` across all 15 tables — odd, so not a valid `[bit15 | byteOffset]`
+compose word at all, distinct from the ordinary `0xFFFF` "table slot
+unused" sentinel `parseLibrary` already handles — matching the raw 2-bit
+wall sub-field's own `0 == open` convention (index 0 = "don't draw
+anything for this direction").
+
+This is a genuine new structural confirmation (table *shape*, and that
+index 1 is always a real "this direction is blocked" wall piece), but it
+does **not** close the dispatch: the mapping from a cell's actual raw
+wallValue (0-15, after whatever `$80:DE1B`-style second-stage lookup
+§3.14.7 left untraced) to which table index to use is still open — see
+`docs/wizardry6/TODO.md` row `snes-dungeon-view-wall-dispatch`.
+
+**v1 walker dispatch** (`view-model.ts`'s `resolveViewOps`, module doc
+comment has the full rationale): always draw the confirmed backdrop
+(`$C2` index 267); per depth 0-2 and per direction (front/left/right),
+draw that direction/depth's table **index-1** entry whenever the raw 2-bit
+wall sub-field is nonzero (a "some kind of wall is here" generic render,
+not the real per-value art); override with the **confirmed** fixed door
+piece (compose word `0x02E8`) whenever the depth-1-dead-ahead cell's raw
+feature nibble is `6` (§3.14.7's already-disassembly-confirmed door
+special case). The wall sub-field itself is read directly from the maze
+table's absolute-direction bit layout (§3.14.8's confirmed
+bits0-1/2-3/4-5/6-7 = +Y/+X/-Y/-X mapping) — no neighbour-cell lookup
+needed, unlike the Amiga port's shared-edge scheme.
+
+**Verified:**
+
+- Placement oracle (`export-dungeon-view.ts`, run every export): all 9
+  depth-0..2 front/left/right index-1 pieces resolved match §3.14.5's cited
+  `(x,y,w,h)` exactly, 9/9 (the other 6 of the 15 total, depths 3-4, aren't
+  used by this v1's 3-depth budget but were also checked ad hoc, 15/15).
+- Offline render (`render-through-dungeon.ts`): real poses across levels 0,
+  3, and 4 (different dominant palettes, 40/45/48) all produce coherent,
+  legible dungeon views — real stone-wall/archway texture, correct
+  per-level colour. A pose one cell short of a real level-4 door cell
+  (`feature==6`, confirmed via `data/maze.json`) renders the confirmed door
+  piece at the expected depth-1 floor position.
+- Browser (`npm run dev` + Playwright, `tools/walker/index.html`): the
+  `#variant` select becomes visible only for Wizardry 6, defaults to
+  Amiga, and switching to SNES loads and renders without console errors;
+  movement (WASD) and the level dropdown (14 levels) both work; switching
+  back to Amiga uses the unmodified existing `Wizardry6View` path.
+- A real densification bug was caught by a fresh unit-test pass before
+  shipping (`tools/wizardry6/snes/__tests__/view-model.test.ts`): the
+  region bounding-box math had `minY`/`maxY` swapped relative to the
+  confirmed major-axis-reversal formula (`globalY = originY + (7 -
+  major)`, so a region's *minimum* global Y is at `major==7`, not
+  `major==0`), which silently shifted every cell 7 rows from where it
+  should densify to and could drop a band of real cells for
+  multi-region levels. Fixed before the offline/browser verification
+  above (both re-run after the fix).
+
+**Still open / approximate**, all documented in `view-model.ts`'s own
+module comment and `docs/wizardry6/TODO.md`:
+
+- The real wallValue -> table-index dispatch (values other than the
+  representative index 1) — needs the `$80:DE1B`-style second-stage lookup
+  fully traced, or a live-capture oracle.
+- No lateral-column faces (Amiga's `wall-lat:{L1,L2,R1,R2}`) — §3.14.5 only
+  gives 3 representative table addresses (front/left/right); the doc notes
+  "a further ~30 tables cover the intermediate lateral columns" with no
+  addresses recorded.
+- No floor/ceiling continuation piece — the confirmed backdrop (§3.14.6)
+  has a real transparent void in its own open-doorway/floor area (visually
+  confirmed identical in both the pre-existing `dungeon-view-sample.png`
+  reference render and this session's new renders), and no always-drawn
+  floor/ceiling piece analogous to the Amiga port's `ceil:*`/`floor:*` lanes
+  has been identified for SNES yet. The walker fills this with a plain
+  black background rather than leaving it as raw transparency.
+- Per-level palette is the **dominant** group by §3.14.10's own
+  region-record count, not the true per-region live selection (which needs
+  the party's in-region cell key resolved against the 221-record region
+  table, not attempted this session for a static per-level asset).
+- No automap/minimap for the SNES variant.
+
 ---
 
 ## 4. Text / font system
