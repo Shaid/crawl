@@ -552,8 +552,9 @@ silently unconsidered.
 
 | Game | Map-format fit | Rendering-engine fit | Confidence |
 |---|---|---|---|
-| EOB1, EOB2 | Per-cell redundant (existing category) | Untested; slot-table family suspected | This repo (format); untested (renderer) |
-| Lands of Lore | Per-cell redundant, byte-identical to EOB's | Untested; slot-table family suspected | This repo (format); untested (renderer) |
+| EOB1 | Per-cell redundant (existing category) | **Tested and refuted (2026-08-16)**: the low-level `IndexedSurface`/`blend:'mask'` primitives generalise fine, but the high-level `SlotTableFile` schema does not — EOB's `.VMP` is a per-8x8-tile mosaic (each of 25 screen positions is a small tile grid, not one placeable compose-list piece the way BC/W6 pieces are). A real walker shipped anyway, as a bespoke `IndexedSurface` compositor (`tools/eotb/renderer.ts`) via `GameView.renderCanvas` — see `docs/eotb/TODO.md`'s "EOB1 (Amiga) walker" closed block | This repo (format + renderer, EOB1 only) |
+| EOB2 | Per-cell redundant (existing category) | Not yet built; EOB1's per-tile-mosaic finding above almost certainly applies (shared `.VCN`/`.VMP` engine family) but not independently confirmed for EOB2's own files | This repo (format); untested (renderer) |
+| Lands of Lore | Per-cell redundant, byte-identical to EOB's | Not yet built; same per-tile-mosaic expectation as EOB2, plus LoL's own `.VCN` is a materially different 128-colour extended format (not just LCW-compressed) | This repo (format); untested (renderer) |
 | Dungeon Master, Chaos Strikes Back | New category: **type-derived** (wall existence comes from cell type, stored on neither adjacent cell) | Slot-table family suspected (Black Crypt likely descends from this engine's design) | External prior art, not repo-verified |
 | Dungeon Master II | Probably type-derived like DM1/CSB, format likely diverges in specifics | Probably slot-table family, less certain than DM1/CSB | External prior art, lower confidence |
 | Elvira, Elvira II, Waxworks | Unknown | Unknown | Needs a real `game-re` pass against ScummVM's AGOS source before any claim |
