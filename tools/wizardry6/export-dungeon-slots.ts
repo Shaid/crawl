@@ -293,13 +293,13 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
   };
 }
 
-function main() {
-  const dataDir = process.argv[2];
-  if (!dataDir) {
-    console.error('Usage: npx tsx tools/wizardry6/export-dungeon-slots.ts <dataDir>');
-    process.exit(1);
-  }
-
+/**
+ * Core export logic, reusable from a pipeline `buildAssets` step as well as
+ * the CLI below. Requires `export-mazedata-indexed.ts` to have already
+ * written `mazedata-indexed.json` (this reads it back off disk to resolve
+ * atlas-absolute frame rects).
+ */
+export function exportDungeonSlots(dataDir: string): void {
   const data = readBinary(resolve(dataDir, 'mazedata.ega'));
   const maze = parseMazeData(data);
 
@@ -323,6 +323,15 @@ function main() {
   console.log(
     `Wrote dungeon/slots.json: ${nWall}/${Object.keys(slots.slots).length} wall/door slots populated, ${slots.staticSlots!.length} static slots, ${slots.staticSlots!.reduce((n, s) => n + s.draws.length, 0)} static draws`,
   );
+}
+
+function main() {
+  const dataDir = process.argv[2];
+  if (!dataDir) {
+    console.error('Usage: npx tsx tools/wizardry6/export-dungeon-slots.ts <dataDir>');
+    process.exit(1);
+  }
+  exportDungeonSlots(dataDir);
 }
 
 const isStandalone =

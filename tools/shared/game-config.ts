@@ -204,10 +204,23 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       platform: 'amiga',
       dataDirs: ['wizardry6/amiga'],
       executable: undefined,
-      expectedFiles: [],
-      supported: false,
+      expectedFiles: ['mazedata.ega'],
+      supported: true,
       assetDir: 'wizardry6',
       features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // Order matters: the indexed atlas must exist on disk before
+        // exportDungeonSlots runs, since it reads mazedata-indexed.json
+        // back off disk to resolve atlas-absolute frame rects.
+        const { exportDungeonLevels } = await import('../wizardry6/export-dungeon-levels.ts');
+        exportDungeonLevels(dataDir);
+        const { exportMazedataIndexed } = await import('../wizardry6/export-mazedata-indexed.ts');
+        exportMazedataIndexed(dataDir);
+        const { exportDungeonSlots } = await import('../wizardry6/export-dungeon-slots.ts');
+        exportDungeonSlots(dataDir);
+        console.log('  wizardry6/amiga: levels + indexed atlas + dungeon slots exported');
+      },
     }, {
       platform: 'dosega',
       dataDirs: ['wizardry6/dosega/wiz6'],

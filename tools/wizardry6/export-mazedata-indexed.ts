@@ -86,13 +86,8 @@ function buildIndexedAtlas(
   return { rgba, maskRgba, width: packed.width, height: packed.height, frames };
 }
 
-function main() {
-  const dataDir = process.argv[2];
-  if (!dataDir) {
-    console.error('Usage: npx tsx tools/wizardry6/export-mazedata-indexed.ts <dataDir>');
-    process.exit(1);
-  }
-
+/** Core export logic, reusable from a pipeline `buildAssets` step as well as the CLI below. */
+export function exportMazedataIndexed(dataDir: string): void {
   const data = readBinary(resolve(dataDir, 'mazedata.ega'));
   const maze = parseMazeData(data);
   const outDir = resolve('public/assets/wizardry6/amiga/maps');
@@ -115,6 +110,15 @@ function main() {
   console.log(
     `Wrote mazedata-indexed.{png,json} + mazedata-indexed-mask.png (${maze.dirRecords.length} frames, ${width}x${height}, ${PLANES} planes, ${PIC_PALETTE.length}-colour palette)`,
   );
+}
+
+function main() {
+  const dataDir = process.argv[2];
+  if (!dataDir) {
+    console.error('Usage: npx tsx tools/wizardry6/export-mazedata-indexed.ts <dataDir>');
+    process.exit(1);
+  }
+  exportMazedataIndexed(dataDir);
 }
 
 const isStandalone =

@@ -125,13 +125,8 @@ function densifyLevel(lvl: MazeLevel): DenseLevel {
   return { id: lvl.level, width, height, wallA, wallB, feature, orient, flagP, flagQ };
 }
 
-function main() {
-  const dataDir = process.argv[2];
-  if (!dataDir) {
-    console.error('Usage: npx tsx tools/wizardry6/export-dungeon-levels.ts <dataDir>');
-    process.exit(1);
-  }
-
+/** Core export logic, reusable from a pipeline `buildAssets` step as well as the CLI below. */
+export function exportDungeonLevels(dataDir: string): void {
   const data = readBinary(resolve(dataDir, 'scenario.dbs'));
   const levels = parseMazeLevels(data);
   const dense = levels.map(densifyLevel);
@@ -193,4 +188,17 @@ function main() {
   console.log(`Wrote ${dense.length} per-level DungeonLevelFile JSON files (level00.json .. level${String(dense.length - 1).padStart(2, '0')}.json) and levels-index.json to ${outDir}`);
 }
 
-main();
+function main() {
+  const dataDir = process.argv[2];
+  if (!dataDir) {
+    console.error('Usage: npx tsx tools/wizardry6/export-dungeon-levels.ts <dataDir>');
+    process.exit(1);
+  }
+  exportDungeonLevels(dataDir);
+}
+
+const isStandalone =
+  process.argv[1]?.endsWith('export-dungeon-levels.ts') ||
+  process.argv[1]?.endsWith('export-dungeon-levels');
+
+if (isStandalone) main();
