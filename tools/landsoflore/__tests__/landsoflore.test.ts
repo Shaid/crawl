@@ -7,6 +7,7 @@ import { decodeWll, buildWllLookup } from '../decode-wll.ts';
 import { decodeVcn } from '../decode-vcn.ts';
 import { decodeVmp, WALL_RENDER_SLOTS } from '../decode-vmp.ts';
 import { decodeIniWallSet } from '../decode-ini.ts';
+import { disassembleEmc, LOL_SYSCALLS } from '../decode-emc.ts';
 import { resolveWallTypes, canStepForward, rotateOffset } from '../view-model.ts';
 import { renderView, VIEWPORT_W, VIEWPORT_H } from '../renderer.ts';
 import { parsePak, readEntry, ensureExtracted, LEVEL_WALL_SETS, CACHE_DIR } from '../export-dungeon.ts';
@@ -186,5 +187,36 @@ describe('view-model + renderer, real KEEP level 1 data', () => {
     expect(surface.height).toBe(VIEWPORT_H);
     const nonZero = surface.data.filter((v) => v !== 0).length;
     expect(nonZero).toBeGreaterThan(surface.data.length * 0.3);
+  });
+});
+
+describe('decode-emc: EMC2 script bytecode disassembly, real LEVEL1.INI', () => {
+  it('decodes every word to a valid opcode (0-18) with no truncation', () => {
+    const instructions = disassembleEmc(loadPakEntry('L01.PAK', 'LEVEL1.INI'));
+    expect(instructions.length).toBeGreaterThan(0);
+    for (const inst of instructions) {
+      expect(inst.opcode).toBeGreaterThanOrEqual(0);
+      expect(inst.opcode).toBeLessThanOrEqual(18);
+    }
+  });
+
+  it('resolves sysCall ids to real, mostly-implemented LoLEngine::olol_* names', () => {
+    const instructions = disassembleEmc(loadPakEntry('L01.PAK', 'LEVEL1.INI'));
+    const sysCalls = instructions.filter((i) => i.mnemonic === 'sysCall');
+    expect(sysCalls.length).toBeGreaterThan(0);
+    const unresolved = sysCalls.filter((i) => i.syscall?.startsWith('<unimplemented'));
+    // A handful of real OpcodeUnImpl() reserved slots exist in the engine's
+    // own table -- a script referencing one isn't a decode bug, but the vast
+    // majority of a real level-init script's sysCalls should resolve to a
+    // named engine function.
+    expect(unresolved.length).toBeLessThan(sysCalls.length * 0.1);
+    // Sanity: a level-init script should plausibly touch level/monster setup.
+    const names = new Set(sysCalls.map((i) => i.syscall));
+    expect(names.has('olol_loadLevelGraphics')).toBe(true);
+    expect(names.has('olol_loadMonsterShapes')).toBe(true);
+  });
+
+  it('LOL_SYSCALLS has exactly 190 entries, matching the Opcode()/OpcodeUnImpl() push count in LoLEngine::setupOpcodeTable', () => {
+    expect(LOL_SYSCALLS.length).toBe(190);
   });
 });
