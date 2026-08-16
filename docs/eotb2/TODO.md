@@ -14,6 +14,7 @@ task brief. An Amiga EOB2 doc/extractor is future work, not yet started.
 | eotb2-pipeline-wiring | open | 6 formats (`.DCR`, `.DEC`, `.EGA`-as-palette, `ITEM.DAT`, `ITEMTYPE.DAT`, `TEXT.DAT`) are now fully format-confirmed (byte-exact, zero residue) but not yet emitted as JSON by `scripts/extract_eotb2_dosvga.py` | `dosvga/data-structure.md` §§ ".DCR", ".DEC", ".EGA files", "ITEM.DAT / ITEMTYPE.DAT / TEXT.DAT" | 2026-08-02 game-re |
 | eotb2-dos-cps-palette-second-field | open | EOB2's INF format has an optional *second* wall-set-name field (for a second palette) that's confirmed to exist from source but not decoded/verified against real INF bytes, and per-file (non-wall-set) palette selection for the 110 `PALETTE0.PAL`-fallback CPS screens isn't individually traced | `dosvga/data-structure.md` § "Palette resolution (per-CPS)" → "Confirmed mechanism" | 2026-08-02 game-re |
 | eotb2-amiga-not-started | deferred:out-of-scope | `data/eotb2/amiga/` (incl. Manual/Maps/Solution reference material) not yet reverse-engineered — DOS/VGA was this session's priority | (no doc yet) | 2026-08-02 game-re |
+| eotb2-dos-inf-header-offsets-dont-match | open | **A real playable EOB2 (DOS/VGA) first-person walker is shipped** (`tools/eotb2/`, wired into the shared browser walker as game `eotb2`) — see the "EOB2 (DOS/VGA) walker" closed-items block below for what it confirmed, including that the renderer-family question this game was untested for is now answered (slot-table family refuted, same as EOB1). **Left open by this session**: `docs/eotb/dosvga/data-structure.md` § "INF" → "Decompressed buffer layout"'s fixed byte offsets (`mazStem` at 0x002, `wallSetStem` at 0x00E) do **not** reproduce against any of EOB2's 16 real `LEVELn.INF` files once LCW-decompressed — the real `"levelN.maz"` string starts 3 bytes later (0x005) and `wallSetStem` doesn't follow at a clean +12 stride either. The walker works around this with a token scan (`tools/eotb2/decode-inf.ts`) rather than trusting the offsets, verified against all 16 files including both documented maze-reuse cases. Root cause not chased down (genuinely different EOB2 header preamble vs. a copy-paste offset error in the doc — unknown). **Bonus finding, also unconfirmed further**: the scan incidentally shows the string `"azure"` appearing in `LEVEL10-13.INF`'s scanned window *after* their real (`mezz`) wall-set name — plausibly the EOB2-specific optional *second* wall-set-name field `eotb2-dos-cps-palette-second-field` (below) already flags as unverified; worth checking together if either is picked up again | `tools/eotb2/decode-inf.ts` module doc | 2026-08-16 game-re |
 
 ## Closed this session (2026-08-02, ScummVM source + byte-exact verification)
 
@@ -53,3 +54,70 @@ task brief. An Amiga EOB2 doc/extractor is future work, not yet started.
   EOB1's for wall-set/dungeon screens (shared `initLevelData` code,
   `setLevelPalettes` is a no-op for DOS). Narrowed rather than fully
   closed — see `eotb2-dos-cps-palette-second-field` above for what's left.
+
+## EOB2 (DOS/VGA) walker — closed this session (2026-08-16, game-re)
+
+Phase 2 of the EOB1/EOB2/Lands of Lore family (`tools/eotb/`'s EOB1
+walker, `docs/walker-map-format-future-decision.md`, shipped first).
+Reused directly rather than re-derived, per format confirmed
+byte-identical to EOB1: `.MAZ` decode (`tools/eotb2/decode-maze.ts` is a
+thin re-export of `tools/eotb/decode-maze.ts`), the 25-slot render
+geometry and pose-dispatch logic (`tools/eotb2/view-model.ts` re-exports
+`tools/eotb/view-model.ts`'s `WALL_RENDER_SLOTS`/`CELL_OFFSETS`/
+`resolveWallTypes`/`canStepForward` wholesale, including their existing
+documented caveats), the LCW ("Format 80") decompressor
+(`tools/eotb/lcw.ts`, confirmed identical between EOB1/EOB2/DOS/Amiga),
+and the slot-table-family-doesn't-fit finding (EOB's `.VMP` is a
+per-8x8-tile mosaic per screen position, not a placeable compose-list
+piece — ships as a bespoke `IndexedSurface` compositor via
+`GameView.renderCanvas`, same as EOB1).
+
+**Genuinely new for EOB2 DOS/VGA** (a real second decode, not a port):
+`.CPS`/`.VCN`/`.INF` are Kyra-bitmap-header + LCW-compressed (same
+container as EOB1's *DOS* port, but structurally different from EOB1's
+*Amiga* port this repo's existing `tools/eotb/` targets — chunky 8bpp
+pixels not 5-bitplane, 4bpp/8x8 `.VCN` tiles with a `colMap` nibble-remap
+not Amiga's 5-colour palette patch, and a real `<STEM>.PAL` file per wall
+set instead of a `.CPS`-embedded base palette). New decoders:
+`decode-vcn.ts`, `decode-vmp.ts` (LE, reuses EOB1's `WALL_RENDER_SLOTS`/
+`CELL_OFFSETS` constants directly), `decode-inf.ts` (see the
+`eotb2-dos-inf-header-offsets-dont-match` row above — the cited doc's
+fixed offsets didn't hold, worked around with a token scan), `palette.ts`
+(DOS VGA 6-bit-to-8-bit `.PAL` reader).
+
+**5 of 6 wall sets exported and walkable**: DUNG, MEZZ, SILVER, CRIMSON
+(all standard 2916-entry VMPs). **FOREST is skipped** — its `.VMP` has a
+non-standard 1192-entry layout (an outdoor-terrain set needing fewer
+viewport-layer mappings, per `docs/eotb2/dosvga/data-structure.md`'s own
+note) that doesn't fit the confirmed backdrop+6*wallType split;
+`decode-vmp.ts` throws rather than guessing a different split, and
+`export-dungeon.ts` skips the one level (`LEVEL4`) that references it —
+documented gap, not a silent wrong render. **AZURE is also skipped**
+(confirmed by the existing `eotb2-dos-azure-vcn-missing` closed item: no
+`.VCN`/`.VMP` pair exists for it at all).
+
+**Verified**: 15 new unit tests (`tools/eotb2/__tests__/eotb2.test.ts`),
+including real-corpus oracle checks against `docs/eotb2/dosvga/
+data-structure.md`'s own published invariants (CRIMSON: numTiles=1132,
+VMP max index=1131, both exact matches) and the two documented
+maze-reuse cases (`LEVEL16`→`level15.maz`, `LEVEL14`→`level12.maz`,
+both reproduced from real `.INF` decode, not hardcoded). Multiple real
+poses across 3 different wall sets rendered offline and visually
+inspected — coherent, recognisable brick/stone/masonry first-person
+corridor views, correct per-wall-set colouring (warm brown DUNG,
+cool blue-grey SILVER, red-orange CRIMSON). Verified live in the browser
+(Playwright): the `eotb2` game entry loads with 0 console errors, the
+level dropdown lists all non-skipped levels labelled by wall set, and
+both forward/backward movement and turning genuinely change the tracked
+pose and re-render (confirmed by screenshot comparison before/after
+movement, including a real wall-collision stop). Full repo `vitest`
+(256/256), `tsc --noEmit`, and `lint` all clean with this in the tree —
+EOB1's own walker and both Wizardry 6 walkers unaffected (no shared files
+touched besides `tools/walker/walker.ts`'s `GAMES` list, an additive
+change).
+
+**Not attempted this session, honestly flagged**: Lands of Lore (phase
+3) — EOB2 alone used the full session; its `.CMZ`-is-EOB's-`.MAZ`-format
+hypothesis (`docs/landsoflore/landsoflore-formats-research.md:10-11`)
+and EOB1's `lcw.ts` are both real, ready-to-reuse starting points for
+whoever picks it up next.
