@@ -5232,9 +5232,15 @@ longword from the 64×64 map array at `A4 − 0x37CA`
 ```
 
 Entering a bit-31 square re-tints the stonework to ramp **4** and leaving it
-restores the level default. Level 3 never does this. The gameplay meaning of
-the flag (water / submerged region is the obvious candidate given ramps 4–8
-are all blues) is **hypothesis**, not confirmed.
+restores the level default. Level 3 never does this.
+
+> **Correction (2026-08-17) — confirmed, not hypothesis.** Bit 31 IS the
+> on-disk square's "water" type flag (byte 0's type nibble, bit 3) — a
+> structural identity, not a correlation; see "Underwater/flooded-level
+> rendering" below (near `ViewpointChanged`) for the derivation, the real
+> per-map water-square counts (map 9 is the flooded level), and why the
+> separate mirror-toggle mechanism is *not* part of this effect despite an
+> earlier hypothesis to the contrary.
 
 ##### Selector 3 — `bcdfs` action opcodes `0x1E` / `0x1F` (confirmed)
 
@@ -6420,6 +6426,79 @@ front-wall fix above (`walker-front-wall-handedness`) already renders the
 the dungeon, maps 2–5 only) remain rendered in the same (default, unmirrored
 relative-to-them) state a walker would show for any other square — a small,
 now-precisely-scoped, pre-existing gap, not a new regression.
+
+##### Underwater/flooded-level rendering — Selector 2 and ViewpointChanged unified, and disentangled
+
+The user asked directly how flooded later levels are rendered. Both bit-31
+(Selector 2, above) and bit-29 (`ViewpointChanged`, above) are independently
+disassembly-confirmed *mechanisms*; what was missing was connecting them to
+the on-disk **square type nibble** (`Byte 0: [type:4b][0xF]`, "bcdfs — Map /
+Dungeon Format" → "Square format") and to real per-map data. Doing that
+settles the question — with a real twist: **only one of the two mechanisms
+is about water; the other is unrelated.**
+
+**Bit 31 = the water flag itself, not merely "the obvious candidate."** The
+type nibble occupies byte 0's high nibble, which is the most-significant
+byte of the big-endian 4-byte square value both `Selector 2` and
+`ViewpointChanged`'s gate read as a longword. "Water" is bit 3 of that
+nibble (on-disk type byte `0x8F`, table above) = byte-0 bit 7 = **longword
+bit 31** — the exact bit `ANDI.L #$80000000,D0` tests at `S_1 +0x02D46` to
+trigger the ramp-4 ("cold blue-grey") re-tint. This is a structural identity
+(the two are, by construction, the same bit read from the same square
+value), not a statistical correlation — the earlier "hypothesis, not
+confirmed" framing under Selector 2 is superseded; see the correction note
+added there.
+
+**Bit 29 = the darkness flag, and has nothing to do with water.** Per
+`ViewpointChanged`'s own "runtime condition" analysis above, bit 29 is bit 1
+of the *same* type nibble — the already-documented **darkness** flag
+(on-disk type byte `0x2F`), not water. A square's type nibble is a single
+value (floor/wall/darkness/spell-failed/water, plus one observed combo —
+see below), so darkness-typed and water-typed squares are, by construction,
+never the same square. The full-viewport mirror toggle this flag gates is
+therefore a **distinct, unrelated "dark zone" effect** (already shown above
+to not even reliably track its own bit-29 region across scripted
+teleports), not a water-reflection trick. Any hypothesis connecting the
+mirror flag to water/reflection is refuted by this bit-identity alone —
+no corpus check needed, though see below for one anyway.
+
+**Which maps are actually flooded — real corpus data**
+(`scripts/bclib/bcdfs.walk_all`, type nibble `& 0x8`, all 14,168 squares
+across all 13 maps, zero parse exceptions):
+
+| Map | Water squares |
+|-----|---------------|
+| 3   | 5             |
+| 9   | 486           |
+| 10  | 57            |
+
+**Map 9 is the flooded level** (486/548 = 89% of all water squares in the
+game); map 10 has a smaller flooded section; map 3's 5 squares read as a
+single pool/fountain feature, not a themed flooded area. No other map has
+any water-typed squares at all. (Map 3 also has 77 darkness-typed squares,
+per the `ViewpointChanged` analysis above — geographically distinct from
+its 5 water squares, consistent with the type nibble's single-value
+encoding.)
+
+**Bonus finding — one type-nibble combination not in the "observed type
+values" table above.** 5 of map 3's squares carry type nibble `0x9`
+(binary `1001` = wall bit `0x1` **and** water bit `0x8` both set,
+on-disk byte `0x9F`) — a combined "underwater wall" reading, structurally
+consistent with §"Square format"'s own "Additional observed type values
+(`0x3F`–`0xFF`) reserve the upper nibble" note, but not previously called
+out as an actually-observed value. Added to the table there.
+
+**Verdict**: Black Crypt's underwater visual effect is a single mechanism —
+the bit-31/water-triggered palette re-tint to accent ramp 4 (and neighbours
+5-8, all blue-toned) on `S_1 +0x02D46`, applied per-square on party
+movement. It does **not** combine with the full-viewport mirror toggle,
+which is a separate, unrelated mechanic gated on the darkness flag (bit 29)
+instead. A walker only needs the already-fully-specified Selector 2 logic
+(bit 31 → ramp 4 on enter, level default on leave, level 3 exempt) to
+render flooded levels correctly — it does not need the `walker-mirror-flag-
+polarity` toggle-state-machine work at all for this purpose. That toggle
+remains open for its own (still-not-fully-understood) darkness-zone
+purpose, unrelated to this question.
 
 ##### What the two tables actually differ in — confirmed byte-exact
 
@@ -8266,6 +8345,7 @@ Square type byte values observed in the file:
 | 0x2F  | Darkness          |
 | 0x4F  | Spell-failed zone |
 | 0x8F  | Water             |
+| 0x9F  | Wall + water (underwater wall) — 5 squares, map 3 only |
 
 Additional observed type values (0x3F–0xFF) reserve the upper nibble (type) while
 the lower nibble is always 0xF.
