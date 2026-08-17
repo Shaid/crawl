@@ -1799,8 +1799,56 @@ and Level 1's two type-`0x1E` records split exactly along `+0x07`:
 Every one of the 41 **trap** records (gfx `0x4A`) in all 13 maps has
 `byte +0x07 = 1`, so **tile 14 is never drawn from shipped on-disk state** —
 the trap marker is reachable only if something clears `+0x07` at runtime.
-(11 candidate `byte +0x07` writers exist in S_1; none was traced to the
-`A4 − 0x6E7A` object array this pass. See `TODO.md` row `automap-trap-tile`.)
+
+> **Correction — `automap-trap-tile` is now closed with an exhaustive
+> negative: nothing in the shipped executable ever clears a type-`0x1E`
+> record's `byte +0x07`.** Every instruction in the whole 166,676-byte S_1
+> image that writes the object pool's (`A4 − 0x6E7A`, 20-byte stride) field
+> `+0x07` was censused and traced to its record's real type/kind — not just
+> the earlier pass's 11 `MOVE.B` hits, but every byte-writing form
+> (`MOVE.B`/`ADDI.B`/`CLR.B`, the only forms that can address an odd offset
+> like `0x07` on 68000; no folded-displacement `LEA −0x6E73(A4)` variant
+> exists either, confirmed by a dedicated search) — **19 write instructions
+> in total, collapsing into 11 distinct mechanisms**, matching the prior
+> pass's "11 candidates" count almost exactly once the two unrelated arrays
+> at `A4+0x836` (8-byte-stride action-chain "next id" field) and
+> `A4+0x1036`/local stride-8 tables are set aside. Every one of the 11
+> mechanisms was traced to a **non-`0x1E`** record kind, each confirmed via
+> the same type-filter constant (`D3`) passed to the confirmed chain-walk
+> helper `+0x27D28`/`+0x27D80`, or via type-specific field usage:
+>
+> | Mechanism (S_1 entry) | Record kind actually written | How identified |
+> |---|---|---|
+> | `+0x1214` (`0x8126C`) | Glyph (type `0x10` sub-kind 3) — 0–3 cycling counter | record index traced to `A4+0x1A1A`, itself written only inside the type-`0x10` sub-kind-3 (glyph) viewport-render case at `+0x2338`/`0x82396` (`d3==1 && d4==0`, i.e. depth 1, dead ahead) |
+> | `+0x5A1A` (`0x85A72`) | Freshly-constructed record, `gfxNumber 0x0015`, type byte `0x0E` | full record-construction site (every field initialised from constants); type `0x0E` is outside the structure-type range entirely |
+> | `+0x2C06`/`+0x5D5E` (`0x80D5E`) | Character's held light-source item (itemType `0`) — torch-fuel countdown | record index = `A4+0x1758` (character array) `+0x16`, a per-character "held light" pointer; gated on the item's own type byte `== 0` |
+> | `+0xB072` (`0x8B0CA`) | Monster (AI attack-outcome byte) | record's `gfxNumber 0x80C5` matches the already-confirmed final-boss check; `+0x13`/`+0x0D` monster-stat-continuation fields also touched in the same function |
+> | `+0xB976`/`+0xBA98` (`0x8B9CE`/`0x8BAF0`) | Monster generator (type `0x2E`) — RNG-reroll on nearby-generator scan | type filter `D3 = 0x2E` confirmed at the resolving `+0x27D80` call, `moveq 0x2e,d3` |
+> | `+0xDE5E` (`0x8DEB6`) | Held item (`gfxNumber 0x12`, "fill flask") — self-referential field copy | whole containing function (`0x8DDE6`) resolves a type-`0x1F` (Fountain/Special-panel) record via `D3 = 0x1F`; this specific write is on the *held item*, not the fountain |
+> | `+0xDF06`/`+0xDFD6` (`0x8DF5E`/`0x8E02E`) | Fountain / Special-panel (type `0x1F`) — water-unit depletion sentinel `0xFF`, special-panel bit flags | same function as above; `D2` = the fountain/panel record itself |
+> | `+0xDFD8`/`0x1631A` (`0x96030`/`0x96382`) | Plaque-input (type `0x21`) — RNG reroll of a puzzle digit | type filter `D3 = 0x21` confirmed (`moveq 0x21,d3`) at the resolving `+0x27D80` call in the same function |
+> | `+0x181F8`/`+0x1820C` (`0x98850`/`0x9886C`) | Action-chain record (`A4+0x836`, 8-byte stride) — "next action id" | different base entirely (`+0x836`, not `−0x6E7A`), matches the already-documented action-array stride/chain-field signature |
+> | `+0x2567A`/`+0x25708` (`0xA56D2`/`0xA5760`) | Unrelated local stride-8 stream loader | not the object pool at all — no `LEA −0x6E7A(A4)` anywhere nearby |
+> | `+0x1371C` (`0x9377C`) | Wand/scroll item (spell-id-shaped `+0x0E` values `0x96`–`0xA9`) — charge decrement | record's own `+0x0E` compared against spell-id-like constants unrelated to structure types; reached from the item-use dispatcher region |
+>
+> **All 10 places in the whole binary that explicitly identify a record as a
+> Door Frame (type `0x11`)** — both the 5 inline `CMPI.B #$11,+0x05(...)`
+> sites and the 5 `MOVEQ #$11,D3` type-filter calls to `+0x27D80` — were also
+> checked directly: none of them is among the `+0x07` writers above (this is
+> the expected result, since a Floor Plate/Trap is type `0x1E`, not `0x11`;
+> checked as a sanity cross-reference while censusing type-filtered calls for
+> the `door-frame-w0c-meaning` item below). Combined with the already-
+> confirmed "41/41 shipped trap records ship `+0x07 = 1`" census, this closes
+> the item: **automap tile 14 (the visible-trap marker) is provably
+> unreachable from the shipped Amiga executable's own code and shipped game
+> data — genuinely dead content**, not a residual worth further searching.
+> No evidence of a cut trap-detection/disarm mechanic was found (no partial
+> implementation, no orphaned string, no dormant jump-table arm) — the
+> simplest explanation is that traps were designed to always be invisible on
+> the automap (matching "detect trap" not existing as a spell/skill in this
+> game) and tile 14's slot in the 24-tile automap bank was authored for a
+> mechanic that was never wired up, or was wired up and then deliberately
+> left unreachable. See `TODO.md` row `automap-trap-tile` (now closed).
 
 ###### Verification (ground truth)
 
@@ -2688,7 +2736,7 @@ The remaining sites compute the index:
 
 | Question | Status |
 |----------|--------|
-| Which of the 95 effects belongs to which spell/attack | **SOLVED for 92 of 95.** Three mechanisms, all traced: (1) `bcdfs` structure type `0x10` sub-kind 3 (glyph) word `+0x10` → effects **1–4** (viewport rune, raw) and **5–8** (trigger, `+4`), 13/13 records in range with zero exceptions; (2) `CastSpellRay` S_1 `+0x06D9A`'s third stack word → effects **9–88**, 26 named spells via the 60-entry spell jump table at `+0x07822` and the S_2 spell-name table at `+0x000E`, an exact stride-3 lattice with no holes; (3) constants in named spell/trap/render routines → effects **0, 29–37, 89–94**. Only **31, 32, 34** have no identified consumer. See "Which effect belongs to which spell — **SOLVED**" above |
+| Which of the 95 effects belongs to which spell/attack | **SOLVED for 92 of 95.** Three mechanisms, all traced: (1) `bcdfs` structure type `0x10` sub-kind 3 (glyph) word `+0x10` → effects **1–4** (viewport rune, raw) and **5–8** (trigger, `+4`), 13/13 records in range with zero exceptions; (2) `CastSpellRay` S_1 `+0x06D9A`'s third stack word → effects **9–88**, 26 named spells via the 60-entry spell jump table at `+0x07822` and the S_2 spell-name table at `+0x000E`, an exact stride-3 lattice with no holes; (3) constants in named spell/trap/render routines → effects **0, 29–37, 89–94**. Only **31, 32, 34** have no identified consumer. See "Which effect belongs to which spell — **SOLVED**" above. **Independently re-verified this pass (`bcdfa-eff-spell-map` in `TODO.md`) — still open, narrowed with a stronger negative:** a fresh, from-scratch census of every `JSR`/`BSR` to both `PlayEffect` entry points (S_1 `+0x2558C`: 5 sites; S_1 `+0x255DA`: 26 sites) across the whole 166,676 B S_1 image finds **exactly 31 total call sites** — matching the doc's own count exactly, confirming the earlier census already examined literally every caller of the only two confirmed effect-drawing entry points. No 31/32/34 among them, and no other code path that reaches either entry point exists (searched by address, not by assumption — the two absolute targets `0xA55E4`/`0xA5632` were grepped across every disassembled instruction in the file). This effectively rules out "a caller of `PlayEffect` was missed"; if 31/32/34 are ever played, it is through a mechanism that doesn't call either documented entry point at all, or they are genuinely unused indices in the 95-slot bank (the same "cut/dead content" pattern already confirmed for automap tile 14 — see `automap-trap-tile` above) |
 | PRG tag bytes `0x3C`/`0x40`/`0x44` | **SOLVED** — all 18 jump-table handlers traced; see "The PRG tag-byte jump table" above |
 | Simulating PRG particle motion for a full render | **SOLVED.** `bclib.bcdfa.simulate_effect` implements the full per-tick loop (20-slot ring, top-down spawn-overwrite, `scriptPtr += 1 record` / blit / tag-dispatch / dx-dy / viewport-kill, trailing ticks after the last group until every particle dies). Driven by `scripts/render_bcspeed_eff.py` → `data/bcspeed-effects-simulated.json` (web asset — per-tick particle lists for a browser engine to play back) + `build/cache/blackcrypt/bcspeed_eff_render/effect*.png` (verification contact sheets, not a web asset). Verified: runs error-free across all 95 effects (1,833 total simulated ticks); every particle stays within the confirmed viewport/frame bounds on every tick; tick 0 of every effect reproduces its raw group-0 spawn records **exactly** (95/95, the strongest available regression check against the already-verified static reading); GFK frame counts derived from the GFK bank itself match the engine's own `+0x258B2` table on 15/16 records, with the one documented exception (record 15) behaving exactly as predicted (kill-by-`0x3C` before the bound would matter). Visual check: the "imploding fireball ring" (effect 9) now visibly converges tick-by-tick instead of repeating a static ring |
 
@@ -7449,12 +7497,108 @@ screenshot oracle was set up"), not evidence against the layout. Classified
 | ~~The object-type switch on `objRec[+4] & 0xF0` at S_1 `+0x033D2`~~ | **SOLVED, and the premise was wrong — the nibble is the square's N/E/S/W wall bitmask, not an object class.** All 11 arms decoded and mapped onto the Structure/Item type tables; whole-corpus census shows 12 distinct values, 11 handled, `0xF0` = monsters (intercepted earlier), and the 4 unhandled values occur zero times. See "The Phase-1 object switch at S_1 `+0x033D2`" above. |
 | Where the `+0x22244` runtime structure-descriptor array is populated | Not traced. Presumably filled from `bcdfs` structure bytecode at level load. A literal-address search under the **corrected** base (`$A229C`) also returns 0 hits, so it is reached PC-relatively, not through a stored pointer. **A second consumer is now known:** the type-`0x2F` (statue) renderer `+0x227B4` reaches it through the same `+0x2201C`/`+0x22042` helpers as `DrawSquareRecord`. |
 | ~~Which container fills graphics-kernel slot `$00`~~ | **SOLVED — `blackcrypt-floorplate-art-source` (`docs/blackcrypt/TODO.md`), resolved by cross-referencing a section of this same file that a prior pass never connected to the open item.** Slot `$00` is confirmed elsewhere in this document as `bcdfa`'s RLE stream at file offset `0x00000` — the "Adventure Screen" UI panel bank (see "bcdfa — UI Panel Bank", 18,932 B, terminates exactly at `0x036FD`) — and its own record table already names the exact 4 records the floor-plate renderer blits from: `src` 18,764/18,820/18,876/18,904 = **`Pressure Plate 1 Up`/`Pressure Plate 1 Down`/`Pressure Plate 2 Up`/`Pressure Plate 2 Down`**, each already matched **100.000%** against DOS `clipper.clp` entries 79/81/80/82. Re-verified this pass by reading the floor-plate descriptors' own `src` fields directly (`+0x217D2`/`+0x217EE`/`+0x2180A`/`+0x21826` → `18764`/`18820`/`18876`/`18904`, `w×h` `16×4`/`16×4`/`16×2`/`16×2`, `flags=0x0000` on all four — the standard 7-plane masked draw) against `public/assets/blackcrypt/amiga/sprites/ui-panel.json`'s already-extracted frame rects (`pressure_plate_1_up`/`_1_down`/`_2_up`/`_2_down`, same geometry) — 4/4 exact matches, zero deviation. "Pressure Plate 1" (16×4, larger) is the **near** pair (unpressed/pressed), "Pressure Plate 2" (16×2, smaller) is the **far** pair — consistent with the documented near/far perspective-scaling convention used everywhere else in this renderer family. No new art extraction needed — `sprites/ui-panel.png` already has the pixels; only the cross-reference was missing. |
-| Slot `$C8`'s "special panel" body at `+6,060` | `+0x25340(D0 != 0)` reads 4,320 B starting 4,320 B past the documented end of chunk 10. Same over-allocation pattern as the alcove/plaque mirror buffers, but the code that fills it was not found this pass. |
-| `$51A(A5)` — the door-family position variant | Read by the door frame (`+0x25CAE`), door leaf (`+0x2613E`), door lock (`+0x25DA0`) and door switch (`+0x25F9E`/`+0x26100`); when nonzero each adds `+0x24` to its position table, which uniformly changes the sprite's `y` to 40 at every depth. Almost certainly "this doorway square also carries a door frame, so raise the fitting" — **not verified**, and no write site was searched for. |
+| ~~Slot `$C8`'s "special panel" body at `+6,060`~~ | **SOLVED — filled by a third, distinct loading mechanism: a raw, conditional `Read()`, not the RLE-chunk-directory path or the alcove/plaque mirror-blit helper.** See below. |
+| ~~`$51A(A5)` — the door-family position variant~~ | **SOLVED — write site found, and it cross-references an already-solved section of this same document that the viewport write-up never linked to.** See below. |
 | ~~Kinds 0–3: the `dir == 3` (`+0x25E12` / `+0x26070`) position tables look unreachable~~ | **SOLVED — they are genuinely unreachable, and the reason is an off-by-one in the engine's own `kind → side` dispatch, not a gap in the reachability argument.** `kind == 3` is structurally impossible for types `0x22`/`0x0F` from *either* through-corridor facing, and the physically-left wall arrives as `kind == 0`, which `+0x02A0E` discards. The old row's arithmetic was also wrong: `kind == 2` is *not* forced — `kind ∈ {0, 2}` in an exact 50/50 split. See "Kind 3 and the left-wall position tables" above for the full derivation, the 504-combination sweep and the in-game fixture. |
 | ~~`DrawDoorAtDepth`'s `$02(a2)` — depth, or party-relative direction?~~ | **SOLVED — party-relative direction.** See the corrected blockquote above "Kind 11" — an exhaustive whole-image caller scan found exactly one caller (`DispatchSquareObject` `+0x027B6`), which always passes the rebased direction `D3`, never a depth. |
 | ~~`A5+$48F` mirror-flag write site~~ | **SOLVED — `BCHG #2,$48F(A0)` at S_1 `+0x2492E`, the candidate two prior passes rejected.** `A0` is loaded from the frame-pointer slot at `+0x2492A`, which both proves the instruction boundary and aliases `A0` to `A5`. The flag is a **pure toggle**, initial value 0 (`AllocMem(…,MEMF_CLEAR)` + `CLR.W $48E(A5)`), flipped by 11 "viewpoint moved" call sites; on the ordinary walk path it fires only when map-square bit `0x20000000` differs between the square left and the square entered. **Refuted premise: the flag is not facing-derived.** Root-based negative now backs the "only one write" claim (54 frame-pointer loads enumerated, all `048C`/`048E`/`048F` displacements censused, all 23 `LEA (d16,A5),An` re-basings checked). See "`ViewpointChanged` (S_1 `+0x2492A`)" above. |
 | A genuine 4-entry facing-indexed (`0=N,1=E,2=S,3=W`-shaped) jump table *does* exist, at S_1 `+0x1EB2A` | **Traced and it is not the wall/floor render dispatch.** It's driven by comparing a cached facing byte `$4DE(A5)` against a live one `$4DF(A5)` (`+0x1EA18`) and, on change, jumps through 4 `BRA.W` trampolines to handlers at `+0x1EB3A/1EB50/1EB56/1EB5C`, each of which writes a run of `WAIT`/colour words into a *different* copper list (`$4E2(A5)`) with a per-handler step size — a **per-facing ambient torchlight colour-gradient effect**, not viewport compositing. This *is* a real, disassembly-confirmed direction dispatch in the graphics kernel — it just isn't the one the old (already-retracted) `AGENTS.md` "Direction Dispatch" note was describing, and it should not be re-chased as the wall-selection loop. |
+
+##### Slot `$C8`'s "special panel" body — closed
+
+The only other reference to the `$C8(A5)` pointer anywhere in the whole S_1
+image (a targeted search for every `0xC8(a5)` operand found exactly **3**
+hits total — the two already-documented reads inside `+0x25340` itself, plus
+one more) is at S_1 **`+0x21F2A`**:
+
+```asm
+; S_1 +0x21F2A
+21F2A  MOVEA.L $C8(A5),A0
+21F2E  LEA     $17AC(A0),A0        ; $17AC = 6,060 decimal — exactly the
+                                    ; documented end of the loaded chunk
+21F32  MOVE.L  A0,D2               ; D2 = dest buffer = $C8 + 6,060
+21F34  MOVE.L  $10E0,D3            ; D3 = length = 4,320 decimal — exactly
+                                    ; the documented gap size
+21F3A  MOVE.L  D4,D1                ; D1 = file handle
+21F3C  MOVEA.L $F0(A5),A6           ; A6 = DOSBase
+21F40  JSR     -0x2A(A6)            ; AmigaDOS Read(fh, buf, len)
+```
+
+This is a **third, distinct file-loading mechanism**, separate from both the
+RLE chunk-directory loader (which produces the 6,060 B "Panel Top +
+Fountain" content already documented) and the alcove/plaque
+mirror-generation blitter (`+0x254FA`, confirmed called **exactly 4 times**
+in the whole image — a dedicated search for every `BSR/JSR` to it found no
+5th call, ruling out a `$C8`-targeted mirror as the fill mechanism). It is a
+**raw, uncompressed `Read()`** straight from the already-open tileset file
+into the buffer immediately past the chunk-directory's own content — which
+is exactly why the chunk directory (13 entries, already fully accounted for)
+never named this data: it isn't one of the directory's chunks at all, it's
+extra data appended after them and read by a hardcoded offset/length instead
+of going through the directory.
+
+This `Read()` call is not unconditional — the same short code block also
+contains **two more `Read()` calls sharing the same guard**:
+`LEA 0xA2040(PC),A0 / D0=D5*2 / TST.W (A0,D0.W) / BEQ <skip all three>`,
+where `D5` is the current level index (the same register the surrounding
+mega-function uses to patch the `bcdfb`…`bcdfn` filename template, per the
+address arithmetic below). This is a per-level/tileset lookup-table gate,
+not a per-door or per-panel-instance condition — **the "special panel" body
+is loaded once per level, for levels whose tileset variant calls for it**,
+not filled lazily when a special-panel structure is first drawn.
+
+This whole sequence sits **inside** the same giant multi-thousand-byte
+loader function (`link.w a5,#$4520` at S_1 `+0x1D420`) that also contains
+the already-documented `OpenTilesetFile` alcove/plaque mirror-generation
+code and the `bcdfb`–`bcdfn` level-file `Open()` — i.e. `OpenTilesetFile`
+is not a separate subroutine but a label inside one long "load everything
+for this level" routine that does the RLE-chunk load, the two mirror blits,
+this raw `$C8`-tail `Read()`, and the level-file open, all in sequence.
+Closed: **found, mechanism identified (raw conditional `Read()`, not a
+blit), size and destination byte-exact against the already-documented gap.**
+The exact per-level/tileset gate table at S_1 `+0x21FE8` (its content, and
+which levels set it) was not decoded further this pass — out of scope for
+this item, which only asked whether the fill code exists.
+
+##### `$51A(A5)` — the door-family position variant — closed
+
+A targeted search for every `0x51a(a5)` operand in the whole S_1 image finds
+**6 hits**: 5 reads (4 already documented as door-family renderer consumers,
+plus one more inside the same tileset-selection region) and exactly **one
+write**, at S_1 **`+0x21E98`**:
+
+```asm
+; S_1 +0x21E98, inside the same level-load mega-function as the $C8 fill above
+21E82  SUBQ.W  #1,D0                ; D0 = level index - 1 (from caller)
+21E84  MOVE.W  D0,D5                ; D5 = level index (0-12)
+21E86  MOVE.W  D5,$518(A5)          ; sibling field, same write
+21E8C  LEA     $21FCE(PC),A0        ; the per-level tileset-index table
+21E94  MOVE.W  (A0,D0.W),D1         ; D1 = table[level]
+21E98  MOVE.W  D1,$51A(A5)          ; <-- the write
+```
+
+**`$51A(A5)` is not a door-specific flag at all — it is set once per level
+load from the already-documented 13-entry tileset-index table at S_1
+`+0x21FCE`**, the exact table "Selector 1 — per-level default" above already
+decoded and cross-verified five independent ways: values `0 0 0 0 1 2 2 2 2
+2 2 0 0` for maps 1–13, i.e. `0` = `bcdfx`, `1` = `bcdfy`, `2` = `bcdfz`.
+That section already documents `$51A(A5)` as "consumed as a graphics-variant
+flag" by three readers (S_1 `+0x204A4`, `+0x25DC4`, `+0x26114`) that each
+`TST.W` it and select an alternate table/offset when non-zero — `+0x25DC4`
+and `+0x26114` sit a few bytes inside the door-lock (`+0x25DA0`) and
+door-switch (`+0x26100`) renderers this item names, confirming they're the
+same consumers.
+
+This refutes the old hypothesis ("this doorway square also carries a door
+frame, so raise the fitting"): the flag has nothing to do with per-square
+door-frame co-occurrence. It is purely a **per-dungeon-level tileset
+variant** — levels 5–11 (tileset `y`/`z`) draw their door-family sprites 24
+px lower (`y = 40` instead of the default) than levels 1–4/12–13 (tileset
+`x`), a cosmetic adjustment for the taller/differently-proportioned wall art
+in the `y`/`z` tilesets. Closed by cross-reference — no new decoding
+needed, only the link from this section to "Dungeon tileset selection" →
+"Selector 1" that a prior pass never made. See `TODO.md` row
+`viewport-kind-handler-bodies` (both residuals now closed).
 
 ---
 
@@ -8589,6 +8733,28 @@ Sub-kind 2's `+0x10` values (54/56/57 on 5 records, all on map 2) and its
 `+0x07` values (7/8/9) are read by neither the movement nor the render path
 traced here — they are **not** effect indices despite being in range. Whatever
 consumes them is still open.
+
+> **Narrowed this pass (`bcdfa-eff-spell-map` in `TODO.md`) — both of sub-kind
+> 2's own known consumers are now structurally proven to never read `+0x07`
+> or `+0x10`, closing off the two most likely remaining candidates.** The
+> movement result (7, "blocked + screen-shake") calls S_1 `+0x23958`, which
+> disassembles to a pure hardware-blitter/copper screen-shake routine
+> (sets up bitplane pointers, modulo and shift registers off `A5`-frame
+> globals only) — it never touches the `A4−0x6E7A` object pool at all, let
+> alone this specific record's fields. The render path's own `+0x21504`
+> (`JSR $A155C`, confirmed byte-identical to the address already cited
+> above) is fully disassembled: it computes a depth/lateral index via
+> `BSR +0x20366`, walks a small fixed byte-stream table, and blits a
+> procedural checkerboard stipple — its only inputs are the party's
+> depth/lateral position, never the magic-field record's own `+0x07` or
+> `+0x10`. (Both addresses were re-derived directly from the confirmed
+> `0x80058` relocation base as an independent check, not assumed from
+> the citations above.) A follow-up search for any *other* code that reads
+> the object pool's `+0x07` and `+0x10` fields together (the shape a
+> sub-kind-2-specific reader would have) found none. The field's consumer
+> remains genuinely unidentified — this is now a stronger negative (the two
+> obvious candidates are conclusively ruled out) rather than "not yet
+> looked for."
 
 ---
 
@@ -9742,7 +9908,7 @@ viewport section).
 |---|---|---|---|
 | `0x00`–`0x01` | 2 | `gfxNumber` (`0x0035`/`0x0036`) | "Structure bytecode" table above |
 | `0x05` | 1 | Structure type (`0x11` = Door frame) | Tested in `ResolveTargetSquare` (movement section) and at S_1 `+0x1117C`/`+0x16C08` (further door-frame-type dispatch sites, not chased this pass) |
-| `0x0C` | 2 (word) | ~~"Structure present" gate / occupancy flag~~ **Not mapped for type `0x11`.** The `TST.W` at S_1 `+0x112E6` cited here reads the *Door switch* (`0x0F`) record, not the Door frame — see the correction under "Consumer 1" above. On a `0x0F` record this word is the next-action id; on `0x10` it is the sub-kind; on `0x22` it is the `lockNumber`. What it means on a Door frame is untraced | — |
+| `0x0C` | 2 (word) | ~~"Structure present" gate / occupancy flag~~ **Confirmed always-zero on disk; no consumer anywhere in S_1 — closed as a real negative, not "untraced."** The `TST.W` at S_1 `+0x112E6` cited here reads the *Door switch* (`0x0F`) record, not the Door frame — see the correction under "Consumer 1" above. On a `0x0F` record this word is the next-action id; on `0x10` it is the sub-kind; on `0x22` it is the `lockNumber`. See the exhaustive trace below | — |
 | `0x0E`–`0x0F` | 2 (word, big-endian) | **Door open/closed state** — bit 0 of byte `+0x0F`: 0=closed, 1=open. Rest of the word not characterized (see caveat below). | Write: S_1 `+0x0CB90`/`+0x0CC0C`/`+0x0CC68`, `+0x11226`. Read: S_1 `+0x112FC` (render), `ResolveTargetSquare` (movement) |
 | `0x12` | 2 (word) | Chain-next index (`unique` of next record chained to this square) | "Runtime parser" section above; independently re-confirmed from the movement side in `ResolveTargetSquare`'s "Chain walk" |
 
@@ -9895,6 +10061,48 @@ which is exactly what those opcodes' `ANDI.W #$00FE` masking preserves.
 | ~~`+0x0CF34`'s exact sub-image selection~~ / ~~whether it has any visible effect for a depth-0 door~~ | **SOLVED, on a refuted premise.** `+0x0CF34` is `TriggerActionsAt(col, row, structType)` — the engine's generic **action-chain executor** (`A4+0x836` is the action array, not an animation-slot table). It is never called with a Door-frame (`0x11`) record by any of its nine call sites; the door path passes type **`0x0F`** (Door switch), and `+0x112FC`/`+0x112E6` were reading that record all along. It is **not** a no-op: for 5 of the 96 shipped door switches (4 monster-generator triggers on map 12, one 6-action timed pillar puzzle on map 9) closing the door executes or schedules real actions, plus sound effect 5 and a viewport commit. The open-branch call at `+0x11310` is dead on shipped data (its bit is clear on 96/96 records and nothing writes it). Full trace: "Action bytecode" → "`TriggerActionsAt`"; door-side summary and census: "Consumer 1 (corrected)" above. |
 | Caller of the literal `word=1` writer at S_1 `+0x11226` | Not identified — likely a spell effect (`Knock`-style) or scripted trigger, not chased to its own caller |
 | ~~Bits 1–15 of the door-state word beyond bit 0~~ | **RESOLVED — bit 1 is the `locked` flag** (set on 154 of 291 shipped Door frames; read at S_1 `+0x111EA`/`+0x1132E`, cleared at `+0x16C36`). Bits 2-15 really are unused: never non-zero on disk, never written. The old wording ("untouched by every write site found this pass") was a false negative — the three action handlers preserve bit 1 *on purpose* (`ANDI.W #$00FE`), which reads as "untouched" only if you don't look at the on-disk values |
+| ~~`door-frame-w0c-meaning` (docs/blackcrypt/TODO.md)~~ | **CLOSED — exhaustive negative.** See the trace immediately below. |
+
+##### `door-frame-w0c-meaning` (docs/blackcrypt/TODO.md) — closed, exhaustive negative
+
+Every place in the whole S_1 image that identifies a record as a Door Frame
+(type `0x11`) was enumerated two ways and both agree: **word `+0x0C` of a
+Door Frame is never read or written anywhere in the shipped executable.**
+
+1. **Inline type checks** — `CMPI.B #$11,+0x05(...)` against a record already
+   in hand: **5 sites** (S_1 `+0x03248` in the Phase-1 viewport
+   object-enqueue dispatch — the kind-11 doorway enqueue; two inside
+   `ResolveTargetSquare`'s movement/reveal-adjacent code, already fully
+   documented above; `+0x1117C` inside `OpenDoorAtParty`, which walks a
+   square's chain keeping the frame in `d4`; `+0x16C08` inside the
+   key→lock→door handler's own frame lookup). None of the five is followed
+   by a `+0x0C` access on the frame register in either function body (the
+   only `+0x0C` reads found nearby — S_1 `+0x112E6`/`+0x11480` inside
+   `OpenDoorAtParty` — are on `d3`, the **Door switch** (`0x0F`) record from
+   the same chain walk, already documented as the switch's own "next action
+   id" field, not the frame's).
+2. **`MOVEQ #$11,D3` type-filter calls** to the confirmed chain-walk helper
+   `+0x27D80` (S_1 `0xA7D80`): **5 more sites** (S_1 `+0x1006C`, a
+   "Knock"-style door-open call that only ever writes the frame's `+0x0E`
+   word to `1`, never `+0x0C`; S_1 `+0x2CFE`, a monster-AI function that
+   auto-opens a nearby frame's `+0x0E` and separately touches an unrelated
+   monster record's own `+0x0C`/`+0x0D` fields — not the frame's; three
+   near-identical S_1 `+0x4B96`/`+0x4C12`/`+0x4C6E` blocks that `BCHG` the
+   frame's `+0x0E` bit 0, matching the already-documented `0x18`/`0x19`/
+   `0x1A` action-opcode toggle). None of these five touches `+0x0C` either.
+
+All **10** distinct consumer sites of a Door Frame record in the shipped
+binary are now enumerated, and not one reads or writes its own `+0x0C`.
+Cross-checked against the corpus: **all 291 shipped Door Frame records have
+word `+0x0C` = 0**, with zero exceptions (`scripts/bclib/bcdfs.py`'s
+`read_records`, filtered on type `0x11`) — consistent with a field the
+loader copies verbatim from an on-disk source that never sets it, and that
+no code ever reads. This is the same byte offset that carries real, distinct
+meaning on three *other* structure types sharing the same 20-byte record
+layout (Door switch `0x0F`: next-action id; Illusionary wall/Magic
+field/Glyph `0x10`: sub-kind; Door lock `0x22`: lock number) — Door Frame is
+simply the one type in that family for which the position was never given a
+use. Closed as **confirmed unused / reserved**, not "untraced."
 
 #### Paths tried
 
