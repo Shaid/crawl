@@ -34,13 +34,33 @@ own declared `numColours` to equal the region's width exactly. 104/152
 <-> "Wight/Flar palette" (numColours=32); "Marble stairs down" (PAL_WALLS)
 <-> "Marble palette" (numColours=16).
 
-Two known residual groups (not resolved by this module, kept OPEN -- see
-data-structure.md):
-- "outtake"/"view"/"letterbox" full-scene resources (single shape, 70-100+
-  unique pixel values spanning multiple windows) -- a different, wider
-  palette-loading scheme than the 4-window per-object case. The *name*
-  pairing itself is unambiguous (e.g. "Fflar outtake" <-> "Fflar palette")
-  but the DAC placement formula isn't nailed down.
+**"outtake" family -- resolved 2026-08-16, real oracle evidence.** Confirmed
+`set_palette`'s actual implementation (ThirdEye `runtime/graphics.cpp`):
+`first = kFirstColor[region]; setPaletteRange(resource, first)` writes the
+resource's own declared `numColours` starting at the region base, with no
+separate per-region width ceiling enforced anywhere in code -- a region is
+just a conventional starting point, not a hard-bounded slot. Corpus-wide
+pixel-range check (14/14 "<X> outtake"-named bitmaps, each with a real
+name-matched `numColours=80` palette resource) confirms they all decode with
+`max_index <= 254` and no bitmap needs a colour past `176+79=255` -- i.e.
+every outtake picture's own 80 colours fit exactly in `0xB0..0xFF`
+(176-255), the entire remaining DAC space after `PAL_FIXED`'s 176 colours.
+**Resolution: DAC base = `0xB0` (the same base as `PAL_WALLS`/`PAL_OUT`,
+region 1), width = 80** -- an outtake picture reuses region 1's base but
+requests all 80 remaining slots instead of the normal 16, which is exactly
+what `set_palette`'s real (unbounded) implementation allows. This needed no
+new region concept, just recognising that `numColours` (not a fixed region
+width) determines how far a `set_palette` call actually writes.
+
+Two residual groups remain genuinely open (not resolved by this module --
+see data-structure.md):
+- The **"letterbox"** family (`City view letterbox`, `Mausoleum letterbox`,
+  etc.) -- pixel range is consistently `192-255` (64 colours, PAL_M1+PAL_M2
+  combined) but, unlike "outtake", their name-matched palette candidates
+  don't cleanly confirm a single base/width story (some match an 80-colour
+  resource, some match the ordinary 16-colour theme palette, some have no
+  name match at all) -- real pixel-range evidence recorded, but the
+  resolution formula isn't as clean as outtake's and isn't implemented here.
 - A `PAL_WALLS`-region bitmap whose name doesn't match any of the 4 named
   16-colour theme palettes (Forest/Mausoleum/Ruins/Marble) -- e.g. the
   "Temple ..." decor family, which almost certainly reuses one of those 4
@@ -109,5 +129,28 @@ def find_named_palette(bitmap_name: str, region: str, palette_index: dict):
         if bn == pn or bn in pn or pn in bn:
             for entry, num_colours in candidates:
                 if num_colours == width:
+                    return entry, num_colours
+    return None
+
+
+# "outtake" family: a full-scene picture reuses PAL_WALLS/PAL_OUT's own base
+# (0xB0) but loads all 80 remaining DAC slots instead of the normal 16 --
+# see this module's docstring for the corpus-wide evidence. Not a distinct
+# `DAC_REGIONS` entry (it isn't a separate conventional region, just a wider
+# load at region 1's base), so it's resolved as its own explicit fallback.
+OUTTAKE_BASE = 0xB0
+OUTTAKE_WIDTH = 80
+
+
+def find_outtake_palette(bitmap_name: str, palette_index: dict):
+    """Best-effort (Entry, numColours=80) match for an "outtake"-family
+    bitmap, or None. Independent of `DAC_REGIONS` -- see OUTTAKE_BASE/WIDTH."""
+    bn = normalize_palette_name(bitmap_name)
+    if not bn:
+        return None
+    for pn, candidates in palette_index.items():
+        if bn == pn or bn in pn or pn in bn:
+            for entry, num_colours in candidates:
+                if num_colours == OUTTAKE_WIDTH:
                     return entry, num_colours
     return None

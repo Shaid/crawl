@@ -666,10 +666,12 @@ game is most wanted next, not a speculative schema change.
 ## EOB3 and Dungeon Hack (AESOP/16 engine) — already started here, wall model still open
 
 Not a new find like the two sweeps above — these two already have real decode
-work in this repo (`docs/eotb3/`, `docs/dungeonhack/`) — but neither has
-reached the actual maze/wall grid yet, so they don't have entries in the
-per-game survey table above. Worth stating precisely what's known vs. not,
-since it's a different shape of gap than anything else in this document.
+work in this repo (`docs/eotb3/`, `docs/dungeonhack/`). **Correction
+(2026-08-16): EOB3 specifically HAS now reached the wall/maze grid** — see its
+own bullet below, updated after a dig into ThirdEye's own architecture docs.
+Dungeon Hack has not; its bullet is unchanged. Worth stating precisely what's
+known vs. not, since it's a different shape of gap than anything else in this
+document.
 
 **Both run the same engine, confirmed, and it's a third engine family beyond
 this document's other two decoded franchises.** Eye of the Beholder III and
@@ -702,13 +704,43 @@ fonts, and (Dungeon Hack) the standalone `MAZE.EXE` generator's invocation
 and output filenames — genuinely useful, but none of it reaches the wall
 data itself:
 
-- **EOB3**: level data lives in `LVLnn.TMP` (one file per level, combining
-  layout + object placement + state — a different shape from EOB1/2's split
-  `.MAZ`/`.INF`/`.OUT`). `docs/eotb3/eotb3-formats-research.md`: "`LVLnn.TMP`
-  layout: Partially documented in ThirdEye; exact schema still incomplete."
-  **Wall-storage model (per-cell / shared-edge / type-derived / other):
-  genuinely unknown, not hypothesised even at Dungeon Master's confidence
-  tier.**
+- **EOB3 — corrected and resolved (2026-08-16).** The `LVLnn.TMP`-is-the-maze
+  claim quoted above was wrong (an artifact of the earlier internet-research
+  pass, `eotb3-formats-research.md`, already flagged elsewhere in this repo as
+  superseded wherever it conflicts with the verified doc). `LVLnn.TMP` is
+  **save-state only** — per-level *object* placement (monsters, items, doors,
+  decorations; `docs/eotb3/dosvga/data-structure.md` §8, citing ThirdEye's
+  `eob3_savegame_format.md`) — not the maze. **The static wall grid lives in
+  `EYE.RES` itself**, as 14 `map32x32` resources (one per dungeon level, 1024
+  B = 32×32 bytes, confirmed byte-exact against ThirdEye's own
+  `automap.cpp`), already decoded and extracted in this repo (§9.2, zero
+  ambiguity: `0xFF` = floor, anything else = wall, exactly ThirdEye's own
+  `isMapWall()` logic). **Wall-storage model: closer to Dungeon Master's
+  "type-derived" category than EOB1/2's per-cell-redundant one** — one byte
+  per cell, no separate per-face (N/E/S/W) value the way BC/EOB1/2/MM2 store;
+  passability is a property of the cell itself. Whether the non-`0xFF` byte
+  values encode a *richer* per-cell type (door vs. plain wall vs. secret,
+  etc.) beyond a flat "blocked" bit is not decoded yet (`docs/eotb3/TODO.md`'s
+  new `eotb3-dungeon-view-mechanism` row), so it could still turn out richer
+  than pure type-derived — but nothing found so far suggests per-face
+  asymmetry. **Rendering engine, mechanism identified but not fully reversed
+  (same TODO row, full citations there)**: NOT the Gold-Box/Bard's-Tale
+  static-picture-lookup hypothesis this document raised elsewhere — it's a
+  genuine tile/depth compositor, closer in spirit to the slot-table family
+  than to a picture library. ThirdEye's own `docs/3d_renderer_feasibility.md`
+  describes a fixed **22-square viewshed at 5 depth tiers**, with wall/floor/
+  ceiling pieces and monster/item/door billboards placed via a generic native
+  `draw_bitmap(page, table, number, x, y, scale, flip, fade_table,
+  fade_level)` primitive. The distinguishing wrinkle versus every other game
+  in this document: **the actual per-tier "which piece goes where for which
+  wall type" dispatch is not in native/disassemblable code at all** — it's
+  entirely AESOP/16 bytecode (the "dungeon"/"area" SOP class objects, already
+  identified in this repo's `EYE.RES` classification pass but deferred as
+  general "game logic, out of scope"). Decompiling specifically the dungeon-
+  view-draw handler(s) of those one or two classes (via `daesop`, ThirdEye's
+  own disassembler — a narrow, bounded target, not the previously-deferred
+  "376 SOP code objects" blanket) is the concrete next step, not a vague
+  "wall model unknown" gap anymore.
 - **Dungeon Hack**: `MAZE.EXE` is confirmed as "the standalone procedural
   dungeon generator" (`docs/dungeonhack/dosvga/data-structure.md` §6,
   confirmed), writing `LEVELS.DAT` (the generated maze) + per-level feature
@@ -732,7 +764,10 @@ among infinitely many rather than "the" game's content. Worth deciding which
 before investing in the wall-format decode itself, since it changes what
 "decode this game's maze format" is even for.
 
-**Not added to the per-game survey table above, on purpose** — that table is
-for games whose wall-storage model is actually known. EOB3 and Dungeon Hack
-stay out of it until the `LVLnn.TMP`/`LEVELS.DAT` grid itself is decoded,
-same standard as the corpus-sweep games above.
+**Still not added to the per-game survey table above.** EOB3's wall-storage
+model is now known (type-derived, see above) but its renderer-family fit
+isn't settled yet — no walker exists, and settling it needs the AESOP
+bytecode decompile described above, not just the grid format. Adding a table
+row before that would overstate how finished this is; revisit once the
+render mechanism (not just the grid) is nailed down. Dungeon Hack stays out
+for the original reason — its `LEVELS.DAT` grid itself is still undecoded.

@@ -13,11 +13,25 @@ for the Kyra games.
 
 There is, however, a very strong ground-truth oracle: **ThirdEye**
 (`github.com/psi29a/thirdeye`), an open-source (GPL) from-scratch AESOP
-reimplementation that boots EOB3 from the original data files and renders its
-menus and dungeon. Every format below was cross-checked against ThirdEye's C++
-source (`apps/thirdeye/resources/*.cpp`, `apps/thirdeye/graphics/*.cpp`) and,
-where ThirdEye has its own research notes, its `docs/*.md`. Two independent
-checks matter here:
+reimplementation being built to boot and eventually fully play EOB3 from the
+original data files. Every format below was cross-checked against ThirdEye's
+C++ source (`apps/thirdeye/resources/*.cpp`, `apps/thirdeye/graphics/*.cpp`)
+and, where ThirdEye has its own research notes, its `docs/*.md`. Two
+independent checks matter here:
+
+> **Correction (2026-08-16):** the previous version of this sentence claimed
+> ThirdEye "renders its menus and dungeon" — too strong. Its own
+> `docs/architecture.md` (`apps` table) is precise about current state: "EOB3
+> boots via SOP and renders its title menu (and, with `--skip-menu`, the
+> in-game HUD)." It loads the dungeon's wall grid (`lvlmap`) but explicitly
+> **not yet** the object layer (`lvlobj` — monsters/items/doors), and its own
+> `docs/3d_renderer_feasibility.md` (a forward-looking design doc, not a
+> status report) is where the actual first-person dungeon-view mechanism is
+> described — see the new §10 below. There is no running dungeon-view
+> reference to screenshot-compare against yet; the mechanism description is
+> real (clearly derived from reading the original `RT.ASM`/SOP bytecode) but
+> is architectural, not something you can currently `--skip-menu` your way
+> into seeing on screen.
 
 1. **This project's from-scratch Python parser reproduces ThirdEye's
    independently-derived `EYE.RES` counts byte-exact** (§1) — strong evidence
@@ -763,6 +777,96 @@ structure, low priority given two font families are already confirmed.
 
 Extractor: `scripts/extract_eotb3_res.py` (§9.1–9.3); classifier:
 `scripts/eotb3lib/classify.py`.
+
+---
+
+## 10. First-person dungeon-view rendering — mechanism identified, exact per-tier resource dispatch not yet reversed
+
+Investigated 2026-08-16 in response to "does EOB3 have a walker yet" — it
+doesn't, and this section is why, precisely (previously the gap was recorded
+only implicitly via the absence of a `tools/eotb3/` directory, no dedicated
+writeup existed).
+
+**The wall/floor topology is already fully decoded** — §9.2's `map32x32`
+resources are the complete static maze for all 14 levels, byte-exact against
+ThirdEye's own `automap.cpp` `isMapWall()`. What's missing is the
+**first-person compositor**: which of the 312 confirmed VFX bitmap resources
+(§4.2) gets drawn where, for a given party position/facing/nearby-wall-type
+combination.
+
+**Confirmed mechanism** (`docs/3d_renderer_feasibility.md` — a forward-
+looking ThirdEye design doc, but its description of the *existing* game
+mechanism, as opposed to its own proposed 3D replacement, is written as
+settled fact and is corroborated by real code below): the dungeon view is a
+fixed 176×121 pixel sub-rect of the 320×200 screen. Each frame, the SOP (the
+game's own AESOP bytecode, not ThirdEye's native C++) renders a **fixed
+22-square viewshed at 5 depth tiers** (near→far) by calling a generic native
+`draw_bitmap(page, table, number, x, y, scale, flip, fade_table, fade_level)`
+primitive (real signature, confirmed in `apps/thirdeye/runtime/graphics.cpp`)
+once per visible piece — walls/floor/ceiling as the base tiers, monsters/
+items/doors/decorations as billboards drawn into the same tiers, using the
+call's own `scale`/`flip` arguments for depth-scaling and left/right
+mirroring.
+
+**This refutes the Gold-Box/Bard's-Tale "static picture lookup" hypothesis**
+`docs/walker-map-format-future-decision.md` raised for simpler pre-DM-era
+engines — EOB3 IS a real tile/depth compositor, architecturally closer to the
+slot-table family (Black Crypt/Wizardry 6/EOB1/EOB2/Lands of Lore all
+composite discrete pieces per depth/lateral slot) than to a single-picture
+lookup. The `"Marble stairs down"`-style "coherent corridor" VFX bitmaps
+noted in §4.2 are consistent with this too — they're plausibly one depth
+tier's floor/wall piece for a themed area, not a full pre-rendered scene.
+
+**The real obstacle, and why this repo doesn't have an EOB3 walker yet**:
+unlike every other game in this project's corpus, **the per-tier "which
+piece for which wall type" dispatch table is not in native/disassemblable
+code at all** — it lives entirely in interpreted AESOP/16 bytecode. Confirmed
+directly: `apps/thirdeye/runtime/eye.cpp`'s `resume_level` handler comment
+states plainly that once level data loads, "the area class then calls
+`set_palette(1, walls), set_palette(2, M1), set_palette(3, M2)` directly from
+bytecode. No C++-side palette enumeration needed" — the SOP owns this
+decision-making, ThirdEye's C++ is a thin generic-primitive layer underneath
+it (object system, event queue, and native `draw_bitmap`/`set_palette`/
+`text_*`/window calls — see `architecture.md`'s "Runtime hook" section for
+the full native-function inventory). This means EOB1/2's approach (disassemble
+the executable's wall-dispatch routine, find literal baseIndex constants) has
+**no equivalent target to disassemble** for EOB3 — the closest analog is the
+"dungeon"/"area" SOP class objects themselves (already located in this repo's
+own `EYE.RES` classification pass, §9.5 — `"dungeon"` 5085 B, plus per-area
+objects like `"mauslvl2"`/`"templvl1"`), which are AESOP bytecode, not native
+code.
+
+**Concrete next step, narrower than the existing "AESOP bytecode is out of
+scope" deferral**: decompiling the *specific* dungeon-view-draw message
+handler(s) of the `"dungeon"`/area-class SOP objects (via `daesop`, ThirdEye's
+own AESOP/16 disassembler — a complete, working tool per its own
+`architecture.md`, ported from Mirek Luza's original DAESOP 0.85) is a
+narrow, bounded target — one or two class objects' one or two methods, not
+the full 376-object codebase the existing `eotb3-aesop-bytecode` TODO row
+correctly deferred as out of scope for a general asset-extraction pass. This
+repo doesn't have `daesop` (or an equivalent AESOP/16 decompiler) available
+locally; building or porting one is real, separate follow-on work, not
+attempted this pass.
+
+**Bonus finding from the same dig — a real evidence-based hypothesis for the
+open `eotb3-bitmap-palette` "outtake" 80-colour question** (§4.2): confirmed
+`set_palette`'s real implementation (`runtime/graphics.cpp`) is `first =
+kFirstColor[region]; setPaletteRange(resource, first)` — it writes the
+resource's own declared `numColours` count of entries starting at the
+region's DAC base, with **no separate per-region width ceiling enforced in
+code**. So the "outtake" family's 80-colour palettes aren't a structurally
+special case needing a new placement formula — they almost certainly call
+`set_palette` with **region 0** (`PAL_FIXED`, base `0x00`, 176 colours wide —
+the only one of the 5 regions with enough headroom for an 80-colour write
+without colliding with the other regions), temporarily overwriting the
+shared/UI palette range for the duration of displaying that one full-screen
+story-art picture (plausible since nothing else needs to share the DAC while
+an outtake is on screen — no dungeon view, no HUD). **Not confirmed** — this
+is reasoned from the mechanism, not from observing the actual SOP call site's
+literal region argument — but it's a concrete, testable hypothesis (render
+the 19 outtake bitmaps with DAC base 0 instead of the current unresolved
+placement and check for a clean, non-garbled result) that didn't exist
+before this pass.
 
 ---
 

@@ -159,8 +159,17 @@ def extract_vfx_bitmaps(r, entries_by_type):
                     tier = 'region-matched'
                     n_region_matched += 1
                 else:
-                    tier = 'unresolved'
-                    n_unresolved += 1
+                    outtake_match = palette_regions.find_outtake_palette(e.name, palette_index)
+                    if outtake_match is not None and mx <= 254:
+                        pal_entry, num_colours = outtake_match
+                        overlay_rgb = palette.load_resource_palette(r.resource_bytes(pal_entry.slot))
+                        overlay_base = palette_regions.OUTTAKE_BASE
+                        overlay_width = palette_regions.OUTTAKE_WIDTH
+                        tier = 'outtake-matched'
+                        n_region_matched += 1
+                    else:
+                        tier = 'unresolved'
+                        n_unresolved += 1
             resolution.append({
                 'id': slot, 'name': e.name, 'region': region, 'tier': tier,
                 'pixelMin': mn, 'pixelMax': mx,
@@ -169,7 +178,7 @@ def extract_vfx_bitmaps(r, entries_by_type):
 
         safe_name = safe_asset_name(e.name)
         for i, shp in enumerate(shapes):
-            if tier in ('fixed', 'region-matched'):
+            if tier in ('fixed', 'region-matched', 'outtake-matched'):
                 rgba = resolved_rgba(shp, base_palette, overlay_rgb, overlay_base, overlay_width)
             else:
                 rgba = greyscale_rgba(shp)
