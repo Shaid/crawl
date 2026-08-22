@@ -35,11 +35,13 @@
     "sync-data-manifests": "npx tsx tools/sync-data-manifests.ts"
   },
   "dependencies": {
+    "@seer-project/canvas-export": "file:../seer/packages/canvas-export",
     "@seer-project/core": "file:../seer/packages/core",
     "@seer-project/dungeon": "file:../seer/packages/dungeon",
     "@seer-project/engine-2d": "file:../seer/packages/engine-2d",
     "@seer-project/iff": "file:../seer/packages/iff",
     "@seer-project/pipeline": "file:../seer/packages/pipeline",
+    "@seer-project/retro-display": "file:../seer/packages/retro-display",
     "@seer-project/smus": "file:../seer/packages/smus",
     "pixi.js": "^8.9.0",
     "pngjs": "^7.0.0"

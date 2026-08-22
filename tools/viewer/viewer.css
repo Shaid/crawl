@@ -50,6 +50,35 @@ button:focus-visible, select:focus-visible, input:focus-visible, .item:focus-vis
   white-space: nowrap;
 }
 .nav-link:hover { border-color: var(--border-control-hover); }
+
+.settings-anchor { position: relative; }
+#sprite-screenshot, #sprite-record, #sprite-display-toggle {
+  padding: 3px 8px; background: var(--bg-input); color: var(--text-primary);
+  border: 1px solid var(--border-control); border-radius: var(--radius); cursor: pointer;
+}
+#sprite-screenshot:hover, #sprite-record:hover, #sprite-display-toggle:hover { border-color: var(--border-control-hover); }
+#sprite-record:disabled { opacity: 0.6; cursor: default; }
+#play-toggle {
+  padding: 3px 8px; background: var(--bg-input); color: var(--text-primary);
+  border: 1px solid var(--border-control); border-radius: var(--radius); cursor: pointer; flex: none;
+}
+#play-toggle:hover { border-color: var(--border-control-hover); }
+#play-toggle.playing { background: var(--bg-selected); color: var(--text-selected); border-color: var(--accent); }
+
+/* Display profile + colour grading + export — a toggle-button-opens-a-
+   floating-panel popover, same pattern as the other seer-project viewers. */
+#sprite-display-panel {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 10;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg-panel); border: 1px solid var(--border-control);
+  border-radius: var(--radius); padding: 10px 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  min-width: 230px;
+}
+#sprite-display-panel label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#sprite-display-panel input[type="range"] { flex: none; width: 140px; }
+#sprite-display-panel select { flex: none; min-width: 140px; }
+#sprite-display-panel button { align-self: flex-start; }
 #game-selector {
   display: flex; gap: 6px; margin-bottom: 6px;
 }

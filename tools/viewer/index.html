@@ -45,9 +45,37 @@
             <option value="white">White</option>
           </select>
         </label>
+        <div id="sprite-display" class="settings-anchor">
+          <button id="sprite-display-toggle" type="button" title="Display profile, colour grading, and export">🎨 Display</button>
+          <div id="sprite-display-panel" class="hidden">
+            <label>Display profile
+              <select id="display-profile">
+                <option value="none" selected>None</option>
+                <option value="crt-shadow-mask">CRT (shadow mask)</option>
+                <option value="crt-aperture-grille">CRT (aperture grille)</option>
+                <option value="crt-slot-mask">CRT (slot mask)</option>
+                <option value="lcd-subpixel">LCD (subpixel)</option>
+              </select>
+            </label>
+            <label>Scanlines <input id="display-scanline" type="range" min="0" max="1" step="0.01" value="0.3" /></label>
+            <label>Mask intensity <input id="display-mask" type="range" min="0" max="1" step="0.01" value="0.25" /></label>
+            <label>Curvature <input id="display-curvature" type="range" min="0" max="1" step="0.01" value="0" /></label>
+            <label>Vignette <input id="display-vignette" type="range" min="0" max="1" step="0.01" value="0.15" /></label>
+            <label>Glow <input id="display-glow" type="range" min="0" max="1" step="0.01" value="0.2" /></label>
+            <label>Chromatic aberration <input id="display-chromatic" type="range" min="0" max="1" step="0.01" value="0" /></label>
+            <label>Brightness <input id="grading-brightness" type="range" min="0.5" max="1.5" step="0.01" value="1" /></label>
+            <label>Contrast <input id="grading-contrast" type="range" min="0.5" max="1.5" step="0.01" value="1" /></label>
+            <label>Saturation <input id="grading-saturate" type="range" min="0" max="2" step="0.01" value="1" /></label>
+            <label>Hue rotate <input id="grading-hue" type="range" min="-180" max="180" step="1" value="0" /></label>
+            <button id="grading-reset" type="button">Reset grading</button>
+            <button id="sprite-screenshot" type="button" title="Download a watermarked PNG screenshot">📷 Screenshot</button>
+            <button id="sprite-record" type="button" title="Record a watermarked clip of the sprite animation">⏺ Record</button>
+          </div>
+        </div>
       </div>
       <div id="canvas-wrap"></div>
       <div id="frame-strip" class="hidden">
+        <button id="play-toggle" type="button" title="Play/pause animation">▶</button>
         <input id="frame-slider" type="range" min="0" max="0" value="0" />
         <span id="frame-label">Sprite 0 / 0</span>
       </div>

@@ -1,5 +1,22 @@
 import { setHidden, type AtlasMeta, type PaletteData, type AtlasFrame, type AssetGroup, type GroupsFile } from './shared.ts';
 import { renderDataTable } from './data-table.ts';
+import {
+  downloadScreenshot,
+  recordClip,
+  downloadClip,
+  createPopover,
+  buildGradingFilterString,
+  type CaptureSource,
+  type RecordClipDriver,
+  type GradingOptions,
+} from '@seer-project/canvas-export';
+import {
+  createRetroDisplayRenderer,
+  resolveRetroDisplayOptions,
+  type DisplayProfile,
+  type RetroDisplayOptions,
+  type RetroDisplayRenderer,
+} from '@seer-project/retro-display';
 import { getAssetBasePath, getViewerConfig } from '../shared/viewer-config.ts';
 import {
   DEFAULT_GAME,
@@ -41,9 +58,26 @@ const bgEl = document.getElementById('bg') as HTMLSelectElement;
 const frameStrip = document.getElementById('frame-strip')!;
 const frameSlider = document.getElementById('frame-slider') as HTMLInputElement;
 const frameLabel = document.getElementById('frame-label')!;
+const playToggleEl = document.getElementById('play-toggle') as HTMLButtonElement;
 const paletteBar = document.getElementById('palette-bar')!;
 const gameSelectEl = document.getElementById('game-select') as HTMLSelectElement;
 const platformSelectEl = document.getElementById('platform-select') as HTMLSelectElement;
+const spriteScreenshotBtn = document.getElementById('sprite-screenshot') as HTMLButtonElement;
+const spriteRecordBtn = document.getElementById('sprite-record') as HTMLButtonElement;
+const spriteDisplayToggle = document.getElementById('sprite-display-toggle') as HTMLButtonElement;
+const spriteDisplayPanel = document.getElementById('sprite-display-panel')!;
+const displayProfileEl = document.getElementById('display-profile') as HTMLSelectElement;
+const displayScanlineEl = document.getElementById('display-scanline') as HTMLInputElement;
+const displayMaskEl = document.getElementById('display-mask') as HTMLInputElement;
+const displayCurvatureEl = document.getElementById('display-curvature') as HTMLInputElement;
+const displayVignetteEl = document.getElementById('display-vignette') as HTMLInputElement;
+const displayGlowEl = document.getElementById('display-glow') as HTMLInputElement;
+const displayChromaticEl = document.getElementById('display-chromatic') as HTMLInputElement;
+const gradingBrightnessEl = document.getElementById('grading-brightness') as HTMLInputElement;
+const gradingContrastEl = document.getElementById('grading-contrast') as HTMLInputElement;
+const gradingSaturateEl = document.getElementById('grading-saturate') as HTMLInputElement;
+const gradingHueEl = document.getElementById('grading-hue') as HTMLInputElement;
+const gradingResetBtn = document.getElementById('grading-reset') as HTMLButtonElement;
 
 let manifest: ManifestEntry[] = [];
 let selected: ManifestEntry | null = null;
@@ -51,6 +85,14 @@ let currentAtlas: AtlasMeta | null = null;
 let currentPalette: PaletteData | null = null;
 let currentFrames: AtlasFrame[] = [];
 let currentFrame = 0;
+/** Colour grading applied via `ctx.filter` in the Canvas2D draw path (Phase 4 of 2d-export-proposal.md) — persists across asset switches, like zoom/background. */
+let gradingOptions: GradingOptions = {};
+/** Post-display simulation (Phases 5-6) — persists across asset switches. Renderer created lazily (first non-'none' selection) since it opens its own WebGL2 context. */
+let displayOptions: RetroDisplayOptions = { profile: 'none' };
+let retroDisplayRenderer: RetroDisplayRenderer | null = null;
+
+/** The list as currently filtered/searched — kept in sync by renderList(), used by Up/Down keyboard navigation. */
+let currentFilteredList: ManifestEntry[] = [];
 
 // Grouped browsing (`groupsFile`): which top-level entries are expanded in
 // the sidebar, their loaded groups data, and which group (if any) is being
@@ -123,10 +165,12 @@ function resetSelection() {
   currentFrames = [];
   currentFrame = 0;
   selectedGroup = null;
+  stopPlayback();
   titleEl.textContent = 'No asset selected';
   metaEl.textContent = '';
   frameInfoEl.textContent = '';
   setHidden(frameStrip, true);
+  setHidden(spriteDisplayToggle, true);
   paletteBar.innerHTML = '';
   canvasWrap.innerHTML = '<div class="state-panel"><span class="state-icon">🖼</span><span class="state-title">Select an asset</span></div>';
 }
@@ -180,6 +224,7 @@ async function loadJSON<T>(name: string): Promise<T | null> {
 function renderList() {
   const q = searchEl.value.trim().toLowerCase();
   const filtered = q ? manifest.filter(a => a.name.includes(q)) : manifest;
+  currentFilteredList = filtered;
 
   listMetaEl.textContent = `${filtered.length} of ${manifest.length} assets`;
 
@@ -249,6 +294,7 @@ async function toggleExpanded(asset: ManifestEntry) {
 async function selectAsset(asset: ManifestEntry, opts: { keepGroup?: boolean } = {}) {
   selected = asset;
   currentFrame = 0;
+  stopPlayback();
   if (!opts.keepGroup) selectedGroup = null;
   if (asset.kind === 'data') {
     currentAtlas = null;
@@ -269,12 +315,17 @@ async function selectAsset(asset: ManifestEntry, opts: { keepGroup?: boolean } =
   } else {
     currentFrames = allFrames;
   }
+  // Primed here, once per asset, so drawAsset() -> drawSpriteFrame()/
+  // drawFullAtlas() below can stay fully synchronous for every subsequent
+  // redraw of THIS asset (frame nav, zoom change, autoplay tick).
+  await loadCachedAtlasImage(`${assetBase}/${asset.png || `${asset.name}.png`}`);
   renderList();
   drawAsset();
 }
 
 async function selectGroup(asset: ManifestEntry, _groupsData: GroupsFile, group: AssetGroup) {
   selectedGroup = group;
+  stopPlayback();
   if (selected === asset && currentAtlas) {
     const byName = new Map(currentAtlas.frames.map(f => [f.name, f]));
     currentFrames = group.frames.map(n => byName.get(n)).filter((f): f is AtlasFrame => !!f);
@@ -284,6 +335,17 @@ async function selectGroup(asset: ManifestEntry, _groupsData: GroupsFile, group:
   } else {
     await selectAsset(asset, { keepGroup: true });
   }
+}
+
+async function navigateList(delta: 1 | -1): Promise<void> {
+  if (currentFilteredList.length === 0) return;
+  const currentIndex = selected ? currentFilteredList.indexOf(selected) : -1;
+  const nextIndex =
+    currentIndex === -1
+      ? 0
+      : (currentIndex + delta + currentFilteredList.length) % currentFilteredList.length;
+  await selectAsset(currentFilteredList[nextIndex]!);
+  listEl.querySelector('.item.selected')?.scrollIntoView({ block: 'nearest' });
 }
 
 function frameLabel_(asset: ManifestEntry, frame: AtlasFrame): string | null {
@@ -314,11 +376,72 @@ function describeData(json: unknown): string {
   return 'data';
 }
 
+// ── Persistent canvas + image cache (Phase 2 of 2d-export-proposal.md) ──
+//
+// The previous implementation did `canvasWrap.innerHTML = ''` + created a
+// BRAND NEW `<canvas>` on every single draw, and re-fetched/re-decoded the
+// atlas PNG via a fresh `Image()` on every redraw even though nothing
+// about the image itself had changed. That broke `canvas.captureStream()`
+// (Phase 3's video export — a `MediaStreamTrack` goes to `ended` on the
+// first frame advance if its source element gets replaced) and wasted
+// work on every zoom change or frame-nav click.
+
+const spriteCanvas2D = document.createElement('canvas');
+
+/** Makes `canvas` the sole child of `canvasWrap` — a no-op (no DOM mutation) if it already is, so this is cheap to call unconditionally on every redraw. */
+function mountSpriteCanvas(canvas: HTMLCanvasElement): void {
+  if (canvasWrap.firstElementChild === canvas && canvasWrap.children.length === 1) return;
+  canvasWrap.innerHTML = '';
+  canvasWrap.appendChild(canvas);
+}
+
+/**
+ * Post-display simulation (Phases 5-6 of `2d-export-proposal.md`) — called
+ * at the end of `drawSpriteFrame`/`drawFullAtlas`, after grading
+ * (`ctx.filter`) is already baked into `spriteCanvas2D`. When a profile is
+ * active, feeds that already-graded canvas through `retroDisplayRenderer`
+ * and mounts ITS output canvas instead. A no-op, leaving `spriteCanvas2D`
+ * mounted, when `displayOptions.profile === 'none'`.
+ */
+function applyRetroDisplayIfActive(): void {
+  if (displayOptions.profile === 'none') return;
+  retroDisplayRenderer ??= createRetroDisplayRenderer(displayOptions);
+  retroDisplayRenderer.setOptions(displayOptions);
+  retroDisplayRenderer.render(spriteCanvas2D);
+  mountSpriteCanvas(retroDisplayRenderer.canvas);
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`failed to load ${url}`));
+    img.src = url;
+  });
+}
+
+/** One-slot cache (plain atlas image) keyed by URL — `selectAsset()`/`selectGroup()` prime this before their final `drawAsset()` call, so every subsequent redraw (zoom change, frame nav) reads an already-decoded bitmap instead of re-fetching. */
+let cachedAtlasImage: HTMLImageElement | null = null;
+let cachedAtlasImageUrl: string | null = null;
+
+async function loadCachedAtlasImage(url: string): Promise<void> {
+  if (cachedAtlasImageUrl === url && cachedAtlasImage) return;
+  try {
+    cachedAtlasImage = await loadImage(url);
+    cachedAtlasImageUrl = url;
+  } catch {
+    cachedAtlasImage = null;
+    cachedAtlasImageUrl = null;
+  }
+}
+
 function drawAsset() {
   if (!selected || !currentAtlas) {
+    setHidden(spriteDisplayToggle, true);
     canvasWrap.innerHTML = '<div class="state-panel"><span class="state-icon">🖼</span><span class="state-title">Select an asset</span></div>';
     return;
   }
+  setHidden(spriteDisplayToggle, false);
 
   const zoom = Number(zoomEl.value);
   const frame = currentFrames[currentFrame];
@@ -334,27 +457,37 @@ function drawAsset() {
     frameSlider.max = String(currentFrames.length - 1);
     frameSlider.value = String(currentFrame);
     frameLabel.textContent = `${currentFrame + 1} / ${currentFrames.length}`;
+    // Recording plays through currentFrames — meaningless (and disabled,
+    // like the play/pause button already is) for a single-frame asset.
+    spriteRecordBtn.disabled = currentFrames.length <= 1;
+    spriteRecordBtn.title = currentFrames.length <= 1 ? 'This asset has only one frame' : 'Record a watermarked clip of the sprite animation';
 
-    const img = new Image();
-    img.onload = () => {
-      canvasWrap.innerHTML = '';
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, frame.w * zoom);
-      canvas.height = Math.max(1, frame.h * zoom);
-      canvasWrap.appendChild(canvas);
-      const ctx = canvas.getContext('2d')!;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, frame.x, frame.y, frame.w, frame.h, 0, 0, canvas.width, canvas.height);
-    };
-    img.onerror = () => {
-      canvasWrap.innerHTML = '<div class="state-panel state-error"><span class="state-icon">⚠</span><span class="state-title">Failed to load image</span></div>';
-    };
-    img.src = `${assetBase}/${selected.png || `${selected.name}.png`}`;
-
-    renderPalette(currentPalette);
+    drawSpriteFrame(frame, zoom);
   } else {
     drawFullAtlas(selected, currentAtlas, zoom);
   }
+}
+
+/** Draws one atlas frame into the persistent Canvas2D canvas — synchronous, relying on `selectAsset()`/`selectGroup()` having already primed `cachedAtlasImage` for this asset. Safe to call every autoplay tick/frame-nav/zoom-change. */
+function drawSpriteFrame(frame: AtlasFrame, zoom: number): void {
+  const url = `${assetBase}/${selected!.png || `${selected!.name}.png`}`;
+  if (!cachedAtlasImage || cachedAtlasImageUrl !== url) {
+    canvasWrap.innerHTML = '<div class="state-panel state-error"><span class="state-icon">⚠</span><span class="state-title">Failed to load image</span></div>';
+    return;
+  }
+
+  mountSpriteCanvas(spriteCanvas2D);
+  spriteCanvas2D.width = Math.max(1, frame.w * zoom);
+  spriteCanvas2D.height = Math.max(1, frame.h * zoom);
+  const ctx = spriteCanvas2D.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, spriteCanvas2D.width, spriteCanvas2D.height);
+  ctx.filter = buildGradingFilterString(gradingOptions);
+  ctx.drawImage(cachedAtlasImage, frame.x, frame.y, frame.w, frame.h, 0, 0, spriteCanvas2D.width, spriteCanvas2D.height);
+  ctx.filter = 'none';
+
+  renderPalette(currentPalette);
+  applyRetroDisplayIfActive();
 }
 
 function drawFullAtlas(asset: ManifestEntry, atlas: AtlasMeta, zoom: number) {
@@ -362,31 +495,32 @@ function drawFullAtlas(asset: ManifestEntry, atlas: AtlasMeta, zoom: number) {
   metaEl.textContent = `${atlas.width}×${atlas.height}, ${atlas.frames.length} sprites`;
   setHidden(frameStrip, true);
 
-  const img = new Image();
-  img.onload = () => {
-    const cw = Math.max(1, atlas.width * zoom);
-    const ch = Math.max(1, atlas.height * zoom);
-    canvasWrap.innerHTML = '';
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    canvasWrap.appendChild(canvas);
-    const ctx = canvas.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, 0, cw, ch);
-
-    ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-    ctx.lineWidth = 1;
-    for (const f of atlas.frames) {
-      ctx.strokeRect(f.x * zoom, f.y * zoom, Math.max(1, f.w * zoom), Math.max(1, f.h * zoom));
-    }
-
-    renderPalette(currentPalette);
-  };
-  img.onerror = () => {
+  const url = `${assetBase}/${asset.png || `${asset.name}.png`}`;
+  if (!cachedAtlasImage || cachedAtlasImageUrl !== url) {
     canvasWrap.innerHTML = '<div class="state-panel state-error"><span class="state-icon">⚠</span><span class="state-title">Failed to load image</span></div>';
-  };
-  img.src = `${assetBase}/${asset.png || `${asset.name}.png`}`;
+    return;
+  }
+
+  mountSpriteCanvas(spriteCanvas2D);
+  const cw = Math.max(1, atlas.width * zoom);
+  const ch = Math.max(1, atlas.height * zoom);
+  spriteCanvas2D.width = cw;
+  spriteCanvas2D.height = ch;
+  const ctx = spriteCanvas2D.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.filter = buildGradingFilterString(gradingOptions);
+  ctx.drawImage(cachedAtlasImage, 0, 0, cw, ch);
+  ctx.filter = 'none';
+
+  ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+  ctx.lineWidth = 1;
+  for (const f of atlas.frames) {
+    ctx.strokeRect(f.x * zoom, f.y * zoom, Math.max(1, f.w * zoom), Math.max(1, f.h * zoom));
+  }
+
+  renderPalette(currentPalette);
+  applyRetroDisplayIfActive();
 }
 
 function renderPalette(palette: PaletteData | null) {
@@ -422,8 +556,45 @@ bgEl.addEventListener('change', () => {
   if (bgEl.value === 'white') canvasWrap.classList.add('bg-white');
 });
 
+// ── Animation autoplay ───────────────────────────────────────────────────
+//
+// Crawl never had this — added here as a Phase 3 prerequisite: recording
+// "the sprite animation" is a non-sequitur without a live-preview notion
+// of animation playback to record in the first place. Milliseconds
+// between frames matches the interval already used in
+// siren/flower/chimera/ceres's equivalent viewers.
+
+const AUTOPLAY_INTERVAL_MS = 150;
+let playTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopPlayback(): void {
+  if (playTimer !== null) {
+    clearInterval(playTimer);
+    playTimer = null;
+  }
+  playToggleEl.textContent = '▶';
+  playToggleEl.classList.remove('playing');
+}
+
+function togglePlayback(): void {
+  if (playTimer !== null) {
+    stopPlayback();
+    return;
+  }
+  if (currentFrames.length <= 1) return;
+  playToggleEl.textContent = '⏸';
+  playToggleEl.classList.add('playing');
+  playTimer = setInterval(() => {
+    currentFrame = (currentFrame + 1) % currentFrames.length;
+    drawAsset();
+  }, AUTOPLAY_INTERVAL_MS);
+}
+
+playToggleEl.addEventListener('click', togglePlayback);
+
 frameSlider.addEventListener('input', () => {
   if (!selected) return;
+  stopPlayback();
   currentFrame = Number(frameSlider.value);
   drawAsset();
 });
@@ -432,15 +603,193 @@ document.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
   if (e.code === 'ArrowLeft' && currentFrames.length > 0) {
     e.preventDefault();
+    stopPlayback();
     currentFrame = (currentFrame - 1 + currentFrames.length) % currentFrames.length;
     drawAsset();
   }
   if (e.code === 'ArrowRight' && currentFrames.length > 0) {
     e.preventDefault();
+    stopPlayback();
     currentFrame = (currentFrame + 1) % currentFrames.length;
     drawAsset();
   }
+  if (e.code === 'ArrowUp') {
+    e.preventDefault();
+    void navigateList(-1);
+  }
+  if (e.code === 'ArrowDown') {
+    e.preventDefault();
+    void navigateList(1);
+  }
 });
+
+/** Watermark text for an export. */
+function spriteWatermarkText(asset: ManifestEntry): string {
+  const gameLabel = GAME_DISPLAY_NAMES[currentGame];
+  const platformLabel = PLATFORM_DISPLAY_NAMES[currentPlatform];
+  return `${asset.name} — ${gameLabel} (${platformLabel}) — blackcrypt — a seer project`;
+}
+
+/**
+ * Screenshot export for the 2D draw path, per `2d-export-proposal.md`'s
+ * Part 1. `canvas` is a **getter** — the persistent canvases are one of
+ * TWO (Canvas2D vs. retro-display's own WebGL2 output), so which element
+ * is actually mounted in `canvasWrap` changes depending on the active
+ * display profile. `renderNow` re-renders the retro-display canvas if a
+ * profile is active — its buffer can go stale between the last actual draw
+ * and a later Screenshot click otherwise.
+ */
+const spriteCaptureSource: CaptureSource = {
+  get canvas() {
+    return canvasWrap.querySelector('canvas') as HTMLCanvasElement;
+  },
+  renderNow: applyRetroDisplayIfActive,
+};
+
+spriteScreenshotBtn.addEventListener('click', () => {
+  if (!selected) return;
+  void downloadScreenshot(spriteCaptureSource, selected.name, {
+    watermark: { text: spriteWatermarkText(selected) },
+  });
+});
+
+/**
+ * Video export for the 2D draw path (Phase 3 of `2d-export-proposal.md`,
+ * built on Phase 2's persistent canvas — `canvas.captureStream()` needs a
+ * stable element across frame advances, which is what that phase fixed).
+ * Recording always does draw-then-advance (draw the current frame, then
+ * advance for the next capture) rather than advance-then-draw, which would
+ * skip frame 0 on the very first capture.
+ */
+const spriteRecordCaptureSource: CaptureSource = {
+  get canvas() {
+    return canvasWrap.querySelector('canvas') as HTMLCanvasElement;
+  },
+  renderNow: () => {
+    drawAsset();
+    if (currentFrames.length > 0) currentFrame = (currentFrame + 1) % currentFrames.length;
+  },
+};
+
+const spriteRecordDriver: RecordClipDriver = {
+  start() {
+    stopPlayback();
+    currentFrame = 0;
+    drawAsset();
+  },
+  stop() {
+    currentFrame = 0;
+    drawAsset();
+  },
+};
+
+spriteRecordBtn.addEventListener('click', () => {
+  void (async () => {
+    if (!selected || spriteRecordBtn.disabled) return;
+    spriteRecordBtn.disabled = true;
+    try {
+      const result = await recordClip(spriteRecordCaptureSource, {
+        driver: spriteRecordDriver,
+        fps: 12,
+        durationSeconds: 2,
+        watermark: { text: spriteWatermarkText(selected) },
+      });
+      downloadClip(result, selected.name);
+    } catch (err) {
+      console.error('sprite recording failed', err);
+    } finally {
+      spriteRecordBtn.disabled = currentFrames.length <= 1;
+    }
+  })();
+});
+
+/**
+ * Display profile + colour grading + export (Phases 4-6 of
+ * `2d-export-proposal.md`) — one floating panel (same `createPopover`
+ * toggle/outside-click/Escape behavior as the other seer-project viewers)
+ * housing the retro-display profile/effect sliders, the grading sliders,
+ * and the screenshot/record buttons.
+ */
+createPopover(spriteDisplayToggle, spriteDisplayPanel);
+
+/**
+ * Grades via `ctx.filter` (not `style.filter` — the CSS property is
+ * compositor-level only and would not appear in a screenshot/recording),
+ * applied in `drawSpriteFrame`/`drawFullAtlas` through `buildGradingFilterString`.
+ */
+function onGradingSliderChange(): void {
+  gradingOptions = {
+    brightness: Number(gradingBrightnessEl.value),
+    contrast: Number(gradingContrastEl.value),
+    saturate: Number(gradingSaturateEl.value),
+    hueRotate: Number(gradingHueEl.value),
+  };
+  drawAsset();
+}
+
+gradingBrightnessEl.addEventListener('input', onGradingSliderChange);
+gradingContrastEl.addEventListener('input', onGradingSliderChange);
+gradingSaturateEl.addEventListener('input', onGradingSliderChange);
+gradingHueEl.addEventListener('input', onGradingSliderChange);
+
+gradingResetBtn.addEventListener('click', () => {
+  gradingBrightnessEl.value = '1';
+  gradingContrastEl.value = '1';
+  gradingSaturateEl.value = '1';
+  gradingHueEl.value = '0';
+  gradingOptions = {};
+  drawAsset();
+});
+
+/**
+ * Effect sliders meaningful for the currently-selected profile are enabled;
+ * the rest are disabled (not hidden — the layout stays stable as the user
+ * flips between profiles). `'none'` disables all of them; `scanlineIntensity`
+ * is additionally disabled for `'lcd-subpixel'`, which `RetroDisplayOptions`
+ * documents as a no-op there (a flat panel has no scanlines to simulate).
+ */
+function updateDisplayControlsEnabled(): void {
+  const active = displayOptions.profile !== 'none';
+  for (const el of [displayMaskEl, displayCurvatureEl, displayVignetteEl, displayGlowEl, displayChromaticEl]) {
+    el.disabled = !active;
+  }
+  displayScanlineEl.disabled = !active || displayOptions.profile === 'lcd-subpixel';
+}
+
+function onDisplaySliderChange(): void {
+  displayOptions = {
+    profile: displayProfileEl.value as DisplayProfile,
+    scanlineIntensity: Number(displayScanlineEl.value),
+    maskIntensity: Number(displayMaskEl.value),
+    curvature: Number(displayCurvatureEl.value),
+    vignette: Number(displayVignetteEl.value),
+    glow: Number(displayGlowEl.value),
+    chromaticAberration: Number(displayChromaticEl.value),
+  };
+  drawAsset();
+}
+
+displayScanlineEl.addEventListener('input', onDisplaySliderChange);
+displayMaskEl.addEventListener('input', onDisplaySliderChange);
+displayCurvatureEl.addEventListener('input', onDisplaySliderChange);
+displayVignetteEl.addEventListener('input', onDisplaySliderChange);
+displayGlowEl.addEventListener('input', onDisplaySliderChange);
+displayChromaticEl.addEventListener('input', onDisplaySliderChange);
+
+displayProfileEl.addEventListener('change', () => {
+  const profile = displayProfileEl.value as DisplayProfile;
+  const preset = resolveRetroDisplayOptions({ profile });
+  displayScanlineEl.value = String(preset.scanlineIntensity);
+  displayMaskEl.value = String(preset.maskIntensity);
+  displayCurvatureEl.value = String(preset.curvature);
+  displayVignetteEl.value = String(preset.vignette);
+  displayGlowEl.value = String(preset.glow);
+  displayChromaticEl.value = String(preset.chromaticAberration);
+  onDisplaySliderChange();
+  updateDisplayControlsEnabled();
+});
+
+updateDisplayControlsEnabled();
 
 gameSelectEl.addEventListener('change', () => {
   currentGame = gameSelectEl.value as GameId;
