@@ -139,10 +139,45 @@ export interface BlackCryptViewOptions {
   bindings: BindingsFile;
   banks: PieceBankLookup;
   palette: RGBAColor[];
+  /**
+   * Accent ramp 4 ("cold blue-grey") for the unit's tileset, i.e.
+   * `palettes/dungeon-<tileset>-ramp4.json` — the underwater/flooded-square
+   * re-tint `S_1 +0x02D46` forces while the party stands on a "water"
+   * square (type-nibble bit 3, `type & 0x8`), except on level 3, which is
+   * exempt. `undefined` when the tileset's indexed-atlas ramp files aren't
+   * available (falls back to the baked/default palette everywhere — see
+   * `docs/blackcrypt/amiga/data-structure.md` "Selector 2 — per-square
+   * override" and "Underwater/flooded-level rendering").
+   */
+  waterPalette?: RGBAColor[];
   automapBank: PieceBank;
   unit: LevelUnit;
   startPose: Pose;
   onInteract?: (msg: string) => void;
+}
+
+/** Type-nibble bit for a "water" square (`bcdfs` on-disk type byte `0x8F`; `docs/blackcrypt/amiga/data-structure.md` "bcdfs — Map / Dungeon Format" § "Square format"). */
+const WATER_TYPE_BIT = 0x8;
+/** Level 3 is explicitly exempted from the water re-tint by `S_1 +0x02D46` itself (`CMPI.W #$3,$1E5C(A4) / BEQ`), even though it has 5 water-typed squares of its own. */
+const WATER_RETINT_EXEMPT_LEVEL = 3;
+
+/**
+ * Type-nibble bit for the "darkness" flag (`bcdfs` on-disk type byte
+ * `0x2F`) — the map-square condition `MoveParty`'s success tail
+ * (S_1 `+0x16F0A`) diffs to gate the `$48F(A5)` mirror-toggle (`ViewpointChanged`,
+ * S_1 `+0x2492A`) on the *ordinary walk path only*. `docs/blackcrypt/amiga/
+ * data-structure.md` "`ViewpointChanged`" + "`walker-mirror-flag-polarity`"
+ * (`docs/blackcrypt/TODO.md`) — the other 9 `JSR $A4982.l` sites
+ * (teleport/spell/command triggers) toggle unconditionally and have no
+ * representation in this schema; only this one walk-path component is
+ * modelled here, per that TODO row's explicit scoping.
+ */
+const DARKNESS_TYPE_BIT = 0x2;
+
+/** A `front-direct:`/`side-direct:` slot's override for the `$48F != 0` branch (`slots.json`, `scripts/export_dungeon_slots.py`'s `blackcrypt-darkness-mirror-toggle` addition) — just enough of a `PieceDraw` to patch a resolved `DrawItem` post-hoc, without touching `@seer-project/dungeon`'s `buildViewList`/`compositeDrawList`. */
+interface MirrorOverride {
+  frame: string;
+  mirrorX: boolean;
 }
 
 export class BlackCryptView implements GameView {
@@ -154,14 +189,29 @@ export class BlackCryptView implements GameView {
   private readonly walker: Walker;
   private readonly unit: LevelUnit;
   private readonly palette_: RGBAColor[];
+  private readonly waterPalette_: RGBAColor[] | undefined;
   private readonly noclip: { on: boolean };
+  /** Session-tracked `$48F(A5)` state, seeded false (`AllocMem(...,MEMF_CLEAR)` + `CLR.W $48E(A5)`) — see `DARKNESS_TYPE_BIT` above. */
+  private mirrorToggle = false;
+  private readonly mirrorOverrides: Map<string, MirrorOverride>;
+  private lastMirrorRawItems: DrawItem[] | null = null;
+  private lastMirrorToggleApplied = false;
+  private lastMirrorItems: DrawItem[] = [];
 
   constructor(opts: BlackCryptViewOptions) {
     this.unit = opts.unit;
     this.palette_ = opts.palette;
+    this.waterPalette_ = opts.waterPalette;
     this.noclip = { on: false };
     this.banks = opts.banks;
     this.slots = opts.slots;
+    this.mirrorOverrides = new Map();
+    for (const [key, slot] of Object.entries(opts.slots.slots)) {
+      if (!key.startsWith('front-direct:') && !key.startsWith('side-direct:')) continue;
+      const draw = slot?.draws[0];
+      if (!draw || typeof draw.frame !== 'string') continue; // defensive: only plain string frames are produced by export_dungeon_slots.py here
+      this.mirrorOverrides.set(key, { frame: draw.frame, mirrorX: draw.mirrorX ?? false });
+    }
 
     const level = new FlatGridLevel(opts.levelFile, opts.unit);
     const worldWidth = opts.levelFile.cellSpace.kind === 'flat' ? opts.levelFile.cellSpace.width : 64;
@@ -198,17 +248,59 @@ export class BlackCryptView implements GameView {
     return this.walker.pose;
   }
   get items(): DrawItem[] {
-    return this.walker.items;
+    const raw = this.walker.items;
+    if (!this.mirrorToggle || this.mirrorOverrides.size === 0) return raw;
+    if (raw === this.lastMirrorRawItems && this.lastMirrorToggleApplied === this.mirrorToggle) {
+      return this.lastMirrorItems;
+    }
+    const mapped = raw.map((item) => {
+      const override = this.mirrorOverrideFor(item);
+      return override ? { ...item, frame: override.frame, mirrorX: override.mirrorX } : item;
+    });
+    this.lastMirrorRawItems = raw;
+    this.lastMirrorToggleApplied = this.mirrorToggle;
+    this.lastMirrorItems = mapped;
+    return mapped;
   }
   get currentTick(): number {
     return this.walker.currentTick;
   }
   get palette(): RGBAColor[] {
+    // S_1 +0x02D46: entering a "water" square (type-nibble bit 3) re-tints
+    // the dungeon accent ramp to 4 (cold blue-grey); leaving restores the
+    // level's default ramp. Level 3 is exempt (it has 5 water squares of
+    // its own but the routine explicitly skips the retint there).
+    if (this.waterPalette_ && this.unit.id !== WATER_RETINT_EXEMPT_LEVEL) {
+      const { x, y } = this.walker.pose;
+      const type = this.unit.planes.type?.[y * 64 + x] ?? 0;
+      if ((type & WATER_TYPE_BIT) !== 0) return this.waterPalette_;
+    }
     return this.palette_;
+  }
+  /** Debug/test visibility into the session-tracked `$48F` state (see `DARKNESS_TYPE_BIT`). Not part of `GameView`. */
+  get mirrorToggleActive(): boolean {
+    return this.mirrorToggle;
+  }
+
+  private mirrorOverrideFor(item: DrawItem): MirrorOverride | undefined {
+    if (item.kind === 'front') return this.mirrorOverrides.get(`front-direct:${item.lateral}:${item.depth}`);
+    if (item.kind === 'side' && item.side) return this.mirrorOverrides.get(`side-direct:${item.side}:${item.depth}`);
+    return undefined;
   }
 
   update(dtMs: number, keys: KeyStateLike): Pose | null {
-    return this.walker.update(dtMs, keys);
+    const before = this.walker.pose;
+    const next = this.walker.update(dtMs, keys);
+    // Only the ordinary walk path (an actual cell change) drives the
+    // toggle here — see DARKNESS_TYPE_BIT's doc comment for why the other
+    // 9 real trigger sites (teleport/spell/command) are out of scope.
+    if (next && (next.x !== before.x || next.y !== before.y)) {
+      const type = this.unit.planes.type;
+      const oldDark = (type?.[before.y * 64 + before.x] ?? 0) & DARKNESS_TYPE_BIT;
+      const newDark = (type?.[next.y * 64 + next.x] ?? 0) & DARKNESS_TYPE_BIT;
+      if (oldDark !== newDark) this.mirrorToggle = !this.mirrorToggle;
+    }
+    return next;
   }
   setPose(pose: Pose): void {
     this.walker.setPose(pose);

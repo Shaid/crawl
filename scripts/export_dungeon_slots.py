@@ -94,6 +94,22 @@ SIDE_TABLE_OFFSET = 0x22E4A
 SIDE_RECORD_BYTES = 28
 SIDE_RECORD_COUNT = 8
 
+## `blackcrypt-darkness-mirror-toggle` (docs/blackcrypt/TODO.md) -- the other
+## ($48F != 0`, direct-draw) branch of the same two tables, added this pass.
+## `+0x22CE2` is the front-wall table's `flag != 0` branch (drawn direct by
+## `+0x2300A`, no blitter mirror) -- immediately-preceding, contiguous 9x20B
+## block: `0x22CE2 + 9*20 (0xB4) == 0x22D96`. `+0x22F2A` is the side-wall
+## table's `flag != 0` branch (drawn with the sprite's own BLTCON1 mirror bit
+## set, `0x0400` in the `flags` word) -- immediately-following, contiguous
+## 8x28B block: `0x22E4A + 8*28 (0xE0) == 0x22F2A`. Both tables are read
+## independently below (not derived from the flag==0 tables) and then
+## cross-checked against the documented "left/right source swapped, dest
+## identical" relationship -- see data-structure.md's "What the two tables
+## actually differ in" for the prose this verifies byte-exact, not assumes.
+FRONT_DIRECT_TABLE_OFFSET = 0x22CE2
+SIDE_DIRECT_TABLE_OFFSET = 0x22F2A
+SIDE_DIRECT_FLAGS = 0x0400
+
 BANK_ID = 'dungeon-bcdfx'
 BANK = {'id': BANK_ID, 'atlas': 'textures/dungeon-bcdfx.json', 'image': 'textures/dungeon-bcdfx.png'}
 
@@ -127,11 +143,11 @@ def _sub_image_names_by_offset(slot):
     return out
 
 
-def read_front_descriptors(s1):
+def read_front_descriptors(s1, table_offset=FRONT_TABLE_OFFSET):
     names = _sub_image_names_by_offset(0xB0)
     out = []
     for i in range(FRONT_RECORD_COUNT):
-        off = FRONT_TABLE_OFFSET + i * FRONT_RECORD_BYTES
+        off = table_offset + i * FRONT_RECORD_BYTES
         src, dst, wm1, hm1, add_after = struct.unpack_from('>IIIII', s1, off)
         w, h = (wm1 + 1) * 16, hm1 + 1
         y, x = dst // 40, (dst % 40) * 8
@@ -146,11 +162,11 @@ def read_front_descriptors(s1):
     return out
 
 
-def read_side_descriptors(s1):
+def read_side_descriptors(s1, table_offset=SIDE_TABLE_OFFSET, expect_flags=0x0000):
     names = _sub_image_names_by_offset(0x08)
     out = []
     for i in range(SIDE_RECORD_COUNT):
-        off = SIDE_TABLE_OFFSET + i * SIDE_RECORD_BYTES
+        off = table_offset + i * SIDE_RECORD_BYTES
         (slot, src, bpp, mask_src, bltsize, modulo, dx, dy, flags, w, h) = \
             struct.unpack_from('>HIIIHHHHHHH', s1, off)
         if slot != 0x08:
@@ -169,6 +185,9 @@ def read_side_descriptors(s1):
         if modulo + blit_bytes != 40:
             raise ValueError(f'side descriptor {i}: modulo {modulo} + '
                              f'blitBytes {blit_bytes} != 40')
+        if flags != expect_flags:
+            raise ValueError(f'side descriptor {i}: flags {flags:#x} != '
+                             f'expected {expect_flags:#x}')
         if src not in names:
             raise ValueError(f'side descriptor {i}: src offset {src} has no '
                               f'named sub-image in bcdfxyz.SUB_IMAGES (slot 0x08)')
@@ -180,7 +199,42 @@ def read_side_descriptors(s1):
     return out
 
 
-def build_slots(front, side):
+def verify_mirror_pair(front, front_direct, side, side_direct):
+    """Cross-check the doc's "the two tables are the same records with
+    left/right source swapped and identical destinations" claim byte-exact,
+    against two *independently* raw-read tables (`front_direct`/`side_direct`
+    are read from their own file offsets, not derived from `front`/`side`).
+    Raises loudly on any deviation -- this is the gate that decides whether
+    the direct-branch tables are trustworthy enough to ship."""
+    # Front: record i's destination/geometry must match its direct-branch
+    # counterpart at the *same* index; only the name (source sub-image) may
+    # differ, and only by the left<->right swap within the same depth triple
+    # (index i%3==1, the centre, must be byte-identical).
+    for i, (d, dd) in enumerate(zip(front, front_direct)):
+        if (dd['destX'], dd['destY'], dd['w'], dd['h']) != (d['destX'], d['destY'], d['w'], d['h']):
+            raise ValueError(f'front-direct descriptor {i}: destination/geometry '
+                              f'disagrees with the flag==0 table (expected identical)')
+        sibling = i + 2 if i % 3 == 0 else (i - 2 if i % 3 == 2 else i)
+        expect_name = front[sibling]['name']
+        if dd['name'] != expect_name:
+            raise ValueError(f'front-direct descriptor {i} ({dd["name"]}): expected '
+                              f'left/right-swapped name {expect_name!r} (flag==0 record '
+                              f'{sibling}), per data-structure.md\'s confirmed swap')
+    # Side: record i's destination/geometry must match its direct-branch
+    # counterpart at the same index; the name must equal the flag==0 table's
+    # L/R sibling within the same depth (index i^1).
+    for i, (d, dd) in enumerate(zip(side, side_direct)):
+        if (dd['destX'], dd['destY'], dd['w'], dd['h']) != (d['destX'], d['destY'], d['w'], d['h']):
+            raise ValueError(f'side-direct descriptor {i}: destination/geometry '
+                              f'disagrees with the flag==0 table (expected identical)')
+        expect_name = side[i ^ 1]['name']
+        if dd['name'] != expect_name:
+            raise ValueError(f'side-direct descriptor {i} ({dd["name"]}): expected '
+                              f'left/right-swapped name {expect_name!r} (flag==0 record '
+                              f'{i ^ 1}), per data-structure.md\'s confirmed swap')
+
+
+def build_slots(front, side, front_direct=None, side_direct=None):
     slots = {}
     for (depth, lateral), d in zip(FRONT_SLOTS, front):
         key = f'front:{lateral}:{depth}'
@@ -204,6 +258,36 @@ def build_slots(front, side):
                       f'(side-wall descriptor {d["index"]}), re-read this pass -- '
                       f'atlas frame name "{d["name"]}" predates the left/right correction',
         }]}
+
+    # `blackcrypt-darkness-mirror-toggle` -- the `$48F != 0` (direct-draw)
+    # branch of the same two tables, keyed with a `-direct` suffix so
+    # `buildViewList` (which only ever looks up plain `front:`/`side:` keys)
+    # never sees them; `BlackCryptView` (tools/walker/games.ts) is the only
+    # consumer, swapping a `DrawItem`'s `frame`/`mirrorX` post-hoc when the
+    # session-tracked toggle is set. Not wired into the normal dispatch --
+    # see docs/blackcrypt/TODO.md.
+    if front_direct is not None:
+        for (depth, lateral), d in zip(FRONT_SLOTS, front_direct):
+            key = f'front-direct:{lateral}:{depth}'
+            slots[key] = {'draws': [{
+                'bank': BANK_ID, 'frame': d['name'], 'destX': d['destX'], 'destY': d['destY'],
+                'blend': 'replace',
+                'origin': f'bcdft S_1+{FRONT_DIRECT_TABLE_OFFSET + d["index"] * FRONT_RECORD_BYTES:#x} '
+                          f'(front-wall descriptor {d["index"]}, the $48F!=0 branch, drawn '
+                          f'direct/unmirrored per +0x2300A -- blackcrypt-darkness-mirror-toggle)',
+            }]}
+    if side_direct is not None:
+        for i, d in enumerate(side_direct):
+            depth = i // 2
+            side_label = 'L' if i % 2 == 0 else 'R'
+            key = f'side-direct:{side_label}:{depth}'
+            slots[key] = {'draws': [{
+                'bank': BANK_ID, 'frame': d['name'], 'destX': d['destX'], 'destY': d['destY'],
+                'mirrorX': True, 'blend': 'mask',
+                'origin': f'bcdft S_1+{SIDE_DIRECT_TABLE_OFFSET + d["index"] * SIDE_RECORD_BYTES:#x} '
+                          f'(side-wall descriptor {d["index"]}, the $48F!=0 branch, BLTCON1 mirror '
+                          f'bit {SIDE_DIRECT_FLAGS:#x} set -- blackcrypt-darkness-mirror-toggle)',
+            }]}
     return slots
 
 
@@ -246,7 +330,18 @@ def main():
     print(f'  read {len(front)}/9 front-wall descriptors, {len(side)}/8 side-wall '
           f'descriptors -- all self-validating invariants passed')
 
-    slots = build_slots(front, side)
+    # `blackcrypt-darkness-mirror-toggle` -- the $48F!=0 (direct-draw) branch
+    # of the same two tables, read independently from its own file offset
+    # and cross-checked against the doc's "left/right swapped, dest
+    # identical" claim before it's trusted enough to ship.
+    front_direct = read_front_descriptors(s1, FRONT_DIRECT_TABLE_OFFSET)
+    side_direct = read_side_descriptors(s1, SIDE_DIRECT_TABLE_OFFSET, SIDE_DIRECT_FLAGS)
+    verify_mirror_pair(front, front_direct, side, side_direct)
+    print(f'  read {len(front_direct)}/9 front-wall + {len(side_direct)}/8 side-wall '
+          f'$48F!=0-branch descriptors -- verified byte-exact left/right-swap of the '
+          f'$48F==0 branch (data-structure.md\'s "What the two tables actually differ in")')
+
+    slots = build_slots(front, side, front_direct, side_direct)
 
     print('  comparing against the file currently on disk:')
     agrees = compare_against_existing(slots, SLOTS_PATH)

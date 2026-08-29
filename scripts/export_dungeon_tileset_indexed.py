@@ -77,6 +77,18 @@ def main():
 
     s1, s2 = s1_path.read_bytes(), s2_path.read_bytes()
     ramps_by_tileset = bclib.tileset_ramps(s1, s2)
+    # Also export the water/flooded-square override ramp (accent ramp 4,
+    # `bclib.SQUARE_FLAG_RAMP` -- S_1+0x02D46's per-square re-tint on
+    # entering a bit-31 "water" square) for every tileset, even though no
+    # level's *default* ramp table ever selects it -- `tileset_ramps()`
+    # only reports ramps a level statically installs, so ramp 4 would
+    # otherwise never be written. Cheap (one more 64-entry JSON file per
+    # tileset) and needed so the walker can retint at render time instead
+    # of only at level load. See docs/blackcrypt/TODO.md
+    # "blackcrypt-underwater-rendering".
+    for name in ramps_by_tileset:
+        if bclib.SQUARE_FLAG_RAMP not in ramps_by_tileset[name]:
+            ramps_by_tileset[name] = sorted(ramps_by_tileset[name] + [bclib.SQUARE_FLAG_RAMP])
     pal_dir = bclib.asset_dir('palettes')
     tex_dir = bclib.asset_dir('textures')
     manifest_entries = []

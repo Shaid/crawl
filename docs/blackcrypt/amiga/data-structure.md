@@ -5290,6 +5290,30 @@ restores the level default. Level 3 never does this.
 > separate mirror-toggle mechanism is *not* part of this effect despite an
 > earlier hypothesis to the contrary.
 
+> **Wired into the walker (2026-08-29).** `tools/walker/games.ts`'s
+> `BlackCryptView.palette` getter is now a function of the current pose's
+> cell, not a fixed field set once at construction: it reads
+> `unit.planes.type[y*64+x]` on every access and returns the tileset's
+> accent-ramp-4 palette (`palettes/dungeon-<tileset>-ramp4.json`, newly
+> exported by `scripts/export_dungeon_tileset_indexed.py` — ramp 4 is never
+> any level's *default* ramp, so `bclib.tileset_ramps()`'s per-tileset set
+> never included it before this pass) whenever `type & 0x8` is set and the
+> level isn't 3, else the level's already-loaded default ramp.
+> `tools/walker/walker.ts`'s `loadBlackCrypt` fetches that ramp-4 file
+> alongside the tileset's normal ramp and passes it through as
+> `BlackCryptViewOptions.waterPalette` (only when `loadTilesetBank` reports
+> `rampSource === 'indexed'` — a `'baked'` fallback bank has its own ad-hoc
+> local palette a raw-EHB-index ramp file can't be swapped into). Verified
+> against real corpus data, not a synthetic fixture
+> (`tools/walker/__tests__/games-blackcrypt-water.test.ts`, 6/6 passing): a
+> real water square on map 9 at `(33,1)` (`type=8`) renders under ramp 4,
+> its real adjacent non-water neighbour `(32,1)` (`type=1`) renders under
+> the level's default ramp 2, the palette follows the party across a real
+> `setPose` step onto/off the water square, and map 3's own real water
+> square at `(36,3)` (`type=8`) stays on its default ramp 0 — the level-3
+> exemption holds even standing on a real water tile, not just a
+> hypothetical one.
+
 ##### Selector 3 — `bcdfs` action opcodes `0x1E` / `0x1F` (confirmed)
 
 The action-opcode dispatcher is at **S_1 `+0x0CEA8`** — `CMPI.W #$24,D0 /
@@ -6475,6 +6499,71 @@ the dungeon, maps 2–5 only) remain rendered in the same (default, unmirrored
 relative-to-them) state a walker would show for any other square — a small,
 now-precisely-scoped, pre-existing gap, not a new regression.
 
+> **Walk-path component implemented (2026-08-29) — narrowed, per this row's
+> own explicit scoping above.** The *ordinary walk path*'s 1-bit toggle
+> (seed `false`, XOR on bit-29/`0x2` type-nibble diff between the square
+> left and the square entered) is now session-tracked state in
+> `tools/walker/games.ts`'s `BlackCryptView` (`mirrorToggle`, a private
+> field seeded `false` at construction — same "session state, not on-disk
+> data" pattern already used for the door-open-state overlay), updated in
+> `update()` by comparing `unit.planes.type` at the pose before and after
+> each `Walker.update()` call whenever the `(x,y)` cell actually changed
+> (a facing-only turn or a `setPose` jump — including the URL-param
+> entrance pose — never touches it, matching this row's scoping: only the
+> walk path is modelled, not the 9 non-walk trigger sites). The other 9
+> sites remain **not implemented**, unchanged from the conclusion above.
+>
+> **The direct (`$48F != 0`) branch of both blit tables is now also
+> exported and wired at render time**, closing the prerequisite the TODO
+> row asked about ("is the direct table exported anywhere?" — no, before
+> this pass). `scripts/export_dungeon_slots.py` now independently reads
+> `+0x22CE2` (front, 9×20B) and `+0x22F2A` (side, 8×28B) — the same record
+> counts and byte layouts as the already-confirmed `+0x22D96`/`+0x22E4A`
+> tables, at offsets exactly one full table's size before/after them
+> (`0x22CE2 + 9*20 == 0x22D96`; `0x22E4A + 8*28 == 0x22F2A`, itself
+> corroborating "two contiguous, same-shaped tables" independent of the
+> disassembly) — and cross-checks the read bytes against this doc's "What
+> the two tables actually differ in" claim (`verify_mirror_pair`): for
+> every record, destination/geometry must be byte-identical to the
+> flag-`==0` table, and the frame name must equal the flag-`==0` table's
+> same-depth left/right sibling (front) or L/R sibling (side, with the
+> `0x0400` BLTCON1 mirror bit — checked exactly, not just presence — set
+> on every side-direct record and clear on every side-mirrored one). All
+> 9 front + 8 side records passed with zero deviation; the script aborts
+> non-zero on any mismatch rather than shipping a guessed transcription.
+> The verified records are written to `slots.json` under new
+> `front-direct:<lateral>:<depth>` / `side-direct:<label>:<depth>` keys —
+> a pure superset `buildViewList` never looks up (it only ever builds
+> plain `front:`/`side:` keys), so this cannot regress the existing
+> dispatch. `BlackCryptView`'s `items` getter builds a
+> `Map<string, {frame, mirrorX}>` from those keys once at construction and,
+> when `mirrorToggle` is true, post-processes each resolved `DrawItem`
+> (`kind`/`depth`/`lateral`/`side` already carry enough provenance to
+> rebuild the same key) to swap in the direct-branch `frame`/`mirrorX` —
+> entirely inside `tools/walker/games.ts`, with **no change** to
+> `@seer-project/dungeon`'s `buildViewList`/`compositeDrawList`.
+>
+> Verified against real corpus data
+> (`tools/walker/__tests__/games-blackcrypt-mirror-toggle.test.ts`, 6/6
+> passing): map 3 has a real darkness square at `(41,3)` (`type=2`) and a
+> real adjacent non-darkness square at `(40,3)` (`type=1`); a noclip'd
+> `update()` step across that real pair flips `mirrorToggleActive` true,
+> stepping back flips it false, a facing-only turn (no cell change) never
+> flips it, `setPose` (a non-walk jump) never touches it, and once toggled
+> a real resolved front-wall `DrawItem` at the pose's own `(lateral:-1,
+> depth:0)` slot carries exactly the `front-direct:-1:0` frame/`mirrorX`
+> pair from the real, freshly-exported `slots.json` — not a hand-computed
+> expectation.
+>
+> **Still open, unchanged in scope from this row's own conclusion above:**
+> the 9 non-walk trigger sites (teleport/spell/command), which need
+> action-chain/spell-command schema modelling this project doesn't have
+> yet. The 100 bit-29 squares therefore still render in the *default*
+> mirror state for any approach other than the ordinary walk path (e.g. a
+> `setPose` jump straight onto one, or the map's data-derived entrance
+> tile) — only movement that actually crosses the boundary on foot now
+> renders correctly.
+
 ##### Underwater/flooded-level rendering — Selector 2 and ViewpointChanged unified, and disentangled
 
 The user asked directly how flooded later levels are rendered. Both bit-31
@@ -6548,6 +6637,10 @@ polarity` toggle-state-machine work at all for this purpose. That toggle
 remains open for its own (still-not-fully-understood) darkness-zone
 purpose, unrelated to this question.
 
+> **Wired into the walker (2026-08-29).** See the "Wired into the walker"
+> note under "Selector 2 — per-square override" above for the
+> implementation (`BlackCryptView.palette`) and verification evidence.
+
 ##### What the two tables actually differ in — confirmed byte-exact
 
 `+0x2304A` is definitively the horizontal-mirror blitter: its inner loop
@@ -6599,6 +6692,16 @@ art, not a match. The flag genuinely selects different pixels.
 > pre-fix golden shows exactly **9,827 of 64,000 bytes** differ, entirely
 > within the front-wall region (`y ∈ [6,126]`) — ceiling, floor and side
 > walls are byte-identical, confirming the fix touched only what it should.
+
+> **The other (flag ≠ 0) branch is now also exported (2026-08-29,
+> `blackcrypt-darkness-mirror-toggle`).** `export_dungeon_slots.py` reads
+> `+0x22CE2` (front) and `+0x22F2A` (side) independently and cross-checks
+> them against exactly this section's claim (destinations/geometry
+> identical, names left/right-swapped, side's mirror bit `0x0400` set) —
+> see "`walker-mirror-flag-polarity` (docs/blackcrypt/TODO.md) — resolved
+> this pass" above for the verification detail and the `BlackCryptView`
+> wiring that consumes the new `front-direct:`/`side-direct:` `slots.json`
+> keys.
 
 #### `DrawSquareRecord` (S_1 `+0x220F0`) — the per-square corridor renderer, confirmed
 

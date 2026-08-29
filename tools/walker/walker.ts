@@ -123,6 +123,16 @@ async function loadBank(assetBase: string, atlasPath: string, imagePath: string)
 // basePalette). Confirmed: bcdfx -> [0,3], bcdfy -> [1], bcdfz -> [2].
 const TILESET_PRIMARY_RAMP: Record<string, number> = { bcdfx: 0, bcdfy: 1, bcdfz: 2 };
 
+// Accent ramp 4 ("cold blue-grey") -- the underwater/flooded-square re-tint
+// `S_1 +0x02D46` forces on entering a "water" (type-nibble bit 3) square,
+// restoring the level's default ramp on leaving; level 3 is exempt. Not any
+// level's *static* default ramp, so `bclib.tileset_ramps()`'s per-tileset set
+// doesn't include it on its own -- `export_dungeon_tileset_indexed.py` now
+// always additionally exports it per tileset. See
+// docs/blackcrypt/amiga/data-structure.md "Selector 2 -- per-square
+// override" and "Underwater/flooded-level rendering".
+const WATER_ACCENT_RAMP = 4;
+
 async function loadTilesetBank(
   assetBase: string,
   bankRef: SlotTableFile['banks'][number],
@@ -203,12 +213,22 @@ async function loadBlackCrypt(assetBase: string, unitId: number, startPose: Pose
   const ramp = paletteRampForUnit(unit);
   const bankRef = slots.banks[0];
   if (!bankRef) throw new Error('slots.json has no piece banks');
-  const { bank, palette: ramPalette, basePalette } = await loadTilesetBank(assetBase, bankRef, unit.tileset, ramp);
+  const { bank, palette: ramPalette, basePalette, rampSource } = await loadTilesetBank(assetBase, bankRef, unit.tileset, ramp);
   const banks: PieceBankLookup = { [bankRef.id]: bank };
   // Align every other bank's indices with the tileset's EHB index space so
   // the single-palette present renders prop art with its real colours
   // (the fromRGBA local-palette mismatch that made items/walls look wrong).
   const reindexed = (b: PieceBank) => (basePalette ? PieceBank.reindex(b, basePalette) : b);
+
+  // Underwater/flooded-square re-tint (see WATER_ACCENT_RAMP above) -- only
+  // meaningful when the bank is rendering off the tileset's raw EHB index
+  // space (`rampSource === 'indexed'`); a 'baked' fallback bank has its own
+  // ad-hoc local palette that a raw-index ramp file can't be swapped into.
+  const waterPaletteFile =
+    unit.tileset && rampSource === 'indexed'
+      ? await tryFetchJSON<RampPaletteFile>(`${assetBase}/${rampPalettePath(unit.tileset, WATER_ACCENT_RAMP)}`)
+      : null;
+  const waterPalette = waterPaletteFile ? parseRampPalette(waterPaletteFile) : undefined;
 
   // M4 — real animated torches (fire-animation.json's 15-frame flame cycle).
   const fireData = await tryFetchJSON<{
@@ -247,6 +267,7 @@ async function loadBlackCrypt(assetBase: string, unitId: number, startPose: Pose
     bindings,
     banks,
     palette: ramPalette,
+    waterPalette,
     automapBank,
     startPose: startPose ? { ...startPose, level: unit.id } : bcEntrancePose(unit),
     onInteract: (msg) => setStatus(msg),
