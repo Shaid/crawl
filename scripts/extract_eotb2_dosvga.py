@@ -14,9 +14,14 @@ level-grid decode — all byte-identical formats to EOB1's DOS files.
 
 Writes:
   - palettes/*.json       every standalone .PAL (19 files, 768 B/256-colour)
+                          plus the 8 alternate EGA-render-mode .PAL-shaped
+                          .EGA files, suffixed `_ega` to avoid colliding
+                          with the same-stem .PAL output
   - screens/*.png (+json)  every .CPS as a 1-frame atlas
   - textures/*_vcn.png     the 6 wall-set .VCN tilesets
-  - data/*.json            MAZ level grids (15 levels)
+  - data/*.json            MAZ level grids (15 levels), ITEM.DAT,
+                          ITEMTYPE.DAT, TEXT.DAT, per-file .DCR and .DEC
+                          decoration tables
 """
 from __future__ import annotations
 
@@ -33,6 +38,10 @@ from kyralib.format80 import decompress_bitmap
 from kyralib.palette import vga_palette_to_rgb, palette_to_rgba
 from kyralib.vcn import parse_vcn, decode_all_tiles
 from kyralib.maze import parse_maz
+from kyralib.items import parse_item_dat, parse_itemtype_dat, item_dat_to_json, itemtype_dat_to_json
+from kyralib.decorations import parse_dec, dec_to_json
+from kyralib.dcr import parse_dcr, dcr_to_json
+from kyralib.textdat import parse_text_dat
 
 GAME = 'eotb2'
 PLATFORM = 'dosvga'
@@ -154,6 +163,74 @@ def extract_mazes(base: Path):
     return written
 
 
+def extract_ega_palettes(base: Path):
+    """The 8 `.EGA` files in this corpus are NOT graphics (unlike EOB1) —
+    they are 768-byte alternate VGA-style palettes selected instead of the
+    matching `.PAL` when the game's EGA render mode is active. Decoded with
+    the same reader as `.PAL`, written under a `_ega` suffix so they don't
+    collide with the same-stem `.PAL` output. See data-structure.md §
+    ".EGA files"."""
+    written = 0
+    for path in sorted(base.glob('*.EGA')):
+        chunk = path.read_bytes()
+        if len(chunk) != 768:
+            continue
+        rgb = vga_palette_to_rgb(chunk)
+        colors = [{'r': int(r), 'g': int(g), 'b': int(b)} for r, g, b in rgb]
+        write_json(asset_dir('palettes', GAME, PLATFORM) / f'{path.stem.lower()}_ega.json',
+                   {'colors': colors}, pretty=True)
+        written += 1
+    return written
+
+
+def extract_item_tables(base: Path):
+    written = 0
+    item_path = base / 'ITEM.DAT'
+    if item_path.exists():
+        item_dat = parse_item_dat(item_path.read_bytes())
+        write_json(asset_dir('data', GAME, PLATFORM) / 'item.json',
+                   item_dat_to_json(item_dat), pretty=True)
+        written += 1
+    itemtype_path = base / 'ITEMTYPE.DAT'
+    if itemtype_path.exists():
+        itemtypes = parse_itemtype_dat(itemtype_path.read_bytes())
+        write_json(asset_dir('data', GAME, PLATFORM) / 'itemtype.json',
+                   itemtype_dat_to_json(itemtypes), pretty=True)
+        written += 1
+    return written
+
+
+def extract_text_dat(base: Path):
+    written = 0
+    text_path = base / 'TEXT.DAT'
+    if text_path.exists():
+        strings = parse_text_dat(text_path.read_bytes())
+        write_json(asset_dir('data', GAME, PLATFORM) / 'text.json',
+                   {'strings': strings}, pretty=True)
+        written = 1
+    return written
+
+
+def extract_dcr_files(base: Path):
+    written = 0
+    for path in sorted(base.glob('*.DCR')):
+        dcr = parse_dcr(path.read_bytes())
+        write_json(asset_dir('data', GAME, PLATFORM) / f'{path.stem.lower()}_dcr.json',
+                   dcr_to_json(dcr), pretty=True)
+        written += 1
+    return written
+
+
+def extract_dec_files(base: Path):
+    written = 0
+    for path in sorted(base.glob('*.DEC')):
+        dec = parse_dec(path.read_bytes())
+        write_json(asset_dir('data', GAME, PLATFORM) / f'{path.stem.lower()}_dec.json',
+                   dec_to_json(dec), pretty=True)
+        written += 1
+    return written
+
+
 def main():
     base = data_dir(GAME, PLATFORM)
 
@@ -170,6 +247,21 @@ def main():
 
     n_maz = extract_mazes(base)
     print(f'MAZ level grids: {n_maz}')
+
+    n_ega = extract_ega_palettes(base)
+    print(f'EGA alternate palettes: {n_ega}')
+
+    n_items = extract_item_tables(base)
+    print(f'Item tables (ITEM.DAT/ITEMTYPE.DAT): {n_items}')
+
+    n_text = extract_text_dat(base)
+    print(f'TEXT.DAT: {n_text}')
+
+    n_dcr = extract_dcr_files(base)
+    print(f'DCR monster-decoration files: {n_dcr}')
+
+    n_dec = extract_dec_files(base)
+    print(f'DEC level-decoration files: {n_dec}')
 
 
 if __name__ == '__main__':

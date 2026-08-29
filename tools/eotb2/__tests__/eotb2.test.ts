@@ -38,6 +38,19 @@ describe('decodeInf', () => {
   it('throws on a truncated/corrupt buffer rather than silently misreading', () => {
     expect(() => decodeInf(new Uint8Array(5))).toThrow();
   });
+
+  it('decodes the optional second wall-set stem ("azure") on exactly LEVEL10-14, and only those', () => {
+    const expectSecond = new Set([10, 11, 12, 13, 14]);
+    for (let n = 1; n <= 16; n++) {
+      const data = readFileSync(resolve(DATA_DIR, `LEVEL${n}.INF`));
+      const { secondWallSetStem } = decodeInf(new Uint8Array(data));
+      if (expectSecond.has(n)) {
+        expect(secondWallSetStem?.toLowerCase()).toBe('azure');
+      } else {
+        expect(secondWallSetStem).toBeUndefined();
+      }
+    }
+  });
 });
 
 describe('decodePal', () => {

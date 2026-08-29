@@ -118,19 +118,104 @@ screens** — same trace as EOB1 (`docs/eotb/dosvga/data-structure.md` §
 wall-set stem to `<stem>.PAL` (or `<stem>.EGA` in EGA render mode — see
 below), exactly this extractor's heuristic, and
 `EoBEngine::setLevelPalettes` is a SegaCD-only no-op (`engine/eob.cpp:
-868-877`) so there's no further per-level patch. **EOB2-specific
-addition:** the INF format has a *second*, optional wall-set-name field
-(`scene_eob.cpp:191-194`: `if (*pos++ != 0xFF && GI_EOB2) { tmpStr =
-format(pattern, pos); pos += 13; }`) — some EOB2 levels can name a second
-palette this way (likely for levels that mix two wall themes, or a
-special-effect overlay palette); not individually decoded/verified against
-real INF bytes this pass, but the mechanism itself (second optional
-12-byte-cstring wall-stem field right after the first) is confirmed from
-source and slots directly into the already-decoded EOB1 INF record layout
-(`docs/eotb/dosvga/data-structure.md` § "INF — Level configuration").
-Monster/UI CPS files without a matching `.PAL` face the same "likely wrong,
-should use the owning level's active palette rather than a fixed fallback"
-caveat noted for EOB1.
+868-877`) so there's no further per-level patch.
+
+**EOB2-specific second wall-set field — now fully decoded and verified
+(2026-08-29), closing this item.** The INF format has a *second*, optional
+wall-set-name field (`scene_eob.cpp`: `if (*pos++ != 0xFF && GI_EOB2) {
+tmpStr = format(pattern, pos); pos += 13; }`) — a real 13-byte cstring,
+same width as the (corrected — see "INF — Level configuration (EOB2)"
+below) first wall-set-stem field, gated by a flag byte immediately after
+the first stem. Decoded against all 16 real `LEVELn.INF` files via
+`tools/eotb2/decode-inf.ts`'s `secondWallSetStem`: the flag is `0xFF`
+(absent) on 11 levels, and exactly `LEVEL10`-`LEVEL14` (5 levels) carry a
+present second field, decoding to `"azure"` in every one of those 5 cases
+— consistent with those levels using MEZZ as their primary 3D wall
+texture set while naming AZURE as a second, presumably UI/overlay or
+scripted-encounter palette (AZURE itself has no `.VCN`/`.VMP`, i.e. is
+never a *navigable* wall set — see "VCN / VMP" above — so this can only be
+a palette reference, not a second tile texture). What in-game code
+actually *consumes* `tmpStr` after this second `loadPalette`-pattern
+format call is not traced further (ScummVM's `initLevelData` builds the
+string and moves on; no second `_screen->loadPalette()` call sits right
+next to it in the function body) — the field's presence/content is now
+ground truth, its runtime effect remains open. Monster/UI CPS files
+without a matching `.PAL` face the same "likely wrong, should use the
+owning level's active palette rather than a fixed fallback" caveat noted
+for EOB1.
+
+---
+
+## INF — Level configuration (EOB2 header preamble, root-caused 2026-08-29)
+
+**Superseding the previous "offsets don't match" open item.** EOB1's
+documented fixed offsets (`docs/eotb/dosvga/data-structure.md` § "INF" →
+"Decompressed buffer layout (EOB1)": `mazStem` at 0x002, `wallSetStem` at
+0x00E, both 12-byte cstrings) were never wrong for EOB1 — they just don't
+transfer unmodified to EOB2. **EOB2 genuinely has a different, longer
+header preamble and wider stem fields**, confirmed straight from
+ScummVM's `EoBCoreEngine::initLevelData` (`engine/scene_eob.cpp`, fetched
+fresh this pass):
+
+```cpp
+const uint8 *data = _screen->getCPagePtr(5) + 2;   // skip trailerOffset (u16 @ 0x000)
+const uint8 *pos = data;                            // = buffer + 2
+int slen = (_flags.gameID == GI_EOB1) ? 12 : 13;     // <-- the key difference: EOB2's stems are 13 bytes
+// (sub-level chaining, skipped for sub == 0 — the only case documented here)
+pos += 2;                                            // buffer + 4
+if (*pos++ == 0xEC || _flags.gameID == GI_EOB1) {     // tag byte @ 0x004; *pos++ always executes (evaluation order)
+    if (_flags.gameID == GI_EOB1) pos -= 3;           // EOB1 only: undoes the +2/+1 above -> mazStem @ buffer+2
+    loadBlockProperties(pos);                         // EOB2: pos = buffer+5 here -> mazStem @ 0x005
+    pos += slen;                                      // -> wallSetStem @ 0x005+13 = 0x012 (EOB2 only)
+    ...
+    pos += slen;                                      // -> second-field flag byte @ 0x012+13 = 0x01F (EOB2 only)
+    if (*pos++ != 0xFF && _flags.gameID == GI_EOB2) {  // optional second wall-set-name field
+        tmpStr = format(paletteFilePattern, pos);      // second stem @ 0x020
+        pos += 13;
+    }
+```
+
+**EOB2's real decompressed-buffer offsets** (all absolute, sub == 0):
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| 0x000 | 2 | `trailerOffset` (u16 LE) | same field/role as EOB1 |
+| 0x002 | 2 | sub-level chain pointer (u16 LE) | only meaningful when `sub > 0`; unused for the single-sub-level case this project decodes |
+| 0x004 | 1 | tag byte | must be `0xEC` for the block-properties/VMP/palette load to happen at all — confirmed present (`0xEC`) in **all 16** real `LEVELn.INF` files |
+| 0x005 | 13 | `mazStem` (cstring, NUL-padded) | **13 bytes, not EOB1's 12** — e.g. `"level1.maz\0\0\0"` |
+| 0x012 | 13 | `wallSetStem` (cstring, NUL-padded) | 13 bytes — e.g. `"dung\0\0\0\0\0\0\0\0\0"` |
+| 0x01F | 1 | `secondWallSetFlag` | `0xFF` = no second field; else a second wall-set stem follows |
+| 0x020 | 13 | `secondWallSetStem` (cstring, NUL-padded, only when flag != 0xFF) | see "Palette resolution" above for what's decoded from it |
+
+**Verified byte-exact against all 16 real `LEVELn.INF` files** (see
+`tools/eotb2/decode-inf.ts` and its test suite): tag byte is `0xEC` in
+every file; `mazStem`/`wallSetStem` decode to the exact same values the
+previous token-scan workaround already found (including both documented
+maze-reuse cases, `LEVEL16→level15.maz` and `LEVEL14→level12.maz`); the
+optional second field is present (flag `0x01`) in exactly `LEVEL10`-
+`LEVEL14` and decodes to `"azure"` in all 5 — **this is the same discovery
+as `eotb2-dos-cps-palette-second-field`, confirmed from two angles at
+once as the task brief predicted.**
+
+**Root cause, stated plainly:** it's a genuine EOB2-specific header
+preamble, not a doc error — `slen` (the cstring field width) is
+game-gated in ScummVM's own source (`12` for EOB1, `13` for EOB2), and
+EOB2 additionally reads one extra tag byte plus a 2-byte sub-level-chain
+field before the first stem even starts, none of which EOB1's code path
+retains (the `pos -= 3` line for `GI_EOB1` specifically discards them).
+Both games' documented offsets are now correct **for their own game** —
+they were never meant to be shared, and this doc's earlier framing (which
+called EOB2's numbers a deviation from "the" INF layout) is corrected
+here to "EOB1 and EOB2 have different, both-now-fully-decoded INF header
+preambles."
+
+**`tools/eotb2/decode-inf.ts` now uses this fixed-offset struct as its
+primary decoder** (regression-verified against all 16 files, plus a new
+test locking in the second-wall-set-stem finding), falling back to the
+previous token-scan only if a future/malformed file fails the fixed-offset
+sanity checks (tag byte, cstring printability, known wall-set name).
+**Closes `eotb2-dos-inf-header-offsets-dont-match` and
+`eotb2-dos-cps-palette-second-field`.**
 
 ---
 
@@ -300,9 +385,11 @@ per-game divergence:
   (`scripts/kyralib/palette.py`).
 
 **Closes `eotb2-dos-ega-files`** — reclassified from "undecoded graphics"
-to "alternate palette set, decodes with existing code, not yet wired into
-the extractor as a distinct palette-mode option" (a pipeline task, not a
-format-unknown task).
+to "alternate palette set, decodes with existing code". **Wired into the
+extractor (2026-08-29):** all 8 `.EGA` files are now extracted as
+`palettes/<stem>_ega.json` (suffixed to avoid colliding with the
+same-stem `.PAL` output — see `extract_ega_palettes` in
+`scripts/extract_eotb2_dosvga.py`).
 
 ---
 
@@ -336,8 +423,10 @@ Every one of the 122 strings decodes to fully legible EOB2 NPC dialogue
 text — `"Oh great heroes, thank you for your timely rescue..."`,
 `"Calandra eagerly joins your party."`, `"You befriended my brothers. \rBut
 Dran closed the path..."`, etc. **Closes `eotb2-dos-item-text-dat`** (all
-three files now byte-exact confirmed); not yet wired into the extractor
-pipeline as JSON output.
+three files now byte-exact confirmed). **Wired into the extractor
+(2026-08-29):** `data/item.json` (`{items, names}`), `data/itemtype.json`
+(`{types}`), `data/text.json` (`{strings}`) — new shared modules
+`scripts/kyralib/items.py` and `scripts/kyralib/textdat.py`.
 
 ---
 
@@ -346,16 +435,31 @@ pipeline as JSON output.
 | Item | Notes |
 |------|-------|
 | `.SND` / `.ADL` (10 each) | Audio (digitized + AdLib music) — out of scope for this pass. |
-| Per-CPS palette selection for the 110 `PALETTE0.PAL`-fallback screens | Mechanism confirmed (see "Palette resolution" above — same wall-set-stem match as EOB1, plus an optional second wall-set field); which specific non-wall-set CPS files (monster/UI) actually need a level-specific palette vs. the game-wide fallback not individually traced. |
-| Extractor pipeline wiring for `.DCR`/`.DEC`/`.EGA`(as palette)/`ITEM.DAT`/`ITEMTYPE.DAT`/`TEXT.DAT` | All 6 formats are now format-confirmed (byte-exact where checked) but not yet emitted as `public/assets/eotb2/dosvga/data/*.json` by `scripts/extract_eotb2_dosvga.py` |
+| Per-CPS palette selection for the 110 `PALETTE0.PAL`-fallback screens | Mechanism confirmed (see "Palette resolution" above — same wall-set-stem match as EOB1, plus the now-fully-decoded second wall-set field); which specific non-wall-set CPS files (monster/UI) actually need a level-specific palette vs. the game-wide fallback not individually traced. |
+| Second-wall-set-field runtime consumer | The field itself is fully decoded (see "INF — Level configuration (EOB2)" above); what in-game code does with the resulting `tmpStr` beyond the one `format()` call ScummVM's `initLevelData` performs is not traced further. |
+
+**Extractor pipeline wiring is now complete (2026-08-29)** — all 6
+previously-pending formats (`.DCR`, `.DEC`, `.EGA`-as-palette, `ITEM.DAT`,
+`ITEMTYPE.DAT`, `TEXT.DAT`) are emitted as JSON by
+`scripts/extract_eotb2_dosvga.py`, each verified against this corpus's own
+files (record counts, zero residue, and for `.DCR`/`.DEC` byte-exact
+`setCount`/`decCount`/`rectCount` invariants matching the tables above).
+New shared decode modules: `scripts/kyralib/items.py` (`ITEM.DAT`/
+`ITEMTYPE.DAT`, shared layout with EOB1 — not yet wired into EOB1's own
+extractor, out of scope for this pass), `scripts/kyralib/decorations.py`
+(`.DEC`, shared DOS/Amiga layout), `scripts/kyralib/dcr.py` (`.DCR`,
+EOB2-only), `scripts/kyralib/textdat.py` (`TEXT.DAT`, EOB2-only). **Closes
+`eotb2-pipeline-wiring`.**
 
 ---
 
 ## Files
 
 - **Library:** `scripts/kyralib/` (shared with EOB1; `format80.py` gained
-  `decode_frame3` this session for EOB2's one RLE-compressed CPS)
+  `decode_frame3` this session for EOB2's one RLE-compressed CPS;
+  `items.py`/`decorations.py`/`dcr.py`/`textdat.py` added this pass)
 - **Extractor:** `scripts/extract_eotb2_dosvga.py`
 - **Assets:** `public/assets/eotb2/dosvga/{palettes,screens,textures,data}/`
-  — 19 palettes, 116 CPS screens, 5 VCN wall texture atlases, 15 MAZ level
-  grids
+  — 19 palettes + 8 `_ega` alternates, 116 CPS screens, 5 VCN wall texture
+  atlases, 15 MAZ level grids, `item.json`/`itemtype.json`/`text.json`, 9
+  `*_dcr.json`, 6 `*_dec.json`

@@ -11,10 +11,45 @@ task brief. An Amiga EOB2 doc/extractor is future work, not yet started.
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| eotb2-pipeline-wiring | open | 6 formats (`.DCR`, `.DEC`, `.EGA`-as-palette, `ITEM.DAT`, `ITEMTYPE.DAT`, `TEXT.DAT`) are now fully format-confirmed (byte-exact, zero residue) but not yet emitted as JSON by `scripts/extract_eotb2_dosvga.py` | `dosvga/data-structure.md` §§ ".DCR", ".DEC", ".EGA files", "ITEM.DAT / ITEMTYPE.DAT / TEXT.DAT" | 2026-08-02 game-re |
-| eotb2-dos-cps-palette-second-field | open | EOB2's INF format has an optional *second* wall-set-name field (for a second palette) that's confirmed to exist from source but not decoded/verified against real INF bytes, and per-file (non-wall-set) palette selection for the 110 `PALETTE0.PAL`-fallback CPS screens isn't individually traced | `dosvga/data-structure.md` § "Palette resolution (per-CPS)" → "Confirmed mechanism" | 2026-08-02 game-re |
 | eotb2-amiga-not-started | deferred:out-of-scope | `data/eotb2/amiga/` (incl. Manual/Maps/Solution reference material) not yet reverse-engineered — DOS/VGA was this session's priority | (no doc yet) | 2026-08-02 game-re |
-| eotb2-dos-inf-header-offsets-dont-match | open | **A real playable EOB2 (DOS/VGA) first-person walker is shipped** (`tools/eotb2/`, wired into the shared browser walker as game `eotb2`) — see the "EOB2 (DOS/VGA) walker" closed-items block below for what it confirmed, including that the renderer-family question this game was untested for is now answered (slot-table family refuted, same as EOB1). **Left open by this session**: `docs/eotb/dosvga/data-structure.md` § "INF" → "Decompressed buffer layout"'s fixed byte offsets (`mazStem` at 0x002, `wallSetStem` at 0x00E) do **not** reproduce against any of EOB2's 16 real `LEVELn.INF` files once LCW-decompressed — the real `"levelN.maz"` string starts 3 bytes later (0x005) and `wallSetStem` doesn't follow at a clean +12 stride either. The walker works around this with a token scan (`tools/eotb2/decode-inf.ts`) rather than trusting the offsets, verified against all 16 files including both documented maze-reuse cases. Root cause not chased down (genuinely different EOB2 header preamble vs. a copy-paste offset error in the doc — unknown). **Bonus finding, also unconfirmed further**: the scan incidentally shows the string `"azure"` appearing in `LEVEL10-13.INF`'s scanned window *after* their real (`mezz`) wall-set name — plausibly the EOB2-specific optional *second* wall-set-name field `eotb2-dos-cps-palette-second-field` (below) already flags as unverified; worth checking together if either is picked up again | `tools/eotb2/decode-inf.ts` module doc | 2026-08-16 game-re |
+| eotb2-inf-second-wallset-runtime-consumer | open | The EOB2 INF second wall-set-name field is now fully decoded (13-byte cstring, present on LEVEL10-14, always `"azure"`) — what in-game code actually consumes the resulting palette string beyond the one `format()` call in `initLevelData` is not traced | `dosvga/data-structure.md` § "Palette resolution (per-CPS)" → second-field paragraph | 2026-08-29 game-re |
+
+## Closed this session (2026-08-29, ScummVM source + byte-exact verification against all 16 LEVELn.INF)
+
+- **`eotb2-pipeline-wiring`** — wired all 6 previously-format-confirmed
+  formats (`.DCR`, `.DEC`, `.EGA`-as-palette, `ITEM.DAT`, `ITEMTYPE.DAT`,
+  `TEXT.DAT`) into `scripts/extract_eotb2_dosvga.py`, backed by new shared
+  decode modules `scripts/kyralib/{items,decorations,dcr,textdat}.py`.
+  Verified: 434/123 items+names, 64 item types, 122 dialogue strings, 9/9
+  `.DCR` and 6/6 `.DEC` files — all matching the doc's own already-
+  published invariants exactly, zero residue. See `dosvga/data-structure.md`
+  § "ITEM.DAT / ITEMTYPE.DAT / TEXT.DAT" and § ".EGA files".
+- **`eotb2-dos-inf-header-offsets-dont-match`** and
+  **`eotb2-dos-cps-palette-second-field`** — root-caused together, exactly
+  as suspected they'd be the same discovery. Fresh-fetched
+  `engines/kyra/engine/scene_eob.cpp`'s `EoBCoreEngine::initLevelData`
+  shows EOB2 genuinely uses a different, longer INF header preamble than
+  EOB1 (a `slen` field width of 13 bytes vs. EOB1's 12, plus a 3-byte
+  tag/sub-chain preamble EOB1's code path discards): real EOB2 offsets are
+  `mazStem`@0x005 (13B), `wallSetStem`@0x012 (13B), an optional
+  `secondWallSetStem`@0x020 (13B, gated by a flag byte @0x01F). Verified
+  byte-exact against **all 16** real `LEVELn.INF` files: tag byte `0xEC`
+  in all 16, `mazStem`/`wallSetStem` reproduce the previously-shipped
+  token-scan output exactly, and the second field is present (decoding to
+  `"azure"`) on exactly `LEVEL10`-`LEVEL14` and absent on all other 11 —
+  the "azure" bonus finding from the prior session was indeed this same
+  field. `tools/eotb2/decode-inf.ts` now uses the real fixed-offset struct
+  as its primary decoder (token scan kept only as a fallback), with 2 new
+  regression tests (17 total in `tools/eotb2/__tests__/eotb2.test.ts`, all
+  passing). Full repo `vitest` (284/284), `tsc --noEmit`, and `lint` all
+  clean; `export-dungeon.ts` re-run and a real pose re-rendered
+  (`level1-16-16-f0.png`, `level10-16-16-f0.png`) — both still coherent,
+  correctly-coloured corridor views, confirming no regression from the
+  offset-parsing switch. See `dosvga/data-structure.md` § "INF — Level
+  configuration (EOB2 header preamble, root-caused 2026-08-29)". Left
+  open: what in-game code *consumes* the second wall-set string beyond the
+  one `format()` call (`eotb2-inf-second-wallset-runtime-consumer`,
+  above).
 
 ## Closed this session (2026-08-02, ScummVM source + byte-exact verification)
 
