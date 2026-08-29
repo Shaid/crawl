@@ -69,7 +69,7 @@ describe('densifyMazeLevel', () => {
   };
 
   it('places cells at the confirmed major-axis-reversed global position and records the origin', () => {
-    const grid = densifyMazeLevel(level, 0x0e);
+    const grid = densifyMazeLevel(level, 0x0e, [], [], 0);
     expect(grid.width).toBe(8);
     expect(grid.height).toBe(8);
     expect(grid.originX).toBe(10);
@@ -80,7 +80,7 @@ describe('densifyMazeLevel', () => {
   });
 
   it("fills unvisited cells with the game's own level-load seeds (wall 0, DB8D feature byte)", () => {
-    const grid = densifyMazeLevel(level, 0x0e);
+    const grid = densifyMazeLevel(level, 0x0e, [], [], 0);
     // local (1,1) was never written by a cell record
     expect(grid.wall[1 * grid.width + 1]).toBe(0);
     expect(grid.feature[1 * grid.width + 1]).toBe(0x0e);
@@ -88,11 +88,17 @@ describe('densifyMazeLevel', () => {
 });
 
 describe('canStepSnes', () => {
-  const grid = densifyMazeLevel({
-    level: 0,
-    origins: [{ x: 0, y: 0 }],
-    cells: [{ region: 0, major: 7, minor: 0, wall: 0, feature: 0x0d }],
-  });
+  const grid = densifyMazeLevel(
+    {
+      level: 0,
+      origins: [{ x: 0, y: 0 }],
+      cells: [{ region: 0, major: 7, minor: 0, wall: 0, feature: 0x0d }],
+    },
+    0x0d,
+    [],
+    [],
+    0,
+  );
 
   it('allows stepping through an open sub-field', () => {
     expect(canStepSnes(grid, 0, 0, 0)).toBe(true); // N wall bits = 0
@@ -140,7 +146,8 @@ describe.skipIf(!haveAssets)('resolveViewWords (real data, golden fixtures from 
   for (const g of GOLDEN) {
     it(`level ${g.level} pose (${g.gx},${g.gy}) facing ${g.facing} matches word-for-word`, () => {
       const lvl = maze.find((l) => l.level === g.level)!;
-      const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[g.level] ?? 0x0d);
+      const seedVariant = viewPieces.variants[g.level] ?? 0;
+      const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[g.level] ?? 0x0d, viewPieces.da2e, viewPieces.db9b, seedVariant);
       const words = resolveViewWords(viewPieces, grid, g.level, g.gx - grid.originX, g.gy - grid.originY, g.facing);
       expect(words.map((w) => `0x${w.toString(16)}`)).toEqual(g.words.map((w) => `0x${w.toString(16)}`));
     });

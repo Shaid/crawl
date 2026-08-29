@@ -30,11 +30,38 @@
  *   to be floor/ceiling style selectors, not just "no feature" markers);
  * - the always-appended final backdrop piece `0x834A`.
  *
- * Known approximation (documented in `docs/wizardry6/TODO.md`): the
- * per-cell variant byte is modelled as one uniform value per level
- * (`walk.variants[level]`) -- the real value comes from a per-region
- * attribute chain (`$0B19` -> `$80:DA2E` -> `$80:DB9B` 2-bit patterns)
- * whose mode flags (`$09F0`/`$09F1`) are runtime state.
+ * v3 (this session, `data-structure.md` §3.14.12 "per-region art-variant"):
+ * **true per-cell variant resolution**, closing the previous per-level
+ * uniform approximation. Disassembly of `$80:D073`-`$80:D1B7` found the
+ * real chain: `$be` (the region cursor) is resolved by a bounding-box scan
+ * over the level's 12 known region origins against the party's current
+ * cell (with a cheap cached-region short-circuit); the variant byte is
+ * then `$80:DA2E[level*12+region]` (an XBA-stashed accumulator recovered
+ * across an `$09F0` flag test that is **provably always false** -- bit 2 of
+ * `$09F0` has zero writers anywhere in the ROM, so the "runtime-gated"
+ * framing in the prior session's docs was a misreading of an always-taken
+ * branch, not a real live gate). Bit 7 of the DA2E byte selects a 16-byte
+ * pattern row from `$80:DB9B`, unpacked 2-bit-per-cell into the region's
+ * 64 `(major,minor)` slots (`g = major*2 + (minor>>2)`, `f = minor & 3`);
+ * bit 7 clear means a uniform fill. See `resolveCellVariant` below and
+ * `DenseMazeGrid.variant` -- the per-cell equivalent of the real `$7E:4780`
+ * array. (The `$0B19` value the prior session guessed fed this lookup is
+ * a *different*, unrelated mechanism -- a small 1-10 scripted per-region
+ * event-trigger id, consumed by `$80:9B1A`/`$80:BC74` into `$091E`/`$0842`,
+ * not a `$80:DA2E` index at all; corrected in the doc.)
+ *
+ * v4 (this session, §3.14.12 "per-region palette -- CONFIRMED"): **true
+ * per-region palette resolution**, closing the palette half of the same
+ * gap. A same-session earlier pass wrongly refuted this (compared the
+ * FULL 16-bit `$82:F842` record key against the small range only its LOW
+ * byte should occupy); re-disassembling the key's high-byte setup
+ * (`$82:F878`-`$82:F883`) found `key = ((level<<4)|region)<<8 |
+ * ((dy<<4)|dx)` -- `region` is the plain 0-11 index held in direct-page
+ * `$c0`, set by the same bounding-box scan that resolves `$be`. See
+ * `resolveRegionPaletteGroup` below and the real caveat it documents:
+ * `$82:F842` only actually re-runs at 7 hardcoded scripted transitions
+ * engine-wide, so a region with more than one distinct triggered group is
+ * resolved by majority vote, not a perfect reconstruction of live state.
  */
 
 export interface DenseMazeGrid {
@@ -51,6 +78,14 @@ export interface DenseMazeGrid {
   feature: Uint8Array;
   /** Off-map/seed feature byte used beyond the grid bounds. */
   seedFeature: number;
+  /** Per-cell floor/ceiling/art-family variant byte (the real `$7E:4780`
+   * equivalent, §3.14.12 v3) -- resolved per `(level,region)` from
+   * `$80:DA2E`/`$80:DB9B`, NOT a pose-wide constant. Off-map cells hold
+   * `seedVariant`. */
+  variant: Uint8Array;
+  /** Off-map/seed variant byte (the level's `$80:DB7F` default, `0x80`
+   * normalised to `0x40` per the exporter). */
+  seedVariant: number;
   /** Global maze coordinate of grid cell (0,0) -- needed because the walk
    * parity `$8e = ((globalX ^ globalY ^ facing) & 1) * 2` uses the game's
    * own global coordinates, not grid-local ones. */
@@ -65,15 +100,42 @@ export interface MazeLevelRaw {
 }
 
 /**
+ * Resolve one cell's real `$7E:4780`-equivalent variant byte from
+ * `$80:DA2E[level*12+region]` (§3.14.12 v3). Byte-verified against
+ * `$80:D181`-`$80:D1AD`: bit 7 clear -> uniform fill (the DA2E byte
+ * itself); bit 7 set -> row `value & 0x7f` of the 16-byte `$80:DB9B` table,
+ * unpacked 2-bit-per-cell (`g = major*2 + (minor>>2)` selects the source
+ * byte within the row, `f = minor & 3` selects which of its four 2-bit
+ * fields), each field scaled into `{0x00,0x20,0x40,0x60}` via the game's
+ * own per-field shift (`f=0`: `(b&0xC0)>>1`; `f=1`: `(b&0x30)<<1`; `f=2`:
+ * `(b&0x0C)<<3`; `f=3`: `(b&0x03)<<5`).
+ */
+export function resolveCellVariant(da2e: number[], db9b: number[], level: number, region: number, major: number, minor: number): number {
+  const v = da2e[level * 12 + region] ?? 0;
+  if ((v & 0x80) === 0) return v;
+  const row = v & 0x7f;
+  const g = major * 2 + (minor >> 2);
+  const src = db9b[row * 16 + g] ?? 0;
+  const f = minor & 3;
+  if (f === 0) return (src & 0xc0) >> 1;
+  if (f === 1) return (src & 0x30) << 1;
+  if (f === 2) return (src & 0x0c) << 3;
+  return (src & 0x03) << 5;
+}
+
+/**
  * Densify one level's region/major/minor cell list (raw `data/maze.json`
  * shape, `decode-maze.ts`) into a flat grid, tight-cropped to the active
  * regions' bounding box. `major`/`minor` place a cell within its region:
  * **global Y = originY + (7 - major)`, global X = originX + minor`** (the
  * confirmed major-axis reversal, §3.14.8). Off-map cells hold the game's
  * own level-load seeds (wall 0, feature `$80:DB8D[level]`) rather than a
- * synthetic "solid" fill -- matching `$8B:DE64`/`$80:D2D3`.
+ * synthetic "solid" fill -- matching `$8B:DE64`/`$80:D2D3`. `da2e`/`db9b`
+ * (from `view-pieces.json`'s `tables`) give the real per-region variant
+ * (§3.14.12 v3); `seedVariant` (the level's `$80:DB7F` default) fills
+ * off-map cells only.
  */
-export function densifyMazeLevel(level: MazeLevelRaw, seedFeature = 0x0d): DenseMazeGrid {
+export function densifyMazeLevel(level: MazeLevelRaw, seedFeature: number, da2e: number[], db9b: number[], seedVariant: number): DenseMazeGrid {
   const usedRegions = new Set(level.cells.map((c) => c.region));
   const origins = level.origins.filter((_, i) => usedRegions.has(i));
   const minX = Math.min(...origins.map((o) => o.x));
@@ -85,6 +147,7 @@ export function densifyMazeLevel(level: MazeLevelRaw, seedFeature = 0x0d): Dense
   const height = maxY - minY + 1;
   const wall = new Uint8Array(width * height); // seed: wall 0 (open), the game's own fill
   const feature = new Uint8Array(width * height).fill(seedFeature);
+  const variant = new Uint8Array(width * height).fill(seedVariant);
 
   for (const cell of level.cells) {
     const origin = level.origins[cell.region];
@@ -95,10 +158,95 @@ export function densifyMazeLevel(level: MazeLevelRaw, seedFeature = 0x0d): Dense
     const idx = gy * width + gx;
     wall[idx] = cell.wall;
     feature[idx] = cell.feature;
+    variant[idx] = resolveCellVariant(da2e, db9b, level.level, cell.region, cell.major, cell.minor);
   }
 
-  return { width, height, wall, feature, seedFeature, originX: minX, originY: minY };
+  return { width, height, wall, feature, seedFeature, variant, seedVariant, originX: minX, originY: minY };
 }
+
+/**
+ * Resolve which of the level's 12 regions contains global cell `(gx,gy)`,
+ * plus the cell's local `(major,minor)` within it -- the same bounding-box
+ * scan the game runs at `$80:D0C2`-`$80:D0DE` (regions tried in ascending
+ * order, first match wins). Returns `null` if no region contains the cell
+ * (matches the ROM's own out-of-region fallback path).
+ */
+export function resolveRegionForCell(level: MazeLevelRaw, gx: number, gy: number): { region: number; major: number; minor: number } | null {
+  for (let region = 0; region < level.origins.length; region++) {
+    const o = level.origins[region];
+    if (!o) continue;
+    const minor = gx - o.x;
+    if (minor < 0 || minor > 7) continue;
+    const flipped = gy - o.y; // = 7 - major
+    if (flipped < 0 || flipped > 7) continue;
+    return { region, major: 7 - flipped, minor };
+  }
+  return null;
+}
+
+// CORRECTION (this session, §3.14.12 v4): an earlier draft of this module
+// shipped a `resolveRegionPaletteGroup` that assumed `$82:F842`'s stored
+// record `key` was a small `(minor<<4)|(7-major)` in-region local offset
+// (0-119), found the real stored keys were all far larger (9793-53521),
+// and concluded the field couldn't be a per-cell function at all -- WRONG:
+// that comparison checked the FULL 16-bit key against the range only its
+// LOW byte should occupy. Re-disassembling `$82:F878`-`$82:F883` (the
+// $43-byte setup immediately preceding the table scan) found:
+//
+//   $82:F878  SEP #$20
+//   $82:F87A  LDA $0905        ; dungeon level (0-13)
+//   $82:F87D  ASL x4           ; level << 4
+//   $82:F881  ORA $c0          ; direct-page $c0, NOT an immediate -- see below
+//   $82:F883  STA $43          ; high byte of the 16-bit key ($42/$43)
+//
+// `$c0` is set by the SAME bounding-box region-scan that resolves `$be`
+// (file 0x0050f6, `STA $c0` right after `TXA; EOR #$00FF; ADC #$000C`
+// recovers the ascending region index from the scan's descending counter)
+// -- i.e. `$c0` holds the plain 0-11 region index, not a pre-scaled offset
+// like `$be`. So the full key is:
+//
+//   key = ((level << 4) | region) << 8 | ((dy << 4) | dx)
+//
+// Verified against every real record: 0/170 `>=0x50` records violate
+// `region <= 11`, `keyHigh >> 4 == level`, or `keyLow <= 0x77`, across all
+// 14 levels (`region-env.json`'s own export-time census reports the same
+// 0 violations). Every environment record is therefore addressable by
+// (level, region, local dy, local dx) -- see `resolveRegionPaletteGroup`
+// below, and the caveat there about within-region path-dependence.
+
+/** `dungeon/level-palettes.json`'s shape (§3.14.12 v4). */
+export interface LevelPalettesFile {
+  /** Per-level fallback group -- the level's own most-common palette group among its `$82:F842` records (or the global default `40` if it has none). */
+  groups: number[];
+  /** `perRegion[level][region]` = that region's own majority group, or `-1` if the level has no record for that region (callers fall back to `groups[level]`). */
+  perRegion: number[][];
+}
+
+/**
+ * §3.14.12 v4: resolve the palette group for a specific region of a level,
+ * falling back to the level's own dominant group when that region has no
+ * `$82:F842` environment record. `region` may be `null` (party position
+ * outside every known region, e.g. an off-grid seed cell).
+ *
+ * Caveat (real, not just an approximation gap): `$82:F842` only actually
+ * re-runs at 7 hardcoded scripted screen-fade transitions engine-wide, not
+ * on every region crossing -- so a region's TRUE in-game palette at any
+ * given moment depends on which entry/exit trigger the party last crossed,
+ * not just "which region contains them right now". Where a region carries
+ * more than one distinct triggered group (real for a handful of regions,
+ * e.g. level 12 region 1: group 42 x2 vs. group 52 x1), this resolves to
+ * the region's own majority vote -- a real improvement over the old
+ * per-level-only approximation, but still an approximation for those
+ * specific multi-trigger regions. See `docs/wizardry6/TODO.md`.
+ */
+export function resolveRegionPaletteGroup(levelPalettes: LevelPalettesFile, level: number, region: number | null): number {
+  const fallback = levelPalettes.groups[level] ?? DEFAULT_PALETTE_GROUP;
+  if (region === null) return fallback;
+  const g = levelPalettes.perRegion[level]?.[region];
+  return g !== undefined && g >= 0 ? g : fallback;
+}
+
+const DEFAULT_PALETTE_GROUP = 40;
 
 /** Extract the 2-bit wall sub-field for absolute compass `facing` (0=N/+Y, 1=E/+X, 2=S/-Y, 3=W/-X) from one cell's raw wall byte. */
 export function wallForFacing(wallByte: number, facing: 0 | 1 | 2 | 3): number {
@@ -134,6 +282,11 @@ function cellWallByte(grid: DenseMazeGrid, x: number, y: number): number {
 
 function cellFeatureByte(grid: DenseMazeGrid, x: number, y: number): number {
   return inBounds(grid, x, y) ? grid.feature[y * grid.width + x]! : grid.seedFeature;
+}
+
+/** The real `$7E:4780`-equivalent variant byte for a cell (§3.14.12 v3, `resolveCellVariant`). Off-grid cells use the level's `$80:DB7F` seed. */
+function cellVariantByte(grid: DenseMazeGrid, x: number, y: number): number {
+  return inBounds(grid, x, y) ? grid.variant[y * grid.width + x]! : grid.seedVariant;
 }
 
 /** Whether the party can step one cell in compass direction `dir` from `(x, y)` -- open iff that direction's wall sub-field is 0 (in-grid only). */
@@ -201,8 +354,12 @@ export interface ViewPiecesFile {
   pieces: Record<string, ViewPiece>;
   doorWord: number; // 0x02E8
   backdropWord: number; // 0x834A -- appended last (painter's-algorithm backstop)
-  /** Per-level uniform variant approximation (see module comment). */
+  /** Per-level `$80:DB7F` default variant byte -- used ONLY as the off-map/out-of-region seed (`DenseMazeGrid.seedVariant`); real in-grid cells resolve via `resolveCellVariant`/`$80:DA2E` instead (§3.14.12 v3). */
   variants: number[];
+  /** `$80:DA2E`, 168 entries (`level*12+region`) -- the real per-region variant/art-family selector (§3.14.12 v3). */
+  da2e: number[];
+  /** `$80:DB9B`, flat `(maxRow+1)*16`-byte pattern-row table referenced by `da2e`'s bit-7-set entries. */
+  db9b: number[];
 }
 
 interface WalkState {
@@ -212,8 +369,7 @@ interface WalkState {
   facing: number;
   level: number;
   parity: number; // $8e: ((x^y^facing)&1)*2
-  variant: number; // uniform per-level approximation of $7E:4780
-  e0: number; // $0e = db7f[level]
+  e0: number; // $0e = db7f[level] (off-grid/level-default seed only; see cellVariantByte for the real per-cell source)
   words: number[];
   vis: number[]; // $7e3b00 skip flags, 1 = skip
   p78: number; // deferred front piece
@@ -270,15 +426,19 @@ function resolveWord(s: WalkState, table: string, a2x: number, farRole: Role): n
     const extra = rec.words[0x44 >> 1];
     if (extra !== undefined && extra !== 0xffff) s.words.push(extra);
   }
+  // the evaluated (slot) cell's own real per-cell variant (§3.14.12 v3) --
+  // NOT yet the full $ccde fork (evaluated-cell-equals-level-default ->
+  // use the far cell's variant instead), which needs a byte-exact trace of
+  // $00:CC72's own comparison target; still-open minor nuance, see the doc.
+  const variant = cellVariantByte(s.grid, s.slotX, s.slotY);
   // per-facing override (door/gate far-side art swap)
   let idx: number | null = null;
   if (rec.override[s.facing]! !== 0) {
     if (a2x === 0x14) idx = 0x84;
-    else if (a2x === 0x06) idx = s.variant === 0x60 ? 0x88 : 0x86;
+    else if (a2x === 0x06) idx = variant === 0x60 ? 0x88 : 0x86;
   }
   if (idx === null) {
-    // both branches of $ccde collapse to code*2 + variant under the uniform-variant approximation
-    idx = (a2x + s.variant) & 0xff;
+    idx = (a2x + variant) & 0xff;
   }
   const k = (idx & 0xfe) >> 1;
   const byteOff = s.t.de4e[k];
@@ -377,7 +537,8 @@ function runHandler(s: WalkState, spec: HandlerSpec): void {
 /** The floor/ceiling pass ($00:CE4C) for one slot. */
 function fcCell(s: WalkState, x: number, y: number, slot: number): void {
   const raw = cellFeatureByte(s.grid, x, y);
-  const yv = ((s.variant & 0x60) >> 2) | s.parity;
+  const variant = cellVariantByte(s.grid, x, y);
+  const yv = ((variant & 0x60) >> 2) | s.parity;
   let ceil: number;
   let floor: number;
   if (raw === 0x8f) {
@@ -428,7 +589,6 @@ export function resolveViewWords(f: ViewPiecesFile, grid: DenseMazeGrid, level: 
     facing,
     level,
     parity: (((x + grid.originX) ^ (y + grid.originY) ^ facing) & 1) * 2,
-    variant: f.variants[level] ?? 0,
     e0: f.tables.db7f[level] ?? 0,
     words: [],
     vis: new Array(27).fill(1),

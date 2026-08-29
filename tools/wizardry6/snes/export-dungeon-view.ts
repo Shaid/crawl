@@ -10,13 +10,14 @@
  * per-slot piece tables, and every referenced compose word resolved to a
  * placed piece.
  *
- * Palette-per-level: unchanged from v1 -- each level's **dominant**
- * §3.14.10 region-palette group (documented approximation; the real
- * selection is per-region). Variant-per-level: the `$7E:4780` art-family
- * byte is likewise approximated as one uniform value per level (the
- * `$80:DB7F` level default, with the `0x80` "out-of-region" default
- * replaced by `0x40`, the most common in-region pattern value) -- see
- * `view-model.ts`'s module comment and `docs/wizardry6/TODO.md`.
+ * v4 (this session, §3.14.12 "per-region palette -- CONFIRMED"): both the
+ * `$7E:4780` art-family variant AND the §3.14.10 palette group are now
+ * resolved per-cell/per-region from real ROM data -- `da2e`/`db9b`
+ * (`resolveCellVariant`) and `level-palettes.json`'s `groups`+`perRegion`
+ * pair (`resolveRegionPalettes`/`resolveRegionPaletteGroup`), superseding
+ * the earlier per-level-uniform approximations for both. See
+ * `view-model.ts`'s module comment and `docs/wizardry6/TODO.md` for the
+ * real remaining caveat (within-region multi-trigger majority voting).
  *
  * Usage: npx tsx tools/wizardry6/snes/export-dungeon-view.ts <path-to-sfc>
  */
@@ -34,37 +35,72 @@ const BANK_START = 0x080000; // file offset, CPU $10:8000 -- dungeon-art pool st
 const BANK_END = 0x0e0000;
 const POOL_COLS = 32; // tiles/row in the exported contact-sheet atlas
 
-// §3.14.10's confirmed 12-group region-record table -- unchanged from v1.
-const PALETTE_GROUPS: Array<{ selector: number; group: number; levels: number[]; records: number }> = [
-  { selector: 0x50, group: 40, levels: [2, 5, 6, 12, 13], records: 14 },
-  { selector: 0x52, group: 41, levels: [7, 8], records: 4 },
-  { selector: 0x54, group: 42, levels: [12], records: 10 },
-  { selector: 0x56, group: 43, levels: [12], records: 1 },
-  { selector: 0x58, group: 44, levels: [10], records: 1 },
-  { selector: 0x5a, group: 45, levels: [3, 6], records: 29 },
-  { selector: 0x5c, group: 46, levels: [3, 6], records: 23 },
-  { selector: 0x5e, group: 47, levels: [4], records: 40 },
-  { selector: 0x60, group: 48, levels: [4], records: 46 },
-  { selector: 0x62, group: 49, levels: [4], records: 1 },
-  { selector: 0x66, group: 51, levels: [9], records: 2 },
-  { selector: 0x68, group: 52, levels: [12], records: 1 },
-];
 const DEFAULT_GROUP = 40;
 const LEVEL_COUNT = 14;
 
-function dominantPaletteGroupPerLevel(): number[] {
-  const perLevel: number[] = new Array(LEVEL_COUNT).fill(DEFAULT_GROUP);
-  const bestRecords: number[] = new Array(LEVEL_COUNT).fill(-1);
-  for (const { group, levels, records } of PALETTE_GROUPS) {
-    for (const level of levels) {
-      if (level < 0 || level >= LEVEL_COUNT) continue;
-      if (records > bestRecords[level]!) {
-        bestRecords[level] = records;
-        perLevel[level] = group;
-      }
+// v3 shipped a `PALETTE_GROUPS` selector table (§3.14.10) + a
+// `dominantPaletteGroupPerLevel()` that picked, per level, whichever
+// selector had the HIGHEST `records` count among selectors whose `levels[]`
+// included it -- but that `records` figure is a whole-selector total summed
+// across every level sharing the selector, not a per-level count. It
+// silently mis-picked level 12 as group 40 (from selector `0x50`'s pooled
+// 14-across-5-levels count) when level 12's own records are overwhelmingly
+// group 42 (8/11 real records) -- a real bug, not just an approximation.
+// Removed in v4 (this session, §3.14.12 "per-region palette -- CONFIRMED")
+// in favour of `resolveRegionPalettes` below, which tallies groups directly
+// per (level, region) from the decoded `$82:F842` key structure instead of
+// an aggregate selector table. `decode-dungeon-composer.ts`'s own separate
+// selector->group->file-offset table (`DUNGEON_PALETTE_GROUPS`) is unaffected.
+
+/**
+ * Tie-break: highest count wins; ties prefer `preferred` (the level's own
+ * overall fallback group) if it's among the tied leaders, else the lowest
+ * group number — deterministic, no hidden randomness.
+ */
+function pickTopGroup(counts: Map<number, number>, preferred: number): number {
+  if (counts.size === 0) return preferred;
+  let best = -1;
+  for (const c of counts.values()) best = Math.max(best, c);
+  const leaders = [...counts.entries()].filter(([, c]) => c === best).map(([g]) => g);
+  return leaders.includes(preferred) ? preferred : Math.min(...leaders);
+}
+
+/**
+ * §3.14.12 v4: real per-(level,region) palette-group resolution from
+ * `$82:F842`'s own environment records. The record `key`'s HIGH byte is
+ * `(level << 4) | region` (region = the plain 0-11 index held in direct-
+ * page `$c0`, disassembly-confirmed at `$82:F878`-`$82:F883`: `LDA $0905;
+ * ASL x4; ORA $c0; STA $43`), its LOW byte the in-region `(dy<<4)|dx`
+ * local-cell offset already documented. This supersedes the earlier
+ * "refuted — keys too large" verdict, which compared the FULL 16-bit key
+ * against the small range only the LOW byte should occupy. Verified: 0/170
+ * real `>=0x50` records violate `region <= 11` or `keyHigh>>4 == level` or
+ * `keyLow <= 0x77`, across all 14 levels.
+ *
+ * Returns, per level: `fallbackGroup` (the level's own most-common group,
+ * correcting `dominantPaletteGroupPerLevel`'s cross-level aggregation bug)
+ * and `perRegion[12]` (`-1` where the level has no record for that region
+ * — callers fall back to `fallbackGroup`).
+ */
+function resolveRegionPalettes(envRecords: Array<{ envByKey: Record<number, number> }>): Array<{ fallbackGroup: number; perRegion: number[] }> {
+  return envRecords.map(({ envByKey }) => {
+    const overall = new Map<number, number>();
+    const byRegion = new Map<number, Map<number, number>>();
+    for (const [keyStr, group] of Object.entries(envByKey)) {
+      const key = Number(keyStr);
+      const region = (key >> 8) & 0x0f; // §3.14.12 v4: high byte = (level<<4)|region
+      overall.set(group, (overall.get(group) ?? 0) + 1);
+      if (!byRegion.has(region)) byRegion.set(region, new Map());
+      const m = byRegion.get(region)!;
+      m.set(group, (m.get(group) ?? 0) + 1);
     }
-  }
-  return perLevel;
+    const fallbackGroup = pickTopGroup(overall, DEFAULT_GROUP);
+    const perRegion: number[] = new Array(REGION_COUNT).fill(-1);
+    for (const [region, counts] of byRegion) {
+      if (region >= 0 && region < REGION_COUNT) perRegion[region] = pickTopGroup(counts, fallbackGroup);
+    }
+    return { fallbackGroup, perRegion };
+  });
 }
 
 // ── ROM table locations (all file offsets; disassembly citations in
@@ -77,6 +113,12 @@ const OFF_DE4E = 0x05e4e; // 69 u16 record byte offsets
 const OFF_DED8 = 0x05ed8; // 21 u16 CPU addrs (bank $89) of 27-word floor/ceiling tables
 const OFF_DB7F = 0x05b7f;
 const OFF_DB8D = 0x05b8d;
+const OFF_DA2E = 0x05a2e; // 168 entries (level*12+region), §3.14.12 v3
+const OFF_DB9B = 0x05b9b; // 16-byte pattern rows referenced by da2e's bit7-set entries
+const REGION_COUNT = 12;
+// $82:F842's per-level environment-record table (§3.14.10): 14 x u16 list
+// pointers, then 3-byte [key u16][value u8] records (0-terminated).
+const OFF_ENV_PTRS = 0x178b1; // file offset, CPU $82:F8B1
 const OFF_C85E = 0x0485e; // 27 bytes, $78-flush flags per slot
 const DOOR_WORD = 0x02e8; // fixed door piece ($00:CD8F)
 const BACKDROP_WORD = 0x834a; // final always-appended backdrop ($00:C81B)
@@ -119,6 +161,39 @@ const SLOT0 = { left: 'F356', right: 'F6C6', front: 'EB1A' }; // $c879's own-cel
 
 function bank89FileOffset(cpuAddr: number): number {
   return 0x48000 + (cpuAddr - 0x8000);
+}
+function bank82FileOffset(cpuAddr: number): number {
+  return 0x10000 + (cpuAddr - 0x8000);
+}
+
+/**
+ * Parse `$82:F842`'s per-level environment-record table (§3.14.10): 14
+ * u16 CPU-address list pointers at `$82:F8B1`, each pointing to a
+ * 0-terminated list of 3-byte `[key u16][value u8]` records. Returns, per
+ * level, the `>=0x50` records as `{key -> paletteGroup}` (key = 16-bit
+ * `((level<<4)|region)<<8 | ((dy<<4)|dx)`, §3.14.12 v4 -- see
+ * `resolveRegionPalettes`) and the raw `<0x50` records too (a small 1-10
+ * scripted-event-trigger id, §3.14.12 v3 correction -- exported for
+ * completeness, not consumed by rendering).
+ */
+function parseEnvironmentRecords(data: Uint8Array): Array<{ envByKey: Record<number, number>; eventByKey: Record<number, number> }> {
+  const out: Array<{ envByKey: Record<number, number>; eventByKey: Record<number, number> }> = [];
+  for (let level = 0; level < LEVEL_COUNT; level++) {
+    const ptr = u16At(data, OFF_ENV_PTRS + 2 * level);
+    let off = bank82FileOffset(ptr);
+    const envByKey: Record<number, number> = {};
+    const eventByKey: Record<number, number> = {};
+    for (;;) {
+      const key = u16At(data, off);
+      if (key === 0) break;
+      const value = data[off + 2]!;
+      if (value >= 0x50) envByKey[key] = Math.floor(value / 2);
+      else eventByKey[key] = value;
+      off += 3;
+    }
+    out.push({ envByKey, eventByKey });
+  }
+  return out;
 }
 
 function u16At(data: Uint8Array, off: number): number {
@@ -244,6 +319,15 @@ function main() {
     c85e: Array.from(data.subarray(OFF_C85E, OFF_C85E + 27)),
   };
 
+  // ── §3.14.12 v3: the real per-region variant table ($80:DA2E, 168
+  // entries = level*12+region) and its referenced $80:DB9B pattern rows.
+  const da2e = Array.from(data.subarray(OFF_DA2E, OFF_DA2E + LEVEL_COUNT * REGION_COUNT));
+  let maxRow = -1;
+  for (const v of da2e) if (v & 0x80) maxRow = Math.max(maxRow, v & 0x7f);
+  const db9bLen = (maxRow + 1) * 16;
+  const db9b = Array.from(data.subarray(OFF_DB9B, OFF_DB9B + db9bLen));
+  console.log(`da2e: ${da2e.length} region-variant entries; db9b: ${maxRow + 1} pattern rows (${db9bLen} bytes) referenced.`);
+
   // ── Art records (39 words + 4 override bytes each).
   const tableKeys = new Set<string>([SLOT0.left, SLOT0.right, SLOT0.front]);
   for (const h of HANDLERS) {
@@ -334,7 +418,7 @@ function main() {
     process.exit(1);
   }
 
-  // ── Per-level uniform variant approximation.
+  // ── Per-level off-grid/seed variant (real in-grid cells use da2e/db9b via resolveCellVariant -- §3.14.12 v3).
   const variants = tables.db7f.map((v) => (v === 0x80 ? 0x40 : v));
 
   writeJson(resolve(dungeonDir, 'view-pieces.json'), {
@@ -352,20 +436,73 @@ function main() {
     doorWord: DOOR_WORD,
     backdropWord: BACKDROP_WORD,
     variants,
+    da2e,
+    db9b,
     note:
-      'v2 faithful view-walk data (see tools/wizardry6/snes/view-model.ts + data-structure.md §3.14.12). ' +
+      'v3 faithful view-walk data (see tools/wizardry6/snes/view-model.ts + data-structure.md §3.14.12). ' +
       'records = the bank-$89 39-word art tables (word index = code + variant/2 via de4e; codes: 0-3 wall values, 4-15 = feature+3). ' +
-      'Known approximations: per-level uniform variant + dominant palette (both per-region in the real game).',
+      'variants[] is the off-grid/level-default seed ONLY -- real per-cell art-variant resolution is da2e[level*12+region] + db9b (resolveCellVariant). ' +
+      'Palette group is still resolved separately -- see dungeon/region-env.json + resolveRegionPaletteGroup for the per-region/per-cell resolution ' +
+      '($82:F842\'s own algorithm, confirmed statically computable but only actually re-run by the live game at 7 scripted screen-fade transitions).',
   });
 
-  const levelPalettes = dominantPaletteGroupPerLevel();
-  writeJson(resolve(dungeonDir, 'level-palettes.json'), {
-    groups: levelPalettes,
+  // ── §3.14.12 v4: the real per-level environment-record table ($82:F842)
+  // decoded to genuine per-(level,region) palette groups (resolveRegionPalettes)
+  // -- the "refuted" verdict from the prior pass compared the FULL 16-bit
+  // key against the small range only its LOW byte occupies; the HIGH byte
+  // is (level<<4)|region (region = plain 0-11, direct-page $c0, disassembly
+  // at $82:F878-F883), confirmed 0/170 violations. eventByKey is the <0x50
+  // scripted-event-trigger id family (exported for completeness, not
+  // consumed by rendering).
+  const envRecords = parseEnvironmentRecords(data);
+  const regionPalettes = resolveRegionPalettes(envRecords);
+  const totalEnvRecords = envRecords.reduce((n, r) => n + Object.keys(r.envByKey).length, 0);
+  let violations = 0;
+  for (let level = 0; level < LEVEL_COUNT; level++) {
+    for (const keyStr of Object.keys(envRecords[level]!.envByKey)) {
+      const key = Number(keyStr);
+      const hi = (key >> 8) & 0xff;
+      const lo = key & 0xff;
+      if (hi >> 4 !== level || (hi & 0x0f) > 11 || lo > 0x77) violations++;
+    }
+  }
+  console.log(
+    `region-env: ${totalEnvRecords} >=0x50 records decoded to (level,region,dy,dx) keys, ${violations} violations ` +
+      `(expect 0 -- key structure ((level<<4)|region)<<8|((dy<<4)|dx) confirmed by disassembly at $82:F878-F883).`,
+  );
+  writeJson(resolve(dungeonDir, 'region-env.json'), {
+    levels: envRecords.map((r, level) => ({
+      level,
+      fallbackGroup: regionPalettes[level]!.fallbackGroup,
+      perRegionGroup: regionPalettes[level]!.perRegion,
+      envByKey: r.envByKey,
+      eventByKey: r.eventByKey,
+    })),
     note:
-      'Per-level DOMINANT dungeon-palette group (approximate -- the real selection is per-region, §3.14.10). ' +
-      'Index = level (0-13). Colours: ../palettes/dungeon-region-<group>.json.',
+      'Per-level $82:F842 environment records, split by the confirmed >=0x50 (palette, envByKey: raw 16-bit key -> group) / ' +
+      '<0x50 (scripted per-region event-trigger id 1-10, eventByKey -- NOT a $80:DA2E variant index; §3.14.12 v3 correction) families. ' +
+      'key = ((level<<4)|region)<<8 | ((dy<<4)|dx) -- §3.14.12 v4, disassembly-confirmed ($82:F878-F883: LDA $0905; ASL x4; ORA $c0; STA $43), ' +
+      '0/170 real records violate region<=11 or keyHigh>>4==level or keyLow<=0x77. fallbackGroup/perRegionGroup are the same fields ' +
+      'shipped in level-palettes.json (this file additionally carries the raw per-key records for reference). ' +
+      'See data-structure.md §3.14.12 v4 for the caveat: $82:F842 only actually re-runs at 7 hardcoded scripted screen-fade transitions ' +
+      '(whole-ROM JSL census), so the true in-game palette is path/entry-point-dependent within a region that has >1 record; ' +
+      'perRegionGroup is the per-region majority vote, a real improvement over the old per-level-only approximation but still an ' +
+      'approximation where a region has multiple distinct triggered groups (see docs/wizardry6/TODO.md).',
   });
-  console.log(`Wrote dungeon/view-pieces.json and dungeon/level-palettes.json. Level->group: ${JSON.stringify(levelPalettes)}`);
+
+  writeJson(resolve(dungeonDir, 'level-palettes.json'), {
+    groups: regionPalettes.map((r) => r.fallbackGroup),
+    perRegion: regionPalettes.map((r) => r.perRegion),
+    note:
+      'groups[level] = the level\'s own most-common palette group (fixed this session: the old dominantPaletteGroupPerLevel() ' +
+      'picked by a cross-level-aggregated record count and mis-picked level 12 as group 40 instead of the level\'s real majority, group 42). ' +
+      'perRegion[level][region] = the region\'s own majority group, -1 if that region has no $82:F842 record (fall back to groups[level]). ' +
+      'See region-env.json for the raw per-key data and data-structure.md §3.14.12 v4. Colours: ../palettes/dungeon-region-<group>.json.',
+  });
+  console.log(
+    `Wrote dungeon/view-pieces.json, dungeon/region-env.json, dungeon/level-palettes.json (per-region + per-level fallback). ` +
+      `Level->fallback group: ${JSON.stringify(regionPalettes.map((r) => r.fallbackGroup))}`,
+  );
 }
 
 main();

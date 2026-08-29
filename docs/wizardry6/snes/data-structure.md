@@ -2850,8 +2850,8 @@ module comment and `docs/wizardry6/TODO.md`:
 
 #### 3.14.12 The full view walk and wallValue dispatch — confirmed (this session)
 
-Closes the `snes-dungeon-view-walker` row's core open item (the true
-wallValue → art dispatch) **and**, jointly with the byte-identical Amiga
+Closes the `snes-dungeon-view-walker-residuals` row's core open item (the
+true wallValue → art dispatch) **and**, jointly with the byte-identical Amiga
 maze data, the cross-platform wall-value-semantics unknown
 (`maze-plane-semantics` / `snes-maze-data-extractor`). Everything below is
 disassembly-traced with a flag-aware 65816 disassembler (fresh
@@ -3084,19 +3084,143 @@ column cell; a *front* handler's left/right-edge evals (the `F3xx`/`F7xx`/
 mapping 1:1 onto the Amiga's `9b58` lateral columns and `LAB_0506`
 perpendicular dispatcher respectively.
 
-##### The variant byte's source (partially traced; approximation documented)
+##### The variant byte's source — CONFIRMED (v3 session), fully static
 
 `$7E:4780` is seeded to `DB7F[level]` and overwritten per region by the
 `$80:D25B` blit from a 64-byte pattern buffer (`$7E:49C0`) built at
 `$80:D181` by unpacking 2-bit fields → `{0x00,0x20,0x40,0x60}` from 16-byte
-rows of **`$80:DB9B`**, row selected via **`$80:DA2E`**`[regionAttr]`
-(bit 7 set = pattern row `value & 0x7f`; clear = uniform fill with the
-value), where `regionAttr` is the `< 0x50` value family of §3.14.10's own
-region-attribute records (stored to `$0B19` — the same table that holds
-the `>= 0x50` palette selectors), all gated by runtime mode flags
-`$09F0`/`$09F1` not traced to closure. The walker approximates this as
-one uniform variant per level (`DB7F`, with `0x80` → `0x40`); still-open
-sub-item.
+rows of **`$80:DB9B`**, row selected via **`$80:DA2E`**`[level*12+region]`
+(bit 7 set = pattern row `value & 0x7f`, unpacked 2-bit-per-cell into the
+region's 64 `(major,minor)` slots — `g = major*2 + (minor>>2)` selects the
+byte, `f = minor & 3` selects the 2-bit field within it; bit 7 clear = a
+uniform fill with the value).
+
+> **Correction — the `$09F0`/`$09F1` "runtime gate" and the `$0B19`
+> feeder were both misreadings.** An exhaustive whole-ROM byte census for
+> any instruction that writes bit 2 of `$09F0` (`STA`/`TSB`/`TRB`/`ASL`/
+> `INC` addressed at `$09F0`, every 8- and 16-bit form) found **zero
+> writers** — the flag is hardcoded clear at reset and never touched
+> again, so the branch that appeared to gate the DA2E lookup on it is
+> **always taken**, not a live runtime condition. Separately, `$0B19` is
+> **not** consumed by this lookup at all: it is written by the SAME
+> `$82:F842` table this doc already covers in §3.14.10, but only by that
+> table's `< 0x50` records, which are a *different*, small (1-10) scripted
+> per-region **event-trigger id** — read back at `$80:9B1A`/`$80:BC74`
+> into `$091E`/`$0842`, part of the game's general event-script system,
+> unrelated to art-variant selection. (All 49 real `<0x50` region records
+> hold small values 1-10, consistent with event IDs and inconsistent with
+> an art-family variant byte.)
+>
+> The real region cursor is **`$be`**, resolved by a bounding-box scan at
+> `$80:D073`-`$80:D1B7`: for the current level, it checks the party's cell
+> against each of the level's 12 region origins (`$80:D78E`/`$80:D790`)
+> in order, first match wins, with a cheap cached-region short-circuit
+> (`$80:D039`-`$80:D064`) that skips the full rescan when the party hasn't
+> left the previously-resolved region. `$be` holds the **byte offset**
+> `level*48 + region*4` into the origin table (same "index-is-a-byte-offset"
+> convention as the `$ca` table, §3.14.10) — resolving this session's
+> addressing-ambiguity question: `$be` is pre-scaled, not a plain 0-11
+> index needing further scaling.
+>
+> With both corrections in place, per-cell variant resolution is **fully
+> static** — `resolveCellVariant(da2e, db9b, level, region, major, minor)`
+> in `view-model.ts` — with zero runtime dependency. Implemented in the
+> walker: `DenseMazeGrid.variant` (a per-cell `Uint8Array`, populated by
+> `densifyMazeLevel`) replaces the old pose-wide uniform approximation.
+
+##### Per-region palette resolution — CONFIRMED (this session, supersedes an in-session false refutation)
+
+Closes the palette half of the same per-region gap, via §3.14.10's own
+`$82:F842` environment-record table. That section already documented the
+3-byte `[key u16][value u8]` record shape and the key's LOW byte
+(`$0967`/`$42` = `(dy<<4)|dx`, `dy = party_y - regionOriginY`, `dx =
+party_x - regionOriginX`) but elided the high byte (`$0968`/`$43`) as
+"`(level<<4)|$c0`" without stating what `$c0` holds. Re-disassembling that
+setup, immediately before the table scan:
+
+```
+82:f878  e2 20        SEP #$20
+82:f87a  ad 05 09     LDA $0905                  ; dungeon level (0-13)
+82:f87d  0a 0a 0a 0a  ASL x4                      ; level << 4
+82:f881  05 c0        ORA $c0                     ; direct-page $c0 -- NOT an immediate
+82:f883  85 43        STA $43                     ; high byte of the 16-bit key
+82:f885  8d 68 09     STA $0968
+```
+
+`$c0` is set by the **same** bounding-box region-scan that resolves `$be`
+(file `0x0050f6`: `STA $c0` right after `TXA; EOR #$00FF; ADC #$000C`,
+which recovers the ascending region index from the scan's descending
+loop counter) — i.e. `$c0` holds the **plain 0-11 region index**, a
+different convention from `$be`'s pre-scaled byte offset. The full 16-bit
+key is therefore:
+
+```
+key = ((level << 4) | region) << 8  |  ((dy << 4) | dx)
+```
+
+**Every environment record is addressable by (level, region, local dy,
+local dx).** This directly refutes the immediately-prior draft of this
+section (written earlier the same session), which compared the FULL
+16-bit key against the small 0-119 range only its LOW byte should occupy,
+found real keys far larger (9793-53521), and wrongly concluded the field
+couldn't be a per-cell function at all. Verified against every real
+record: **0/170 real `>=0x50` records** violate `region <= 11`,
+`keyHigh>>4 == level`, or `keyLow <= 0x77`, across all 14 levels
+(`region-env.json`'s own export-time census reports the same 0
+violations).
+
+**Real per-region caveat (not just an approximation gap).** `$82:F842` is
+only ever invoked from **7 hardcoded screen-fade transition sites**
+whole-ROM (exhaustive `JSL $82F842` byte census, confirmed unchanged this
+session), not on every region crossing during ordinary movement — so a
+region's *true* live palette at any moment depends on which scripted
+entry/exit trigger the party last crossed, not purely "which region
+contains them right now". Most levels' regions agree on one dominant
+group (their own records' majority vote resolves to the same value the
+level-wide majority does), but a handful of regions carry a genuine,
+non-tied local majority that *differs* from the level's own overall
+majority — e.g. **level 3 region 6**: local majority group **46** (2/3
+records) vs. the level's overall majority group **45** (25/44 records
+level-wide). `resolveRegionPalettes` (`export-dungeon-view.ts`) computes,
+per level: `fallbackGroup` (the level's own most-common group among its
+own records — see the correction below) and `perRegion[12]` (each
+region's own majority group, tie-broken toward `fallbackGroup` if it's
+among the tied leaders else the lowest group number; `-1` where a region
+has no record, falling back to `fallbackGroup`). `resolveRegionPaletteGroup`
+(`view-model.ts`) is the pure per-(level,region) lookup, wired into both
+`render-through-dungeon.ts` and the browser walker (`games-w6-snes.ts`,
+which preloads every group a level can resolve to and re-resolves the
+palette live every frame from the party's current region).
+
+> **Correction to the shipped `level-palettes.json` — a real bug, not
+> just an approximation.** The prior per-level "dominant" table
+> (`dominantPaletteGroupPerLevel`, now removed) picked, per level,
+> whichever `PALETTE_GROUPS` selector had the highest `records` count
+> among selectors whose `levels[]` list included that level — but that
+> `records` figure is a whole-selector total summed **across every level
+> sharing the selector**, not a per-level count. This silently mis-picked
+> **level 12** as group **40** (from selector `0x50`'s pooled
+> 14-records-across-5-levels count) when level 12's own records are
+> overwhelmingly group **42** (8/11 real records). Fixed: `groups[level]`
+> is now the level's own most-common group, tallied directly from its own
+> `$82:F842` records.
+
+**Visual verification.** Two poses in level 3 (same level, same wall
+variant/art family — cave rock, `variant` byte identical), different
+regions:
+
+| pose (level, local x,y, facing) | region | resolved group | render |
+|---|---|---|---|
+| (3, 9, 18, N) | 6 | 46 | warm brown/red-toned cave rock |
+| (3, 10, 2, N) | 0 | 45 | cooler grey-green-toned cave rock |
+
+Both renders are the same art (identical compose words modulo the pieces
+that differ by position), but the two groups' actual RGB colours produce
+a visibly different tone — confirming the per-region palette split
+resolves to a real, distinguishable in-game difference, not just distinct
+numbers. Level 2's decisive closed-door pose (§3.14.12 Verification below)
+re-renders pixel-identical to before (single-group level, region 2 →
+group 40, unchanged).
 
 ##### Verification
 
@@ -3126,17 +3250,25 @@ sub-item.
    must reproduce the Python oracle's word list for the closed-door pose
    exactly (66/66); plus painter-order and seeding unit tests.
 
-Implementation: `tools/wizardry6/snes/view-model.ts` (v2 walk + painter),
-`export-dungeon-view.ts` (v2 data export: dispatch tables, all 44 art
-records, 21 floor/ceiling tables, resolved pieces; pool atlas extended to
-banks `$10`-`$1B`), `render-through-dungeon.ts`, browser wiring unchanged
-(`tools/walker/games-w6-snes.ts` updated to the new API).
+Implementation: `tools/wizardry6/snes/view-model.ts` (v2 walk + painter, v3
+per-cell variant, v4 per-region palette), `export-dungeon-view.ts` (v2 data
+export: dispatch tables, all 44 art records, 21 floor/ceiling tables,
+resolved pieces; pool atlas extended to banks `$10`-`$1B`; v3
+`da2e`/`db9b`; v4 `resolveRegionPalettes`), `render-through-dungeon.ts` and
+`tools/walker/games-w6-snes.ts` (both updated to the v3/v4 APIs).
 
-**Still open after this session** (tracked in `docs/wizardry6/TODO.md`):
-true per-cell variant + per-region palette selection (the `$09F0`/`$0B19`
-chain above); the `$7E:AC00` trigger-overlay draw pass (`$00:CE00`, runs
-before each handler — scripted decorations, not modelled); the `$7E:DBC0`
-stairs/pit flag array's writer; the `$094d`/`0x02EC` post-walk overwrite.
+**Closed this session** (were "still open" at the end of the prior
+session): true per-cell art-variant selection (`$80:DA2E`/`$80:DB9B`, the
+`$09F0` dead-branch proof, the `$0B19` role correction) and true
+per-region palette selection (`$82:F842`'s 16-bit key decode, the
+`dominantPaletteGroupPerLevel` aggregation-bug fix). See
+`docs/wizardry6/TODO.md` for the residual within-region multi-trigger
+caveat, tracked as a much narrower item than before.
+
+**Still open** (tracked in `docs/wizardry6/TODO.md`): the `$7E:AC00`
+trigger-overlay draw pass (`$00:CE00`, runs before each handler —
+scripted decorations, not modelled); the `$7E:DBC0` stairs/pit flag
+array's writer; the `$094d`/`0x02EC` post-walk overwrite.
 
 ---
 
@@ -3975,6 +4107,7 @@ font at §4.4).
 | Item | Approach | Result | Why it stopped |
 |---|---|---|---|
 | Dungeon-view palette — independent re-verification + extraction | Follow-up session: re-derived the `$ca` table's 8-record/5-byte-stride structure and all its values from scratch (fresh Python, never the escalation's script); re-parsed `$82:F842`'s 14-level region-attribute table from raw bytes and independently reproduced its 221-record total, all 12 selector values, and their level associations exactly; re-checked group 40's raw palette bytes and the "index 0/11 always zero" family signature | **All core claims reproduced independently.** One caught error: the escalation's prose separately stated "141 palette-setting records", but its own per-selector breakdown table (which I reproduced digit-for-digit) sums to **172** — an internal inconsistency in the escalation's own report, corrected in §3.14.10. Promoted to the committed extractor: `decode-dungeon-composer.ts` now renders every piece and the decisive sample in real colour (group 40) and exports all 12 confirmed palette groups as `palettes/dungeon-region-*.json` — the composed decisive render (stone masonry, wood door, torch stands) is a strong additional structural oracle, matching the plausible-material-colour expectation decisively | Sixth clean escalation-verification pass in this corpus (see `verify-escalation-artifacts-not-just-claims.md`) — the fifth caught a wrong per-level claim in an otherwise-solid escalation; this one caught a wrong aggregate count sitting next to its own correct breakdown table |
+| Per-region palette resolution from `$82:F842`'s record `key` | Same session, two passes. Pass 1: hypothesised `key` = the small `(dy<<4)|dx` local-cell offset (0-119) already documented for the LOW byte alone; exported real keys, found 170/170 far larger (9793-53521), and wrote up a "refuted, keys too large" verdict with the per-level-dominant approximation left unchanged. Pass 2 (immediately after, before ending the session): re-disassembled the key's HIGH-byte setup (`$82:F878`-`$82:F883`) instead of trusting the doc's own compressed "`(level<<4)\|$c0`" transcription, found `ORA $c0` is a **direct-page** operand (not an immediate `#$c0`), and traced `$c0`'s writer to the same bounding-box region-scan that sets `$be` | **Solved on pass 2.** Full key = `((level<<4)\|region)<<8 \| ((dy<<4)\|dx)`, region = plain 0-11 (direct-page `$c0`). 0/170 real records violate the decoded structure. Implemented per-(level,region) palette resolution (`resolveRegionPalettes`/`resolveRegionPaletteGroup`), which also caught and fixed a real bug in the old per-level dominant table (level 12 was mis-picked as group 40 instead of its own real majority, group 42) | Textbook case of `negative-from-addressing-root-not-shapes.md`: pass 1's negative came from checking the wrong BYTE WIDTH (comparing a 16-bit key against the range only its low byte should occupy), not from the mechanism being genuinely unsolvable. The fix was re-reading the doc's own already-transcribed disassembly line literally (an elided "`\|$c0`" hid a direct-page operand, not an immediate) rather than trusting a prior compressed paraphrase of it |
 | Wall sub-field value semantics (door vs. solid wall, values 1-3) | This session: checked whether the confirmed per-depth/per-lateral piece-selection tables (`$80:CC40`/`$80:CC72`, §3.14.5) might select a visually distinct door sprite for one specific `wallValue`, as a way to identify which value means "door" without a full disassembly trace of the table-index arithmetic | **Inconclusive, not pursued further.** The dispatch code (`$80:CC30`-area) turned out to need a nontrivial trace beyond what a quick check could resolve, and this project's §3.14.7 already flags "the exact final field-to-wallValue-index arithmetic downstream of this point was not re-traced to full closure" as a known residual gap from a prior session | Confirmed as a genuine cross-platform-shared unknown, not an SNES-only gap — the Amiga port's own wall values are equally unpinned (`maze-plane-semantics`). Per this session's explicit "don't over-invest if it dead-ends the same way" guidance, stopped after one bounded attempt rather than committing to the full trace |
 | SNES-only feature-byte flag bits 6-7 | This session: censused all 24 whole-ROM `LDA $7E4540,X` raw-feature-byte reads (before the confirmed `AND #$3F` mask most consumers apply) for any bit-6/bit-7-isolating test distinct from the already-confirmed combined `>=0xC0` "top-bit marker" check | **Partial** — found one genuine isolated bit-6 test (file `0x004441`, `AND #$C0; CMP #$40`), but it's gated behind dungeon level `== 8` and an unidentified second flag, suggesting a level-8-specific scripted trigger, not a universal per-cell semantic. Bit 7 alone still has no reader | The census approach worked (found a real, previously-unknown consumer), but tracing the level-8 handler (file `0x0044A9`) and identifying `$0964`/`$094D` was out of scope for this session's bounded pass — left as a narrower, better-scoped lead for later |
 | Graphics: tile/pixel decode | *Solved this session* — Blind 2bpp/4bpp tile render at 8 speculative offsets (pass 1, failed, see below); pass 2, traced the RESET-time resource-loader table through a 15-entry resource-type dispatcher (file `0x66a0e`) to a `MVN`-based ROM-bank-`$85`→WRAM-`$7F` copy primitive, then traced its source-address register back 2 instructions to a 60-slot directory table (file `0x105D1`) | Pass 1: no recognizable image at any offset. Pass 2: **confirmed** — 36 face portraits decoded, byte-exact 288-byte-stride directory invariant, unambiguous recognisable renders | Pass 1 failed because guessing offsets without a traced source pointer rarely hits tile data by chance. Pass 2 succeeded by finding the reader (the loader's own `MVN` call site) instead of guessing — see §3.2 |

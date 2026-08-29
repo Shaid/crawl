@@ -16,9 +16,12 @@ import {
   resolveViewWords,
   extractPoolIndices,
   compositeSnesView,
+  resolveRegionForCell,
+  resolveRegionPaletteGroup,
   type ViewPiecesFile,
   type MazeLevelRaw,
   type Palette16,
+  type LevelPalettesFile,
 } from './view-model';
 
 function loadPNG(path: string): { rgba: Uint8Array; width: number; height: number } {
@@ -43,13 +46,27 @@ function main() {
   if (!lvl) throw new Error(`no level ${level} in data/maze.json`);
 
   const viewPieces: ViewPiecesFile = JSON.parse(readFileSync(resolve(base, 'dungeon/view-pieces.json'), 'utf8'));
-  const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[level] ?? 0x0d);
+  const seedVariant = viewPieces.variants[level] ?? 0;
+  const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[level] ?? 0x0d, viewPieces.da2e, viewPieces.db9b, seedVariant);
   console.log(`Level ${level} densified: ${grid.width}x${grid.height}`);
   const { rgba: poolRgba, width: poolW } = loadPNG(resolve(base, `dungeon/${viewPieces.poolAtlas}`));
   const pool = extractPoolIndices(poolRgba, poolW, poolRgba.length / poolW / 4);
 
-  const levelPalettes: { groups: number[] } = JSON.parse(readFileSync(resolve(base, 'dungeon/level-palettes.json'), 'utf8'));
-  const group = levelPalettes.groups[level] ?? 40;
+  // Palette: real per-region resolution (§3.14.12 v4 -- resolveRegionPaletteGroup),
+  // falling back to the level's own dominant group off-region or where the
+  // region has no $82:F842 record. resolveRegionForCell compares against
+  // MazeLevelRaw's own GLOBAL-space origins, but the CLI's x/y (like
+  // resolveViewWords' own x/y) are grid-LOCAL -- convert before calling it.
+  const levelPalettes: LevelPalettesFile = JSON.parse(readFileSync(resolve(base, 'dungeon/level-palettes.json'), 'utf8'));
+  const gx = x + grid.originX;
+  const gy = y + grid.originY;
+  const resolvedRegion = resolveRegionForCell(lvl, gx, gy);
+  const group = resolveRegionPaletteGroup(levelPalettes, level, resolvedRegion?.region ?? null);
+  console.log(
+    resolvedRegion
+      ? `Party cell local (${x},${y}) / global (${gx},${gy}) -> region ${resolvedRegion.region}, local (major=${resolvedRegion.major},minor=${resolvedRegion.minor}) -- palette group ${group} (per-region, §3.14.12 v4).`
+      : `Party cell local (${x},${y}) / global (${gx},${gy}) is outside every region -- palette group ${group} (per-level fallback).`,
+  );
   const paletteFile: { colors: { r: number; g: number; b: number }[] } = JSON.parse(
     readFileSync(resolve(base, `palettes/dungeon-region-${group}.json`), 'utf8'),
   );

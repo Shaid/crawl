@@ -9,11 +9,11 @@
  * renderer is the better fit here, same reasoning as MM1/MM2's
  * `renderCanvas` views in `games-mm.ts`).
  *
- * See `view-model.ts`'s module doc comment for exactly what's confirmed vs.
- * approximate in this v1 (backdrop + confirmed door: real; generic
- * per-direction "blocked" wall art: placement confirmed, exact per-value
- * variant selection open; floor/ceiling continuation in the open middle of
- * the view: not yet identified, rendered as a black void).
+ * See `view-model.ts`'s module doc comment for the full v2/v3/v4 history --
+ * as of v4 (`data-structure.md` §3.14.12) the wall/floor/ceiling art
+ * variant AND the palette group are both resolved per-region/per-cell from
+ * real ROM data (`resolveCellVariant`, `resolveRegionPaletteGroup`), not
+ * approximated per-level.
  */
 import type { KeyStateLike } from '@seer-project/dungeon';
 import { WalkerController, DEFAULT_BINDINGS } from '@seer-project/dungeon';
@@ -26,10 +26,13 @@ import {
   extractPoolIndices,
   compositeSnesView,
   canStepSnes,
+  resolveRegionForCell,
+  resolveRegionPaletteGroup,
   type DenseMazeGrid,
   type MazeLevelRaw,
   type ViewPiecesFile,
   type Palette16,
+  type LevelPalettesFile,
 } from '../wizardry6/snes/view-model.ts';
 
 async function fetchJSON<T>(url: string): Promise<T> {
@@ -76,10 +79,13 @@ function snesEntrancePose(grid: DenseMazeGrid, levelId: number): Pose {
 
 export interface Wizardry6SnesViewOptions {
   grid: DenseMazeGrid;
+  mazeLevel: MazeLevelRaw;
   viewPieces: ViewPiecesFile;
   pool: Uint8Array;
   poolW: number;
-  palette: Palette16;
+  /** Group -> palette, preloaded for every group `levelPalettes` can resolve to for this level (§3.14.12 v4 real per-region resolution). */
+  palettesByGroup: Map<number, Palette16>;
+  levelPalettes: LevelPalettesFile;
   levelId: number;
   startPose: Pose;
 }
@@ -103,20 +109,26 @@ export class Wizardry6SnesView implements GameView {
   };
   private readonly controller: WalkerController;
   private readonly grid: DenseMazeGrid;
+  private readonly mazeLevel: MazeLevelRaw;
   private readonly viewPieces: ViewPiecesFile;
   private readonly pool: Uint8Array;
   private readonly poolW: number;
-  private readonly palette_: RGBAColor[];
+  private readonly palettesByGroup: Map<number, RGBAColor[]>;
+  private readonly levelPalettes: LevelPalettesFile;
   private readonly levelId_: number;
   private noclip = false;
   private tick = 0;
 
   constructor(opts: Wizardry6SnesViewOptions) {
     this.grid = opts.grid;
+    this.mazeLevel = opts.mazeLevel;
     this.viewPieces = opts.viewPieces;
     this.pool = opts.pool;
     this.poolW = opts.poolW;
-    this.palette_ = opts.palette.map((c) => ({ r: c.r, g: c.g, b: c.b, a: 255 }));
+    this.palettesByGroup = new Map(
+      [...opts.palettesByGroup.entries()].map(([g, pal]) => [g, pal.map((c) => ({ r: c.r, g: c.g, b: c.b, a: 255 }))]),
+    );
+    this.levelPalettes = opts.levelPalettes;
     this.levelId_ = opts.levelId;
     this.controller = new WalkerController(opts.startPose, DEFAULT_BINDINGS, {
       canStep: (pose, dir) => this.noclip || canStepSnes(this.grid, pose.x, pose.y, dir),
@@ -138,8 +150,23 @@ export class Wizardry6SnesView implements GameView {
   get currentTick(): number {
     return this.tick;
   }
+  /**
+   * Not used by the walker's main render loop (this view has `renderCanvas`,
+   * which the loop prefers -- see `walker.ts`'s `renderMainView`), but kept
+   * live (resolved for the CURRENT pose/region, §3.14.12 v4) for any other
+   * consumer (e.g. a future automap legend).
+   */
   get palette(): RGBAColor[] {
-    return this.palette_;
+    return this.resolvePalette();
+  }
+
+  private resolvePalette(): RGBAColor[] {
+    const pose = this.pose;
+    const gx = pose.x + this.grid.originX;
+    const gy = pose.y + this.grid.originY;
+    const region = resolveRegionForCell(this.mazeLevel, gx, gy);
+    const group = resolveRegionPaletteGroup(this.levelPalettes, this.levelId_, region?.region ?? null);
+    return this.palettesByGroup.get(group) ?? this.palettesByGroup.get(this.levelPalettes.groups[this.levelId_] ?? 40)!;
   }
 
   update(dtMs: number, keys: KeyStateLike): Pose | null {
@@ -165,7 +192,8 @@ export class Wizardry6SnesView implements GameView {
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const pose = this.pose;
     const words = resolveViewWords(this.viewPieces, this.grid, this.levelId_, pose.x, pose.y, pose.facing);
-    const { rgba, width, height } = compositeSnesView(this.viewPieces, this.pool, this.poolW, this.palette_, words);
+    const palette = this.resolvePalette();
+    const { rgba, width, height } = compositeSnesView(this.viewPieces, this.pool, this.poolW, palette, words);
 
     const canvas = ctx.canvas;
     ctx.imageSmoothingEnabled = false;
@@ -188,34 +216,53 @@ export class Wizardry6SnesView implements GameView {
   }
 }
 
-/** Load one SNES dungeon level + its palette + the v1 view pieces + the shared tile-pool atlas, and build the `GameView`. `startPose` may be `null` to use the level's data-derived entrance tile. */
+/** Load one SNES dungeon level + its palette(s) + the v1 view pieces + the shared tile-pool atlas, and build the `GameView`. `startPose` may be `null` to use the level's data-derived entrance tile. */
 export async function loadWizardry6Snes(assetBase: string, levelId: number, startPose: Pose | null): Promise<GameView> {
   const [maze, viewPieces, levelPalettes] = await Promise.all([
     fetchJSON<MazeLevelRaw[]>(`${assetBase}/data/maze.json`),
     fetchJSON<ViewPiecesFile>(`${assetBase}/dungeon/view-pieces.json`),
-    fetchJSON<{ groups: number[] }>(`${assetBase}/dungeon/level-palettes.json`),
+    fetchJSON<LevelPalettesFile>(`${assetBase}/dungeon/level-palettes.json`),
   ]);
   const lvl = maze.find((l) => l.level === levelId);
   if (!lvl) throw new Error(`wizardry6 (SNES): no level ${levelId} in data/maze.json`);
-  const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[levelId] ?? 0x0d);
+  const seedVariant = viewPieces.variants[levelId] ?? 0;
+  // §3.14.12 v4: da2e/db9b give the real per-cell art-family variant; the
+  // level-palettes.json fallback/perRegion pair gives the real per-region
+  // palette group (resolveRegionPaletteGroup) -- both replace the earlier
+  // per-level-uniform approximations. See docs/wizardry6/TODO.md for the
+  // remaining within-region multi-trigger caveat.
+  const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[levelId] ?? 0x0d, viewPieces.da2e, viewPieces.db9b, seedVariant);
 
   const poolImg = await decodePNGToRGBA(`${assetBase}/dungeon/${viewPieces.poolAtlas}`);
   if (!poolImg) throw new Error(`wizardry6 (SNES): failed to load ${assetBase}/dungeon/${viewPieces.poolAtlas} -- run npm run w6:snes:view`);
   const pool = extractPoolIndices(poolImg.rgba, poolImg.width, poolImg.height);
 
-  const group = levelPalettes.groups[levelId] ?? 40;
-  const paletteFile = await fetchJSON<{ colors: { r: number; g: number; b: number }[] }>(
-    `${assetBase}/palettes/dungeon-region-${group}.json`,
-  );
-
   const pose = startPose ?? snesEntrancePose(grid, levelId);
+
+  // Preload every group this level's palette resolution can possibly land
+  // on (the fallback + every region's own group) so `renderCanvas` can
+  // resolve the live per-pose palette synchronously every frame.
+  const groups = new Set<number>([levelPalettes.groups[levelId] ?? 40]);
+  for (const g of levelPalettes.perRegion[levelId] ?? []) if (g >= 0) groups.add(g);
+  const palettesByGroup = new Map<number, Palette16>(
+    await Promise.all(
+      [...groups].map(
+        async (group): Promise<[number, Palette16]> => [
+          group,
+          (await fetchJSON<{ colors: { r: number; g: number; b: number }[] }>(`${assetBase}/palettes/dungeon-region-${group}.json`)).colors,
+        ],
+      ),
+    ),
+  );
 
   return new Wizardry6SnesView({
     grid,
+    mazeLevel: lvl,
     viewPieces,
     pool,
     poolW: poolImg.width,
-    palette: paletteFile.colors,
+    palettesByGroup,
+    levelPalettes,
     levelId,
     startPose: pose,
   });
