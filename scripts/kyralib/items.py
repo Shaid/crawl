@@ -1,25 +1,21 @@
-"""ITEM.DAT / ITEMTYPE.DAT decode, shared EOB1/EOB2 DOS/VGA (and Amiga, modulo
-endianness — not re-verified against Amiga bytes here).
+"""EOB1 (DOS) ITEM.DAT / ITEMTYPE.DAT parsers.
 
-Ported from ScummVM's `EoBCoreEngine::loadItemDefs` (engines/kyra/engine/
-items_eob.cpp:35-143). Record widths are 14 bytes (`EoBItem`) and 16 bytes
-(`EoBItemType`) — confirmed byte-exact (zero residue) against both EOB1's
-`EOBDATA6.PAK` copies and EOB2's standalone `ITEM.DAT`/`ITEMTYPE.DAT`; see
-docs/eotb/dosvga/data-structure.md and docs/eotb2/dosvga/data-structure.md
-§ "ITEM.DAT / ITEMTYPE.DAT / TEXT.DAT".
+Byte-exact port of `EoBCoreEngine::loadItemDefs` (`engine/items_eob.cpp:35-
+143`, fetched 2026-08-02). See docs/eotb/dosvga/data-structure.md §
+"ITEM.DAT / ITEMTYPE.DAT" -- verified byte-exact against this project's
+real EOBDATA6.PAK ITEM.DAT (9,601 bytes: numItems=448 -> 2+448*14=6274,
+numNames=95 at that offset -> 6276+95*35=9601, file size exactly, zero
+residue) and ITEMTYPE.DAT (914 bytes: numTypes=57 -> 2+57*16=914, file
+size exactly, zero residue).
 """
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass, asdict
-
-ITEM_STRUCT = struct.Struct('<BBBbbbhhhBb')  # 14 bytes
-NAME_LEN = 35
-ITEMTYPE_STRUCT = struct.Struct('<HHbbbbbbbbbBH')  # 16 bytes
+from dataclasses import dataclass
 
 
 @dataclass
-class EoBItem:
+class EobItem:
     name_unid: int
     name_id: int
     flags: int
@@ -33,8 +29,30 @@ class EoBItem:
     value: int
 
 
+def parse_item_dat(data: bytes) -> tuple[list[EobItem], list[str]]:
+    num_items = struct.unpack_from('<H', data, 0)[0]
+    off = 2
+    items = []
+    for _ in range(num_items):
+        (name_unid, name_id, flags, icon, itype, pos, block, nxt, prev, level, value) = struct.unpack_from(
+            '<BBBbbbhhhBb', data, off)
+        items.append(EobItem(name_unid, name_id, flags, icon, itype, pos, block, nxt, prev, level, value))
+        off += 14
+    num_names = struct.unpack_from('<H', data, off)[0]
+    off += 2
+    names = []
+    for _ in range(num_names):
+        raw = data[off:off + 35]
+        nul = raw.find(b'\x00')
+        names.append(raw[:nul if nul != -1 else 35].decode('latin1'))
+        off += 35
+    if off != len(data):
+        raise ValueError(f'ITEM.DAT: expected to land exactly on EOF ({len(data)}), stopped at {off}')
+    return items, names
+
+
 @dataclass
-class EoBItemType:
+class EobItemType:
     inv_flags: int
     hand_flags: int
     armor_class: int
@@ -50,49 +68,14 @@ class EoBItemType:
     extra_properties: int
 
 
-@dataclass
-class ItemDat:
-    items: list[EoBItem]
-    names: list[str]
-
-
-def parse_item_dat(data: bytes) -> ItemDat:
-    (num_items,) = struct.unpack_from('<H', data, 0)
-    off = 2
-    items = []
-    for _ in range(num_items):
-        items.append(EoBItem(*ITEM_STRUCT.unpack_from(data, off)))
-        off += ITEM_STRUCT.size
-    (num_names,) = struct.unpack_from('<H', data, off)
-    off += 2
-    names = []
-    for _ in range(num_names):
-        raw = data[off:off + NAME_LEN]
-        names.append(raw.split(b'\x00', 1)[0].decode('latin1'))
-        off += NAME_LEN
-    if off != len(data):
-        raise ValueError(f'ITEM.DAT residue: parsed {off} of {len(data)} bytes')
-    return ItemDat(items, names)
-
-
-def parse_itemtype_dat(data: bytes) -> list[EoBItemType]:
-    (num_types,) = struct.unpack_from('<H', data, 0)
+def parse_itemtype_dat(data: bytes) -> list[EobItemType]:
+    num_types = struct.unpack_from('<H', data, 0)[0]
     off = 2
     types = []
     for _ in range(num_types):
-        types.append(EoBItemType(*ITEMTYPE_STRUCT.unpack_from(data, off)))
-        off += ITEMTYPE_STRUCT.size
+        fields = struct.unpack_from('<HHbbbbbbbbbBH', data, off)
+        types.append(EobItemType(*fields))
+        off += 16
     if off != len(data):
-        raise ValueError(f'ITEMTYPE.DAT residue: parsed {off} of {len(data)} bytes')
+        raise ValueError(f'ITEMTYPE.DAT: expected to land exactly on EOF ({len(data)}), stopped at {off}')
     return types
-
-
-def item_dat_to_json(item_dat: ItemDat) -> dict:
-    return {
-        'items': [asdict(i) for i in item_dat.items],
-        'names': item_dat.names,
-    }
-
-
-def itemtype_dat_to_json(types: list[EoBItemType]) -> dict:
-    return {'types': [asdict(t) for t in types]}

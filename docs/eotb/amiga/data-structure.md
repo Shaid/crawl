@@ -108,6 +108,41 @@ it and when" wasn't individually re-verified against real files this pass.
 This narrows `eotb1-amiga-multipalette-cps` from "logic not implemented"
 to "logic identified and cited, not yet ported to the extractor."
 
+**Call site traced (2026-08-29) — very likely unreachable in EOB1's shipped
+data.** Followed `engine/eobcommon.cpp:1783` up its caller chain to find
+which real CPS files (if any) actually exercise `setDualPalettes`:
+
+- The enclosing function is `EoBCoreEngine::???` — actually
+  `Screen_EoB::loadEoBBitmap`'s caller context resolves to
+  `displayParchment()`/the "dialogue" text-box drawer, entered via the
+  event-script opcode `oeob_dialogue` (`engine/script_eob.cpp`, case
+  `-45`/`op_45`). Its CPS filename argument is **data-driven** — it comes
+  from the currently-running `.INF` event script's own operand bytes, not
+  a hardcoded string.
+- Decompressed all 12 `LEVELn.INF` files (via the existing
+  `scripts/kyralib/format80.py` LCW decoder) and scanned their event-script
+  bytecode regions for any embedded ASCII string ending in `.CPS` that
+  could be a `oeob_dialogue` argument. **Zero CPS filenames found in any of
+  the 12 files** — EOB1's shipped level scripts never invoke the dialogue
+  opcode with a bitmap argument that would reach `setDualPalettes`.
+- A second candidate call path, `displayParchment()`'s own hardcoded
+  `"MAP"` bitmap stem (used for the parchment/map screen), was also
+  checked: no `MAP.CPS`/`MAP1.CPS` exists anywhere in this EOB1 (English,
+  Amiga) corpus's PAK directories, and no caller of `displayParchment` was
+  found to pass an `amigaPalIndex` that would make it take the dual-palette
+  branch rather than the ordinary single-palette one.
+- **Conclusion**: the mechanism is real, correctly identified (a
+  split-screen dual-palette blit, not a fade), and cited to exact source
+  lines — but there is no evidence any real file in this project's EOB1
+  Amiga corpus (`data/eotb/amiga/`) actually drives it. This is a
+  structural/data-flow negative (zero `.CPS` operand strings across the
+  full event-script corpus, zero matching `MAP.CPS` file), not a full
+  opcode-by-opcode interpreter trace of every `.INF`'s script — so it is
+  reported as **strongly narrowed, not airtight-closed**: "no data in this
+  corpus reaches `setDualPalettes`," rather than "provably impossible."
+  No extractor work was done for this item since there is nothing in the
+  corpus to extract multi-palette output from.
+
 **Standalone (.PAL files, EOB2 only):** 64-byte files containing 32 × 16-bit
 big-endian colors. Wall sets: `AZURE.PAL`, `CRIMSON.PAL`, `DUNG.PAL`,
 `FOREST.PAL`, `MEZZ.PAL`, `SILVER.PAL`. `FINALE.PAL` is 384 bytes (6 palettes).
@@ -201,10 +236,48 @@ files"). Also carries its own 32-colour palette (64 raw bytes, Amiga
 12-bit RGB, loaded via the same `loadAmigaPalette` as VCN) **before** the
 compression header, but only when a size-check fails
 (`screen_eob_amiga.cpp:75-79`) — "unlike normal CPS files these files
-never have more than one palette" (source comment). Not implemented as a
-decoder this pass — logged here as a confirmed, named, cited algorithm for
-a future pass on Amiga `.INF`/`TEXT.CPS`, not a new open TODO item (out of
-this pass's requested scope).
+never have more than one palette" (source comment).
+
+**Implemented and tested (2026-08-29), but unverifiable against real
+corpus data.** Ported byte-for-byte to `tools/eotb/decode-special-cps.ts`
+(`usesSpecialAmigaCodec()` implementing the exact
+`stream.readSint32BE() + 12 === stream.size()` gate the outer call sites
+use, and `decodeSpecialAmigaCps()` implementing the bit reader + decode
+loop). Working through the bit-reader arithmetic by hand established that
+each refilled 32-bit word contributes exactly **31** usable bits, not 32
+— the 32nd `readNextBit()` call against any freshly-loaded word always
+lands on the `val === 0` refill branch and its own extracted bit is
+discarded, regardless of the word's actual top-bit value (documented in
+the file's module doc).
+
+Verification:
+- **Whole-corpus gate scan** (`tools/eotb/__tests__/eotb-special-cps.test.ts`):
+  ran `usesSpecialAmigaCodec()` against every file in `data/eotb/amiga/`
+  including all 12 `LEVELn.INF` and `TEXT.CPS` — **zero matches**. Every
+  one of these files has an ordinary `compType=4` Kyra-bitmap (LCW) header
+  instead, confirming this EOB1 (English) Amiga corpus never takes this
+  branch — consistent with the source's own comment that it's chiefly an
+  EOB2-Amiga-German fallback path. Same honest-negative shape as
+  `eotb1-amiga-dec-verify`'s "no `.DEC` file exists in this corpus either."
+- **Hand-built synthetic test vector**, since no real file exercises the
+  codec: a 16-byte file (`inSize=4, outSize=1`) with one compressed word
+  chosen bit-by-bit (worked out by hand from the decode loop's own branch
+  structure) to drive the literal-byte path and emit exactly `0x41` (`'A'`),
+  with the header `chk` field set so the format's own self-check (running
+  XOR checksum, `error("checksum error")` in the source) lands on exactly
+  0 at EOF. This exercises the bit reader and the literal-byte decode path
+  for real. A second test confirms a deliberately-corrupted checksum is
+  correctly rejected. The match-copy branches (`code<2`/`code===2`/
+  `code===3`) remain ported-from-source only, with no oracle available in
+  this corpus to exercise them — labelled **source-confirmed, not
+  data-verified** for those specific branches.
+- 5/5 tests passing in `tools/eotb/__tests__/eotb-special-cps.test.ts`.
+
+This closes the *implementation* half of `eotb1-amiga-special-cps-codec`
+(a working, tested decoder exists and is committed) while leaving the
+*real-file verification* half an honest negative — there is no `TEXT.CPS`
+or any other file in this project's data directory that actually needs
+this codec.
 
 ### Image Data
 
@@ -482,7 +555,51 @@ Palettes for these wall sets are stored in the corresponding `.VCN` files.
 
 ---
 
-## EOBDATA.SAV — Save game (confirmed available from source, not fully ported)
+## EOBDATA.SAV — Save game (confirmed, ported, byte-exact verified — 2026-08-29)
+
+**`eotb1-amiga-savegame-port` closed.** The full record layout below was
+ported to `tools/eotb/decode-savegame.ts` (`decodeSavegame`) and verified
+against the real `data/eotb/amiga/EOBDATA.SAV` (33,107 bytes): the decoder
+throws unless its cursor lands **exactly** on EOF after walking every
+character record, party field, INF-processor flag state, all 500 item
+slots, all 12 per-level temp-data blocks, and the 6 `EoBItemType`
+overrides — and it does, with **zero residue**. Along the way it decoded
+plausible, semantically correct content with no further oracle needed:
+4 active party members with legible AD&D-style names (`ALLABAR`, `ARIEL`,
+`VALANAU`, `TENMIYANA`), in-range HP (`cur <= max` for every character and
+every decoded monster-in-play record), party at dungeon level 1, and
+exactly 1 of 12 level temp-data slots flagged active (`hasTempDataFlags =
+0x0001`), matching a party that has only ever visited level 1.
+
+**One confirmed discrepancy from a literal reading of the ScummVM
+source, resolved empirically.** `readOriginalSaveFile`'s per-level
+temp-data loop is written as `for (i = 0; i < numParts + 1; i++)` with
+`numParts = 12` for EOB1 (13 fixed 2040-byte blocks). Walking the real
+file with 13 blocks overshoots it by exactly one block (2040 bytes);
+walking it with **12** blocks (`numParts`, not `numParts + 1`) lands the
+cursor on the file's last byte exactly. Every other section (character
+records, item table, the 6 `EoBItemType` overrides) verified size-exact
+against the literal source reading with no adjustment needed — this
+discrepancy is isolated to that one loop bound. See
+`tools/eotb/decode-savegame.ts`'s module doc for the full byte-accounting
+derivation that pinned this down (each of: character-record size,
+party-field size, INF-processor state size, and the item table's 14-byte-
+per-record layout, cross-checked field-by-field against the source before
+concluding the loop bound itself was the discrepancy, not a miscounted
+field elsewhere).
+
+Also newly load-bearing for this decode: `EoBInfProcessor::loadState`
+(`script/script_eob.cpp:215-220`) for the `origFile`+EOB1 case reads **no**
+`_preventRest` byte (unlike EOB2/non-`origFile`), then exactly 12 `u32`
+flags, then one more `u32` merged into `_flagTable[17]` — 52 bytes total,
+not documented anywhere before this pass since it sits between the
+already-documented party fields and the item table.
+
+Tests: `tools/eotb/__tests__/eotb-savegame.test.ts` (4 tests, real-file-
+gated — skips cleanly if the corpus file isn't present).
+
+### Original text (superseded by the above, kept for the historical
+record of what this item looked like before this pass)
 
 **Confirmed: a byte-exact, source-derived spec exists** in
 `GUI_EoB::loadGameOld`/related (`gui/saveload_eob.cpp:690-780+`), including
@@ -571,6 +688,23 @@ Shikadi-wiki-derived description can be replaced by this source-confirmed
 one; not independently re-verified against a real Amiga `.DEC` file this
 pass (the DOS-side verification target didn't exist in this corpus either
 — logged as confirmed-from-source only).
+
+**`eotb1-amiga-dec-verify` — checked exhaustively (2026-08-29), genuinely
+unverifiable, not just "not attempted".** `find data -iname '*.dec'`
+across the *entire* repo's `data/` tree returns **zero** hits under
+`data/eotb/amiga/` or `data/eotb/dosvga/` — this corpus contains no `.DEC`
+file for EOB1 at all, DOS or Amiga. This is not a gap in this pass's
+search; it's the expected, consistent consequence of an already-confirmed
+fact one section up ("Monster Graphics" / the DOS doc's INF section):
+`hasDecorations` is hardcoded `false` at every EOB1 call site
+(`scene_eob.cpp:275`), so the shipped EOB1 game never needed to ship any
+`.DEC` files in the first place — the only `.DEC` files that exist
+anywhere in this project's data are EOB2's (`data/eotb2/dosvga/*.DEC`,
+`data/eotb2/amiga/data/*.DEC`), a different game with its own already-
+documented format doc. **This item stays closed as "format confirmed from
+source, byte-verification against real Amiga bytes is not possible in
+this corpus because no such file exists for this game"** — a real, honest
+negative, not a deferred task.
 
 ### OUT Files
 

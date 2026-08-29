@@ -211,19 +211,35 @@ with this extractor's name-match-else-fallback substitute; the two spot
 checks below (title, Westwood logo) confirm the substitute gets these
 right.
 
-**Monster CPS files: heuristic refined, not fully confirmed.** The
-`EOBPAL.COL` fallback this extractor uses for monster sprites (no matching
-`.COL`/`.PAL`) is very likely **not** what the live game shows — per the
-trace above, a monster CPS is normally composited over an already-loaded
-dungeon view, so its true palette is whatever wall-set `.PAL` is active for
-the level that monster appears in (e.g. `KOBOLD.CPS` → `BRICK.PAL`, since
-kobolds are levels 1-3/BRICK per `EOBDATA3.PAK`'s contents), not the
-game-wide `EOBPAL.COL`. This wasn't corrected in the extractor this pass
-(would require a monster→level→wall-set lookup table, itself dependent on
-the now-decoded INF monster-shape-filename fields — see "INF" below); noted
-as a still-open refinement, downgraded from "may be off" to "specifically,
-likely wrong — should use the owning level's wall-set palette instead of
-`EOBPAL.COL`."
+**Monster CPS files: fixed and wired in (2026-08-29).** The `EOBPAL.COL`
+fallback this extractor previously used for monster sprites was replaced
+with a real monster→level→wall-set lookup, built from the now-decoded
+`.INF` monster-shape-slot header fields (`kyralib.inf.parse_inf_header`,
+see "INF" below): for each of the 12 real `LEVELn.INF` files, read its
+`wallSetStem` and its (at most 2) named monster stems, and map every
+monster CPS filename to that level's wall-set `.PAL`.
+
+**Verified:** decoding all 12 `LEVELn.INF` files this way resolves **all
+22 EOB1 monster stems to exactly one wall-set apiece**, with zero
+ambiguity (no monster's stem appears under two different wall sets) and
+zero unresolved monsters. Resolving the monster stem to its real `.CPS`
+filename needed one more source-confirmed step: 6 of the 22 stems
+(`spider`, `drider`, `mantis`, `xorn`, `xanath`, `rust`) have **no** bare
+`<STEM>.CPS` file in this corpus — only `<STEM>1.CPS`
+(`SPIDER1.CPS`/`DRIDER1.CPS`/etc.). This is not a guess: `Screen_EoB::
+loadEoBBitmap`'s EOB1 "loadAlternative" branch (`graphics/screen_eob.cpp`,
+fetched 2026-08-29), reached whenever the bare `<STEM>.CPS` isn't found,
+does exactly `tmp.insertChar('1', tmp.size() - 4)` — inserting a literal
+`'1'` right before the `.CPS` extension — before retrying the load. Ported
+as `resolve_monster_cps_name` (try `<STEM>.CPS`, then `<STEM>1.CPS`) in
+`scripts/extract_eotb_dosvga.py`; resolves all 6 with zero gaps.
+
+`KOBOLD.CPS`/`LEECH.CPS` → `BRICK.PAL` (levels 1-3), `ZOMBIE.CPS`/
+`SKELETON.CPS` → `BRICK.PAL`, `KUOTOA.CPS`/`FLIND.CPS` → `BRICK.PAL`,
+`SPIDER1.CPS`/`DWARF.CPS`/`KENKU.CPS`/`MAGE.CPS` → `BLUE.PAL`,
+`DROWELF.CPS`/`SKELWAR.CPS`/`DRIDER1.CPS`/`HELLHND.CPS`/`RUST1.CPS`/
+`DISBEAST.CPS` → `DROW.PAL`, `SHINDIA.CPS`/`MANTIS1.CPS`/`XORN1.CPS`/
+`MFLAYER.CPS` → `GREEN.PAL`, `XANATH1.CPS`/`GOLEM.CPS` → `XANATHA.PAL`.
 
 ### Rendering verification
 
@@ -234,9 +250,15 @@ likely wrong — should use the owning level's wall-set palette instead of
   reproduces the Westwood Associates logo screen exactly.
 - `screens/chargen.png` (`CHARGEN.CPS` + `EOBPAL.COL` fallback) is a clean,
   fully legible "Character Generation" UI screen.
-- `screens/kobold.png` (`KOBOLD.CPS` + `EOBPAL.COL` fallback) shows 6 clearly
-  recognisable kobold sprite-animation frames (idle/walk/attack poses) laid
-  out left-to-right/wrapped within the 320×200 canvas.
+- `screens/kobold.png` (`KOBOLD.CPS` + `BRICK.PAL`, the level's own
+  wall-set palette, per the fix above) shows 6 clearly recognisable red
+  kobold sprite-animation frames (idle/walk/attack poses) laid out
+  left-to-right/wrapped within the 320×200 canvas — a plausible dungeon-
+  toned recolour versus the earlier `EOBPAL.COL`-fallback render (still
+  "rendered", not byte-exact-oracle-confirmed — no emulator/screenshot
+  ground truth was checked this pass, but the palette source itself is now
+  the game's own documented mechanism instead of a fallback known to
+  likely be wrong).
 
 This is byte-exact-oracle-strength verification for the CPS+LCW+PAK pipeline
 (known, recognisable screens reproduced exactly) even though individual
@@ -303,10 +325,53 @@ already suspected — now confirmed structurally identical containers, same
 `.VCN`, not independently verified this pass — the container-format
 confirmation was the priority).
 
-**Not implemented as an extractor this pass** (structure fully understood,
-time went to the higher-priority INF/ITEM.DAT closures) — this is now a
-"known format, not yet wired into the pipeline" item rather than a
-"format unknown" item.
+**Wired into the pipeline (2026-08-29).** `scripts/kyralib/ega_palette.py`
+(the `EGA_COLORS`/`EGA_DEFAULT_PALETTE_INDICES` constants above) +
+`extract_ega_screens`/`extract_ecn_wallsets` in
+`scripts/extract_eotb_dosvga.py`. Verified:
+
+- **42/48 `.EGA` files decode cleanly** to `screens/<stem>_ega.png` (the
+  `_ega` suffix is load-bearing — every `.EGA` stem is identical to its
+  `.CPS` sibling's stem, e.g. `DOOR.EGA`/`DOOR.CPS`, and writing both under
+  the bare stem would silently clobber the VGA screen since
+  `extract_cps_screens` runs first). `screens/door_ega.png` is a legible,
+  colourful 16-colour door/decoration reference sheet (spider, wall
+  panels, an eye motif) — clearly the EGA-mode equivalent of the same
+  content `DOOR.CPS` already renders in 256 colours.
+- **6 residual `.EGA` files do NOT decode** with this pipeline:
+  `BRICK1/2/3.EGA`, `BLUE.EGA`, `DROW.EGA` all have `compType=1` (not `0`,
+  `3`, or `4` — a genuinely different, still-undecoded Format80 variant,
+  likely one of the LZW modes the Amiga doc's compression-type table
+  lists as `0x0001`/`0x0002`), and `ITEMRMP.EGA` decodes to `imgSize=0` (an
+  apparently-empty/placeholder file). These are non-critical reference
+  images (wall-set title cards + one degenerate file), not the primary
+  wall-rendering assets (those are `.ECN`, below, which decode cleanly for
+  all 5 wall sets) — logged as a new, narrower open item rather than
+  reworked into this pass's scope; see `docs/eotb/TODO.md`.
+- **`.ECN` decodes via `kyralib.vcn.parse_vcn`'s header unmodified**
+  (verified byte-exact: `numTiles*32 + 34` equals the LCW-decompressed
+  payload length exactly, for all 5 real wall sets — e.g. `BRICK.ECN`:
+  `numTiles=1484`, `1484*32+34=47522=` the decoded length exactly). **But
+  its per-tile pixel decode needs a different path than VGA `.VCN`**: every
+  real `.ECN`'s `col_map[0:16]` is **all zero** (confirmed for all 5 wall
+  sets), unlike VGA `.VCN` where `col_map` is a real nibble→256-colour
+  remap — applying VGA's `decode_all_tiles` (which remaps through
+  `col_map`) to `.ECN` collapses every tile to palette index 0, rendering
+  a fully blank/transparent atlas. The raw 4bpp nibbles themselves are
+  already the intended 0-15 EGA-palette index with no remap layer at all
+  (unsurprising: EGA only has 16 colours, so there's nothing for a
+  nibble→256-colour table to usefully remap to). `decode_ecn_tile_raw` in
+  the extractor bypasses `col_map` accordingly.
+  `textures/brick_ecn.png` renders a legible red-brick masonry-coursing
+  texture with a blue/black sky band — the expected EGA-mode equivalent of
+  `textures/brick_vcn.png`. All 5 wall sets (`BLUE`/`BRICK`/`DROW`/`GREEN`/
+  `XANATHA`) extracted.
+- `.EMP` (the `.VMP` equivalent) confirmed structurally identical in the
+  same pass (`count=2916`, `2 + 2916*2 = 5834` bytes exactly, matching
+  `.VMP` byte-for-byte in shape) but **not extracted as an asset**, for
+  parity with `.VMP` itself — this pipeline doesn't render the full 22×15
+  viewport composite for VGA either (see "VMP" below), so there is nothing
+  for `.EMP` to feed yet.
 
 ---
 
@@ -466,6 +531,14 @@ strings with zero garbage — `mazStem="level1.maz"`, `wallSetStem="brick"`,
 monster stems `"kobold"`/`"leech"` (matching `EOBDATA3.PAK`'s known BRICK
 wall set + kobold/leech monster roster), and 3 decoration entries with
 stems `"brick1"`/`"brick2"`/`"brick3"` all paired with `dec="brick.dat"`.
+The `wallSetStem`/monster-shape-slot fields (the header portion needed for
+the monster-CPS palette fix above) are now a committed module,
+`scripts/kyralib/inf.py`'s `parse_inf_header` — re-verified against all 12
+real `LEVELn.INF` files, not just `LEVEL1.INF` (see "VGA palette" →
+"Monster CPS files" above for the resulting monster→wall-set table). The
+rest of this table (door shapes, script timers, active-monster array,
+decoration list, block-property overrides, event script) remains
+uncommitted/probe-only, as before.
 The trailer-list invariant is exact: `trailerOffset(2737) + 2 + 38*5 ==
 2929` (file size) with **zero residue**, across all 38 override records.
 One override record's `assignedObjects` field is `719` — exactly the byte
@@ -612,10 +685,13 @@ field-by-field against Amiga bytes this pass, but the DOS-side record
 widths (14/16 bytes) are now unambiguous ground truth for that comparison
 if revisited.
 
-Not yet wired into `scripts/extract_eotb_dosvga.py`/`pak_directory.json` as
-structured JSON output — the format is fully confirmed but extraction
-into `public/assets/eotb/dosvga/data/` wasn't implemented this pass (time
-budget went to closing the format-unknown status of every TODO item first).
+**Wired into the pipeline (2026-08-29).** `scripts/kyralib/items.py`
+(`parse_item_dat`/`parse_itemtype_dat`) + `extract_item_data` in
+`scripts/extract_eotb_dosvga.py`, writing
+`public/assets/eotb/dosvga/data/{item,itemtype}.json`. Re-verified against
+the real corpus at wiring time: `numItems=448`/`numNames=95` and
+`numTypes=57`, matching the byte-exact structural checks above exactly,
+zero residue.
 
 ---
 
@@ -628,9 +704,8 @@ format-unknown task.
 
 | Item | Status | Where to pick up |
 |------|--------|-------------------|
-| `.EGA` / `.ECN` / `.EMP` files (EGA render-mode graphics) | Confirmed: same container/codec as `.CPS`/`.VCN`/`.VMP`, different palette source (see "EGA render mode" above) | `scripts/kyralib/format80.py` (reuse unmodified) + a new `ega_palette.py` for `_egaColors`/`_egaDefaultPalette` |
 | `INF` level-config records | Confirmed structurally, byte-exact verified on `LEVEL1.INF` (see "INF" above); event-script opcode operand widths not exhaustively decoded | `engine/scene_eob.cpp` `initLevelData` (ported above); `script/script_eob.cpp` `oeob_*` for opcode operands if pursued further |
-| `ITEM.DAT` / `ITEMTYPE.DAT` field layout | Confirmed byte-exact (see "ITEM.DAT / ITEMTYPE.DAT" above) | Not yet wired into `scripts/extract_eotb_dosvga.py` |
+| `.EGA` `compType=1` variant (`BRICK1/2/3.EGA`, `BLUE.EGA`, `DROW.EGA`) | New finding (2026-08-29): 5 of 48 `.EGA` files use an undecoded Format80 variant (`compType` values 0/3/4 are handled; these use `1`, likely one of the Amiga doc's LZW-12/LZW-14 compression types) — see "EGA render mode" above | `scripts/kyralib/format80.py`'s `decompress_bitmap` (add a `compType==1` branch); reference decoder needed from ScummVM source or another Format80 implementation |
 | `ADLIB.DAT` / `PCSOUND.DAT` / `SOUND.DAT` | Audio, out of scope for palette/sprite/container breadth pass | `engines/kyra/sound/` |
 | VMP-driven full-viewport render (VMP+VCN combined 22×15 scene) | Per-tile atlas already extracted; full composite is a nice-to-have | `engine/scene_rpg.cpp` `generateBlockDrawingBuffer` |
 

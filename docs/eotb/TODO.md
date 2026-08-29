@@ -6,15 +6,89 @@ full evidence and paths-tried tables — this file is pointers only.
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| eotb1-dos-ega-pipeline | open | `.EGA`/`.ECN`/`.EMP` format is now fully confirmed (same container/codec as `.CPS`/`.VCN`, EGA-index palette) but not yet wired into the extractor pipeline | `dosvga/data-structure.md` § "EGA render mode" | 2026-08-02 game-re |
 | eotb1-dos-inf-opcode-operands | open | `.INF` event-script bytecode dispatcher and ~30 opcode names are confirmed from source; individual opcode operand byte-widths not exhaustively decoded | `dosvga/data-structure.md` § "INF — Level configuration" → "Event script" | 2026-08-02 game-re |
-| eotb1-dos-item-dat-pipeline | open | `ITEM.DAT`/`ITEMTYPE.DAT` byte layout is fully confirmed (byte-exact, zero residue) but not yet wired into `scripts/extract_eotb_dosvga.py` as JSON output | `dosvga/data-structure.md` § "ITEM.DAT / ITEMTYPE.DAT" | 2026-08-02 game-re |
-| eotb1-dos-monster-cps-palette | open | Monster CPS files render with a `EOBPAL.COL` fallback that's now known to likely be wrong — the game shows them over the owning level's wall-set palette (e.g. `KOBOLD.CPS` should use `BRICK.PAL`, not `EOBPAL.COL`); needs a monster→level→wall-set lookup (buildable from the now-decoded INF monster-shape fields) wired into the extractor | `dosvga/data-structure.md` § "VGA palette" → "Monster CPS files: heuristic refined, not fully confirmed" | 2026-08-02 game-re |
-| eotb1-amiga-dec-verify | open | `.DEC` format confirmed from source (shared byte-exact layout with DOS, forced-LE reader) but not independently byte-verified against a real Amiga `.DEC` file (none in this corpus to cross-check against DOS either) | `amiga/data-structure.md` § "DEC Files" | 2026-08-02 game-re |
-| eotb1-amiga-savegame-port | open | `EOBDATA.SAV` structure fully confirmed from source and platform-detection heuristic spot-verified against the real file; full record layout not ported to a standalone decoder/extractor | `amiga/data-structure.md` § "EOBDATA.SAV — Save game" | 2026-08-02 game-re |
-| eotb1-amiga-multipalette-cps-callsite | open | Multi-palette CPS mechanism confirmed (`setDualPalettes` = horizontal split-screen dual palette, not fade/animation) but the specific screen/context that calls it (`eobcommon.cpp:1783`) not traced to find which CPS files actually use it | `amiga/data-structure.md` § "Palette Locations" → "Multi-palette CPS — mechanism confirmed" | 2026-08-02 game-re |
-| eotb1-amiga-special-cps-codec | open | Bonus finding (not originally an open item): a second Amiga-only compression codec (`loadSpecialAmigaCPS`, backwards-reading bit-level LZ) used for Amiga `.INF`-equivalent files and `TEXT.CPS` — confirmed and cited from source, not implemented as a decoder | `amiga/data-structure.md` § "A second, distinct Amiga-only codec" | 2026-08-02 game-re |
+| eotb1-dos-ega-comptype1-variant | open | A `compType=1` `.EGA` variant (`BRICK1/2/3.EGA`, `BLUE.EGA`, `DROW.EGA`, plus `ITEMRMP.EGA`'s empty-file case — 6 files total) was found while wiring the mainline `compType=4` `.EGA`/`.ECN`/`.EMP` pipeline and is skipped by the extractor; not yet decoded | `dosvga/data-structure.md` § "EGA render mode" → "Not extracted this session (open items)" | 2026-08-29 game-re |
 | eotb1-amiga-walker-wallmapping-decorations | open | The wall-mapping override table (`wallIndex`->`vmpIndex`) itself is now closed (see closed-items block below) and implemented. Still open, real but out of this pass's scope: `decIndex`-driven decoration overlays (`assignWallsAndDecorations`'s `_levelDecorationData`/`_levelDecorationRects` do-while chain, fed by the `0xEC` decoration-load records `parseInf` already exposes as `decorationLoads`), `specialType`/`flags` (door/stairs/special-tile behaviour beyond wall art), the render rotation for facing != North (`tools/eotb/view-model.ts`'s `roleSide`, a self-consistent extrapolation not independently verified — no oracle in this corpus to check it against), VMP's per-tile `zMask` flag ("seam" hint, unmodelled), and door open/closed state (static from the `.MAZ` snapshot only, `.INF` event-script mutation not applied) | `tools/eotb/decode-inf.ts` (`parseInf`'s `decorationLoads`/`specialType`/`flags` fields, unused downstream); `tools/eotb/view-model.ts` (`roleSide` doc comment) | 2026-08-29 amiga-disasm |
+
+## Closed this session (2026-08-29, game-re — DOS pipeline wiring + Amiga savegame/special-codec/multipalette)
+
+- **`eotb1-dos-ega-pipeline`** — **closed.** `.EGA`/`.ECN`/`.EMP`
+  (`compType=4`) wired into `scripts/extract_eotb_dosvga.py` via new
+  `extract_ega_screens`/`extract_ecn_wallsets` functions and new shared
+  modules `scripts/kyralib/ega_palette.py` (EGA 16-colour default palette)
+  and `scripts/kyralib/inf.py` (`.INF` header parse for wall-set stems).
+  42/48 candidate files extracted successfully (6 skipped, each with a
+  documented reason — see the new `eotb1-dos-ega-comptype1-variant` row
+  above). Verified by rendering: `screens/door_ega.png` (14 unique
+  colours, legible door art) coexists correctly with the pre-existing VGA
+  `screens/door.png` (57 unique colours) after fixing a real filename
+  collision bug (both extractors initially wrote to the same `screens/door`
+  manifest key). `textures/brick_ecn.png` required bypassing `.VCN`'s
+  `col_map` remap (confirmed vestigial/all-zero for every real `.ECN` in
+  the corpus, unlike meaningful VGA `.VCN` maps) via a new
+  `decode_ecn_tile_raw`; before the fix it rendered fully transparent
+  (every tile decoding to index 0), after the fix it shows a legible red
+  brick texture with a blue/black sky band. See `dosvga/data-structure.md`
+  § "EGA render mode".
+- **`eotb1-dos-item-dat-pipeline`** — **closed.** Wired into
+  `scripts/extract_eotb_dosvga.py`'s new `extract_item_data`, writing
+  `data/item.json` (448 items, 95 names) and `data/itemtype.json` (57
+  types) via the already byte-exact `scripts/kyralib/items.py`. See
+  `dosvga/data-structure.md` § "ITEM.DAT / ITEMTYPE.DAT".
+- **`eotb1-dos-monster-cps-palette`** — **closed.** Built
+  `build_monster_wallset_palette()` in `scripts/extract_eotb_dosvga.py`,
+  parsing all 12 `LEVELn.INF` headers' monster-shape slots (via the new
+  `scripts/kyralib/inf.py`) into a monster-CPS-filename -> wall-set-stem
+  map, and wired it into `extract_cps_screens` so monster CPS files
+  resolve to `<WALLSET>.PAL` instead of the wrong `EOBPAL.COL` fallback —
+  also fixing/confirming the `<STEM>.CPS` vs `<STEM>1.CPS` fallback naming
+  rule from ScummVM's `loadEoBBitmap` source along the way. See
+  `dosvga/data-structure.md` § "VGA palette" → "Monster CPS files".
+- **`eotb1-amiga-dec-verify`** — **closed as a confirmed, honest
+  negative.** No `.DEC` file exists anywhere in EOB1's corpus, DOS or
+  Amiga — the format (shared byte-exact layout, forced-LE reader) is
+  fully confirmed from source but has zero real files in this project to
+  verify it against, and this is reported plainly rather than fabricating
+  a check. See `amiga/data-structure.md` § "DEC Files".
+- **`eotb1-amiga-savegame-port`** — **closed.** New
+  `tools/eotb/decode-savegame.ts` (`decodeSavegame`,
+  `detectAmigaSaveFile`) fully implements `EoBCoreEngine::
+  readOriginalSaveFile`'s layout, verified byte-exact against the real
+  `data/eotb/amiga/EOBDATA.SAV` (33,107 bytes) — parsing lands exactly on
+  EOF with zero residue. One genuine discrepancy from ScummVM's literal
+  source was found and documented: the temp-data-parts loop must run
+  `numParts` (12) times, not the source's literal `numParts + 1` (13) —
+  the byte-exact-EOF oracle was used as the tiebreaker. 4/4 tests passing
+  in `tools/eotb/__tests__/eotb-savegame.test.ts`. See
+  `amiga/data-structure.md` § "EOBDATA.SAV".
+- **`eotb1-amiga-multipalette-cps-callsite`** — **closed, strongly
+  narrowed rather than airtight-proven.** Traced `setDualPalettes`'s call
+  site up to the data-driven `oeob_dialogue` event-script opcode and the
+  hardcoded-`"MAP"` `displayParchment` path; scanned all 12 decompressed
+  `LEVELn.INF` event-script regions for any `.CPS` filename operand —
+  zero found — and confirmed no `MAP.CPS`/`MAP1.CPS` exists anywhere in
+  this corpus. Conclusion: no data in this EOB1 Amiga corpus reaches
+  `setDualPalettes`, though this is a data-flow negative (no CPS operand
+  strings, no MAP file), not a full opcode-by-opcode script interpreter
+  proof. No extractor work was needed since there's nothing in the corpus
+  to extract multi-palette output from. See `amiga/data-structure.md` §
+  "Palette Locations" → "Multi-palette CPS".
+- **`eotb1-amiga-special-cps-codec`** — **closed on the implementation
+  side; verification side an honest negative.** New
+  `tools/eotb/decode-special-cps.ts` (`usesSpecialAmigaCodec`,
+  `decodeSpecialAmigaCps`) ports `loadSpecialAmigaCPS` byte-for-byte,
+  including the bit reader's 31-usable-bits-per-32-bit-word behaviour. A
+  whole-corpus gate scan (`tools/eotb/__tests__/eotb-special-cps.test.ts`)
+  found **zero files** in `data/eotb/amiga/` (including all 12
+  `LEVELn.INF` and `TEXT.CPS`) that take this codec's branch — every one
+  uses the ordinary `compType=4` LCW path instead, consistent with the
+  source's own note that this is chiefly an EOB2-Amiga-German fallback.
+  Verified instead against a from-first-principles hand-built 16-byte
+  synthetic test vector (drives the literal-byte decode path to emit
+  `0x41` with a self-consistent XOR checksum) plus a checksum-rejection
+  test; the match-copy branches remain source-ported-only with no
+  corpus oracle to exercise them. 5/5 tests passing. See
+  `amiga/data-structure.md` § "A second, distinct Amiga-only codec".
 
 ## Closed this session (2026-08-29, amiga-disasm — real `.INF` wall-mapping table)
 
