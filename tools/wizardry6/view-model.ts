@@ -82,12 +82,30 @@
  * `word[-11330(A4) + depth*6 + side*2] != 0`, and both draws are skipped
  * entirely when `byte[-11354(A4)]` / `byte[-11342(A4)]` at `depth*3 + side`
  * is set. Those three arrays are memset to 0 per render (`0x0a8f6`-`0x0a91e`)
- * and only written by `EvalCellFace`'s special-map-mode paths, so — like
- * `evaluate-cell.ts`'s other overlay assumptions — they are taken as clear.
+ * and only written by `EvalCellFace`'s special-map-mode paths — the flagP/
+ * flagQ overlay dispatch, §4.7.9 — which `evalOverlay` (`evaluate-cell.ts`)
+ * now implements and this module wires into the per-lane ceiling/floor
+ * emission and the blocking predicates below (previously assumed clear).
  */
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { DrawItem, DrawItemKind } from '@seer-project/dungeon';
-import { evalCellFace, stepForward, type CellPlanes } from './evaluate-cell.ts';
+import { evalCellFace, evalOverlay, stepForward, type CellPlanes, type OverlayEffect } from './evaluate-cell.ts';
+
+/** The three per-(depth,side) overlay effects that matter for one lane's ceiling/floor draw — `evalOverlay`'s `fog` is handled separately (it also forces the wall code and forces occlusion, see `buildViewItems`). */
+interface SideGate {
+  skipCeiling: boolean;
+  skipFloor: boolean;
+  altFloor: boolean;
+}
+
+/** OR two evaluators' overlay effects into one gate — §4.7.9's per-lane approximation documented on `evalOverlay` (a lane fed by two evaluator calls, e.g. the perpendicular side wall and the lateral column sharing one "left"/"right" gate slot, is gated if EITHER fired). */
+function combineGate(a: OverlayEffect, b: OverlayEffect): SideGate {
+  return {
+    skipCeiling: a.skipCeiling || b.skipCeiling,
+    skipFloor: a.skipFloor || b.skipFloor,
+    altFloor: a.altFloor || b.altFloor,
+  };
+}
 
 /** Lanes are 8 bytes but only depths 0-3 are initialised (`CODE+0xa86a`, `CMP.W #4,D4`). */
 const LANE_DEPTHS = 4;
@@ -158,16 +176,16 @@ function hide(lane: boolean[], depth: number): void {
  * `4` are drawn but see-through.
  *
  * Both this and `perpBlocks` have a second, `OR`-ed condition in the game —
- * a per-depth stride-3 byte flag (`-11365`/`-11366`/`-11364(A4)`, written at
- * `0x0aa10` only when `-18340(A4)` is 10 or 12) that forces occlusion even
- * for a see-through code. Those flags are assumed clear here, the same
- * conservative assumption `evaluate-cell.ts` makes for `EvalCellFace`'s two
- * `TestBit`-gated overlay dispatches.
+ * a per-depth stride-3 byte flag (`-11365`/`-11366`/`-11364(A4)`) that
+ * forces occlusion even for a see-through code. §4.7.9 identifies its real
+ * writer as the flagP "fog/view-blocker" handler (levels 0/4/5/12-outside-
+ * regions-0-8) — `forceOcclude` below is `evalOverlay(...).fog` from the
+ * same evaluator call, plumbed in by `buildViewItems`.
  */
-const blocks = (code: number): boolean => code === 2 || code >= 5;
+const blocks = (code: number, forceOcclude: boolean): boolean => code === 2 || code >= 5 || forceOcclude;
 
-/** `LAB_053B`/`LAB_053E`'s predicate (`TST.W 10(A5); BNE`) — *any* non-open perpendicular face occludes. */
-const perpBlocks = (code: number): boolean => code !== 0;
+/** `LAB_053B`/`LAB_053E`'s predicate (`TST.W 10(A5); BNE`) — *any* non-open perpendicular face occludes (+ the same fog occlusion-override, §4.7.9). */
+const perpBlocks = (code: number, forceOcclude: boolean): boolean => code !== 0 || forceOcclude;
 
 /**
  * `LAB_0506`'s dispatch (`data-structure.md` §4.7.6.1-§4.7.6.2) — which
@@ -210,9 +228,15 @@ function sideKeys(code: number, depth: number, alt: string): string[] {
  *
  * `alt` is the `-11436(A4)` per-depth checkerboard parity suffix
  * (`(partyX + partyY + facing + depth) & 1`, §4.7.8) picking the mirrored
- * pair branch. The kind-1/2 animated-decoration `.PIC`-cel tokens the same
- * queue also carries (codes 3/4/7/8/9's depth-0/front arms) are not
- * modelled — no cel-resource resolution in the walker yet.
+ * pair branch. The kind-1/2 `.PIC`-cel tokens the same queue also carries
+ * (codes 3/4/7/8/9's depth-0/front arms) are the monster/NPC combat-
+ * encounter portrait overlay, not an "animated decoration" — the
+ * resolution formula IS known (§4.7.8's correction block: frame =
+ * `(rec+9)-1` inside whichever `mon<NN>.pic` occupies resource-cache slot
+ * `rec+8`), but which monster (if any) occupies that slot is combat-
+ * encounter *runtime* state with no static per-cell representation in the
+ * exported maze data — so this stays unmodelled here deliberately, not
+ * for lack of a formula.
  */
 function frontKeys(
   site: 'front' | 'L1' | 'L2' | 'R1' | 'R2',
@@ -271,8 +295,8 @@ function frontKeys(
  * (`0x0a578`-`0x0a58c`) also lowers `-11440(A4)` to `d + 3` when it is
  * currently larger, which matters now that the loop runs to depth 3.
  */
-function blockFront(v: Lanes, d: number, code: number, loopBound: number): number {
-  if (!blocks(code)) return loopBound;
+function blockFront(v: Lanes, d: number, code: number, loopBound: number, forceOcclude: boolean): number {
+  if (!blocks(code, forceOcclude)) return loopBound;
   hide(v.front, d + 1);
   hide(v.front, d + 2);
   hide(v.front, d + 3);
@@ -286,44 +310,44 @@ function blockFront(v: Lanes, d: number, code: number, loopBound: number): numbe
 }
 
 /** `LAB_053B` (file `0x0a594`), called at `0x0ac08` with the left perpendicular code. */
-function blockPerpLeft(v: Lanes, d: number, code: number): void {
-  if (!perpBlocks(code)) return;
+function blockPerpLeft(v: Lanes, d: number, code: number, forceOcclude: boolean): void {
+  if (!perpBlocks(code, forceOcclude)) return;
   hide(v.left2, d);
   hide(v.left1, d + 1);
   hide(v.sideL, d + 2);
 }
 
 /** `LAB_053E` (file `0x0a5dc`), called at `0x0ac6e` — `LAB_053B`'s exact mirror. */
-function blockPerpRight(v: Lanes, d: number, code: number): void {
-  if (!perpBlocks(code)) return;
+function blockPerpRight(v: Lanes, d: number, code: number, forceOcclude: boolean): void {
+  if (!perpBlocks(code, forceOcclude)) return;
   hide(v.right1, d);
   hide(v.right2, d + 1);
   hide(v.sideR, d + 2);
 }
 
 /** `LAB_0541` (file `0x0a628`), called at `0x0ad62` after the outer-left draw. */
-function blockLeft1(v: Lanes, d: number, code: number): void {
-  if (!blocks(code)) return;
+function blockLeft1(v: Lanes, d: number, code: number, forceOcclude: boolean): void {
+  if (!blocks(code, forceOcclude)) return;
   hide(v.sideL, d + 1);
 }
 
 /** `LAB_0544` (file `0x0a662`), called at `0x0ae20` after the inner-left draw. */
-function blockLeft2(v: Lanes, d: number, code: number): void {
-  if (!blocks(code)) return;
+function blockLeft2(v: Lanes, d: number, code: number, forceOcclude: boolean): void {
+  if (!blocks(code, forceOcclude)) return;
   hide(v.left1, d + 1);
   hide(v.sideL, d + 2);
 }
 
 /** `LAB_0547` (file `0x0a6aa`), called at `0x0aee0` — `LAB_0544`'s mirror. */
-function blockRight1(v: Lanes, d: number, code: number): void {
-  if (!blocks(code)) return;
+function blockRight1(v: Lanes, d: number, code: number, forceOcclude: boolean): void {
+  if (!blocks(code, forceOcclude)) return;
   hide(v.right2, d + 1);
   hide(v.sideR, d + 2);
 }
 
 /** `LAB_054A` (file `0x0a6f2`), called at `0x0afa0` — `LAB_0541`'s mirror. */
-function blockRight2(v: Lanes, d: number, code: number): void {
-  if (!blocks(code)) return;
+function blockRight2(v: Lanes, d: number, code: number, forceOcclude: boolean): void {
+  if (!blocks(code, forceOcclude)) return;
   hide(v.sideR, d + 1);
 }
 
@@ -381,6 +405,11 @@ export function buildViewItems(
    * `LAB_04F8`, with the lane's wall in between; `LAB_0528` draws the same
    * pair with nothing in between. `body` fills that gap so this helper can
    * express both, in the game's own order.
+   *
+   * `gate` is §4.7.9's flagP/flagQ overlay result for this lane's side at
+   * this depth: `skipCeiling`/`skipFloor` omit the draw entirely, and
+   * `altFloor` (when the floor is not itself skipped) substitutes the
+   * `floor-alt:*` compose family (214-241) for the normal one.
    */
   const emitLane = (
     lane: string,
@@ -388,13 +417,23 @@ export function buildViewItems(
     lateral: number,
     side: 'L' | 'R' | undefined,
     cell: { x: number; y: number },
+    gate: SideGate,
     body?: () => void,
   ) => {
     // ceiling/floor fork on the POSE parity `-11434(A4)` (§4.7.7/§4.7.8)
-    emit(`ceil:${lane}:${depth}${altPose}`, 'side', depth, lateral, side, cell);
+    if (!gate.skipCeiling) emit(`ceil:${lane}:${depth}${altPose}`, 'side', depth, lateral, side, cell);
     body?.();
-    emit(`floor:${lane}:${depth}${altPose}`, 'side', depth, lateral, side, cell);
+    if (!gate.skipFloor) {
+      const floorKey = gate.altFloor ? `floor-alt:${lane}:${depth}${altPose}` : `floor:${lane}:${depth}${altPose}`;
+      emit(floorKey, 'side', depth, lateral, side, cell);
+    }
   };
+
+  // `-0x47a4(a4)`, the current maze level — `evalOverlay`'s per-level
+  // flagP/flagQ dispatch key (§4.7.9). `-1` (no `CellPlanes.level`) matches
+  // no branch, i.e. behaves as "no overlay effect" — see `evalOverlay`'s own
+  // doc comment.
+  const level = planes.level ?? -1;
 
   let loopBound = MAX_LOOP_DEPTH;
   for (let depth = 0; depth < loopBound && depth < LANE_DEPTHS; depth++) {
@@ -402,44 +441,93 @@ export function buildViewItems(
 
     const altD = altDepth(depth);
 
+    // Every evaluator call the real EvalCellFace family makes this depth,
+    // computed up front (unconditionally, matching the game — visibility
+    // lanes gate the *draw*, not the evaluation) so their §4.7.9 overlay
+    // effects can be combined into the three per-side gates below before
+    // any lane is drawn. `*Overlay.fog` overrides its own evaluator's wall
+    // code to 0 (open) and forces occlusion, per `evalOverlay`'s doc comment.
+    const rawFront = evalCellFace(planes, cell.x, cell.y, facing, 0);
+    const frontOverlay = evalOverlay(planes, level, cell.x, cell.y, facing, 0);
+    const front = frontOverlay.fog ? 0 : rawFront;
+
+    const rawPerpL = evalCellFace(planes, cell.x, cell.y, (facing + 3) % 4, 0);
+    const perpLOverlay = evalOverlay(planes, level, cell.x, cell.y, (facing + 3) % 4, 0);
+    const perpL = perpLOverlay.fog ? 0 : rawPerpL;
+
+    const rawPerpR = evalCellFace(planes, cell.x, cell.y, (facing + 1) % 4, 0);
+    const perpROverlay = evalOverlay(planes, level, cell.x, cell.y, (facing + 1) % 4, 0);
+    const perpR = perpROverlay.fog ? 0 : rawPerpR;
+
+    const rawLatL = evalCellFace(planes, cell.x, cell.y, facing, -1);
+    const latLOverlay = evalOverlay(planes, level, cell.x, cell.y, facing, -1);
+    const latL = latLOverlay.fog ? 0 : rawLatL;
+
+    const rawLatR = evalCellFace(planes, cell.x, cell.y, facing, 1);
+    const latROverlay = evalOverlay(planes, level, cell.x, cell.y, facing, 1);
+    const latR = latROverlay.fog ? 0 : rawLatR;
+
+    // Three per-side ceiling/floor gates (§4.7.9): front is its own
+    // evaluator; left/right each OR together the perpendicular-face and
+    // lateral-column evaluators that share that side, per `evalOverlay`'s
+    // documented approximation (its own doc comment explains why: only 3
+    // gate slots exist for 7 lanes, and which of the two left/right
+    // evaluators writes which wasn't independently traced).
+    const frontGate = combineGate(frontOverlay, frontOverlay);
+    const leftGate = combineGate(perpLOverlay, latLOverlay);
+    const rightGate = combineGate(perpROverlay, latROverlay);
+
+    // The fog handler's third effect — "clears that side's visibility
+    // lanes at this depth" (§4.7.9) — applies immediately, before this
+    // depth's own visibility checks below (distinct from the occlusion-
+    // override, which affects *future* depths via blockFront/blockPerp*).
+    if (frontOverlay.fog) hide(v.front, depth);
+    if (perpLOverlay.fog || latLOverlay.fog) {
+      hide(v.sideL, depth);
+      hide(v.left1, depth);
+      hide(v.left2, depth);
+    }
+    if (perpROverlay.fog || latROverlay.fog) {
+      hide(v.sideR, depth);
+      hide(v.right1, depth);
+      hide(v.right2, depth);
+    }
+
     // Front wall — `0x9202` straight ahead, lane `-11432` (`0x0ab92`).
     // `0x9b58`'s per-code dispatch (§4.7.8): the preamble solid wall for
     // codes 2/>=7, the door pair for 5, feature pieces for 6-14, and the
     // deferred doorway/door-leaf records for 1/3/4.
-    const front = evalCellFace(planes, cell.x, cell.y, facing, 0);
     if (v.front[depth]) {
-      emitLane('front', depth, 0, undefined, cell, () => {
+      emitLane('front', depth, 0, undefined, cell, frontGate, () => {
         if (depth >= MAX_WALL_DEPTH) return;
         const { now, deferred } = frontKeys('front', front, depth, altD);
         for (const k of now) emit(k, 'front', depth, 0, undefined, cell);
         for (const k of deferred) deferredItems.push({ key: k, kind: 'front', depth, lateral: 0, side: undefined, cell });
       });
     }
-    loopBound = blockFront(v, depth, front, loopBound);
+    loopBound = blockFront(v, depth, front, loopBound, frontOverlay.fog);
 
     // Receding side walls — the perpendicular faces (`0x969a`/`0x9876`) run
     // through `LAB_0506`'s own dispatch, both gated on the same `-11432`
     // lane as the front wall. `LAB_0506` carries no ceiling/floor of its
     // own; its pair draws fork on the POSE parity `-11434` (not the
     // per-depth `-11436`), §4.7.6.2/§4.7.8.
-    const perpL = evalCellFace(planes, cell.x, cell.y, (facing + 3) % 4, 0);
     if (v.front[depth])
       for (const k of sideKeys(perpL, depth, altPose)) {
         const [base, suffix] = k.endsWith(':alt') ? [k.slice(0, -4), ':alt'] : [k, ''];
         emit(`${base}:L:${depth}${suffix}`, 'side', depth, -1, 'L', cell);
       }
-    blockPerpLeft(v, depth, perpL);
+    blockPerpLeft(v, depth, perpL, perpLOverlay.fog);
 
-    const perpR = evalCellFace(planes, cell.x, cell.y, (facing + 1) % 4, 0);
     if (v.front[depth])
       for (const k of sideKeys(perpR, depth, altPose)) {
         const [base, suffix] = k.endsWith(':alt') ? [k.slice(0, -4), ':alt'] : [k, ''];
         emit(`${base}:R:${depth}${suffix}`, 'side', depth, 1, 'R', cell);
       }
-    blockPerpRight(v, depth, perpR);
+    blockPerpRight(v, depth, perpR, perpROverlay.fog);
 
     // `LAB_0528` left (`0x0aca2`, lane `-11392`) — ceiling/floor only.
-    if (v.sideL[depth]) emitLane('side:L', depth, -1, 'L', cell);
+    if (v.sideL[depth]) emitLane('side:L', depth, -1, 'L', cell, leftGate);
 
     // Lateral column faces — one evaluation per side (`0x9202` at lateral
     // ∓1), two draw sites each, one lane per site, each carrying its own
@@ -451,28 +539,26 @@ export function buildViewItems(
       for (const k of deferred) deferredItems.push({ key: k, kind: 'side', depth, lateral, side, cell });
     };
 
-    const latL = evalCellFace(planes, cell.x, cell.y, facing, -1);
     if (v.left1[depth]) {
-      emitLane('lat:L1', depth, -1, 'L', cell, () => emitLatBody('L1', latL, -1, 'L'));
+      emitLane('lat:L1', depth, -1, 'L', cell, leftGate, () => emitLatBody('L1', latL, -1, 'L'));
     }
-    blockLeft1(v, depth, latL);
+    blockLeft1(v, depth, latL, latLOverlay.fog);
     if (v.left2[depth]) {
-      emitLane('lat:L2', depth, -1, 'L', cell, () => emitLatBody('L2', latL, -1, 'L'));
+      emitLane('lat:L2', depth, -1, 'L', cell, leftGate, () => emitLatBody('L2', latL, -1, 'L'));
     }
-    blockLeft2(v, depth, latL);
+    blockLeft2(v, depth, latL, latLOverlay.fog);
 
-    const latR = evalCellFace(planes, cell.x, cell.y, facing, 1);
     if (v.right1[depth]) {
-      emitLane('lat:R1', depth, 1, 'R', cell, () => emitLatBody('R1', latR, 1, 'R'));
+      emitLane('lat:R1', depth, 1, 'R', cell, rightGate, () => emitLatBody('R1', latR, 1, 'R'));
     }
-    blockRight1(v, depth, latR);
+    blockRight1(v, depth, latR, latROverlay.fog);
     if (v.right2[depth]) {
-      emitLane('lat:R2', depth, 1, 'R', cell, () => emitLatBody('R2', latR, 1, 'R'));
+      emitLane('lat:R2', depth, 1, 'R', cell, rightGate, () => emitLatBody('R2', latR, 1, 'R'));
     }
-    blockRight2(v, depth, latR);
+    blockRight2(v, depth, latR, latROverlay.fog);
 
     // `LAB_0528` right (`0x0afd6`, lane `-11384`) — ceiling/floor only.
-    if (v.sideR[depth]) emitLane('side:R', depth, 1, 'R', cell);
+    if (v.sideR[depth]) emitLane('side:R', depth, 1, 'R', cell, rightGate);
   }
 
   // The deferred-draw queue is consumed after the whole depth loop, in
@@ -485,7 +571,13 @@ export function buildViewItems(
   return items;
 }
 
-/** Whether the party can step one cell in compass direction `dir` from `(x, y)` (the W6 movement rule: the approach cell must be open, and the destination in-bounds). */
+/**
+ * Whether the party can step one cell in compass direction `dir` from
+ * `(x, y)` (the W6 movement rule: the approach cell must be open, and the
+ * destination in-bounds). A flagP fog cell (§4.7.9) evaluates as open here
+ * too, matching `buildViewItems`'s wall-code override — the same
+ * `EvalCellFace` return value both consumers read.
+ */
 export function canStepDir(
   planes: CellPlanes,
   x: number,
@@ -496,5 +588,7 @@ export function canStepDir(
 ): boolean {
   const dest = stepForward(x, y, dir, 1);
   if (dest.x < 0 || dest.y < 0 || dest.x >= levelWidth || dest.y >= levelHeight) return false;
-  return evalCellFace(planes, x, y, dir, 0) === 0;
+  const overlay = evalOverlay(planes, planes.level ?? -1, x, y, dir, 0);
+  const code = overlay.fog ? 0 : evalCellFace(planes, x, y, dir, 0);
+  return code === 0;
 }

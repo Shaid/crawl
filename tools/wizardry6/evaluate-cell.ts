@@ -29,6 +29,21 @@ export interface CellPlanes {
   wallB: number[];
   feature: number[];
   orient: number[];
+  /**
+   * The `flagP`/`flagQ` scripted-overlay bit planes (`levelBuf+0x43A`/
+   * `+0x49A`, 1 bit/cell — `decode-scenario-maze.ts` already extracts
+   * them) and the source region index (0-11) of each densified cell,
+   * needed only by `evalOverlay`'s level-12 special case
+   * (`export-dungeon-levels.ts` doesn't emit `region` by default; see its
+   * module doc). All optional and back-compatible: omitting them (or
+   * `level` below) makes `evalOverlay` a no-op, matching every caller/test
+   * that predates §4.7.9's overlay wiring.
+   */
+  flagP?: number[];
+  flagQ?: number[];
+  region?: number[];
+  /** Current maze level (`-0x47a4(a4)`) -- selects `evalOverlay`'s per-level flagP/flagQ handler (§4.7.9). */
+  level?: number;
 }
 
 /** `CODE+0x964e`'s full 16-entry feature dispatch table (data-structure.md §4.7.2's addendum). `'wall'` means the stub leaves the raw wall value unchanged (either a pure pass-through, or a side-effect-only stub this port doesn't implement -- see the module doc comment). */
@@ -85,20 +100,21 @@ function index(planes: CellPlanes, x: number, y: number): number {
  * the two side-wall evaluator siblings (`-1`/`+1`); `0` is the
  * straight-ahead case the front-wall call site uses exclusively.
  *
- * Two things this port deliberately does NOT implement, both confirmed
- * but out of scope for now (data-structure.md §4.7.2/§4.7.1):
- * - The two `TestBit`-gated 14-way dispatches on `-0x47a4(a4)` at the
- *   very top of the real function (`CODE+0x9434`/`0x949e`) -- these read
- *   bits from the `flagP`/`flagQ` scripted-overlay planes
- *   `export-dungeon-levels.ts` already exports, but their 14-way targets
- *   were never traced. Assumed false (both bits clear) for every cell,
- *   same conservative assumption Black Crypt's own walker-mirror-flag
- *   work made for an analogous "deferred, needs a live oracle" gap.
+ * One thing this port deliberately does NOT implement, confirmed but out
+ * of scope for now (data-structure.md §4.7.2/§4.7.1):
  * - Feature codes 6/13/14/15's side-effect array writes (per-cell
  *   "triggered/discovered" flags, structurally identified but not
  *   semantically decoded) -- this port treats them as pure wall-value
  *   pass-throughs, matching their `D7`-unchanged behaviour exactly; only
  *   the side effect (irrelevant to a static render) is omitted.
+ *
+ * The two `TestBit`-gated 14-way dispatches on `-0x47a4(a4)` at the very
+ * top of the real function (`CODE+0x9434`/`0x949e`) -- previously assumed
+ * clear -- are now implemented separately by `evalOverlay` below (§4.7.9),
+ * since their effects (skip-ceiling, skip-floor, alt-floor, fog/occlusion)
+ * apply to the ceiling/floor/blocking machinery in `view-model.ts`, not to
+ * this function's own return value in every case (see `evalOverlay`'s own
+ * doc comment for the one case where it does: the fog handler).
  */
 export function evalCellFace(planes: CellPlanes, x: number, y: number, facing: number, lateral: number): number {
   // The real EvalCellFace only checks bounds after a lateral step -- (x,y)
@@ -153,4 +169,120 @@ export function evalCellFace(planes: CellPlanes, x: number, y: number, facing: n
 
   const result = FEATURE_DISPATCH[feature];
   return result === 'wall' || result === undefined ? wall : result;
+}
+
+/**
+ * The four documented effects of `EvalCellFace`'s flagP/flagQ overlay
+ * dispatch (`CODE+0x9434`/`0x949e`, data-structure.md §4.7.9). All default
+ * false/off -- a cell with no flagP/flagQ bit set (or a `CellPlanes` that
+ * doesn't carry those planes at all) always resolves to this.
+ */
+export interface OverlayEffect {
+  /**
+   * The flagP "fog/view-blocker" handler fired (levels 0/4/5, and level 12
+   * outside source regions 0-8): the real game (a) evaluates this face as
+   * wall code 0 (open) regardless of the raw wall/feature value, (b) sets
+   * the §4.7.6 occlusion-override array so this face still blocks farther
+   * depths despite the see-through code, and (c) directly clears this
+   * side's visibility lane(s) *at this depth*. All three are the caller's
+   * responsibility (`view-model.ts`) -- this flag alone signals all three.
+   */
+  fog: boolean;
+  /** Skip the ceiling draw for this (depth, side)'s lane(s) (flagQ, most levels; flagP level 1 also sets this). */
+  skipCeiling: boolean;
+  /** Skip the floor draw for this (depth, side)'s lane(s) (flagP levels 1/2/3/6/11/13). */
+  skipFloor: boolean;
+  /** Draw the alt-floor compose family (214-241) instead of the normal floor (flagP levels 8/10/12-inside-regions-0-8). */
+  altFloor: boolean;
+}
+
+const NO_OVERLAY: OverlayEffect = { fog: false, skipCeiling: false, skipFloor: false, altFloor: false };
+
+/**
+ * `EvalCellFace`'s two `TestBit`-gated 14-way overlay dispatches
+ * (`CODE+0x9434`/`0x949e`, data-structure.md §4.7.9 -- read that section
+ * for the full per-level table and its evidence). Call this with the
+ * *same* `(x, y, facing, lateral)` used for the corresponding
+ * `evalCellFace` call -- it resolves the identical cell (bounds check +
+ * lateral step) before testing the flagP/flagQ bit there.
+ *
+ * `level` is the current maze level (`-0x47a4(a4)`, the same global
+ * `evalCellFace`'s siblings read internally but that this pure port
+ * doesn't otherwise need). Pass `planes.level ?? -1` from a caller that
+ * stores it on `CellPlanes`; a level matching no branch below behaves as
+ * "no known handler, and does not fall through to the flagQ test" -- the
+ * same behaviour real levels 0/1/2/3/4/5/6/8/10/11/12/13 have (only 7 and
+ * 9's flagP handler is a no-op that *does* fall through, per the
+ * pseudocode's two independent top-level `if`s, data-structure.md §4.7.2
+ * line "if TestBit(P): ...; if TestBit(Q): ...").
+ *
+ * **Known approximation** (flagged, not silently assumed): the exact
+ * per-evaluator-call "side" argument (0/1/2 = left/front/right) that the
+ * real dispatch handlers pass into the shared `-11354`/`-11342`/`-11330`/
+ * `-11364..66` gate arrays was not independently traced for the lateral
+ * column calls (`facing, lateral=∓1`) versus the perpendicular calls
+ * (`0x969a`/`0x9876`, `facing∓1, lateral=0`) -- both plausibly write the
+ * same "left"/"right" slot. `view-model.ts` treats them as sharing one
+ * slot (OR of both evaluators' effects), by analogy with the
+ * already-confirmed ceiling/floor gate arrays' 3-slot/7-lane grouping
+ * (§4.7.7.2); this is the one place a live oracle (not available to this
+ * project, `game-re-tooling` amiberry gate) could tighten further.
+ */
+export function evalOverlay(
+  planes: CellPlanes,
+  level: number,
+  x: number,
+  y: number,
+  facing: number,
+  lateral: number,
+): OverlayEffect {
+  if (!planes.flagP && !planes.flagQ) return NO_OVERLAY;
+
+  // Mirror evalCellFace's own cell resolution (bounds + lateral step) --
+  // an off-map cell (either before or after the lateral step) has no
+  // overlay bit to test, same "off-map" convention evalCellFace uses.
+  let cx = x;
+  let cy = y;
+  if (lateral !== 0) {
+    const right = FACING_DELTAS[(facing + 1) % 4]!;
+    cx += right.dx * lateral;
+    cy += right.dy * lateral;
+  }
+  if (!inBounds(planes, cx, cy) || !inBounds(planes, x, y)) return NO_OVERLAY;
+  const cellIdx = index(planes, cx, cy);
+
+  let effect: OverlayEffect = NO_OVERLAY;
+  let fellThroughToQ = true;
+
+  const flagPSet = (planes.flagP?.[cellIdx] ?? 0) !== 0;
+  if (flagPSet) {
+    fellThroughToQ = level === 7 || level === 9;
+    if (level === 0 || level === 4 || level === 5) {
+      effect = { ...effect, fog: true };
+    } else if (level === 12) {
+      const region = planes.region?.[cellIdx] ?? -1;
+      effect = region >= 0 && region <= 8 ? { ...effect, altFloor: true } : { ...effect, fog: true };
+    } else if (level === 8 || level === 10) {
+      effect = { ...effect, altFloor: true };
+    } else if (level === 1) {
+      effect = { ...effect, skipFloor: true, skipCeiling: true };
+    } else if (level === 2 || level === 3 || level === 6 || level === 11 || level === 13) {
+      effect = { ...effect, skipFloor: true };
+    }
+    // levels 7, 9: no-op handler, falls through to the flagQ test below.
+  }
+
+  if (fellThroughToQ) {
+    const flagQSet = (planes.flagQ?.[cellIdx] ?? 0) !== 0;
+    if (flagQSet) {
+      // Levels 2, 5, 7, 9 route to a further facing-indexed handler that
+      // wasn't traced to closure (§4.7.9) -- left unimplemented rather
+      // than guessed, so those 4 levels get no flagQ effect here.
+      if (!(level === 2 || level === 5 || level === 7 || level === 9)) {
+        effect = { ...effect, skipCeiling: true };
+      }
+    }
+  }
+
+  return effect;
 }

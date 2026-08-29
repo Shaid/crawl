@@ -269,6 +269,12 @@ async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose
     wallB: unit.planes.wallB,
     feature: unit.planes.feature,
     orient: unit.planes.orient,
+    flagP: unit.planes.flagP,
+    flagQ: unit.planes.flagQ,
+    region: unit.planes.region,
+    // `evalOverlay`'s dispatch key (§4.7.9) -- the requested levelId, not
+    // `unit.id` (same value; the level file is always the one it names).
+    level: levelId,
   };
 
   const slots = validateSlotTableFile(await fetchJSON<unknown>(`${assetBase}/dungeon/slots.json`));

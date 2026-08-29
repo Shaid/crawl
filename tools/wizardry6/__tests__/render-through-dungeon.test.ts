@@ -80,12 +80,13 @@ function minimalSlots(): SlotTableFile {
   }
   slots['wall-side:L:3'] = slot('sideL3', 72, 40);
   slots['wall-side:R:3'] = slot('sideR3', 216, 40);
-  // §4.7.7's per-lane ceiling/floor runs, depths 0-3.
+  // §4.7.7's per-lane ceiling/floor runs, depths 0-3, + §4.7.9's alt-floor family.
   for (let d = 0; d < 4; d++) {
     for (const lane of ['front', 'side:L', 'lat:L1', 'lat:L2', 'lat:R1', 'lat:R2', 'side:R']) {
       const tag = lane.replace(':', '');
       slots[`ceil:${lane}:${d}`] = slot(`ceil_${tag}_${d}`, 72, 32);
       slots[`floor:${lane}:${d}`] = slot(`floor_${tag}_${d}`, 72, 128);
+      slots[`floor-alt:${lane}:${d}`] = slot(`flooralt_${tag}_${d}`, 72, 128);
     }
   }
   return {
@@ -342,6 +343,111 @@ describe('buildViewItems: per-lane ceiling/floor continuation', () => {
     expect(f).not.toContain('floor_front_3');
     // `LAB_0538`'s tail caps `-11440(A4)` at depth+3, so depth 3 never runs.
     expect(f.filter((s) => s.endsWith('_3'))).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// §4.7.9 (`walker-flag-overlays`): the flagP/flagQ per-level scripted
+// overlay dispatch -- fog cells, open sky (skip ceiling), pits (skip
+// floor), and the alt floor. `evalOverlay` itself is unit-tested in
+// `evaluate-cell.test.ts`; these confirm the wiring INTO `buildViewItems`'s
+// lane emission and blocking predicates.
+// ─────────────────────────────────────────────────────────────────────────
+describe('buildViewItems: §4.7.9 flagP/flagQ overlay wiring', () => {
+  const slots = minimalSlots();
+  const at = (x: number, y: number) => x + y * 9;
+  const allFrames = (planes: CellPlanes, x = 4, y = 4, facing = 0) =>
+    buildViewItems(planes, x, y, facing, slots).map((i) => i.frame as string);
+  const wallFrames = (planes: CellPlanes, x = 4, y = 4, facing = 0) =>
+    allFrames(planes, x, y, facing).filter((f) => !f.startsWith('ceil_') && !f.startsWith('floor') && !f.startsWith('flooralt'));
+
+  it('level 1 (skip floor+ceiling) omits the front lane\'s ceiling and floor on a flagged cell', () => {
+    const flagP = new Array(81).fill(0);
+    flagP[at(4, 4)] = 1; // the party's own cell, depth 0
+    const planes = makePlanes({ flagP, level: 1 });
+    const f = allFrames(planes);
+    expect(f).not.toContain('ceil_front_0');
+    expect(f).not.toContain('floor_front_0');
+    // Other depths/lanes are untouched (only this cell's bit is set).
+    expect(f).toContain('ceil_front_1');
+  });
+
+  it.each([2, 3, 6, 11, 13])('level %d (skip floor) omits only the floor, not the ceiling', (level) => {
+    const flagP = new Array(81).fill(0);
+    flagP[at(4, 4)] = 1;
+    const planes = makePlanes({ flagP, level });
+    const f = allFrames(planes);
+    expect(f).toContain('ceil_front_0');
+    expect(f).not.toContain('floor_front_0');
+  });
+
+  it.each([8, 10])('level %d (alt-floor gate) draws floor-alt instead of floor', (level) => {
+    const flagP = new Array(81).fill(0);
+    flagP[at(4, 4)] = 1;
+    const planes = makePlanes({ flagP, level });
+    const f = allFrames(planes);
+    expect(f).toContain('ceil_front_0');
+    expect(f).not.toContain('floor_front_0');
+    expect(f).toContain('flooralt_front_0');
+  });
+
+  it('level 12 alt-floor gate uses the region plane: region<=8 alt-floors, region>8 fogs', () => {
+    const flagP = new Array(81).fill(0);
+    flagP[at(4, 4)] = 1;
+    const region8 = new Array(81).fill(-1);
+    region8[at(4, 4)] = 8;
+    const altPlanes = makePlanes({ flagP, region: region8, level: 12 });
+    expect(allFrames(altPlanes)).toContain('flooralt_front_0');
+
+    const region9 = new Array(81).fill(-1);
+    region9[at(4, 4)] = 9;
+    const wallA = new Array(81).fill(0);
+    wallA[at(4, 4)] = 2; // would render as a solid wall if not fogged
+    const fogPlanes = makePlanes({ flagP, region: region9, level: 12, wallA });
+    expect(wallFrames(fogPlanes)).toEqual([]); // evaluates as code 0 (open), not the wall
+  });
+
+  it("a fog cell (level 0/4/5) evaluates as open even where the raw wall is solid, and hides that lane's ceiling/floor at this depth", () => {
+    const wallA = new Array(81).fill(0);
+    wallA[at(4, 5)] = 2; // solid wall straight ahead at depth 1
+    const flagP = new Array(81).fill(0);
+    flagP[at(4, 5)] = 1; // same cell is a fog cell
+    const planes = makePlanes({ wallA, flagP, level: 0 });
+    const f = allFrames(planes);
+    expect(wallFrames(planes)).toEqual([]); // no wall drawn -- evaluates as open
+    expect(f).not.toContain('ceil_front_1');
+    expect(f).not.toContain('floor_front_1');
+  });
+
+  it('a fog cell forces occlusion of farther depths despite its own see-through (open) code', () => {
+    // Without fog, an open cell at depth 0 would let depth-1 draw normally.
+    // With fog at depth 0, depth 1's front lane must be suppressed too --
+    // the occlusion-override array firing even though the fogged code (0)
+    // wouldn't itself block under the plain `blocks()` predicate.
+    const flagP = new Array(81).fill(0);
+    flagP[at(4, 4)] = 1; // depth-0 cell is fog
+    const planes = makePlanes({ flagP, level: 0 });
+    const f = allFrames(planes);
+    expect(f).not.toContain('ceil_front_1');
+    expect(f).not.toContain('floor_front_1');
+  });
+
+  it('flagQ alone (no flagP) skips the ceiling on a generic level, leaving the floor', () => {
+    const flagQ = new Array(81).fill(0);
+    flagQ[at(4, 4)] = 1;
+    const planes = makePlanes({ flagQ, level: 3 });
+    const f = allFrames(planes);
+    expect(f).not.toContain('ceil_front_0');
+    expect(f).toContain('floor_front_0');
+  });
+
+  it('a level with no flagP/flagQ bits set anywhere renders exactly as before (no regression)', () => {
+    const planes = makePlanes({ level: 5 });
+    const f = allFrames(planes);
+    for (let d = 0; d < 4; d++) {
+      expect(f).toContain(`ceil_front_${d}`);
+      expect(f).toContain(`floor_front_${d}`);
+    }
   });
 });
 

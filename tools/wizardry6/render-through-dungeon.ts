@@ -94,6 +94,10 @@ function main() {
     wallB: unit.planes.wallB,
     feature: unit.planes.feature,
     orient: unit.planes.orient,
+    flagP: unit.planes.flagP,
+    flagQ: unit.planes.flagQ,
+    region: unit.planes.region,
+    level: unit.id,
   };
   if (!existsSync(resolve(dataDir, 'mazedata.ega'))) {
     console.error(`No ${resolve(dataDir, 'mazedata.ega')} — need real W6 data (run export-mazedata-indexed.ts first)`);

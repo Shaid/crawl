@@ -220,9 +220,11 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
   // The third family (`74/76(a5)` for `0x9b58`, `20/22(a5)` for `LAB_0528`)
   // is an ALTERNATE floor selected when `word[-11330(A4) + depth*6 + side*2]`
   // is non-zero — a per-cell override written only by `EvalCellFace`'s
-  // special-map-mode paths (`0x9258`/`0x92e6`/`0x93f8`). Like
-  // `evaluate-cell.ts`'s other overlay assumptions, those arrays are taken
-  // as clear here, so only the normal floor is emitted.
+  // special-map-mode paths (`0x9258`/`0x92e6`/`0x93f8`), i.e. the flagP
+  // "alt-floor gate" handler (§4.7.9, levels 8/10/12). Emitted below as
+  // `floor-alt:<lane>:<depth>` (+ `:alt` mirrored variant); `view-model.ts`
+  // selects it via `evalOverlay`'s `altFloor` flag instead of the assumed-
+  // clear default the other overlay gates (still) fall back to.
   const BACKDROP_BASE: Record<string, { ceil: number; floor: number; alt: number }> = {
     // `0x0ab92`: 18/20(a5)=122/122, 70/72(a5)=150/150, 74/76(a5)=214/214.
     'front': { ceil: 122, floor: 150, alt: 214 },
@@ -261,7 +263,9 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
    *   68        code 13 single (mode 0, always direct)
    *
    * (14/16 hold the kind-1/2 `.PIC`-cel token screen coordinates — the
-   * animated-decoration path, not modelled in the walker; §4.7.8.)
+   * monster/NPC combat-encounter portrait overlay, not modelled in the
+   * walker since occupancy is runtime encounter state; §4.7.8's
+   * correction block.)
    */
   const SITE_ARGS: Record<string, Record<number, number>> = {
     front: { 18: 0x7a, 20: 0x7a, 22: 0x0, 24: 0x0, 26: 0x5b, 28: 0x17, 30: 0x17, 32: 0x1a, 34: 0x1a, 36: 0x1d, 38: 0x20, 40: 0x20, 42: 0x1d, 44: 0xb2, 46: 0xb2, 48: 0xc7, 50: 0xc7, 52: 0xf2, 54: 0x101, 56: 0x116, 58: 0x116, 60: 0x12b, 62: 0x12b, 64: 0x13a, 66: 0x13a, 68: 0x149, 70: 0x96, 72: 0x96, 74: 0xd6, 76: 0xd6 },
@@ -281,22 +285,33 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
   // depth gate, and `LAB_04F8` is that gate's jump target), unlike the wall
   // slots which stop at depth 2. `:alt` = the `-11434(A4) != 0` mirrored
   // branch (pair art at this lane's placement, mirrored).
-  const BACKDROP_PAIR: Record<string, { ceil: number; floor: number }> = {
-    front: { ceil: 122, floor: 150 },
-    'side:L': { ceil: 146, floor: 174 },
-    'lat:L1': { ceil: 142, floor: 170 },
-    'lat:L2': { ceil: 138, floor: 166 },
-    'lat:R1': { ceil: 134, floor: 162 },
-    'lat:R2': { ceil: 130, floor: 158 },
-    'side:R': { ceil: 126, floor: 154 },
+  //
+  // `alt` here is each lane's MIRROR PARTNER's alt-floor base (the third
+  // 74/76(a5)-family member of the same pairing ceil/floor already use --
+  // §4.7.7.1's SITE_ARGS comment: e.g. front is self-paired (214/214),
+  // side:L pairs with side:R (218/238), lat:L1 with lat:R2 (222/234),
+  // lat:L2 with lat:R1 (226/230)), so `floor-alt:<lane>:<depth>:alt` can
+  // reuse `mirroredDraw` exactly like `ceil`/`floor` do.
+  const BACKDROP_PAIR: Record<string, { ceil: number; floor: number; alt: number }> = {
+    front: { ceil: 122, floor: 150, alt: 214 },
+    'side:L': { ceil: 146, floor: 174, alt: 238 },
+    'lat:L1': { ceil: 142, floor: 170, alt: 234 },
+    'lat:L2': { ceil: 138, floor: 166, alt: 230 },
+    'lat:R1': { ceil: 134, floor: 162, alt: 226 },
+    'lat:R2': { ceil: 130, floor: 158, alt: 222 },
+    'side:R': { ceil: 126, floor: 154, alt: 218 },
   };
   for (let depth = 0; depth < 4; depth++) {
-    for (const [lane, { ceil, floor }] of Object.entries(BACKDROP_BASE)) {
+    for (const [lane, { ceil, floor, alt }] of Object.entries(BACKDROP_BASE)) {
       slots[`ceil:${lane}:${depth}`] = slot(composeDraw(ceil, depth));
       slots[`floor:${lane}:${depth}`] = slot(composeDraw(floor, depth));
+      // The alt-floor family (§4.7.9's flagP alt-floor gate, levels 8/10/12) --
+      // previously collected but never emitted (§4.7.7.2: "never emitted yet").
+      slots[`floor-alt:${lane}:${depth}`] = slot(composeDraw(alt, depth));
       const pair = BACKDROP_PAIR[lane]!;
       slots[`ceil:${lane}:${depth}:alt`] = slot(mirroredDraw(pair.ceil, ceil, depth));
       slots[`floor:${lane}:${depth}:alt`] = slot(mirroredDraw(pair.floor, floor, depth));
+      slots[`floor-alt:${lane}:${depth}:alt`] = slot(mirroredDraw(pair.alt, alt, depth));
     }
   }
 

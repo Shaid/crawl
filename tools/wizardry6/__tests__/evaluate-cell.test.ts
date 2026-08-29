@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evalCellFace, stepForward, FEATURE_DISPATCH, type CellPlanes } from '../evaluate-cell.ts';
+import { evalCellFace, evalOverlay, stepForward, FEATURE_DISPATCH, type CellPlanes } from '../evaluate-cell.ts';
 
 // 3x3 grid, index = y*width+x. Matches export-dungeon-levels.ts's own
 // densified coordinate space and @seer-project/dungeon's Direction.ts
@@ -156,5 +156,109 @@ describe('evalCellFace: feature dispatch', () => {
       14: 'wall',
       15: 'wall',
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// `evalOverlay`: §4.7.9's flagP/flagQ per-level dispatch (`walker-flag-
+// overlays`). Each case flags exactly one cell's bit and checks the
+// resulting effect against data-structure.md's per-level table.
+// ─────────────────────────────────────────────────────────────────────────
+describe('evalOverlay: §4.7.9 flagP/flagQ per-level dispatch', () => {
+  const CELL = 1 * 3 + 1; // (1,1)
+  const bit = (set: boolean) => {
+    const arr = new Array(9).fill(0);
+    if (set) arr[CELL] = 1;
+    return arr;
+  };
+
+  it('is a no-op when the planes carry no flagP/flagQ at all (back-compat default)', () => {
+    const planes = makePlanes();
+    expect(evalOverlay(planes, 0, 1, 1, 0, 0)).toEqual({ fog: false, skipCeiling: false, skipFloor: false, altFloor: false });
+  });
+
+  it('is a no-op when the flagP bit is clear for this cell, even on a fog-handler level', () => {
+    const planes = makePlanes({ flagP: bit(false), flagQ: bit(false) });
+    expect(evalOverlay(planes, 0, 1, 1, 0, 0).fog).toBe(false);
+  });
+
+  it.each([0, 4, 5])('level %d: flagP set fires the fog handler', (level) => {
+    const planes = makePlanes({ flagP: bit(true) });
+    const effect = evalOverlay(planes, level, 1, 1, 0, 0);
+    expect(effect.fog).toBe(true);
+    expect(effect.skipCeiling).toBe(false);
+    expect(effect.skipFloor).toBe(false);
+    expect(effect.altFloor).toBe(false);
+  });
+
+  it('level 1: flagP set skips both floor and ceiling (a void/chasm cell)', () => {
+    const planes = makePlanes({ flagP: bit(true) });
+    const effect = evalOverlay(planes, 1, 1, 1, 0, 0);
+    expect(effect).toEqual({ fog: false, skipCeiling: true, skipFloor: true, altFloor: false });
+  });
+
+  it.each([2, 3, 6, 11, 13])('level %d: flagP set skips the floor only (pit/water cell)', (level) => {
+    const planes = makePlanes({ flagP: bit(true) });
+    const effect = evalOverlay(planes, level, 1, 1, 0, 0);
+    expect(effect).toEqual({ fog: false, skipCeiling: false, skipFloor: true, altFloor: false });
+  });
+
+  it.each([8, 10])('level %d: flagP set draws the alt floor', (level) => {
+    const planes = makePlanes({ flagP: bit(true) });
+    const effect = evalOverlay(planes, level, 1, 1, 0, 0);
+    expect(effect).toEqual({ fog: false, skipCeiling: false, skipFloor: false, altFloor: true });
+  });
+
+  it('level 12: flagP set + region <= 8 draws the alt floor', () => {
+    const region = new Array(9).fill(-1);
+    region[CELL] = 8;
+    const planes = makePlanes({ flagP: bit(true), region });
+    expect(evalOverlay(planes, 12, 1, 1, 0, 0).altFloor).toBe(true);
+  });
+
+  it('level 12: flagP set + region > 8 (or no region tracked) fires fog instead', () => {
+    const region = new Array(9).fill(-1);
+    region[CELL] = 9;
+    const withRegion = makePlanes({ flagP: bit(true), region });
+    expect(evalOverlay(withRegion, 12, 1, 1, 0, 0).fog).toBe(true);
+    const withoutRegion = makePlanes({ flagP: bit(true) });
+    expect(evalOverlay(withoutRegion, 12, 1, 1, 0, 0).fog).toBe(true);
+  });
+
+  it.each([7, 9])('level %d: flagP set is a no-op that falls through to the flagQ test', (level) => {
+    const planes = makePlanes({ flagP: bit(true), flagQ: bit(false) });
+    expect(evalOverlay(planes, level, 1, 1, 0, 0)).toEqual({ fog: false, skipCeiling: false, skipFloor: false, altFloor: false });
+  });
+
+  it('a flagP level other than 7/9 does NOT fall through to flagQ, even with flagQ set', () => {
+    // Level 1's flagP handler (skip floor+ceiling) already sets skipCeiling;
+    // the point of this case is that it isn't ALSO retesting flagQ.
+    const planes = makePlanes({ flagP: bit(true), flagQ: bit(true) });
+    const effect = evalOverlay(planes, 1, 1, 1, 0, 0);
+    expect(effect).toEqual({ fog: false, skipCeiling: true, skipFloor: true, altFloor: false });
+  });
+
+  it('flagQ set (flagP clear) skips the ceiling on a generic level', () => {
+    const planes = makePlanes({ flagP: bit(false), flagQ: bit(true) });
+    expect(evalOverlay(planes, 3, 1, 1, 0, 0)).toEqual({ fog: false, skipCeiling: true, skipFloor: false, altFloor: false });
+  });
+
+  it.each([2, 5, 7, 9])('level %d: flagQ set routes to the untraced facing-indexed handler, not plain skip-ceiling', (level) => {
+    const planes = makePlanes({ flagP: bit(false), flagQ: bit(true) });
+    expect(evalOverlay(planes, level, 1, 1, 0, 0)).toEqual({ fog: false, skipCeiling: false, skipFloor: false, altFloor: false });
+  });
+
+  it('resolves the overlay cell the same way evalCellFace resolves its wall cell (lateral step)', () => {
+    // Flag the cell one step right of (1,1) on facing 0 (its right = +X).
+    const flagP = new Array(9).fill(0);
+    flagP[1 * 3 + 2] = 1; // (2,1)
+    const planes = makePlanes({ flagP });
+    expect(evalOverlay(planes, 0, 1, 1, 0, 1).fog).toBe(true); // lateral +1 resolves to (2,1)
+    expect(evalOverlay(planes, 0, 1, 1, 0, -1).fog).toBe(false); // lateral -1 resolves to (0,1), untouched
+  });
+
+  it('returns no effect when the lateral step itself falls off-grid (matches evalCellFace\'s own off-map convention)', () => {
+    const planes = makePlanes({ flagP: bit(true) });
+    expect(evalOverlay(planes, 0, 0, 1, 0, -1).fog).toBe(false); // one step left of x=0 is off-grid
   });
 });

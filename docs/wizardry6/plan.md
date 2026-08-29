@@ -2841,3 +2841,63 @@ palette solved (§6.4 — per-cell BG sub-palette fields against the boot
 CGRAM shadow, never sub-palette 2, magic-circle render).
 
 Green: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` 283/283.
+
+## Amiga — Session (2026-08-29) — flagP/flagQ wired, cel-token mechanism traced
+
+Closed `walker-flag-overlays` and narrowed
+`dungeon-walker-cell-render-dispatch` further.
+
+**flagP/flagQ overlay (§4.7.9) — wired and verified.** New `evalOverlay()`
+in `evaluate-cell.ts` ports the per-level dispatch table directly; wired
+into `view-model.ts`'s depth loop (all 5 evaluator calls: front/perpL/
+perpR/latL/latR) and `canStepDir`. `export-dungeon-levels.ts` gained a
+`region` plane (source region 0-11 per densified cell) purely for level
+12's region-0-8-vs-outside split; `export-dungeon-slots.ts` now emits the
+previously-collected-but-unshipped `floor-alt:*` compose family
+(214-241). One approximation is explicitly flagged in code/doc: which of
+two evaluator calls feeding "left"/"right" writes which gate slot wasn't
+independently traced, so both are OR'd together (doesn't affect the front
+lane or any of the 4 documented per-level effects, only lane attribution).
+
+Verified: 57 new unit tests (`evalOverlay`'s 16 per-level branches +
+`buildViewItems`'s 8-case wiring), all 138 wizardry6/walker tests passing
+including the pre-existing real-data pixel-identity oracles (untouched —
+their fixtures never set `CellPlanes.level`, so the new dispatch is a
+no-op for them); a 298,744-pose full-corpus sweep with real flagP/flagQ/
+region data (2,286 + 2,124 flagged cells) → 0 exceptions, 0 non-finite
+coordinates; 4 decisive before/after renders (level 1 void, level 3
+skip-floor, level 12 alt-floor blue-water texture, level 12 fog-overrides-
+solid-wall) via `render-through-dungeon.ts`, scratch-only.
+
+**Cel-token dispatch (`dungeon-walker-cell-render-dispatch`) — mechanism
+traced via an `amiga-disasm` escalation, implementation narrowed for a new,
+more precise reason.** An exhaustive A4-entry-55 (file-load) call-site
+census across the whole CODE hunk found exactly 7 hits, all loading either
+`MON00.PIC` or `CREDITS.PIC` — refuting §4.7.8's old "animated
+torch/decoration" guess outright: the corpus has no separate decoration
+`.PIC` file, so the deferred-draw queue's kind≠`0xFF` records are §4.6's
+monster/NPC token overlay, not a distinct system. The resolved formula:
+frame = `(rec+9)-1` (§2.3's already-confirmed cel-index arithmetic) inside
+whichever `mon<NN>.pic` currently occupies resource-cache slot `rec+8`
+(the same 314-byte-stride base §4.7.8 already called "section 8", now also
+confirmed as the monster-portrait load-slot cache). This narrows rather
+than closes the item: slot occupancy is combat-encounter *runtime* state
+with no static per-cell fact in `scenario.dbs`'s maze data, so a static
+walker pose has nothing principled to draw — left unimplemented rather
+than guessed. Doc corrections applied to §4.6 and §4.7.8 (both now cite
+the new finding); `view-model.ts`/`export-dungeon-slots.ts` comments
+updated to explain *why* it's unmodelled (a data gap, not a missing
+formula) rather than call it untraced.
+
+**Files touched:** `tools/wizardry6/evaluate-cell.ts`,
+`view-model.ts`, `export-dungeon-levels.ts`, `export-dungeon-slots.ts`,
+`render-through-dungeon.ts`, `tools/walker/walker.ts`,
+`tools/wizardry6/__tests__/evaluate-cell.test.ts`,
+`__tests__/render-through-dungeon.test.ts`,
+`docs/wizardry6/amiga/data-structure.md` (§4.6, §4.7.8 correction block,
+new §4.7.9.1), `docs/wizardry6/TODO.md` (`walker-flag-overlays` closed/
+deleted, `dungeon-walker-cell-render-dispatch` updated), regenerated
+`public/assets/wizardry6/amiga/dungeon/*.json` + `slots.json` (458 -> 514
+slots). `tsc --noEmit`/`eslint` clean on every touched file (a pre-existing,
+concurrent-sibling-agent-caused `tools/eotb/*` type error is unrelated and
+out of scope).

@@ -48,10 +48,14 @@
  * structure but unconfirmed field semantics (`data-structure.md` §4.7), so
  * `entities`/`entityHandlePlane` are omitted entirely -- per the schema,
  * that's a valid "wall geometry only" level file (`CellQuery.entitiesAt`
- * then always returns `[]`). The `feature`/`orient`/`flagP`/`flagQ` planes
- * decode-scenario-maze.ts already extracts (doors, scripted overlays, etc.)
- * are carried through as extra named planes for a future pass to consume,
- * but are not yet wired into any wall/entity semantics.
+ * then always returns `[]`). The `feature`/`orient` planes decode-
+ * scenario-maze.ts already extracts (doors, etc.) are carried through as
+ * extra named planes for a future pass to consume, but are not yet wired
+ * into any entity semantics. `flagP`/`flagQ` (the scripted overlay bits)
+ * ARE wired -- `evaluate-cell.ts`'s `evalOverlay` + `view-model.ts`
+ * implement their full per-level dispatch, §4.7.9 -- and `region` (the
+ * source region index 0-11 per densified cell, `-1` for a gap) is exported
+ * solely to feed that dispatch's level-12 special case.
  *
  * Usage: npx tsx tools/wizardry6/export-dungeon-levels.ts <dataDir>
  */
@@ -78,6 +82,8 @@ interface DenseLevel {
   orient: number[];
   flagP: number[];
   flagQ: number[];
+  /** Source region index (0-11) of each densified cell, `-1` for a gap not covered by any real region. Needed only by `evalOverlay`'s level-12 flagP special case (data-structure.md §4.7.9: region 0-8 -> alt-floor, region 9-11/gap -> fog). */
+  region: number[];
 }
 
 /** Bounding box of a level's active (non-`(0,0)`-origin) regions, in maze coordinates. */
@@ -106,6 +112,7 @@ function densifyLevel(lvl: MazeLevel): DenseLevel {
   const orient = new Array<number>(cellCount).fill(0);
   const flagP = new Array<number>(cellCount).fill(0);
   const flagQ = new Array<number>(cellCount).fill(0);
+  const region = new Array<number>(cellCount).fill(-1);
 
   for (const r of regions) {
     const ox = lvl.originX[r] - minX;
@@ -120,6 +127,7 @@ function densifyLevel(lvl: MazeLevel): DenseLevel {
         orient[dstIndex] = lvl.orient[srcIndex];
         flagP[dstIndex] = lvl.flagP[srcIndex];
         flagQ[dstIndex] = lvl.flagQ[srcIndex];
+        region[dstIndex] = r;
       }
     }
   }
@@ -127,7 +135,7 @@ function densifyLevel(lvl: MazeLevel): DenseLevel {
   // originX/originY: the densified grid's (0,0) in absolute maze coordinates
   // — needed by `view-model.ts`'s checkerboard parities (§4.7.8), which the
   // game computes from the absolute party position (`-18338/-18336(A4)`).
-  return { id: lvl.level, width, height, originX: minX, originY: minY, wallA, wallB, feature, orient, flagP, flagQ };
+  return { id: lvl.level, width, height, originX: minX, originY: minY, wallA, wallB, feature, orient, flagP, flagQ, region };
 }
 
 /** Core export logic, reusable from a pipeline `buildAssets` step as well as the CLI below. */
@@ -179,6 +187,7 @@ export function exportDungeonLevels(dataDir: string): void {
           orient: lvl.orient,
           flagP: lvl.flagP,
           flagQ: lvl.flagQ,
+          region: lvl.region,
         },
       }],
       provenance,

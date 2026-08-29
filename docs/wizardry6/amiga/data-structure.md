@@ -1323,6 +1323,19 @@ to wall geometry. Full detail and address-by-address evidence:
      the `-0x2c12(a4)` array with real monster placements, as opposed to the
      deferred-draw records `9a52` also writes there) was not traced this
      session.
+     >
+     > **Update (`dungeon-walker-cell-render-dispatch` escalation,
+     > 2026-08-29):** the *loading* half is now traced — record byte `+8`
+     > doubles as the resource-cache/load-slot index that a `mon<NN>.pic`
+     > file was most recently read into (an exhaustive entry-55 call-site
+     > census: 6/6 `.PIC`-format loader call sites in the whole binary load
+     > either `MON00.PIC` or `CREDITS.PIC`, none load a separate decoration
+     > file), driven by §2.6's `InsertToken`/`CODE+0x14ce2` sorted array and
+     > the combat-encounter state machine at `CODE+0x15458` — see §4.7.8's
+     > correction block for the full chain. **Still open**: what triggers a
+     > specific encounter at a specific maze cell (the genuinely-unresolved
+     > half — likely `scenario.dbs` section 3, the per-level entity table
+     > this doc's §4.7.4 already flags as structure-confirmed/semantics-open).
 
 **Paths tried (this session, `CODE+0x9b58` caller trace):**
 
@@ -2512,9 +2525,57 @@ already-drawn walls/floors): per record matching the current depth, kind
 forked on the **per-record parity** `(-18338 + -18336 + -18328 +
 rec.depth) & 1` (`0x0b010`-`0x0b024`); kind != `0xFF` → the confirmed
 `.PIC` cel compositor (A4 entry 56, `jsr -32430(a4)` at `0x0b1b4`) with
-cel list `[rec+9, 0]` and screen coordinates from `rec+0/+2/+4/+6` — the
-**animated wall-decoration path** (torches etc.), §4.6's "monster/NPC
-token overlay" loop re-identified.
+cel list `[rec+9, 0]` and screen coordinates from `rec+0/+2/+4/+6` —
+§4.6's "monster/NPC token overlay" loop re-identified.
+
+> **Correction (`amiga-disasm` escalation, `dungeon-walker-cell-render-
+> dispatch`, this session): "animated wall-decoration path (torches
+> etc.)" was an unverified guess and is wrong — there is no separate
+> decoration `.PIC` file at all.** An exhaustive whole-CODE-hunk census of
+> every call site of A4 entry 55 (`-32436(a4)` = `-0x7eb4(A4)`, "read
+> whole file into a load slot," `LAB_0224`/`CODE+0x3572`) — a `grep` for
+> the literal operand across all of `disasm/Bane.asm` — returns **exactly
+> 7 hits**: 6 load `"MON00.PIC\0"` (`CODE+0x4622`/`0x6214`/`0x148c0`/
+> `0x15daa`/`0x40154`/`0x51604`, byte-for-byte duplicate SAS/C hot-routine
+> bodies) and 1 loads `"CREDITS.PIC\0"` (`CODE+0x4ede`, independently
+> cross-checked against its own `PEA 30634.W` size push — `0x77AA`,
+> `CREDITS.PIC`'s exact byte size). Every `.PIC`-directory-format load in
+> the entire binary is one of those two filenames, matching the on-disk
+> corpus exactly (`CREDITS.PIC` + `mon00.pic`-`mon58.pic`, 60 files, no
+> others). **The kind≠`0xFF` branch above IS §4.6's monster/NPC token
+> overlay — not a distinct torch/decoration system.**
+>
+> The resolved mechanism, reconciling this with the section immediately
+> below: all 6 `MON00.PIC` loader duplicates index the identical base
+> `-15076(A4)` (`= -0x3ae4(A4)`, the same "section-8 resource cache" base
+> already identified below) with the identical `MULS #$013a` (314-byte)
+> stride, and the loader's own `slotIndex` argument is the *same*
+> `kind`-shaped value the deferred-draw record carries at `+8`. So `kind`
+> does double duty: it both selects "draw a `.PIC` cel, not a maze piece"
+> (the `0xFF` sentinel) **and** names the resource-cache slot that a
+> `mon<NN>.pic` file was most recently loaded into by the monster/NPC
+> token-placement pipeline (§2.6's `InsertToken`/`CODE+0x14ce2` sorted
+> array, driven by the combat-encounter state machine at `CODE+0x15458`).
+> Combined with the already-confirmed §2.3 formula, the full resolved
+> read is: **frame = directory slot `(rec+9) − 1` inside whichever
+> `mon<NN>.pic` file currently occupies resource-cache slot `rec+8`.**
+>
+> **Why this stays unimplemented in the static walker (narrowed, not a
+> guess).** Which monster (if any) occupies a given resource-cache slot
+> at a given moment is **combat-encounter runtime state** — populated
+> on-demand when an encounter triggers, not once per level load and not
+> derivable from `scenario.dbs`'s maze/geometry sections (§4.7.3's wall
+> planes carry no "monster here" fact). A static pose render has no
+> encounter active, so there is no principled non-guessed content to draw
+> for a `kind≠0xFF` record outside of live play. The two paths that could
+> supply this data — decoding `scenario.dbs` section 3 (the per-level
+> entity table, structure confirmed but field semantics still open,
+> `scenario-section-5-links`'s sibling item) for static encounter
+> triggers, or a live amiberry combat capture — are both out of scope
+> this session (the former is its own open item; the latter needs
+> explicit user permission per this project's standing amiberry gate).
+> Left as a real, evidence-backed limitation rather than a fabricated
+> placeholder monster.
 
 ##### The `-0x3adc`/`-0x3aaa(a4)` mystery tables ARE `scenario.dbs` section 8
 
@@ -2615,12 +2676,20 @@ coordinates). Verified: 298,744 pose-facing sweep, 0 exceptions;
 24 dispatch/lane unit tests incl. new doorway/leaf/side-door/parity
 cases; `tsc`/lint/`vitest` all clean.
 
-**Still open after this pass**: the kind-1/2 cel-token draws (animated
+**Still open after this pass**: ~~the kind-1/2 cel-token draws (animated
 torch/decoration `.PIC` cels — the walker has no cel-resource resolution;
-which `.PIC`-format resource the cel indices address is untraced);
-`-11728(A4)`/`-11736(A4)` (the token id/animation-counter globals'
-writers). ~~the `-11364/65/66(A4)` occlusion-override writer and
-`-18340(A4)`'s exact value space~~ — **both closed in §4.7.9 below.**
+which `.PIC`-format resource the cel indices address is untraced)~~ —
+**the resolution mechanism is now traced (see the correction block
+above): it's the monster/NPC portrait overlay, `frame = (rec+9)−1` inside
+whichever `mon<NN>.pic` occupies resource-cache slot `rec+8`. Still open
+for a different reason** — occupancy is combat-encounter *runtime* state
+with no static per-cell representation in the maze data, so the walker
+correctly has nothing principled to draw for a static pose and this is
+left unimplemented rather than guessed. `-11728(A4)`/`-11736(A4)` (the
+token id/animation-counter globals' writers) remain untraced too, and
+would only matter once a live-encounter oracle exists. ~~the
+`-11364/65/66(A4)` occlusion-override writer and `-18340(A4)`'s exact
+value space~~ — **both closed in §4.7.9 below.**
 
 #### 4.7.9 The flagP/flagQ overlay dispatches decoded — fog cells, open sky, pits, and the alt floor (2026-08-16)
 
@@ -2660,13 +2729,104 @@ levels 2, 5, 7, 9 → `0x94b0`: a further **facing-indexed** handler
 a per-facing wall override, not traced to closure).
 
 **Net effect on the walker** (`view-model.ts`'s "gates assumed clear"
-note): the assumption is now precisely characterized as an
-approximation — on flagged cells the real game skips floors (levels
-1/2/3/6/11/13), skips ceilings (flagQ, most levels), draws the alt floor
-(levels 8/10/12), or blocks visibility entirely (fog cells, levels
-0/4/5/12). The exported level JSON already carries the flagP/flagQ
-planes, so wiring these is implementable follow-up; left unimplemented
-this pass and recorded in `TODO.md`.
+note): on flagged cells the real game skips floors (levels 1/2/3/6/11/13),
+skips ceilings (flagQ, most levels), draws the alt floor (levels 8/10/12),
+or blocks visibility entirely (fog cells, levels 0/4/5/12). The exported
+level JSON already carries the flagP/flagQ planes.
+
+#### 4.7.9.1 Wired into the walker (`walker-flag-overlays`, closed this session)
+
+**Implemented** in `evaluate-cell.ts`'s new `evalOverlay()` (the per-level
+dispatch table above, ported directly) and wired into `view-model.ts`'s
+depth loop and `canStepDir`. `export-dungeon-levels.ts` now also emits a
+`region` plane (source region index 0-11 per densified cell, `-1` for a
+gap) purely to feed the level-12 region-0-8-vs-outside split; and
+`export-dungeon-slots.ts` emits the previously-collected-but-unshipped
+`floor-alt:<lane>:<depth>` compose family (214-241, §4.7.7.1) so the
+alt-floor gate has something to draw.
+
+`evalOverlay(planes, level, x, y, facing, lateral)` mirrors
+`evalCellFace`'s own cell resolution (bounds check + lateral step) and the
+pseudocode's two independent top-level `if TestBit(P)`/`if TestBit(Q)`
+checks (§4.7.2's pseudocode), including that only levels 7 and 9's flagP
+handler is a no-op that falls through to the flagQ test — every other
+flagP-fired level does not. It returns `{ fog, skipCeiling, skipFloor,
+altFloor }`; `view-model.ts` calls it once per evaluator call per depth
+(front/perpL/perpR/latL/latR — the same five calls `§4.7.1`'s table
+already documents), alongside the matching `evalCellFace` call:
+
+- `fog` overrides that evaluator's own wall code to 0 (open), forces
+  `blocks()`/`perpBlocks()` to occlude farther depths despite the
+  see-through code (their extra OR-condition, previously "assumed clear" —
+  §4.7.9's fog handler is now understood to be its real writer, correcting
+  the `LAB_0538`/`perpBlocks` doc comments' earlier "written at `0x0aa10`
+  when `-18340(A4)` is 10 or 12" citation, which described a different,
+  unrelated write site), and immediately clears that side's own visibility
+  lane(s) at the current depth (front / {sideL,left1,left2} /
+  {sideR,right1,right2}).
+- `skipCeiling`/`skipFloor`/`altFloor` gate the corresponding lane's
+  ceiling/floor emission (`emitLane`'s new `SideGate` parameter): the
+  floor draw is entirely omitted when `skipFloor`, and substitutes
+  `floor-alt:*` for `floor:*` when `altFloor` (mutually exclusive per the
+  per-level table — no level sets both).
+
+**Known, explicitly-flagged approximation** (documented on `evalOverlay`
+itself, not silently assumed): only 3 gate slots exist per depth
+(left/front/right) covering 7 draw lanes, and which of the *two*
+evaluator calls that can feed "left" (the perpendicular side-wall call
+`0x969a` and the lateral-column call `0x9202` at `lateral=-1`) writes
+which slot was not independently traced — `view-model.ts` ORs both
+evaluators' effects into one gate per side (`combineGate`), by analogy
+with the already-confirmed ceiling/floor gate arrays' 3-slot/7-lane
+grouping (§4.7.7.2). A live oracle (not available to this project) is the
+only way to tighten this further; it does not affect the front lane or
+any of the four *documented, per-level* effects themselves, only which
+of the six non-front lanes an effect is attributed to on any given cell.
+
+**Verified**: 4 new render comparisons (before/after this pass, scratch —
+not committed) on real corpus cells with the real flagP bit set,
+decisively different and matching the per-level table:
+- Level 1, pose `(7,2)` facing N: the depth-1 cell's ceiling *and* floor
+  vanish (a black void ahead) instead of the default continuous corridor —
+  the "void/chasm" reading confirmed visually.
+- Level 3, pose `(14,1)` facing N: the depth-1 floor vanishes while the
+  ceiling is retained — skip-floor-only, as documented.
+- Level 12, pose `(3,0)` facing N (region 7, `<=8`): the floor renders as
+  a **distinct blue water/liquid texture** (compose family 214-241)
+  instead of the default stone floor — confirms both the alt-floor gate
+  firing and that the previously-unshipped `floor-alt` slots decode to
+  real, plausible "outdoor floor" art, not garbage.
+- Level 12, pose with region 9 (`>8`) and a raw solid wall (`wallA=2`) at
+  the flagged cell: renders as open (fog fires and overrides the wall
+  code), confirming the region split's "outside 0-8 -> fog" branch.
+
+New/updated unit tests: `evaluate-cell.test.ts`'s `evalOverlay` describe
+block (16 cases covering every per-level branch, the region-12 split, the
+7/9 fallthrough, and the lateral/off-map cell-resolution edge cases) and
+`render-through-dungeon.test.ts`'s new "§4.7.9 flagP/flagQ overlay wiring"
+describe block (8 cases, through `buildViewItems` itself). All pre-existing
+tests (including the 3 real-data pixel-identity oracles against the
+undecorated §4.4 reference formula) still pass unmodified — those fixtures
+never set `CellPlanes.level`, so `evalOverlay` is a no-op for them,
+preserving the old behaviour exactly where the reference doesn't model it.
+`tsc --noEmit` and `eslint` clean on every touched file.
+
+A full-corpus sweep (all 14 real levels, every real cell, all 4 facings —
+298,744 poses, matching §4.7.8's own earlier sweep count) with the real
+flagP/flagQ/region planes and `CellPlanes.level` wired in produced
+**1,934,328 draw items, 0 exceptions, 0 non-finite `destX`/`destY`
+coordinates** — the overlay dispatch is exercised on every real flagged
+cell in the game (2,634 flagP + 1,903 flagQ cells across the 14 levels)
+with no crashes or malformed output (2,286 flagP + 2,124 flagQ cells set
+across the 14 levels, per-level counts from a direct census of the
+exported planes; scratch sweep script, not committed).
+
+**Still open**: the "known approximation" above (live-oracle-only); the 4
+flagQ levels (2/5/7/9) whose real handler is a facing-indexed dispatch not
+traced to closure (left unimplemented, not guessed); whether
+`canStepDir`'s newly-added fog override matches real movement rules (no
+oracle beyond the render-side symmetry argument — the same `EvalCellFace`
+return value feeds both consumers in the original code).
 
 ---
 
