@@ -3,16 +3,22 @@
  * data-structure.md` § "MAZ -- Maze Layout". Empirically confirmed
  * against the real corpus this session: every `data/eotb/amiga/LEVEL*.MAZ`
  * is exactly 4102 bytes = 6-byte header (width, height, tileSize, all LE
- * u16) + 1024 cells x 4 sides x 1 byte. The per-side byte is the
- * `S_TILESIDE` "number of wall graphics" field (`docs/eotb/amiga/
- * eotb-maze-spec.md`): 0=none, 1=solid wall type 1, 2=solid wall type 2,
- * 3=doorway, 4=stairs up, 5=stairs down, 6=magic doorway -- i.e. this
- * byte IS the VMP wallType index directly (0-6), one byte per side, not
- * the fuller 4-field `S_TILESIDE` struct the DOS-era ModdingWiki spec
- * describes (decoration count / event index / passability bits aren't
- * present in this file at all -- door open/closed state, decorations and
- * events live in the companion `.INF` file's event-script/decoration
- * data, out of scope for this pass, see `docs/eotb/TODO.md`).
+ * u16) + 1024 cells x 4 sides x 1 byte. The per-side byte is a raw
+ * `wallIndex` (0-255), **not** a direct 0-6 VMP wallType -- most of the
+ * corpus is clean 0/1/2 (which happen to equal their own default
+ * wallType), but many cells carry much larger `wallIndex` values (e.g.
+ * 58, 62, ... in `LEVEL1.MAZ`). The real `wallIndex -> wallType`
+ * (`vmpIndex`) mapping is a per-level table: `EoBCoreEngine::
+ * resetWallData`'s default (`{1:1, 2:2, 3..22:3, 23:4, 24:5}`, else 0)
+ * overridden by that level's `.INF` wall-mapping records -- see
+ * `docs/eotb/amiga/data-structure.md` § "INF -- Level Configuration" for
+ * the full citations, and `decode-inf.ts`'s `buildWallTypeMap` for the
+ * implementation. `wallTypeAt` below returns the **raw** byte; callers
+ * needing the real render wallType must pass it through a level's
+ * `wallTypeMap` (`view-model.ts`'s `resolveWallTypes` does this). Door
+ * open/closed state, decorations and events live in the companion `.INF`
+ * file's event-script/decoration data, out of scope for this pass, see
+ * `docs/eotb/TODO.md`.
  */
 export type Side = 'N' | 'E' | 'S' | 'W';
 export const SIDES: Side[] = ['N', 'E', 'S', 'W'];
@@ -20,7 +26,7 @@ export const SIDES: Side[] = ['N', 'E', 'S', 'W'];
 export interface MazeData {
   width: number;
   height: number;
-  /** [cellIndex][side index 0=N,1=E,2=S,3=W] -> wallType 0-6. */
+  /** [cellIndex][side index 0=N,1=E,2=S,3=W] -> raw `wallIndex` (0-255; map through a level's `wallTypeMap` for the real 0-6 render wallType -- see module doc). */
   cells: Uint8Array[];
 }
 
@@ -49,7 +55,7 @@ export function cellIndex(maze: MazeData, x: number, y: number): number | null {
   return y * maze.width + x;
 }
 
-/** Wall-type byte (0-6) for a cell's absolute side, or 1 (solid wall) out of bounds. */
+/** Raw `wallIndex` byte (0-255, not a direct 0-6 wallType -- see module doc) for a cell's absolute side, or 1 out of bounds. */
 export function wallTypeAt(maze: MazeData, x: number, y: number, side: Side): number {
   const idx = cellIndex(maze, x, y);
   if (idx === null) return 1; // out of the 32x32 grid: treat as solid wall

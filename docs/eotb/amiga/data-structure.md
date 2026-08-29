@@ -333,18 +333,118 @@ After the cell grid:
 
 ## INF — Level Configuration
 
-Each `.INF` file configures a dungeon level:
+**Confirmed (2026-08-29, `tools/eotb/decode-inf.ts`): the file IS LCW-compressed,
+using the same standard CPS header this doc already documents** (`FileSize`/
+`CompressionType=4`/`UncompressedSize`/`PaletteSize`) -- a previous session's
+"not compressed, plain-text-embedded" conclusion was wrong, and its root
+cause is now understood: `strings LEVEL1.INF` shows readable
+`level1.maz`/`brick`/`kobold`/`leech` directly in the raw file bytes, but
+this is exactly what LCW's own "Command 1" (short literal copy) produces
+for any string under 64 bytes -- it copies source bytes verbatim into the
+compressed stream. Seeing plaintext strings in the compressed bytes is not
+evidence against compression. Real LCW decompression (`tools/eotb/lcw.ts`'s
+`decompressLCW`, the same decoder already verified against 62 real `.CPS`
+files) applied to every real `data/eotb/amiga/LEVEL{1..12}.INF` succeeds
+with **zero drift**, landing on real, sensible field values end to end (see
+below).
 
-- **Header:** Filename references (MAZ file, VCN wall set, PAL file)
-- **Monster spawns:** Up to 30 entries with monster type name, spawn coordinates,
-  quantity, and level
-- **Decoration commands:** `0xEC` loads CPS overlay images, `0xFB` defines wall
-  type mappings
-- **Event scripts:** 18+ bytecode commands for triggers, teleports, damage,
-  sound, messages, conditionals
+### Decompressed field layout (EOB1, `slen=12`)
 
-**Verified:** `LEVEL1.INF` references `level1.maz`, `brick` wall set, and
-monsters `kobold`, `leech`.
+Verified by simulating `EoBCoreEngine::initLevelData`'s `gameID == GI_EOB1`
+control flow byte-for-byte (`engines/kyra/engine/scene_eob.cpp:155-310`,
+fetched from `github.com/scummvm/scummvm` -- these are the engine's own
+**Amiga**-platform branches, e.g. line 233's `_flags.platform ==
+Common::kPlatformAmiga` block, not a DOS-generic struct) plus
+`EoBCoreEngine::loadActiveMonsterData` (`engines/kyra/engine/
+sprites_eob.cpp:62-95`), against the real decompressed bytes:
+
+| Offset (decompressed) | Size | Field |
+|---|---|---|
+| 0 | 2 | `triggersOffset` (u16 LE, unused by this parser) |
+| 2 | 12 | `mazeName` (NUL-terminated) |
+| 14 | 12 | `wallSetName` (NUL-terminated -- also reused verbatim by the engine to build `<name>.PAL`; EOB1 has **no separate on-disk palette-name field**) |
+| 26 | 12 | reserved, read but never used by the EOB1 code path |
+| 38 | 4 | door-shape params (raw bytes -> `loadDoorShapes`) |
+| 42 | 1 | `scriptTimersMode` |
+| 43 | 2 | script timer 0 ticks (u16 LE) |
+| 45 | 2 | `stepsUntilScriptCall` (u16 LE) |
+| 47 | 13 | monster shape 1: 1 compression/type byte (`0xFF`=none) + up to 12-byte name |
+| 60 | 13 | monster shape 2: same shape |
+| 73 | variable | `(type, interval)*` pairs, terminated by a `0xFF` type byte |
+| (follows) | 420 | fixed 30-slot x 14-byte monster-placement array |
+| (follows) | 1 + 2 | 1 unused discriminator byte + `num` (u16 LE) decoration/wall-mapping record count |
+| (follows) | variable | `num` records: `0xEC` + two 12-byte names = decoration-load (25 bytes); anything else = **wall-mapping override** (6 bytes: 1 unused discriminator + `[wallIndex][vmpIndex][decIndex:int8][specialType][flags]`) |
+
+**Verified against the real corpus:** every one of `LEVEL{1..12}.INF`
+decompresses and parses with no out-of-range read, `mazeName`/`wallSetName`
+match the known corpus, and every monster-shape name resolves to a real
+`<name>.CPS` file in `data/eotb/amiga/` (level 1: `kobold`/`leech`; level 2:
+`zombie`/`skeleton`; level 3: `kuotoa`/`flind`; level 4: `spider`/none;
+level 5: `dwarf`/`spider`; level 6: `kenku`/`mage`; level 7: `drowelf`/
+`skelwar`; level 8: `drider`/`hellhnd`; level 9: `rust`/`disbeast`; level
+10: `shindia`/`mantis`; level 11: `xorn`/`mflayer`).
+
+### Wall-mapping override table -- the `eotb1-amiga-walker-wallmapping` fix
+
+`docs/eotb/TODO.md`'s open item is now closed. The wall-mapping override
+record's fields exactly match `assignWallsAndDecorations`'s own signature
+(`engines/kyra/engine/scene_eob.cpp:466`): `assignWallsAndDecorations(int
+wallIndex, int vmpIndex, int decIndex, int specialType, int flags)`. The
+real per-level lookup is: `EoBCoreEngine::resetWallData`'s default table
+(`scene_eob.cpp:542-548`: `{1:1, 2:2, 3..22:3, 23:4, 24:5}`, everything
+else -- including raw 0 -- defaults to vmpIndex 0, "no wall") with each
+level's `.INF` wall-mapping records overriding individual `wallIndex`
+entries on top. `tools/eotb/decode-inf.ts`'s `buildWallTypeMap(infData)`
+builds this 256-entry table directly; `tools/eotb/view-model.ts`'s
+`resolveWallTypes` now takes it as a parameter instead of the old
+`clampWallType` approximation (raw > 6 -> generic solid wall 1).
+
+Confirmed real `LEVEL1.INF` records include the exact `wallIndex` values a
+previous session flagged as anomalous (`58`, `62` -- both real raw bytes in
+`LEVEL1.MAZ`): `wallIndex=58 -> {vmpIndex:1, decIndex:35, specialType:0,
+flags:4}`, `wallIndex=62 -> {vmpIndex:1, decIndex:23, specialType:2,
+flags:4}`. A visually decisive case (rendered, see below): `LEVEL1.MAZ`
+cell `(22,9)` side N has raw `wallIndex=25`, which `LEVEL1.INF` overrides to
+`vmpIndex=0` (**no wall at all** -- an open passage) -- the old clamp
+rendered this as a solid brick wall (vmpIndex 1), completely blocking a
+passage that is actually open. Verified visually:
+`public/assets/eotb/amiga/renders/level1-22-10-f0.png` (after the fix, at
+pose x=22,y=10,facing=North, looking at that cell) now shows an open dark
+corridor instead of a solid wall.
+
+**Root cause of the previous session's failed hand-walk, now identified.**
+It was not a real DOS-vs-Amiga struct-layout divergence (the Amiga on-disk
+layout matches ScummVM's own `GI_EOB1`/`kPlatformAmiga` branches exactly,
+byte for byte) -- the previous attempt simply never LCW-decompressed the
+file, so it was walking compressed bytes against decompressed-buffer
+offsets and was guaranteed to drift.
+
+**Disassembly note.** A from-scratch trace of the Amiga executable's own
+`.INF`-loading code was also attempted this session against
+`data/eotb/amiga/eob2` (190,400 bytes; confirmed via `strings` to be the
+one of this directory's three executables -- `eob` at 5,856 bytes, `EOB1`
+at 40,508 bytes, `eob2` at 190,400 bytes -- that actually embeds the
+`LEVEL*.INF`/`LEVEL*.MAZ`/monster-name literal strings, i.e. the main
+game/dungeon binary; the other two's exact roles in the disk-swap chain
+weren't investigated this pass), via IRA `-preproc`. The level-name
+resource table (containing
+literal strings like `LEVEL1.INF`) was located at `HUNK_DATA` module 12
+(file offset 162732, 2600 bytes; the specific `LEVEL1.INF` pointer sits at
+cumulative address `0x27b14`), but that same hunk's bytes disassemble as
+plausible-looking 68k function prologues/epilogues that IRA doesn't
+classify as code -- not resolved further given the time budget, since the
+file-level verification above is already byte-exact and non-drifting
+across the whole `LEVEL{1..12}.INF` corpus, using the Amiga port's own
+real files and this repo's already-oracle-checked LCW decoder rather than
+a DOS-oriented guess.
+
+**Not implemented from this table (real, cited, but out of scope for the
+walker's wall-type fix):** `decIndex`-driven decoration overlays (the
+`0xEC` decoration-load records + `assignWallsAndDecorations`'s
+`_levelDecorationData`/`_levelDecorationRects` do-while chain), `flags`,
+and `specialType` (door/stairs/special-tile behaviour beyond wall art).
+`tools/eotb/decode-inf.ts`'s `parseInf` exposes all of these fields
+(`wallMappings`, `decorationLoads`) for a future pass.
 
 ---
 

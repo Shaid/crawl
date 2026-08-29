@@ -109,13 +109,21 @@ export function drawWallSlot(surface: IndexedSurface, vcn: VcnData, vmp: VmpData
   }
 }
 
-/** Render one full pose (backdrop + all populated wall slots, farthest-first) onto a fresh viewport-sized surface. */
-export function renderView(maze: MazeData, x: number, y: number, facing: Facing, vcn: VcnData, vmp: VmpData): IndexedSurface {
+/** Render one full pose (backdrop + all populated wall slots, farthest-first) onto a fresh viewport-sized surface. `wallTypeMap` is the level's real `rawWallIndex -> vmpIndex` table (`decode-inf.ts`'s `buildWallTypeMap`). */
+export function renderView(
+  maze: MazeData,
+  x: number,
+  y: number,
+  facing: Facing,
+  vcn: VcnData,
+  vmp: VmpData,
+  wallTypeMap: Uint8Array,
+): IndexedSurface {
   const surface = new IndexedSurface(VIEWPORT_W, VIEWPORT_H);
   surface.clear(0);
   const xflip = (x & y & facing) === 1;
   drawBackdrop(surface, vcn, vmp, xflip);
-  const resolved = resolveWallTypes(maze, x, y, facing);
+  const resolved = resolveWallTypes(maze, x, y, facing, wallTypeMap);
   // WALL_RENDER_SLOTS is already authored back-to-front (A-G, then H-L, then M-O, then P/Q last).
   resolved.forEach(({ wallType }, i) => drawWallSlot(surface, vcn, vmp, i, wallType));
   return surface;

@@ -14,7 +14,50 @@ full evidence and paths-tried tables — this file is pointers only.
 | eotb1-amiga-savegame-port | open | `EOBDATA.SAV` structure fully confirmed from source and platform-detection heuristic spot-verified against the real file; full record layout not ported to a standalone decoder/extractor | `amiga/data-structure.md` § "EOBDATA.SAV — Save game" | 2026-08-02 game-re |
 | eotb1-amiga-multipalette-cps-callsite | open | Multi-palette CPS mechanism confirmed (`setDualPalettes` = horizontal split-screen dual palette, not fade/animation) but the specific screen/context that calls it (`eobcommon.cpp:1783`) not traced to find which CPS files actually use it | `amiga/data-structure.md` § "Palette Locations" → "Multi-palette CPS — mechanism confirmed" | 2026-08-02 game-re |
 | eotb1-amiga-special-cps-codec | open | Bonus finding (not originally an open item): a second Amiga-only compression codec (`loadSpecialAmigaCPS`, backwards-reading bit-level LZ) used for Amiga `.INF`-equivalent files and `TEXT.CPS` — confirmed and cited from source, not implemented as a decoder | `amiga/data-structure.md` § "A second, distinct Amiga-only codec" | 2026-08-02 game-re |
-| eotb1-amiga-walker-wallmapping | open | **A real playable EOB1 (Amiga) first-person walker is shipped** (`tools/eotb/`, wired into the shared browser walker as game `eotb`) — see the "EOB1 (Amiga) walker" closed-items block below for what it confirmed. **Still open, but the real mechanism is now identified (this follow-up session, 2026-08-16, ScummVM source)**: the `.MAZ` per-side byte is not always a direct 0-6 wallType (most of the corpus is clean 0/1/2, but some cells carry much larger values, e.g. 58/62 seen in `LEVEL1.MAZ`). Pulled and read the actual engine source (`engines/kyra/engine/scene_eob.cpp`, function `EoBCoreEngine::initLevelData`, shared by EOB1 and EOB2 at this point — not gated by `gameID`): `resetWallData()` seeds a *default* raw-wallType→vmpRunIndex table (`_wllVmpMap[1]=1, [2]=2, [3..22]=3` (all 20 collapse to one shared generic run), `[23]=4, [24]=5`, everything else including 0 defaults to run 0), and each level's `.INF` decoration-command stream can then override individual entries via `assignWallsAndDecorations(wallIndex, vmpIndex, decIndex, specialType, flags)` — a plain 5-byte record `[wallIndex][vmpIndex][decIndex:int8][specialType][flags]`, inside a `u16 LE`-count-prefixed loop where a `0xEC` marker byte instead means a different (2-string) decoration-load record. This is exactly the mechanism `docs/eotb/amiga/eotb-inf-spec.md`'s `WallMapping`/`0xFB` struct hypothesis pointed at, now with real field order/widths. **Why this isn't implemented yet**: reaching this record stream requires sequentially replicating everything `initLevelData` consumes before it — door-shape params, script-timer fields, monster-shape loads, and critically `loadActiveMonsterData` (`sprites_eob.cpp`, EOB1: a variable-length `(type,interval)` pair list terminated by `0xFF`, then a fixed 420 bytes — tractable) — and a first attempt at walking this by hand against a real file (`data/eotb/amiga/LEVEL1.INF`, hexdump-verified) drifted out of alignment with known string anchors (`"kobold\0"`/`"leech\0"`, the monster-shape filenames) by a few bytes partway through, most likely because the Amiga port's on-disk `.INF` layout diverges from ScummVM's DOS-oriented struct reads in ways not yet pinned down (same category of divergence this doc's own `mazStem`/`wallSetStem` findings already hit for this port) — rather than ship a guessed offset table that could silently mis-map wall art (the exact failure mode this whole project tries to avoid), this is left as real, well-scoped follow-on work: either trace the Amiga executable's own disassembly (`amiga-disasm` agent / `ira-disasm`/`radare2-amiga` skills — a more reliable oracle for Amiga-specific layout than DOS-oriented ScummVM source) or very carefully re-verify each intervening field against real file bytes one at a time. Current walker still clamps anything above 6 to a generic solid wall (correct topology, approximate art for doors/stairs/decorated cells) — unchanged, still the safest fallback. Also open: the render rotation for facing != North (`tools/eotb/view-model.ts`'s `roleSide`) is a self-consistent extrapolation of the (facing-North-only) ModdingWiki diagram, not independently verified — no oracle in this corpus to check it against; VMP's per-tile `zMask` flag ("seam" hint) isn't modelled; door open/closed state is static (from the `.MAZ` snapshot only, `.INF` event-script mutation not applied) | `tools/eotb/view-model.ts` (`clampWallType`, `roleSide` doc comments); `tools/eotb/decode-inf.ts`; ScummVM `engines/kyra/engine/scene_eob.cpp` (`initLevelData`, `assignWallsAndDecorations`, `resetWallData`), `engines/kyra/engine/sprites_eob.cpp` (`loadActiveMonsterData`) | 2026-08-16 game-re |
+| eotb1-amiga-walker-wallmapping-decorations | open | The wall-mapping override table (`wallIndex`->`vmpIndex`) itself is now closed (see closed-items block below) and implemented. Still open, real but out of this pass's scope: `decIndex`-driven decoration overlays (`assignWallsAndDecorations`'s `_levelDecorationData`/`_levelDecorationRects` do-while chain, fed by the `0xEC` decoration-load records `parseInf` already exposes as `decorationLoads`), `specialType`/`flags` (door/stairs/special-tile behaviour beyond wall art), the render rotation for facing != North (`tools/eotb/view-model.ts`'s `roleSide`, a self-consistent extrapolation not independently verified — no oracle in this corpus to check it against), VMP's per-tile `zMask` flag ("seam" hint, unmodelled), and door open/closed state (static from the `.MAZ` snapshot only, `.INF` event-script mutation not applied) | `tools/eotb/decode-inf.ts` (`parseInf`'s `decorationLoads`/`specialType`/`flags` fields, unused downstream); `tools/eotb/view-model.ts` (`roleSide` doc comment) | 2026-08-29 amiga-disasm |
+
+## Closed this session (2026-08-29, amiga-disasm — real `.INF` wall-mapping table)
+
+- **`eotb1-amiga-walker-wallmapping`** — **closed.** The real `.MAZ` raw
+  `wallIndex` -> render `vmpIndex` mapping is implemented and verified:
+  `tools/eotb/decode-inf.ts`'s `buildWallTypeMap`/`parseInf`,
+  `tools/eotb/view-model.ts`'s `resolveWallTypes` (now takes a
+  `wallTypeMap` parameter instead of the old `clampWallType`
+  approximation), `tools/eotb/renderer.ts`'s `renderView`, and
+  `tools/eotb/export-dungeon.ts` (embeds each level's `wallTypeMap` in its
+  exported JSON, consumed by `tools/walker/games-eotb.ts` at runtime).
+  **Root cause of the previous session's failed hand-walk, now
+  identified**: `.INF` genuinely *is* LCW-compressed (a standard CPS-style
+  header, `CompressionType=4`) — the previous session concluded it was
+  plain-text because `strings` shows readable names directly in the raw
+  file, but LCW's own literal-copy command preserves short ASCII runs
+  verbatim, so that observation doesn't distinguish compressed from
+  uncompressed. The previous attempt was walking the *never-decompressed*
+  compressed bytes against decompressed-buffer struct offsets and was
+  guaranteed to drift; it was not, as suspected, a real DOS-vs-Amiga
+  struct-layout divergence — once real decompression (`tools/eotb/lcw.ts`,
+  already verified against 62 real `.CPS` files) is applied, the Amiga
+  on-disk layout matches ScummVM's own `gameID == GI_EOB1`/
+  `kPlatformAmiga` source branches (`engines/kyra/engine/scene_eob.cpp`,
+  `engines/kyra/engine/sprites_eob.cpp`) byte for byte, with **zero
+  drift**, across the whole `LEVEL{1..12}.INF` corpus — every parsed
+  monster-shape name matches a real `<name>.CPS` file, every `wallSetName`
+  matches the known wall-set corpus, and the parse terminates cleanly well
+  inside the decompressed buffer. A from-scratch disassembly of the real
+  Amiga executable (`data/eotb/amiga/eob2`, the 190 KB binary confirmed
+  via `strings` to embed the level filename table) was also attempted;
+  the level table itself was located (`HUNK_DATA` module 12, file offset
+  162732), but the surrounding function-shaped bytes weren't resolved
+  further given the time budget — not needed, since the file-level
+  verification above is already decisive. Visually confirmed:
+  `public/assets/eotb/amiga/renders/level1-22-10-f0.png` (`LEVEL1.MAZ`
+  cell (22,9) side N, raw `wallIndex=25`, overridden by `LEVEL1.INF` to
+  `vmpIndex=0` i.e. no wall) now shows an open passage where the old
+  clamp rendered a solid brick wall. Full field-offset table and citations:
+  `docs/eotb/amiga/data-structure.md` § "INF — Level Configuration".
+  Remaining, genuinely separate open work (decoration overlays,
+  `specialType`/`flags`, facing rotation, `zMask`, door state): see
+  `eotb1-amiga-walker-wallmapping-decorations` above.
 
 ## Closed this session (2026-08-02, ScummVM source)
 

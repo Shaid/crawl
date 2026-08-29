@@ -40,11 +40,15 @@ function refFrom(t: [number, boolean, boolean]): VmpTileRef {
   return { tileIndex: t[0], mirrorX: t[1], zMask: t[2] };
 }
 
-async function loadMaze(assetBase: string, level: number): Promise<{ maze: MazeData; wallSet: string }> {
-  const j = await fetchJSON<{ width: number; height: number; wallSet: string; cells: number[][] }>(
+async function loadMaze(assetBase: string, level: number): Promise<{ maze: MazeData; wallSet: string; wallTypeMap: Uint8Array }> {
+  const j = await fetchJSON<{ width: number; height: number; wallSet: string; cells: number[][]; wallTypeMap: number[] }>(
     `${assetBase}/dungeon/level${level}.json`,
   );
-  return { maze: { width: j.width, height: j.height, cells: j.cells.map((c) => Uint8Array.from(c)) }, wallSet: j.wallSet };
+  return {
+    maze: { width: j.width, height: j.height, cells: j.cells.map((c) => Uint8Array.from(c)) },
+    wallSet: j.wallSet,
+    wallTypeMap: Uint8Array.from(j.wallTypeMap),
+  };
 }
 
 async function loadWallSet(assetBase: string, name: string): Promise<{ vcn: VcnData; vmp: VmpData; palette: RGBAColor[] }> {
@@ -91,13 +95,24 @@ export class Eotb1View implements GameView {
   private stepCooldown = 0;
   private readonly maze: MazeData;
   private readonly wallSet: string;
+  private readonly wallTypeMap: Uint8Array;
   private readonly vcn: VcnData;
   private readonly vmp: VmpData;
   private readonly palette_: RGBAColor[];
 
-  constructor(maze: MazeData, wallSet: string, vcn: VcnData, vmp: VmpData, palette: RGBAColor[], level: number, startPose: Pose | null) {
+  constructor(
+    maze: MazeData,
+    wallSet: string,
+    wallTypeMap: Uint8Array,
+    vcn: VcnData,
+    vmp: VmpData,
+    palette: RGBAColor[],
+    level: number,
+    startPose: Pose | null,
+  ) {
     this.maze = maze;
     this.wallSet = wallSet;
+    this.wallTypeMap = wallTypeMap;
     this.vcn = vcn;
     this.vmp = vmp;
     this.palette_ = palette;
@@ -167,7 +182,7 @@ export class Eotb1View implements GameView {
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const { x, y, facing } = this.pose_;
-    const surface = renderView(this.maze, x, y, facing as Facing, this.vcn, this.vmp);
+    const surface = renderView(this.maze, x, y, facing as Facing, this.vcn, this.vmp, this.wallTypeMap);
     const imageData = ctx.createImageData(VIEWPORT_W, VIEWPORT_H);
     for (let i = 0; i < VIEWPORT_W * VIEWPORT_H; i++) {
       const c = this.palette_[surface.data[i]!] ?? { r: 0, g: 0, b: 0, a: 255 };
@@ -183,14 +198,14 @@ export class Eotb1View implements GameView {
 
   /** Exposed for tests/debugging -- which wallType each of the 25 screen positions resolved to at the current pose. */
   debugResolve() {
-    return resolveWallTypes(this.maze, this.pose_.x, this.pose_.y, this.pose_.facing as Facing);
+    return resolveWallTypes(this.maze, this.pose_.x, this.pose_.y, this.pose_.facing as Facing, this.wallTypeMap);
   }
 }
 
 export async function loadEotb1View(assetBase: string, levelId: number, startPose: Pose | null): Promise<Eotb1View> {
-  const { maze, wallSet } = await loadMaze(assetBase, levelId);
+  const { maze, wallSet, wallTypeMap } = await loadMaze(assetBase, levelId);
   const { vcn, vmp, palette } = await loadWallSet(assetBase, wallSet);
-  return new Eotb1View(maze, wallSet, vcn, vmp, palette, levelId, startPose);
+  return new Eotb1View(maze, wallSet, wallTypeMap, vcn, vmp, palette, levelId, startPose);
 }
 
 export { decodeMaze };

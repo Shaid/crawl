@@ -17,9 +17,13 @@ import type { Facing } from './view-model.ts';
 
 const ASSET_DIR = resolve('public/assets/eotb/amiga');
 
-function loadMaze(level: number): { maze: MazeData; wallSet: string } {
+function loadMaze(level: number): { maze: MazeData; wallSet: string; wallTypeMap: Uint8Array } {
   const j = JSON.parse(readFileSync(resolve(ASSET_DIR, 'dungeon', `level${level}.json`), 'utf8'));
-  return { maze: { width: j.width, height: j.height, cells: j.cells.map((c: number[]) => Uint8Array.from(c)) }, wallSet: j.wallSet };
+  return {
+    maze: { width: j.width, height: j.height, cells: j.cells.map((c: number[]) => Uint8Array.from(c)) },
+    wallSet: j.wallSet,
+    wallTypeMap: Uint8Array.from(j.wallTypeMap),
+  };
 }
 
 function loadWallSet(name: string): { vcn: VcnData; vmp: VmpData; palette: [number, number, number][] } {
@@ -47,10 +51,10 @@ function main() {
   const y = Number(yArg);
   const facing = Number(facingArg) as Facing;
 
-  const { maze, wallSet } = loadMaze(level);
+  const { maze, wallSet, wallTypeMap } = loadMaze(level);
   const { vcn, vmp, palette } = loadWallSet(wallSet);
 
-  const surface = renderView(maze, x, y, facing, vcn, vmp);
+  const surface = renderView(maze, x, y, facing, vcn, vmp, wallTypeMap);
 
   const rgba = new Uint8Array(VIEWPORT_W * VIEWPORT_H * 4);
   for (let i = 0; i < VIEWPORT_W * VIEWPORT_H; i++) {

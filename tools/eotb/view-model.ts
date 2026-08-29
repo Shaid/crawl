@@ -60,56 +60,57 @@ export interface ResolvedSlot {
 }
 
 /**
- * Map a raw `.MAZ` per-side byte to a VMP wallType (0-6).
+ * Map a raw `.MAZ` per-side byte to a VMP wallType (0-6) via a level's
+ * real `wallTypeMap` (`decode-inf.ts`'s `buildWallTypeMap`, a 256-entry
+ * `rawWallIndex -> vmpIndex` table: `EoBCoreEngine::resetWallData`'s
+ * default plus that level's `.INF` wall-mapping overrides).
  *
- * **Not the real mechanism -- a documented, bounded approximation.**
- * Empirically (this session, real `LEVEL1.MAZ` data), the raw byte is
- * NOT always a direct 0-6 wallType: most of the corpus is clean 0/1/2
- * (open/solid-type-1/solid-type-2), but some cells carry much larger
- * values (58, 62, ... seen in `data/eotb/amiga/LEVEL1.MAZ` at (16,16)).
- *
- * **The real mechanism is now identified (2026-08-16 follow-up, ScummVM
- * source), just not implemented yet.** `engines/kyra/engine/scene_eob.cpp`
- * (`EoBCoreEngine::initLevelData`/`resetWallData`/`assignWallsAndDecorations`,
- * shared by EOB1 and EOB2) confirms `docs/eotb/amiga/eotb-inf-spec.md`'s
- * `WallMapping`/`0xFB` hypothesis: `resetWallData()` seeds a default
- * wallType->vmpRunIndex table (`{1:1, 2:2, 3..22:3, 23:4, 24:5}`, else 0),
- * and each level's `.INF` decoration-command stream can override entries
- * via a 5-byte record `[wallIndex][vmpIndex][decIndex][specialType][flags]`.
- * **Why this clamp is still here rather than a real lookup**: reaching
- * that record stream requires sequentially replicating everything
- * `initLevelData` reads before it (door-shape params, script timers,
- * monster-shape loads, `loadActiveMonsterData`), and a first attempt at
- * walking this by hand against real `LEVEL1.INF` bytes drifted out of
- * alignment with known string anchors ("kobold\0"/"leech\0", the
- * monster-shape filenames) partway through -- most likely the Amiga
- * port's on-disk layout diverges from ScummVM's DOS-oriented reads the
- * same way `mazStem`/`wallSetStem` already do (see `decode-inf.ts`'s own
- * module doc). Shipping a guessed offset table risked silently mis-mapped
- * wall art, so this is left as real follow-on work (full details and the
- * exact struct/function citations: `docs/eotb/TODO.md`
- * `eotb1-amiga-walker-wallmapping`) -- either trace the Amiga executable's
- * own disassembly (a more reliable oracle for Amiga-specific layout than
- * DOS-oriented ScummVM source) or carefully re-verify each intervening
- * field against real file bytes one at a time. Until then: pass 0-6
- * through unchanged (the common case, verified clean over most of the
- * corpus), clamp anything else to 1 (generic solid wall) so doors/
- * stairs/decorated cells still render as *a* wall (correct topology,
- * approximate art) instead of a decode error or nonsense tile index.
+ * **This replaces a former clamp-based approximation** (raw > 6 ->
+ * generic solid wall 1). That approximation's premise turned out to be
+ * built on a bug, not a real DOS-vs-Amiga struct divergence: a previous
+ * session's attempt to hand-derive the real mapping drifted out of
+ * alignment because it never LCW-decompressed `.INF` in the first place
+ * (see `decode-inf.ts`'s module doc for the full root-cause writeup and
+ * citations) -- once real decompression is applied, the Amiga on-disk
+ * layout matches ScummVM's own `gameID == GI_EOB1` / `platform ==
+ * kPlatformAmiga` source branches exactly, byte for byte, over the whole
+ * `LEVEL{1..11}.INF` corpus.
  */
-function clampWallType(raw: number): number {
-  return raw <= 6 ? raw : 1;
+function mapWallType(raw: number, wallTypeMap: Uint8Array): number {
+  return wallTypeMap[raw & 0xff]!;
 }
 
-/** Resolve all 25 wall-render slots' wallType for a pose. */
-export function resolveWallTypes(maze: MazeData, x: number, y: number, facing: Facing): ResolvedSlot[] {
+/**
+ * Fallback table for callers that don't (yet) pass a real per-level
+ * `wallTypeMap` -- reproduces the old clamp exactly (raw 0-6 pass
+ * through, anything else -> generic solid wall 1). **EOB2**
+ * (`tools/eotb2/view-model.ts`) re-exports `resolveWallTypes` from this
+ * module and still relies on this default: EOB2's own `.INF`/wall-
+ * mapping format is a separate, not-yet-verified decode (out of scope
+ * for the EOB1 fix this default preserves compatibility for -- see
+ * `docs/eotb/TODO.md`'s `eotb1-amiga-walker-wallmapping` row).
+ */
+const CLAMP_FALLBACK_WALL_TYPE_MAP: Uint8Array = (() => {
+  const map = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) map[i] = i <= 6 ? i : 1;
+  return map;
+})();
+
+/** Resolve all 25 wall-render slots' wallType for a pose, using `wallTypeMap` (`decode-inf.ts`'s `buildWallTypeMap`) to map each cell's raw `.MAZ` byte to a real VMP wallType. Omit `wallTypeMap` to fall back to the old raw-passthrough/clamp-to-1 behaviour (see `CLAMP_FALLBACK_WALL_TYPE_MAP`). */
+export function resolveWallTypes(
+  maze: MazeData,
+  x: number,
+  y: number,
+  facing: Facing,
+  wallTypeMap: Uint8Array = CLAMP_FALLBACK_WALL_TYPE_MAP,
+): ResolvedSlot[] {
   return WALL_RENDER_SLOTS.map((slot) => {
     const [cellLetter, sideSuffix] = slot.label.split('-') as [string, string];
     const [dxRel, dyRel] = CELL_OFFSETS[cellLetter]!;
     const [dx, dy] = rotateOffset(dxRel, dyRel, facing);
     const role = SIDE_ROLE[sideSuffix]!;
     const side = roleSide(role, facing);
-    const wallType = clampWallType(wallTypeAt(maze, x + dx, y + dy, side));
+    const wallType = mapWallType(wallTypeAt(maze, x + dx, y + dy, side), wallTypeMap);
     return { slot, wallType };
   });
 }

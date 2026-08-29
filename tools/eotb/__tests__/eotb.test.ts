@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { decompressLCW } from '../lcw.ts';
 import { decodeMaze, wallTypeAt, type MazeData } from '../decode-maze.ts';
 import { rotateOffset, roleSide, resolveWallTypes, canStepForward } from '../view-model.ts';
-import { findWallSet } from '../decode-inf.ts';
+import { findWallSet, parseInf, buildWallTypeMap } from '../decode-inf.ts';
 import { decodeVmp, WALL_RENDER_SLOTS } from '../decode-vmp.ts';
 
 function loadMaze(level: number): MazeData {
@@ -96,11 +96,17 @@ describe('roleSide', () => {
   });
 });
 
+function loadWallTypeMap(level: number): Uint8Array {
+  const data = readFileSync(resolve(`data/eotb/amiga/LEVEL${level}.INF`));
+  return buildWallTypeMap(new Uint8Array(data));
+}
+
 describe('resolveWallTypes', () => {
-  it('resolves all 25 WALL_RENDER_SLOTS to a wallType in 0-6 (clamped)', () => {
+  it('resolves all 25 WALL_RENDER_SLOTS to a wallType in 0-6 (real per-level map)', () => {
     const maze = loadMaze(1);
+    const wallTypeMap = loadWallTypeMap(1);
     for (const facing of [0, 1, 2, 3] as const) {
-      const resolved = resolveWallTypes(maze, 16, 16, facing);
+      const resolved = resolveWallTypes(maze, 16, 16, facing, wallTypeMap);
       expect(resolved).toHaveLength(WALL_RENDER_SLOTS.length);
       for (const { wallType } of resolved) {
         expect(wallType).toBeGreaterThanOrEqual(0);
@@ -111,9 +117,67 @@ describe('resolveWallTypes', () => {
 
   it('changes with facing at a fixed position (rotation actually applies)', () => {
     const maze = loadMaze(1);
-    const f0 = resolveWallTypes(maze, 10, 10, 0).map((r) => r.wallType);
-    const f1 = resolveWallTypes(maze, 10, 10, 1).map((r) => r.wallType);
+    const wallTypeMap = loadWallTypeMap(1);
+    const f0 = resolveWallTypes(maze, 10, 10, 0, wallTypeMap).map((r) => r.wallType);
+    const f1 = resolveWallTypes(maze, 10, 10, 1, wallTypeMap).map((r) => r.wallType);
     expect(f0).not.toEqual(f1);
+  });
+
+});
+
+describe('buildWallTypeMap / parseInf', () => {
+  it('applies resetWallData defaults for un-overridden indices', () => {
+    const map = loadWallTypeMap(1);
+    expect(map[1]).toBe(1);
+    expect(map[2]).toBe(2);
+    expect(map[10]).toBe(3); // 3..22 -> 3
+    expect(map[0]).toBe(0);
+  });
+
+  it('applies real LEVEL1 wall-mapping overrides (wallIndex 58/62, cited in past TODO notes)', () => {
+    const map = loadWallTypeMap(1);
+    expect(map[58]).toBe(1);
+    expect(map[62]).toBe(1);
+    expect(map[24]).toBe(5); // overridden but matches the default anyway
+    expect(map[26]).toBe(0); // overridden to "no wall" vmpIndex
+  });
+
+  it('parses real monster-shape names for every level 1-11, each matching a real <name>.CPS file in the corpus', () => {
+    // Every name here is independently confirmed against a real file in data/eotb/amiga/
+    // (e.g. level 1 -> KOBOLD.CPS/LEECH.CPS) -- exhaustive cross-check, not a guess.
+    const expected: Record<number, [string, string | null]> = {
+      1: ['kobold', 'leech'],
+      2: ['zombie', 'skeleton'],
+      3: ['kuotoa', 'flind'],
+      4: ['spider', null],
+      5: ['dwarf', 'spider'],
+      6: ['kenku', 'mage'],
+      7: ['drowelf', 'skelwar'],
+      8: ['drider', 'hellhnd'],
+      9: ['rust', 'disbeast'],
+      10: ['shindia', 'mantis'],
+      11: ['xorn', 'mflayer'],
+    };
+    for (const [level, [name1, name2]] of Object.entries(expected)) {
+      const data = readFileSync(resolve(`data/eotb/amiga/LEVEL${level}.INF`));
+      const parsed = parseInf(new Uint8Array(data));
+      expect(parsed.monsterShapes[0]?.name).toBe(name1);
+      expect(parsed.monsterShapes[1]?.name).toBe(name2);
+    }
+  });
+
+  it('decodes every real LEVEL1-11.INF with a plausible, non-empty wall-mapping record set', () => {
+    for (let level = 1; level <= 11; level++) {
+      const data = readFileSync(resolve(`data/eotb/amiga/LEVEL${level}.INF`));
+      const parsed = parseInf(new Uint8Array(data));
+      expect(parsed.wallMappings.length).toBeGreaterThan(0);
+      for (const { wallIndex, vmpIndex } of parsed.wallMappings) {
+        expect(wallIndex).toBeGreaterThanOrEqual(0);
+        expect(wallIndex).toBeLessThanOrEqual(255);
+        expect(vmpIndex).toBeGreaterThanOrEqual(0);
+        expect(vmpIndex).toBeLessThanOrEqual(6);
+      }
+    }
   });
 });
 

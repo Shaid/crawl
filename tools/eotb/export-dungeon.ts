@@ -14,7 +14,7 @@ import { decodeCps } from './decode-cps.ts';
 import { decodeVcn, applyVcnPalette } from './decode-vcn.ts';
 import { decodeVmp } from './decode-vmp.ts';
 import { decodeMaze } from './decode-maze.ts';
-import { findWallSet, type WallSet } from './decode-inf.ts';
+import { findWallSet, buildWallTypeMap, type WallSet } from './decode-inf.ts';
 
 const WALL_SETS: WallSet[] = ['BRICK', 'BLUE', 'DROW', 'GREEN', 'XANATHA'];
 const LEVEL_COUNT = 12;
@@ -60,12 +60,14 @@ function main() {
     const infRaw = readBinary(resolve(dataDir, `LEVEL${n}.INF`));
     const maze = decodeMaze(mazeRaw);
     const wallSet = findWallSet(infRaw);
+    const wallTypeMap = buildWallTypeMap(infRaw);
     writeJson(resolve(outDir, 'dungeon', `level${n}.json`), {
       level: n,
       wallSet,
       width: maze.width,
       height: maze.height,
       cells: maze.cells.map((c) => Array.from(c)),
+      wallTypeMap: Array.from(wallTypeMap),
     });
     levels.push({ level: n, wallSet });
     console.log(`  LEVEL${n}: wall set ${wallSet}`);
