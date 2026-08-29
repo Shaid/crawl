@@ -12,7 +12,50 @@ task brief. An Amiga EOB2 doc/extractor is future work, not yet started.
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
 | eotb2-amiga-not-started | deferred:out-of-scope | `data/eotb2/amiga/` (incl. Manual/Maps/Solution reference material) not yet reverse-engineered — DOS/VGA was this session's priority | (no doc yet) | 2026-08-02 game-re |
-| eotb2-inf-second-wallset-runtime-consumer | open | The EOB2 INF second wall-set-name field is now fully decoded (13-byte cstring, present on LEVEL10-14, always `"azure"`) — what in-game code actually consumes the resulting palette string beyond the one `format()` call in `initLevelData` is not traced | `dosvga/data-structure.md` § "Palette resolution (per-CPS)" → second-field paragraph | 2026-08-29 game-re |
+
+## Closed this session (2026-08-29b, wall-decoration overlay port from EOB1 + INF record-stream decode)
+
+- **`eotb2-inf-second-wallset-runtime-consumer`** — traced and confirmed:
+  `EoBCoreEngine::initLevelData` reuses one `tmpStr` variable for the
+  level's palette filename throughout the function, and the second
+  wall-set field's assignment unconditionally **overwrites** (not
+  merges) the primary `wallSetStem`'s own value, since it runs after it.
+  For `LEVEL10`-`LEVEL14` this means the level's real active palette is
+  `AZURE.PAL`, not `MEZZ.PAL` (the navigable tileset's own stem) — a
+  genuine, visually real override (`MEZZ.PAL`/`AZURE.PAL` differ in 73 of
+  768 bytes). Implemented in `tools/eotb2/export-dungeon.ts`: wall-set
+  asset bundles now combine the navigable tileset's VCN/VMP with the
+  palette-stem's `.PAL` (`secondWallSetStem ?? wallSetStem`), producing a
+  distinct `mezz+azure` bundle for the 5 affected levels. See
+  `dosvga/data-structure.md` § "Palette resolution (per-CPS)" → runtime
+  consumer paragraph.
+- **Ported EOB1's wall-decoration-overlay renderer to EOB2** (new work,
+  not a previously-open TODO row): `tools/eotb2/decode-inf.ts` gained a
+  full `.INF` record-stream parser past the fixed header (door-shapes,
+  monster-shapes, monster-properties, then the wall-mapping/decoration-
+  load stream — none of this was previously decoded for EOB2), verified
+  byte-exact against all 16 real `LEVELn.INF` files with 0 parse errors
+  and 308/308 real wall-decoration assignments resolving cleanly
+  (cross-checked against real `.DEC`/`.DCR` filenames, 0 mismatches). New
+  `tools/eotb2/decode-cps.ts` decodes EOB2's chunky-8bpp decoration shape
+  sheets (confirmed structurally distinct from EOB1 Amiga's planar
+  `.CPS`). `tools/eotb2/renderer.ts`'s `drawWallDecorations` reuses
+  EOB1's `decodeDecorations`/`decorationChain` (`tools/eotb/decode-
+  decorations.ts`, read-only) and EOB1's DSC render-geometry tables
+  (`tools/eotb/dsc-tables.ts`, read-only — confirmed byte-identical to
+  EOB2's own `eob2_dos.h` values, 36/18/12 entries, 0 deviations) with one
+  real, deliberate EOB2-specific deviation: decoration data/sheets are
+  keyed by `decFile`/`cpsFile` string rather than one shared table, since
+  EOB2's LEVEL10-14 genuinely decorate with `azure.dec` while navigating a
+  `mezz` tileset (no EOB1 equivalent). Front/"Down" role only, matching
+  EOB1's own current scope. Verified: two real decorated poses rendered
+  with/without the overlay and diffed — 204/21120 and 124/21120 pixels
+  changed respectively, each forming a compact, distinctly-shaped,
+  correctly-localized region (not noise, not identical between the two
+  different `decIndex` values tested). 25/25 `tools/eotb2` unit tests
+  passing (7 new). Full repo `vitest`, `tsc --noEmit`, `lint` all clean.
+  See `dosvga/data-structure.md` § "Wall decoration overlay rendering
+  (INF wall-mapping/decoration-load record stream, 2026-08-29)".
 
 ## Closed this session (2026-08-29, ScummVM source + byte-exact verification against all 16 LEVELn.INF)
 

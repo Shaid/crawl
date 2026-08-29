@@ -134,15 +134,35 @@ present second field, decoding to `"azure"` in every one of those 5 cases
 texture set while naming AZURE as a second, presumably UI/overlay or
 scripted-encounter palette (AZURE itself has no `.VCN`/`.VMP`, i.e. is
 never a *navigable* wall set — see "VCN / VMP" above — so this can only be
-a palette reference, not a second tile texture). What in-game code
-actually *consumes* `tmpStr` after this second `loadPalette`-pattern
-format call is not traced further (ScummVM's `initLevelData` builds the
-string and moves on; no second `_screen->loadPalette()` call sits right
-next to it in the function body) — the field's presence/content is now
-ground truth, its runtime effect remains open. Monster/UI CPS files
-without a matching `.PAL` face the same "likely wrong, should use the
-owning level's active palette rather than a fixed fallback" caveat noted
-for EOB1.
+a palette reference, not a second tile texture).
+
+**Runtime consumer now traced and confirmed (2026-08-29), closing
+`eotb2-inf-second-wallset-runtime-consumer`.** `tmpStr` (built from
+`secondWallSetStem` via the `paletteFilePattern` format, e.g.
+`"azure.pal"`) is not dead — `EoBCoreEngine::initLevelData` reuses the
+*same* `tmpStr` variable for the level's palette filename throughout the
+function, and the second-field assignment is an unconditional
+**overwrite**, not a merge: whichever wall-set stem's `.PAL`/`.EGA` name
+was formatted into `tmpStr` last is the one `_screen->loadPalette(tmpStr,
+...)` actually loads a few lines later. Since the second-field branch
+runs *after* the primary `wallSetStem`'s own `tmpStr = format(...)`
+assignment, its value wins whenever the second field is present — for
+`LEVEL10`-`LEVEL14`, the level's active in-game palette is `AZURE.PAL`,
+not `MEZZ.PAL`, even though the level's navigable 3D tileset
+(`.VCN`/`.VMP`) is still MEZZ's. This is a genuine, visually real
+override, not a no-op formality: `MEZZ.PAL` and `AZURE.PAL` differ in 73
+of 768 bytes (a real, distinct colour palette), confirmed by direct byte
+comparison of the two files in this corpus. **Implemented in
+`tools/eotb2/export-dungeon.ts`**: each level's wall-set asset bundle is
+now built from the level's *navigable* tileset (`.VCN`/`.VMP`, for tile
+geometry) combined with the *palette stem* (`secondWallSetStem ??
+wallSetStem`, for colour) — for LEVEL10-14 this produces a distinct
+`mezz+azure` bundle (MEZZ tiles rendered with AZURE's palette) rather
+than reusing the plain `mezz` bundle the other 6 mezz-tileset levels get.
+Monster/UI CPS files without a matching `.PAL` still face the same
+"likely wrong, should use the owning level's active palette rather than a
+fixed fallback" caveat noted for EOB1 — that narrower, still-open
+question is unaffected by this finding.
 
 ---
 
@@ -346,6 +366,135 @@ non-tile area; not investigated further.) **Closes `eotb2-dos-dec-format`.**
 
 ---
 
+## Wall decoration overlay rendering (INF wall-mapping/decoration-load record stream, 2026-08-29)
+
+Ports EOB1's just-shipped wall-decoration-overlay renderer
+(`docs/eotb/amiga/data-structure.md`'s equivalent section,
+`tools/eotb/decode-decorations.ts` + `tools/eotb/renderer.ts`'s
+`drawWallDecorations`) to EOB2 DOS/VGA. `resolveWallDecorationAssignments`
+in `tools/eotb2/decode-inf.ts` is the EOB2 counterpart of EOB1's
+`resolveWallDecorationAssignments` — same shared `EoBCoreEngine::
+assignWallsAndDecorations(wallIndex, vmpIndex, decIndex, specialType,
+flags)` semantics, confirmed identical between the two games' engine
+code, but reached via a genuinely different `.INF` record-stream shape
+past the header this session had to derive fresh (EOB2's `slen=13`
+header preamble, see "INF — Level configuration" above, only covers the
+fixed portion; everything after it — door-shapes, monster-shapes,
+monster-properties, then the wall-mapping/decoration-load stream — is a
+separate variable-length record walk not previously decoded for EOB2).
+
+**Record stream, past the fixed 0x005-0x020 header** (derived from fresh
+`engines/kyra/engine/scene_eob.cpp`/`darkmoon.cpp` source, ScummVM
+`master`):
+
+```
+[fixed header, see "INF — Level configuration" above]
+cstring[13]  soundFile
+loop x2:               # door-shape records (open/closed per door type)
+    ...
+u16 LE       stepsUntilScriptCall
+loop x2:                # monster-shape records
+    ...
+loop until 0xFF byte:    # monster-property records, variable length
+    ...
+u8           tag2                 # must be 0xEC for the block-properties/decoration stream to follow
+u16 LE       num                  # record count
+repeat num:
+    u8       recordTag
+    if recordTag == <decoration-load tag>:
+        cstring[13]  cpsFile
+        cstring[13]  decFile
+    else:                          # wall-mapping override record
+        u8   wallIndex
+        u8   vmpIndex
+        s8   decIndex              # -1 = no decoration
+        u8   specialType
+        u8   flags
+```
+
+**Verified byte-exact against all 16 real `LEVELn.INF` files** (see
+`tools/eotb2/decode-inf.ts`'s `parseInfLevelData`/`resolveWallDecoration
+Assignments` and their tests): every file parses with **0 errors**, and
+`resolveWallDecorationAssignments` resolves exactly **308** real
+`wallIndex -> {cpsFile, decFile, decIndex}` assignments across the 16
+levels combined — cross-checked two independent ways, both 0 mismatches:
+1. every resolved `decFile` name matches one of the 6 real `.DEC` files
+   in this corpus (§ ".DEC" above);
+2. every resolved monster-shape name (from the monster-shape record loop
+   earlier in the same stream) matches one of the 9 real `.DCR` files
+   (§ ".DCR" above).
+
+**DSC-table byte-identity cross-check.** The per-cell shape-index/
+shape-X-offset/block-map constants (`DSC_SHAPE_INDEX`, `DSC_SHAPE_X`,
+`DSC_BLOCK_MAP`) EOB1's decoration renderer already uses
+(`tools/eotb/dsc-tables.ts`) are reused **directly, unmodified, read-only**
+rather than re-transcribed for EOB2 — confirmed this session by
+fresh-fetching ScummVM's `devtools/create_kyradat/resources/eob2_dos.h`
+and diffing `kEoB2DscShapeIndexDOS`/`kEoB2DscXDOS`/`kEoB2DscBlockMapDOS`
+against the already-shipped EOB1-Amiga values: **byte-identical**, all
+36/18/12 entries, zero deviations. This is expected (both games share the
+`EoBCoreEngine::drawSceneShapes` cell-layout constants verbatim — the DSC
+tables describe render geometry, not per-game asset content) but was
+verified rather than assumed.
+
+**Genuine EOB2-specific structural quirk: `decFile` is not always the
+level's own navigable `wallSetStem`.** `LEVEL10`-`LEVEL14` use
+`wallSetStem="mezz"` (their real, navigable 3D tileset — see "VCN / VMP"
+above) but their decoration-load record's `decFile` is `"azure.dec"`, not
+`"mezz.dec"` — confirmed directly from the real per-level record parse,
+consistent with (and additional evidence for) the palette-override
+finding just above: these 5 levels genuinely borrow AZURE's whole
+decoration+palette identity while keeping MEZZ's own tile geometry. EOB1
+has no equivalent split (its wall sets are 1:1 with their `.DAT`
+decoration file), so `tools/eotb2/renderer.ts`'s `drawWallDecorations`
+deliberately keys its decoration-data/sheet lookups by `decFile`/`cpsFile`
+string (`Record<string, DecorationData>`/`Record<string,
+DecorationSheet>`) rather than reusing EOB1's single-shared-table
+parameter shape — a real, documented deviation, not a simplification.
+
+**`.CPS` decoration shape sheets are chunky 8bpp, not EOB1 Amiga's
+5-bitplane** — a new `tools/eotb2/decode-cps.ts` (distinct from EOB1's
+`tools/eotb/decode-cps.ts`) decodes them: same Kyra-bitmap-header + LCW
+container as `decode-vcn.ts`/`decode-inf.ts` already use for this port,
+but the payload is one byte per pixel (a raw palette index), no planar
+deinterleave at all. **Verified**: all 10 real decoration `.CPS` files
+referenced by the 308 resolved assignments (`BROWN1/2`, `FOREST`,
+`MEZZ1/2`, `SILVER1/2`, `AZURE1/2`, `CRIMSON`) decompress to exactly
+`320*200 = 64000` bytes with 0 residue.
+
+**Scope: front/"Down" role only**, matching EOB1's own current
+`renderer.ts` scope (side roles — `-east`/`-west` slots — are an
+already-acknowledged EOB1 gap, not newly introduced here; no new TODO
+row needed for EOB2 specifically since it inherits, rather than adds to,
+that gap).
+
+**Render verification (real corpus data, offline).** Using
+`tools/eotb2/render-through-dungeon.ts` with `decorationParams` wired
+in, real decorated poses were rendered with and without the decoration
+overlay and diffed pixel-by-pixel:
+- LEVEL1, pose `(x=4, y=8, facing=1)`, `N-south` slot, `rawWallIndex=56`,
+  `decFile="crimson.dec"`, `decIndex=46` — **204/21120 pixels changed**,
+  forming a compact, contiguous, roughly-rectangular region centred on
+  the wall (not scattered noise, not covering the whole texture).
+- Same level/wallset, a second real assignment (`rawWallIndex=54`,
+  `decIndex=59`) at pose `(x=21, y=9, facing=1)` — **124/21120 pixels
+  changed**, a *different*-shaped, differently-positioned compact region
+  from the first case.
+
+Two different `decIndex` values producing two visually distinct,
+well-formed, correctly-localized shapes (rather than identical output,
+or noise) is the verification bar met here: the decode chain (`.INF`
+wall-mapping -> `decorationChain` walk -> `.DEC` shape/offset lookup ->
+`.CPS` sheet blit) produces coherent, non-garbled, content-dependent
+output on real EOB2 corpus data. This is a **rendered** result, not an
+oracle-confirmed one — no independent screenshot of the real DOS game at
+these exact poses was available to diff against (see EOB1's own
+decoration section for the same caveat) — but the internal consistency
+(two different inputs -> two different, non-degenerate outputs, both
+well-localized) is strong evidence against a garbled/misfiring decode.
+
+---
+
 ## .EGA files — confirmed: alternate palettes, NOT graphics (closes the open item)
 
 **This item's premise was wrong and is corrected here.** The previous pass
@@ -435,8 +584,8 @@ three files now byte-exact confirmed). **Wired into the extractor
 | Item | Notes |
 |------|-------|
 | `.SND` / `.ADL` (10 each) | Audio (digitized + AdLib music) — out of scope for this pass. |
-| Per-CPS palette selection for the 110 `PALETTE0.PAL`-fallback screens | Mechanism confirmed (see "Palette resolution" above — same wall-set-stem match as EOB1, plus the now-fully-decoded second wall-set field); which specific non-wall-set CPS files (monster/UI) actually need a level-specific palette vs. the game-wide fallback not individually traced. |
-| Second-wall-set-field runtime consumer | The field itself is fully decoded (see "INF — Level configuration (EOB2)" above); what in-game code does with the resulting `tmpStr` beyond the one `format()` call ScummVM's `initLevelData` performs is not traced further. |
+| Per-CPS palette selection for the 110 `PALETTE0.PAL`-fallback screens | Mechanism confirmed (see "Palette resolution" above — same wall-set-stem match as EOB1, plus the now-fully-decoded and now-traced-to-a-runtime-effect second wall-set field); which specific non-wall-set CPS files (monster/UI) actually need a level-specific palette vs. the game-wide fallback not individually traced. |
+| Wall-decoration side roles (`-east`/`-west` slots) | Front/"Down" role only is implemented (see "Wall decoration overlay rendering" above), matching EOB1's own current scope — an already-acknowledged EOB1 gap, not a new EOB2-specific one. |
 
 **Extractor pipeline wiring is now complete (2026-08-29)** — all 6
 previously-pending formats (`.DCR`, `.DEC`, `.EGA`-as-palette, `ITEM.DAT`,

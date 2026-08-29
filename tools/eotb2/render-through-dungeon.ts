@@ -9,17 +9,41 @@
 import { resolve } from 'node:path';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { writePNG } from '@seer-project/pipeline';
-import { renderView, VIEWPORT_W, VIEWPORT_H } from './renderer.ts';
+import { renderView, VIEWPORT_W, VIEWPORT_H, type DecorationSheet } from './renderer.ts';
 import type { MazeData } from './decode-maze.ts';
 import type { VcnData } from './decode-vcn.ts';
 import type { VmpData, VmpTileRef } from './decode-vmp.ts';
 import type { Facing } from './view-model.ts';
+import type { DecorationData } from '../eotb/decode-decorations.ts';
+import type { WallDecorationAssignment } from './decode-inf.ts';
 
 const ASSET_DIR = resolve('public/assets/eotb2/dosvga');
 
-function loadMaze(level: number): { maze: MazeData; wallSet: string } {
+function loadMaze(level: number): {
+  maze: MazeData;
+  wallSet: string;
+  wallTypeMap: Uint8Array;
+  wallDecorations: Record<number, WallDecorationAssignment>;
+  decorationsByFile: Record<string, DecorationData>;
+  sheets: Record<string, DecorationSheet>;
+} {
   const j = JSON.parse(readFileSync(resolve(ASSET_DIR, 'dungeon', `level${level}.json`), 'utf8'));
-  return { maze: { width: j.width, height: j.height, cells: j.cells.map((c: number[]) => Uint8Array.from(c)) }, wallSet: j.wallSet };
+  const decorationsByFile: Record<string, DecorationData> = {};
+  for (const [decFile, dec] of Object.entries(j.decorationsByFile as Record<string, DecorationData>)) {
+    decorationsByFile[decFile] = dec;
+  }
+  const sheets: Record<string, DecorationSheet> = {};
+  for (const [cpsFile, sheet] of Object.entries(j.decorationSheets as Record<string, { width: number; height: number; indices: number[] }>)) {
+    sheets[cpsFile] = { width: sheet.width, height: sheet.height, indices: Uint8Array.from(sheet.indices) };
+  }
+  return {
+    maze: { width: j.width, height: j.height, cells: j.cells.map((c: number[]) => Uint8Array.from(c)) },
+    wallSet: j.wallSet,
+    wallTypeMap: Uint8Array.from(j.wallTypeMap),
+    wallDecorations: j.wallDecorations,
+    decorationsByFile,
+    sheets,
+  };
 }
 
 function loadWallSet(name: string): { vcn: VcnData; vmp: VmpData; palette: [number, number, number][] } {
@@ -46,10 +70,10 @@ function main() {
   const y = Number(yArg);
   const facing = Number(facingArg) as Facing;
 
-  const { maze, wallSet } = loadMaze(level);
+  const { maze, wallSet, wallTypeMap, wallDecorations, decorationsByFile, sheets } = loadMaze(level);
   const { vcn, vmp, palette } = loadWallSet(wallSet);
 
-  const surface = renderView(maze, x, y, facing, vcn, vmp);
+  const surface = renderView(maze, x, y, facing, vcn, vmp, wallTypeMap, { wallDecorations, decorationsByFile, sheets });
 
   const rgba = new Uint8Array(VIEWPORT_W * VIEWPORT_H * 4);
   for (let i = 0; i < VIEWPORT_W * VIEWPORT_H; i++) {

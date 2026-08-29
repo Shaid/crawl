@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { decodeMaze, wallTypeAt, type MazeData } from '../decode-maze.ts';
 import { rotateOffset, resolveWallTypes, canStepForward } from '../view-model.ts';
-import { decodeInf } from '../decode-inf.ts';
+import { decodeInf, parseInf, buildWallTypeMap, resolveWallDecorationAssignments } from '../decode-inf.ts';
 import { decodeVcn } from '../decode-vcn.ts';
 import { decodeVmp, WALL_RENDER_SLOTS } from '../decode-vmp.ts';
 import { decodePal } from '../palette.ts';
+import { decodeCps } from '../decode-cps.ts';
+import { decodeDecorations, decorationChain, type DecorationData } from '../../eotb/decode-decorations.ts';
 import { renderView, VIEWPORT_W, VIEWPORT_H } from '../renderer.ts';
 
 const DATA_DIR = 'data/eotb2/dosvga';
@@ -50,6 +52,86 @@ describe('decodeInf', () => {
         expect(secondWallSetStem).toBeUndefined();
       }
     }
+  });
+});
+
+describe('parseInf / buildWallTypeMap / resolveWallDecorationAssignments (wall-mapping + decoration-load record stream)', () => {
+  it('parses the full record stream for every real LEVEL*.INF (1-16) with a tag2 0xEC before the record count', () => {
+    for (let n = 1; n <= 16; n++) {
+      const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, `LEVEL${n}.INF`)));
+      const { wallMappings, decorationLoads, records } = parseInf(infRaw);
+      expect(records.length).toBe(wallMappings.length + decorationLoads.length);
+      expect(decorationLoads.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("LEVEL1's decoration-load records resolve to the real on-disk brown1/brown2 CPS + brown.dec pair", () => {
+    const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, 'LEVEL1.INF')));
+    const { decorationLoads } = parseInf(infRaw);
+    expect(decorationLoads.map((r) => r.cpsFile.toLowerCase())).toEqual(['brown1', 'brown2']);
+    expect(decorationLoads.every((r) => r.decFile.toLowerCase() === 'brown.dec')).toBe(true);
+  });
+
+  it('every decoration-load decFile resolves to one of the 6 real on-disk .DEC files, for all 16 levels', () => {
+    const KNOWN_DEC_FILES = new Set(['brown.dec', 'forest.dec', 'mezz.dec', 'silver.dec', 'azure.dec', 'crimson.dec']);
+    for (let n = 1; n <= 16; n++) {
+      const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, `LEVEL${n}.INF`)));
+      const { decorationLoads } = parseInf(infRaw);
+      for (const { decFile } of decorationLoads) {
+        expect(KNOWN_DEC_FILES.has(decFile.toLowerCase())).toBe(true);
+      }
+    }
+  });
+
+  it('buildWallTypeMap applies the resetWallData default plus this level\'s real .INF overrides', () => {
+    const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, 'LEVEL1.INF')));
+    const map = buildWallTypeMap(infRaw);
+    expect(map).toHaveLength(256);
+    expect(map[1]).toBe(1);
+    expect(map[2]).toBe(2);
+    expect(map[10]).toBe(3); // resetWallData default range 3-22
+    expect(map[23]).toBe(4);
+    expect(map[24]).toBe(5);
+  });
+
+  it('resolveWallDecorationAssignments resolves every wall-mapping decIndex in-range against its real .DEC file, across all 16 levels (0 out-of-range, 0 empty chains)', () => {
+    const decCache = new Map<string, DecorationData>();
+    let totalAssignments = 0;
+    for (let n = 1; n <= 16; n++) {
+      const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, `LEVEL${n}.INF`)));
+      const assignments = resolveWallDecorationAssignments(infRaw);
+      for (const [, a] of assignments) {
+        totalAssignments++;
+        if (!decCache.has(a.decFile)) {
+          const decRaw = readFileSync(resolve(DATA_DIR, a.decFile.toUpperCase()));
+          decCache.set(a.decFile, decodeDecorations(new Uint8Array(decRaw)));
+        }
+        const dec = decCache.get(a.decFile)!;
+        expect(a.decIndex).toBeGreaterThanOrEqual(0);
+        expect(a.decIndex).toBeLessThan(dec.properties.length);
+        expect(decorationChain(dec, a.decIndex).length).toBeGreaterThan(0);
+      }
+    }
+    expect(totalAssignments).toBe(308); // this session's full-corpus verification count, see decode-inf.ts's module doc
+  });
+
+  it('LEVEL10-14 (mezz tileset) reference azure.dec/azure*.cps, not mezz.dec -- the second-wall-set-stem correlation', () => {
+    for (const n of [10, 11, 12, 13, 14]) {
+      const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, `LEVEL${n}.INF`)));
+      const { wallSetStem, decorationLoads } = parseInf(infRaw);
+      expect(wallSetStem.toLowerCase()).toBe('mezz');
+      expect(decorationLoads.every((r) => r.decFile.toLowerCase() === 'azure.dec')).toBe(true);
+    }
+  });
+});
+
+describe('decodeCps (EOB2 DOS/VGA chunky 8bpp, distinct from EOB1 Amiga planar)', () => {
+  it('decodes a real decoration sheet (BROWN1.CPS) to exactly 320x200 chunky indices with 0 residue', () => {
+    const data = readFileSync(resolve(DATA_DIR, 'BROWN1.CPS'));
+    const cps = decodeCps(new Uint8Array(data));
+    expect(cps.width).toBe(320);
+    expect(cps.height).toBe(200);
+    expect(cps.indices).toHaveLength(320 * 200);
   });
 });
 
@@ -171,5 +253,60 @@ describe('renderView (end-to-end, real EOB2 corpus data)', () => {
     let nonZero = 0;
     for (const v of surface.data) if (v !== 0) nonZero++;
     expect(nonZero).toBeGreaterThan(0);
+  });
+
+  it('renders LEVEL1 with decoration overlays on top of walls without throwing, using the real wallTypeMap + decoration data, and stays a superset of the walls-only pixels', () => {
+    const infRaw = new Uint8Array(readFileSync(resolve(DATA_DIR, 'LEVEL1.INF')));
+    const { mazStem } = decodeInf(infRaw);
+    const maze = decodeMaze(new Uint8Array(readFileSync(resolve(DATA_DIR, mazStem.toUpperCase()))));
+    const wallTypeMap = buildWallTypeMap(infRaw);
+    const wallDecorations = Object.fromEntries([...resolveWallDecorationAssignments(infRaw)]);
+    const { decorationLoads } = parseInf(infRaw);
+
+    const vcn = decodeVcn(new Uint8Array(readFileSync(resolve(DATA_DIR, 'DUNG.VCN'))));
+    const vmp = decodeVmp(new Uint8Array(readFileSync(resolve(DATA_DIR, 'DUNG.VMP'))), vcn.numTiles);
+
+    const decorationsByFile: Record<string, DecorationData> = {};
+    const sheets: Record<string, { width: number; height: number; indices: Uint8Array }> = {};
+    for (const { cpsFile, decFile } of decorationLoads) {
+      if (!decorationsByFile[decFile]) {
+        decorationsByFile[decFile] = decodeDecorations(new Uint8Array(readFileSync(resolve(DATA_DIR, decFile.toUpperCase()))));
+      }
+      if (!sheets[cpsFile]) {
+        const cps = decodeCps(new Uint8Array(readFileSync(resolve(DATA_DIR, `${cpsFile.toUpperCase()}.CPS`))));
+        sheets[cpsFile] = { width: cps.width, height: cps.height, indices: cps.indices };
+      }
+    }
+
+    // Find a real pose adjacent to a decorated wallIndex so the overlay actually has something to draw.
+    let found: { x: number; y: number; facing: 0 | 1 | 2 | 3 } | null = null;
+    outer: for (let y = 0; y < maze.height && !found; y++) {
+      for (let x = 0; x < maze.width && !found; x++) {
+        for (const facing of [0, 1, 2, 3] as const) {
+          const resolved = resolveWallTypes(maze, x, y, facing, wallTypeMap);
+          const front = resolved.find((r) => r.slot.label === 'D-south');
+          if (front && wallDecorations[front.rawWallIndex]) {
+            found = { x, y, facing };
+            break outer;
+          }
+        }
+      }
+    }
+    expect(found).not.toBeNull();
+
+    const withoutDecorations = renderView(maze, found!.x, found!.y, found!.facing, vcn, vmp, wallTypeMap);
+    const withDecorations = renderView(maze, found!.x, found!.y, found!.facing, vcn, vmp, wallTypeMap, {
+      wallDecorations,
+      decorationsByFile,
+      sheets,
+    });
+
+    expect(withDecorations.width).toBe(VIEWPORT_W);
+    expect(withDecorations.height).toBe(VIEWPORT_H);
+    let changedPixels = 0;
+    for (let i = 0; i < withoutDecorations.data.length; i++) {
+      if (withoutDecorations.data[i] !== withDecorations.data[i]) changedPixels++;
+    }
+    expect(changedPixels).toBeGreaterThan(0);
   });
 });
