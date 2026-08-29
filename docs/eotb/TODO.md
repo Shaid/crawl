@@ -8,7 +8,60 @@ full evidence and paths-tried tables — this file is pointers only.
 |----|--------|---------------------|----------|---------|
 | eotb1-dos-inf-opcode-operands | open | `.INF` event-script bytecode dispatcher and ~30 opcode names are confirmed from source; individual opcode operand byte-widths not exhaustively decoded | `dosvga/data-structure.md` § "INF — Level configuration" → "Event script" | 2026-08-02 game-re |
 | eotb1-dos-ega-comptype1-variant | open | A `compType=1` `.EGA` variant (`BRICK1/2/3.EGA`, `BLUE.EGA`, `DROW.EGA`, plus `ITEMRMP.EGA`'s empty-file case — 6 files total) was found while wiring the mainline `compType=4` `.EGA`/`.ECN`/`.EMP` pipeline and is skipped by the extractor; not yet decoded | `dosvga/data-structure.md` § "EGA render mode" → "Not extracted this session (open items)" | 2026-08-29 game-re |
-| eotb1-amiga-walker-wallmapping-decorations | open | The wall-mapping override table (`wallIndex`->`vmpIndex`) itself is now closed (see closed-items block below) and implemented. Still open, real but out of this pass's scope: `decIndex`-driven decoration overlays (`assignWallsAndDecorations`'s `_levelDecorationData`/`_levelDecorationRects` do-while chain, fed by the `0xEC` decoration-load records `parseInf` already exposes as `decorationLoads`), `specialType`/`flags` (door/stairs/special-tile behaviour beyond wall art), the render rotation for facing != North (`tools/eotb/view-model.ts`'s `roleSide`, a self-consistent extrapolation not independently verified — no oracle in this corpus to check it against), VMP's per-tile `zMask` flag ("seam" hint, unmodelled), and door open/closed state (static from the `.MAZ` snapshot only, `.INF` event-script mutation not applied) | `tools/eotb/decode-inf.ts` (`parseInf`'s `decorationLoads`/`specialType`/`flags` fields, unused downstream); `tools/eotb/view-model.ts` (`roleSide` doc comment) | 2026-08-29 amiga-disasm |
+| eotb1-amiga-walker-decorations-sideroles | open | `decIndex`-driven decoration overlays are now real and rendered for the front/"Down" role only (`renderer.ts`'s `drawWallDecorations`). Still open: the `i=1` side-role half of `EoBCoreEngine::drawDecorations` (`_dscWallMapping`'s `Right`/`Left`-role entries, decoded but unconsumed), the `ix<0` mirror-flip path (`flags` bit0/bit1 + runtime `_wllProcessFlag`), and the `flags&4` alternate-coordinate path (`_dscShapeCoords`, not yet decoded) | `amiga/data-structure.md` § "Decoration overlays (`decIndex`)" → "Explicitly not ported" | 2026-08-29 amiga-disasm |
+| eotb1-amiga-vmp-zmask | open | VMP's per-tile `zMask` flag ("seam" hint) is decoded but unmodelled by the renderer | `amiga/data-structure.md` § "VMP — Wall View Mapping Table" | 2026-08-02 game-re |
+| eotb1-amiga-wallflags-untraced-bits | open | `specialType`/`flags` dispatch and 4 of 8 `flags` bits are traced from source (door/lever/niche semantics); bits `0x01`/`0x10`/`0x40`/`0x80` and the exact semantic role of the `flags^4` load-time inversion (bit `0x04`) not traced — not blocking (no rendering behaviour depends on them) | `amiga/data-structure.md` § "`specialType` / `flags` semantics" | 2026-08-29 amiga-disasm |
+
+## Closed this session (2026-08-29, amiga-disasm — decoration overlays, facing rotation, wall flags, door state)
+
+- **`eotb1-amiga-walker-wallmapping-decorations`** — split and mostly
+  closed. The former single row bundled 4 distinct sub-items (see the
+  original task brief); each is now resolved independently:
+  - **Decoration overlays: real format confirmed, front-role rendering
+    implemented.** `decIndex` resolves against the wall-set's own `.DAT`
+    file (same `LevelDecorationProperty`/`EoBRect8` layout as EOB2's `.DEC`
+    — new `tools/eotb/decode-decorations.ts`), via a new
+    `resolveWallDecorationAssignments` that walks `.INF`'s record stream in
+    real on-disk order (interleaved-order resolution was required and is
+    now implemented and tested). Rendered for the front/"Down" role only —
+    see the new `eotb1-amiga-walker-decorations-sideroles` row for what's
+    still not ported. Verified via a pixel-exact diff (193 differing
+    pixels, bbox matching hand-computed expected coordinates) plus a
+    coherent, non-garbled visual render. **Not closed outright** — the
+    side-role/mirror-flip/alt-coordinate gap is real, hence the split.
+  - **Facing rotation for non-North — CLOSED, fully confirmed.** ScummVM's
+    `devtools/create_kyradat/resources/eob1_amiga.h` ships literal,
+    game+platform-exact static tables (`kEoB1DscBlockMapAmiga`,
+    `kEoB1DscBlockIndexAmiga`) that are real ground truth, not just engine
+    prose. Decoding both and comparing against `rotateOffset`/`roleSide`
+    gives **zero mismatches** across all 68 `(facing,cell)` pairs and all
+    12 `(facing,role)` pairs. See `amiga/data-structure.md` § "Facing
+    rotation for non-North poses".
+  - **`specialType`/`flags` — traced and documented.** `specialWallAction`'s
+    dispatch table names every `specialType` value (door switch, lever
+    on/off, pryable/non-pryable door, niche, script-only trigger); 4 of 8
+    `flags` bits traced to real consumers (isDoor, open/closed toggle,
+    no-pry, plus the load-time `^4` inversion). Remaining untraced bits
+    moved to the new `eotb1-amiga-wallflags-untraced-bits` row (not
+    blocking).
+  - **Door open/closed state — left static, by deliberate documented
+    decision.** Door state is genuinely runtime/event-script-driven
+    (`.INF`'s embedded bytecode, a distinct undecoded sub-format,
+    triggering `toggleWallState`) with no static per-level table to decode
+    instead. A static geometry walker with no game-state model has no way
+    to reconstruct which doors would be open at an arbitrary point in
+    play; rendering each level's `.MAZ`-snapshot default state (== the
+    real first-load state) is correct as far as it goes and is kept as-is.
+    See `amiga/data-structure.md` § "Door open/closed state".
+  - New files: `tools/eotb/decode-decorations.ts`, `tools/eotb/dsc-tables.ts`,
+    `tools/eotb/__tests__/eotb-decorations.test.ts` (13 new tests, all real
+    corpus-backed, no hand-computed fixtures). Modified:
+    `tools/eotb/decode-inf.ts` (`resolveWallDecorationAssignments`, `InfRecord`),
+    `tools/eotb/view-model.ts` (`ResolvedSlot.rawWallIndex`/`.cellLetter`),
+    `tools/eotb/renderer.ts` (`drawWallDecorations`), `tools/eotb/export-dungeon.ts`
+    (wires decoration data into `wallsets/*.json`/`dungeon/level*.json`),
+    `tools/eotb/render-through-dungeon.ts` (passes decoration params through).
+    `npx vitest run` (65/65), `npx tsc --noEmit`, `npm run lint` all clean.
 
 ## Closed this session (2026-08-29, game-re — DOS pipeline wiring + Amiga savegame/special-codec/multipalette)
 
@@ -129,9 +182,12 @@ full evidence and paths-tried tables — this file is pointers only.
   `vmpIndex=0` i.e. no wall) now shows an open passage where the old
   clamp rendered a solid brick wall. Full field-offset table and citations:
   `docs/eotb/amiga/data-structure.md` § "INF — Level Configuration".
-  Remaining, genuinely separate open work (decoration overlays,
-  `specialType`/`flags`, facing rotation, `zMask`, door state): see
-  `eotb1-amiga-walker-wallmapping-decorations` above.
+  Remaining, genuinely separate open work at the time (decoration overlays,
+  `specialType`/`flags`, facing rotation, `zMask`, door state) was later
+  resolved/split in the 2026-08-29 "decoration overlays, facing rotation,
+  wall flags, door state" session below — see
+  `eotb1-amiga-walker-decorations-sideroles`, `eotb1-amiga-vmp-zmask`, and
+  `eotb1-amiga-wallflags-untraced-bits` above for what's still open.
 
 ## Closed this session (2026-08-02, ScummVM source)
 

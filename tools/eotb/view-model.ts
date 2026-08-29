@@ -22,11 +22,23 @@
  * rotational sense (`DIRS[(baseIndex(role) + facing) % 4]`) -- internally
  * self-consistent (facing 0-3 forms a clean 4-cycle, `canStepForward`
  * derives from the identical `roleSide('front', ...)` so the "can I walk
- * forward" check and "what wall is rendered ahead" can never disagree),
- * but **the absolute correctness of facings 1-3 is unverified** -- there
- * is no oracle in this corpus to check it against. If a future session
- * finds real disassembly or a screenshot showing e.g. a level's west-
- * facing view, that's the thing to check this rotation against.
+ * forward" check and "what wall is rendered ahead" can never disagree).
+ *
+ * **CONFIRMED for all 4 facings (2026-08-29), not just self-consistent.**
+ * ScummVM's own `devtools/create_kyradat/resources/eob1_amiga.h` ships
+ * literal, real, this-exact-game+platform byte tables
+ * (`kEoB1DscBlockIndexAmiga`/`kEoB1DscBlockMapAmiga` -- see
+ * `dsc-tables.ts`'s module doc for the full citation and why these are
+ * ground truth despite living in a devtool rather than the engine
+ * itself) that drive the *real* per-facing cell-offset and wall-side
+ * selection (`KyraRpgEngine::generateBlockDrawingBuffer`/
+ * `assignVisibleBlocks`, `scene_rpg.cpp:128-131,313-320`). Decoding both
+ * tables and comparing against `rotateOffset`/`roleSide` gives **zero
+ * mismatches** across all 68 populated `(facing, cell)` offset pairs and
+ * all 12 `(facing, role)` side-selection pairs -- see
+ * `docs/eotb/amiga/data-structure.md` § "INF -- Level Configuration" ->
+ * "Facing rotation" for the full derivation. This closes the
+ * previously-open "facings 1-3 unverified" gap for real.
  */
 import { decodeMaze, wallTypeAt, type MazeData, type Side } from './decode-maze.ts';
 import { CELL_OFFSETS, WALL_RENDER_SLOTS, type WallRenderSlot } from './decode-vmp.ts';
@@ -57,6 +69,10 @@ export function roleSide(role: 'left' | 'right' | 'front', facing: Facing): Side
 export interface ResolvedSlot {
   slot: WallRenderSlot;
   wallType: number; // 0-6, 0 = no wall (skip)
+  /** The raw, pre-`wallTypeMap` `.MAZ` wallIndex (0-255) at this slot's cell+side -- needed to look up wall-decoration assignments (`decode-inf.ts`'s `resolveWallDecorationAssignments`), which key by wallIndex, not by the render-time `vmpIndex`. */
+  rawWallIndex: number;
+  /** This slot's `CELL_OFFSETS` letter (A-Q) -- needed to resolve `dsc-tables.ts`'s `DSC_SHAPE_INDEX`/`DSC_SHAPE_X` cell-index-keyed tables for decoration placement. */
+  cellLetter: string;
 }
 
 /**
@@ -110,8 +126,9 @@ export function resolveWallTypes(
     const [dx, dy] = rotateOffset(dxRel, dyRel, facing);
     const role = SIDE_ROLE[sideSuffix]!;
     const side = roleSide(role, facing);
-    const wallType = mapWallType(wallTypeAt(maze, x + dx, y + dy, side), wallTypeMap);
-    return { slot, wallType };
+    const rawWallIndex = wallTypeAt(maze, x + dx, y + dy, side);
+    const wallType = mapWallType(rawWallIndex, wallTypeMap);
+    return { slot, wallType, rawWallIndex, cellLetter };
   });
 }
 

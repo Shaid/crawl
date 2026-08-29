@@ -511,13 +511,191 @@ across the whole `LEVEL{1..12}.INF` corpus, using the Amiga port's own
 real files and this repo's already-oracle-checked LCW decoder rather than
 a DOS-oriented guess.
 
-**Not implemented from this table (real, cited, but out of scope for the
-walker's wall-type fix):** `decIndex`-driven decoration overlays (the
-`0xEC` decoration-load records + `assignWallsAndDecorations`'s
-`_levelDecorationData`/`_levelDecorationRects` do-while chain), `flags`,
-and `specialType` (door/stairs/special-tile behaviour beyond wall art).
-`tools/eotb/decode-inf.ts`'s `parseInf` exposes all of these fields
-(`wallMappings`, `decorationLoads`) for a future pass.
+### Facing rotation for non-North poses — CONFIRMED (2026-08-29)
+
+`docs/eotb/TODO.md`'s "facing rotation for non-North, unverified" item is
+closed. `view-model.ts`'s `rotateOffset` (cell-offset rotation) and
+`roleSide` (which absolute `.MAZ` side-byte a screen role reads) were
+self-consistent by construction but never checked against a real oracle for
+facings 1-3 (only facing 0/North was diagrammed from the VMP spec).
+
+**Oracle: ScummVM's own `devtools/create_kyradat/resources/eob1_amiga.h`**
+(fetched from `github.com/scummvm/scummvm`) — not the engine C++ source
+itself, but the literal, per-platform static-data tables the ScummVM team
+reverse-engineered from the real games and ships as readable C arrays,
+registered specifically for `{ kEoB1, kPlatformAmiga }`
+(`kEoB1DscBlockIndexAmigaProvider`, `kEoB1DscBlockMapAmigaProvider`, etc.) —
+i.e. this exact game and platform, not a DOS/PC98/FMTowns/SegaCD sibling's
+values. Transcribed into `tools/eotb/dsc-tables.ts`.
+
+- **`DSC_BLOCK_MAP`** (`kEoB1DscBlockMapAmiga`, `eob1_amiga.h:1420`, 12
+  bytes) drives `KyraRpgEngine::generateBlockDrawingBuffer`
+  (`scene_rpg.cpp:128-131`): `_sceneDrawVarDown = _dscBlockMap[dir]`,
+  `_sceneDrawVarRight = _dscBlockMap[dir+4]`, `_sceneDrawVarLeft =
+  _dscBlockMap[dir+8]`. Decoding this and comparing against
+  `roleSide(role, facing)`'s numeric side index for all 4 facings x 3 roles
+  (`front`~"Down", `left`~"Right", `right`~"Left" — `generateBlockDrawingBuffer`'s
+  own hardcoded call sites always pair the screen-far-left cell with
+  `_sceneDrawVarRight` and the screen-far-right cell with
+  `_sceneDrawVarLeft`, unconditional on facing) gives **zero mismatches
+  across all 12 combinations**.
+- **`kEoB1DscBlockIndexAmiga`** (`eob1_amiga.h`, 72 `int8` entries: 18 cells
+  x 4 facings) drives `KyraRpgEngine::assignVisibleBlocks`
+  (`scene_rpg.cpp:313-320`): `t = (block + _dscBlockIndex[direction*18+i]) &
+  0x3FF`. Decoding each signed offset as `(dy, dx) = (offset >> 5 [floor
+  division], offset - dy*32)` (32 = the `.MAZ` row stride) and comparing
+  against `rotateOffset(dxRel, dyRel, facing)` for the matching
+  `CELL_OFFSETS` letter gives **zero mismatches across all 68 populated
+  `(facing, cell)` pairs** (17 named cells x 4 facings; `_visibleBlocks[16]`,
+  the player's own cell, has no `CELL_OFFSETS` entry and isn't checked).
+
+This is a real, independent, byte-exact ground truth for facings 1-3 — not
+just self-consistency. Neither table is re-exported in this codebase since
+nothing here reads raw block-index arithmetic directly; `CELL_OFFSETS`/
+`rotateOffset`/`roleSide` remain the implementation, now confirmed correct.
+
+### Decoration overlays (`decIndex`) — real format, partial render (2026-08-29)
+
+**Confirmed: EOB1 Amiga's `decIndex` resolves against the wall-set's own
+`.DAT` file** (`BRICK.DAT`, `BLUE.DAT`, etc — see "Wall Set DAT Files"
+below for the byte format), which is **the same `LevelDecorationProperty` +
+`EoBRect8` layout as EOB2's `.DEC` files** — EOB1 just names the container
+differently and points it at a different filename per level. This refines
+(does not overturn) the project's earlier "EOB1 has no `.DCR`" finding,
+which is still correct and about a different, unrelated format (`.DCR` is
+EOB2's *monster*-decoration format; EOB1 never uses it).
+
+**Resolution requires walking `.INF`'s record stream in real on-disk
+order**, not just indexing the parsed `wallMappings`/`decorationLoads`
+arrays independently. `EoBCoreEngine::assignWallsAndDecorations` is called
+once per record in file order during `initLevelData`, and each `0xEC`
+decoration-load record repoints which `.DAT` (`_levelDecorationData`) is
+currently active for every wall-mapping record that follows it, until the
+next decoration-load record. `LEVEL1.INF` interleaves 3 decoration-loads
+(`brick1`/`brick2`/`brick3`, all against `brick.dat`) with its wall-mapping
+records — a wall-mapping's `decIndex` only resolves correctly against the
+**closest preceding** decoration-load. `tools/eotb/decode-inf.ts`'s
+`resolveWallDecorationAssignments(infData)` implements this by walking a new
+`records: InfRecord[]` array (both record kinds, real file order) and
+tracking the currently-active decoration-load, returning a `Map<wallIndex,
+{cpsFile, decFile, decIndex}>`. Verified: `LEVEL1.INF` wallIndex 39 resolves
+to `{cpsFile:'brick1', decIndex:0}` (against the *first* decoration-load),
+while wallIndex 58 resolves to `{cpsFile:'brick2', decIndex:35}` (after the
+*second*) — both confirmed against the real interleaved record order, and
+covered by `tools/eotb/__tests__/eotb-decorations.test.ts`.
+
+**Render mechanism implemented: front/"Down" role only
+(`tools/eotb/renderer.ts`'s `drawWallDecorations`).**
+`EoBCoreEngine::drawDecorations(index)` (`scene_eob.cpp:667-716`) loops `i`
+from 1 down to 0 (side role, then front role) and, for each, checks a
+36-entry table `_dscWallMapping[s]` (`s = index*2 + i`,
+`eobcommon.cpp:267-280`) that's either null (no decoration drawn for that
+role at this cell) or a pointer to `_sceneDrawVarDown`/`Right`/`Left`. For
+`i=0` (front role) this pointer is `&_sceneDrawVarDown` for every cell
+**except** cellIndex 6 (`G`) and cellIndex 17 (`Q`), where it's null — i.e.
+ScummVM itself never draws a front-role decoration for those two cells.
+This exactly matches an independent, pre-existing fact about this project's
+own `WALL_RENDER_SLOTS` diagram (`decode-vmp.ts`): there is no `G-south` or
+`Q-south` slot at all, only `G-west`/`Q-west` — a real cross-check that this
+port's slot geometry and ScummVM's `_dscWallMapping` agree on which cells
+carry a front wall (and therefore a front-role decoration) with zero prior
+knowledge of `_dscWallMapping` when the slot diagram was built. `_dscWallMapping`
+is not re-exported as a table since this project's `-south`-suffix filter on
+`WALL_RENDER_SLOTS` already reproduces its exact effect for `i=0`.
+
+For a `-south` slot's cellIndex, `shpIx = ABS(_dscShapeIndex[cellIndex*2]) -
+1` selects which of a `LevelDecorationProperty`'s 10 screen-depth slots
+applies (`DSC_SHAPE_INDEX` in `dsc-tables.ts`, from `kEoB1DscShapeIndexAmiga`,
+`eob1_amiga.h:1262`); final on-screen X = `shapeX[shpIx] +
+DSC_SHAPE_X[cellIndex]` (`DSC_SHAPE_X`, from `kEoB1DscXAmiga`,
+`eob1_amiga.h:1272`); Y = `shapeY[shpIx]` directly — decorations are
+pre-authored at final on-screen pixel size per depth slot, no scaling.
+`decorationChain` follows each property's own `next` byte (terminates at
+`next === 0`) to draw every decoration stacked at that wall.
+
+**Explicitly not ported (documented gap, not silently dropped):**
+- `i=1` (side/"Right"/"Left" role) decorations — the other half of
+  `drawDecorations`'s loop; `_dscWallMapping`'s side-role entries are real
+  and decoded (see the table above) but no renderer code consumes them yet.
+- The `ix < 0` mirror-flip path (`flg & 1`, or `flg & 2` combined with the
+  runtime `_wllProcessFlag`) — real property records do carry `flags=1`
+  entries (confirmed: `BRICK.DAT` property 51) but the flip isn't applied.
+- The `flg & 4` alternate-coordinate path (`_dscShapeCoords`, a separate
+  per-cell table not yet decoded).
+
+**Verified via a pixel-exact diff, not just a visual glance.** Rendering
+`LEVEL1` pose x=6,y=4,facing=1 with vs. without `decorationParams` differs
+in exactly 193 pixels, whose bounding box `(65,32)-(73,56)` matches the
+hand-computed expected placement from `wallDecorations`/`DSC_SHAPE_X` for
+that pose's `wallIndex=39 -> decIndex=0 -> rect[0]` (9x25px) to the pixel —
+see `public/assets/eotb/amiga/renders/` for the rendered PNG. The shape
+renders as a real, coherent (non-garbled) decoration silhouette, not noise.
+
+### `specialType` / `flags` semantics — traced (2026-08-29)
+
+**`specialType` is a dispatch selector for click-driven wall interactions**,
+named by `EoBCoreEngine::specialWallAction` (`scene_eob.cpp:869-899`), which
+switches on `_specialWallTypes[wallIndex]` (seeded at level load directly
+from a wall-mapping record's `specialType` field, `assignWallsAndDecorations`
+`scene_eob.cpp:480`):
+
+| `specialType` | Handler | Meaning |
+|---|---|---|
+| 1 | `clickedDoorSwitch` | a door switch/button |
+| 2, 8 | `clickedWallShape` | a clickable wall shape (e.g. secret-wall trigger) |
+| 3 | `clickedLeverOn` | a lever, sets state ON |
+| 4 | `clickedLeverOff` | a lever, sets state OFF |
+| 5 | `clickedDoorPry` | a stuck door, forceable open (strength check) |
+| 6 | `clickedDoorNoPry` | a door that cannot be pried (prints a message, no effect) |
+| 7, 9 | `clickedWallOnlyScript` | runs a level script only, no other effect |
+| 10 | `clickedNiche` | an item niche/alcove (put/take items) |
+| 0 (default) | — | no special interaction |
+
+`EoBCoreEngine::resetWallData` (`scene_eob.cpp:552-557`) seeds two default
+groups before any `.INF` override is applied: wallIndex 3-7 and 13-17 as
+type 1 (door switch), and wallIndex 8/18 as type 6 (no-pry door) — these are
+the two "niche/door" wallIndex clusters this project's own `LEVEL2.INF`
+sample data already showed as anomalous (`wallIndex=30, specialType:5,
+flags:12` — a real pryable-door record).
+
+**`flags` seeds `_wllWallFlags[wallIndex]` directly, with one bit inverted**
+(`assignWallsAndDecorations`: `_wllWallFlags[wallIndex] = flags ^ 4`).
+Confirmed bit roles from real consumers:
+
+| Bit | Meaning | Consumer |
+|---|---|---|
+| `0x08` | "this wall is a door" — gates `drawDoor` | `drawSceneShapes`, `scene_eob.cpp:646`: `if ((drawFlags & 0x04) && (w & 8)) drawDoor(t)` — unaffected by the `^4` inversion (different bit) |
+| `0x02` | "door currently open" (dynamic, runtime-toggled) | `toggleWallState(wall, toggle)` (`scene_eob.cpp:560-571`) sets/clears this bit across a 9-wide sub-wall-index group (`wall*10+3 .. wall*10+11`, skipping `+4`) — called from `.INF`'s embedded event-script opcode stream (`scene_eob.cpp:262`: `toggleWallState(pos[13], a); _doorType[pos[13]] = pos[14];`), not from any static per-level table |
+| `0x04` | inverted by `^4` at load — i.e. a bit that's normally **set** in `.wllFlagPreset`'s defaults gets **cleared** for any wall a `.INF` record explicitly assigns (or vice versa); exact semantic role not traced further this session | `assignWallsAndDecorations` only |
+| `0x20` | "cannot be pried open" | `clickedDoorNoPry`/`clickedDoorPry`, `scene_eob.cpp:862`: `if (!(_wllWallFlags[...] & 0x20)) return 0;` |
+| `0x01`, `0x10`, `0x40`, `0x80` | not traced this session | — |
+
+This is real, cited, and sufficient to label most wallIndex records
+semantically (door/lever/niche/plain) — a full per-bit trace of the
+untraced flag bits above is left open (not blocking, no rendering behaviour
+depends on them for a static geometry walker).
+
+### Door open/closed state — left static, by deliberate decision (2026-08-29)
+
+**Door state is genuinely runtime/event-script-driven, not stored
+per-level anywhere the walker parses.** `toggleWallState` (see the `0x02`
+row above) is only ever called from `.INF`'s embedded event-script
+bytecode (a distinct sub-format inside `.INF`, not yet decoded by this
+project — different from the wall-mapping/decoration-load record stream
+this session's work covers), itself triggered by gameplay actions (levers,
+switches, plot flags) this project's static walker has no state model for
+(no save-driven or party-action-driven game-state simulation exists).
+
+**Decision: leave doors rendered statically from each level's `.MAZ`
+snapshot**, which is what this project already does. This is defensible,
+not a gap papered over: `.MAZ`'s baked-in wallIndex values already reflect
+a real, well-defined door state — the level's default/initial state before
+any script has run, i.e. exactly what ScummVM itself would render on a
+fresh level load. Implementing dynamic door state would require decoding
+`.INF`'s event-script opcode stream (a real, nontrivial reverse-engineering
+project on its own) AND giving the walker some notion of game/plot state to
+drive it — both out of scope for a static level-geometry viewer. Recorded
+here explicitly per this session's brief, rather than left undocumented.
 
 ---
 
@@ -547,11 +725,51 @@ AC modifier, class permissions (fighter/mage/cleric/thief), damage dice
 Game narrative text, UI strings, and system messages. Null-terminated strings
 organized in a lookup table.
 
-### Wall Set DAT Files (EOB1)
+### Wall Set DAT Files (EOB1) — decoration data, confirmed byte-exact (2026-08-29)
 
-`BLUE.DAT`, `BRICK.DAT`, `DROW.DAT`, `GREEN.DAT`, `XANATHA.DAT`. Contain
-wall rendering parameters, decoration offsets, and viewport configuration.
-Palettes for these wall sets are stored in the corresponding `.VCN` files.
+`BLUE.DAT`, `BRICK.DAT`, `DROW.DAT`, `GREEN.DAT`, `XANATHA.DAT`. **This is
+the same `LevelDecorationProperty` + `EoBRect8` container EOB2 ships as
+`.DEC`** (`EoBCoreEngine::getDecDefinitions`, `scene_eob.cpp:421-464`),
+forced little-endian regardless of platform, decoded by
+`tools/eotb/decode-decorations.ts`'s `decodeDecorations`:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 2 | `numProperties` (u16 LE) |
+| 2 | `numProperties * 52` | `LevelDecorationProperty[]` — see below |
+| (follows) | 2 | `numRects` (u16 LE) |
+| (follows) | `numRects * 8` | `EoBRect8[]` — `{x:u16, y:u16, w:u16, h:u16}`, all LE |
+
+Each 52-byte `LevelDecorationProperty`:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 10 | `shapeIndex[10]` (u8 each; `0xFF` is a sentinel meaning "no shape at this depth slot", widened to `0xFFFF` on decode to distinguish from a real rect index 0-254) |
+| 10 | 1 | `next` (u8 — index of the next chained property, or `0` to terminate; see the `decorationChain` caveat below) |
+| 11 | 1 | `flags` (bit0/bit1 gate the `ix<0` mirror-flip in `drawDecorations`; bit2 selects the `_dscShapeCoords` alternate-coordinate path — none of the three are applied by this port's renderer yet) |
+| 12 | 20 | `shapeX[10]` (s16 LE each) |
+| 32 | 20 | `shapeY[10]` (s16 LE each) |
+
+**Verified: all 5 real `.DAT` files parse with zero residue** (the decoder
+throws if the final read position doesn't land exactly on EOF) — `BRICK.DAT`
+alone: 60 properties, 177 rects. Every non-sentinel `shapeIndex` value
+across all decoded properties resolves to a real rect with `w>0, h>0` (no
+degenerate/zero-area entries). See `tools/eotb/__tests__/eotb-decorations.test.ts`.
+
+**`next`-chain caveat:** `next == 0` always terminates a chain, even though
+0 is itself a valid absolute index for the *first* property in the array —
+this matches `assignWallsAndDecorations`'s own `do { ... } while (decIndex
+!= -1)` loop, which treats a `next` of 0 as "stop" unconditionally
+(`scene_eob.cpp:508-512`: `decIndex = ...next; if (decIndex) ... else
+decIndex = -1;`). `decorationChain` reproduces this exactly, plus a
+cycle-guard as defensive programming (not needed by any real file so far).
+
+The rects are the actual `encodeShape(x, y, w, h, ...)` source regions in
+the wall set's shape sheet (`BRICK1.CPS`/`BRICK2.CPS`/`BRICK3.CPS` for
+`BRICK`, one `.CPS` per other wall set — see "Decoration overlays" above
+for how a wall-mapping's `decIndex` picks which sheet is active). Palettes
+for the shape sheets are the wall set's own `.VCN`-derived palette (same
+palette already used for wall rendering — no separate decoration palette).
 
 ---
 
@@ -750,7 +968,7 @@ Raw 8-bit PCM audio samples. Level-specific sounds: `LEVEL1.SAM` through
 
 | Category | Files |
 |----------|-------|
-| Wall CPS | BLUE, BRICK, DROW, GREEN, XANATHA |
+| Wall CPS | BLUE, BRICK1, BRICK2, BRICK3, DROW, GREEN, XANATHA (BRICK is the one wall set split across 3 shape sheets, referenced by name in `.INF`'s decoration-load records — see "Wall Set DAT Files" below; the other 4 sets each have a single same-named `.CPS`) |
 | Wall VCN | BLUE, BRICK, DROW, GREEN, XANATHA |
 | Wall VMP | BLUE, BRICK, DROW, GREEN, XANATHA |
 | Wall DAT | BLUE, BRICK, DROW, GREEN, XANATHA |

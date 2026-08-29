@@ -122,12 +122,19 @@ export interface DecorationLoadRecord {
   decFile: string;
 }
 
+/** One record from the interleaved wall-mapping/decoration-load stream, in real on-disk order -- see `parseInfRecords`'s doc comment for why order matters. */
+export type InfRecord =
+  | { kind: 'decoration-load'; record: DecorationLoadRecord }
+  | { kind: 'wall-mapping'; record: WallMappingOverride };
+
 export interface InfLevelData {
   mazeName: string;
   wallSetName: string;
   monsterShapes: Array<{ compressionOrType: number; name: string | null }>;
   wallMappings: WallMappingOverride[];
   decorationLoads: DecorationLoadRecord[];
+  /** The same records as `wallMappings`/`decorationLoads`, but preserving real file order -- required to resolve which decoration-load's `.CPS`/`.DAT` pair is "active" for a given wall-mapping record (see `resolveWallDecorationAssignments`). */
+  records: InfRecord[];
 }
 
 /**
@@ -177,11 +184,14 @@ export function parseInfLevelData(buf: Uint8Array): InfLevelData {
 
   const wallMappings: WallMappingOverride[] = [];
   const decorationLoads: DecorationLoadRecord[] = [];
+  const records: InfRecord[] = [];
   for (let i = 0; i < num; i++) {
     const disc = buf[pos]!;
     pos += 1;
     if (disc === 0xec) {
-      decorationLoads.push({ cpsFile: cstr(buf, pos), decFile: cstr(buf, pos + SLEN) });
+      const record = { cpsFile: cstr(buf, pos), decFile: cstr(buf, pos + SLEN) };
+      decorationLoads.push(record);
+      records.push({ kind: 'decoration-load', record });
       pos += SLEN * 2;
     } else {
       const wallIndex = buf[pos]!;
@@ -190,12 +200,14 @@ export function parseInfLevelData(buf: Uint8Array): InfLevelData {
       const decIndex = decIndexRaw >= 128 ? decIndexRaw - 256 : decIndexRaw;
       const specialType = buf[pos + 3]!;
       const flags = buf[pos + 4]!;
-      wallMappings.push({ wallIndex, vmpIndex, decIndex, specialType, flags });
+      const record = { wallIndex, vmpIndex, decIndex, specialType, flags };
+      wallMappings.push(record);
+      records.push({ kind: 'wall-mapping', record });
       pos += 5;
     }
   }
 
-  return { mazeName, wallSetName, monsterShapes, wallMappings, decorationLoads };
+  return { mazeName, wallSetName, monsterShapes, wallMappings, decorationLoads, records };
 }
 
 /** Decompress + parse a raw `.INF` file in one step. */
@@ -226,6 +238,48 @@ export function buildWallTypeMap(infData: Uint8Array): Uint8Array {
     map[wallIndex] = vmpIndex;
   }
   return map;
+}
+
+/** A wall's decoration assignment: which decoration-load's `.CPS`/`.DAT` pair is active, plus the `decIndex` to chain from (`decode-decorations.ts`'s `decorationChain`). */
+export interface WallDecorationAssignment {
+  cpsFile: string;
+  decFile: string;
+  decIndex: number;
+}
+
+/**
+ * Pair each wall-mapping override's `decIndex` with the decoration-load
+ * (`.CPS`/`.DAT` pair) that was **most recently loaded before it** in the
+ * real on-disk record order -- `docs/eotb/amiga/data-structure.md`'s
+ * "INF -- Level Configuration" section documents the field layout but
+ * (like the original `decode-inf.ts`, before this function) exposed
+ * `wallMappings`/`decorationLoads` as two separate, order-losing arrays.
+ * This matters because `loadDecorations` **reassigns**
+ * `_levelDecorationData`/`_levelDecorationDataSize` on every `0xEC`
+ * record -- confirmed on the real corpus: `LEVEL1.INF` interleaves 3
+ * decoration-loads (`brick1`, `brick2`, `brick3`, all against
+ * `brick.dat`) with wall-mapping records in between, and each
+ * wall-mapping's `decIndex` only makes sense against the data loaded by
+ * the closest **preceding** decoration-load record (verified by manually
+ * walking the decompressed byte stream in order -- see this session's
+ * probe in the TODO/data-structure.md citation for the full 27-record
+ * trace). Skips wall-mapping records with `decIndex === -1` (no
+ * decoration) and any wall-mapping that appears before the first
+ * decoration-load (never observed in the real corpus, but would have no
+ * active `.CPS`/`.DAT` pair to resolve against).
+ */
+export function resolveWallDecorationAssignments(infData: Uint8Array): Map<number, WallDecorationAssignment> {
+  const { records } = parseInf(infData);
+  const assignments = new Map<number, WallDecorationAssignment>();
+  let active: DecorationLoadRecord | null = null;
+  for (const rec of records) {
+    if (rec.kind === 'decoration-load') {
+      active = rec.record;
+    } else if (rec.record.decIndex !== -1 && active) {
+      assignments.set(rec.record.wallIndex, { cpsFile: active.cpsFile, decFile: active.decFile, decIndex: rec.record.decIndex });
+    }
+  }
+  return assignments;
 }
 
 /**
