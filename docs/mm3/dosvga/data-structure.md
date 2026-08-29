@@ -304,9 +304,75 @@ Verified: 0/4717 cross-corpus violations of the flat/tall partition above;
 49,152 simulated views / 897,106 draws / 0 out-of-range frame refs / 0
 missing sprites; real per-facing renders (forest, road, shoreline, ocean,
 lava, snow) all coherent; a real-art top-down world map reproduces `World
-Map.jpg` down to per-cell mountain ridges and forest patches. See TODO
-`mm3-outdoor-view-port` for promoting this into the extraction pipeline
-(`scripts/mm3lib/`) and the walker.
+Map.jpg` down to per-cell mountain ridges and forest patches.
+
+**Promoted into the pipeline and the walker (2026-08-29 pass) — see TODO
+`mm3-outdoor-view-port`, closed.** The `re-codebreaker` escalation's own
+`build()`/`outview.py` reference was ported into the committed
+`scripts/mm3lib/dos_outdoor_view.py` (`build_outdoor_draw_list`, loading a
+frozen `scripts/mm3lib/mm3_outdoor_view.json` table — the terrain name
+list, the 4-entry decimation bit-pattern table, the 46-slot x 4-facing
+`dxt`/`dyt` offset tables, and the 50 draw records, all extracted once
+from the reconstructed exe via `build/cache/mm3/outdoor-view/
+extract_outdoor_table.py`, not re-derived at build/runtime — same
+convention as `mm3_indoor_view.json`). Re-verified byte-identical to the
+escalation's own `outview.py.build()` on 1,344 independent cases (0
+mismatches) before promotion. A TS port, `tools/walker/
+mm3-outdoor-view.ts` (`buildOutdoorDrawList`), matches the Python
+reference exactly on a 384-case golden fixture (`tools/walker/__tests__/
+mm3-outdoor-view.test.ts`, all 24 outdoor mazes x 2 positions x 4 facings
+x 2 alt states). `scripts/extract_mm3_dos_mazes.py` now also publishes
+`data/outdoor-view.json` (mirroring `data/indoor-view.json`'s publish
+step) and no longer filters outdoor mazes out of `data/mazes.json` for
+the walker.
+
+**The decimating shrink (`vga`+0x1EDC, flags bits 8-9) is implemented for
+real, not approximated**, by proving it reduces to a pure per-pixel
+function of absolute position within the sprite's own padded per-frame
+canvas: both the `Rows` and `Cols` state machines in `outview.py` start
+fresh at the same phase for every draw and are never reset mid-cell, so a
+pixel's keep/drop state depends only on its (column, row) index into that
+canvas — not on which opcode/run it came from. Since every extracted
+`.vga` terrain sprite has `xOffset == 0` for every frame (confirmed
+directly from the container's own cell headers: `road.vga`/`grass.vga`/
+`mount.vga`/`ltree.vga`/`water.vga`/`day.vga` all show `xo = {0}`), the
+already-decoded/rendered PNG atlas frame **is** that padded canvas, so the
+decimation applies directly to it via `getImageData` (`tools/walker/
+games-mm3.ts` `decimateRaster`/`computeRowKeep`/`computeColKeep`, ported
+from `outview.py`'s `Rows`/`Cols` classes) — no need to re-walk the source
+RLE opcode stream. Mirror + shrink combination (some overlay slots set
+both) is **not** independently disassembly-traced — only plain mirror and
+plain shrink are each separately confirmed — so `blitTerrainSprite`
+mirrors the *decimated* raster about its own real (shrunk) content width,
+generalizing the already-confirmed `mm3-walker-mirror-origin` rule
+("mirror about the cell's real width, not the padded atlas width") to
+shrunk content. Documented as the one approximation in this otherwise
+fully-implemented mechanism.
+
+Sky: the draw-list table always emits `day.vga` — the escalation's own
+`outview.py` reference hard-codes it too, so `LoadSky`'s clock-driven
+day/night selection was never traced or ported (`night.vga` is loaded and
+available in the walker's `terrainSheets` for whenever that gets decoded,
+just never selected).
+
+Live-verified via Playwright (`npx playwright`, chromium): the walker's
+level dropdown includes all 24 outdoor mazes (105 total options, up from
+81), outdoor-outdoor cross-maze stepping works (`41: A1` → `42: A2`
+walking south, wrapping `y=0→15` correctly), and real per-frame renders
+show coherent composited scenes — an ocean/sky-only view at a coastal
+cell, a rocky shoreline with a grass fringe over water, and a full
+forest (grass ground + multiple depth-shrunk tree overlays) — with 0
+console errors throughout. See TODO `mm3-maze-viewer` for the full
+verification run (indoor transitions, turning, and the asset-viewer
+pass).
+
+**Indoor-outdoor transitions are not a maze-record neighbour link.**
+Checked directly against `data/mazes.json`: 0/81 indoor mazes have any
+`surrounding` field pointing at an outdoor id (41-64), and 0/24 outdoor
+mazes point back at an indoor id — the two maze spaces are only
+connected (if at all) through event-script triggers at specific
+coordinates, not through 16x16-edge wraparound like indoor-indoor and
+outdoor-outdoor stitching. Out of scope for this pass; not attempted.
 
 ### Trailer `0x300..0x33F` (confirmed unless noted)
 

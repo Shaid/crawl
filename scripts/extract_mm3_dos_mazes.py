@@ -11,6 +11,8 @@ Output (public/assets/mm3/dosvga/):
   data/mazes.json         — all 105 maze records, decoded
   data/indoor-view.json   — static indoor 3-D view geometry/dispatch table
                             (same for every maze; see dos_indoor_view.py)
+  data/outdoor-view.json  — static outdoor 3-D draw-list table (same for
+                            every outdoor maze; see dos_outdoor_view.py)
   maps/maze<NN>.png       — indoor wall plot (16x16), one per indoor maze
   maps/world.png          — the 24 outdoor sections composited as the
                             96x64 world map (sections A1..F4 = mazes 41..64)
@@ -32,9 +34,14 @@ from mm3lib.dos_maze import (  # noqa: E402
     GRID_H, GRID_W, MAZE_IDS, Maze, maze_name, parse_events, read_entry,
     resolve_graphics,
 )
+from mm3lib.dos_cc import extract_entry as cc_extract_entry, hash_filename  # noqa: E402
+from mm3lib.dos_sprite import is_sprite_container, decode_frames, TRANSPARENT  # noqa: E402
+from mm3lib.dos_palette import load_dos_palette, scale_6_to_8  # noqa: E402
+from mm3lib.dos_outdoor_view import TERRAIN as OUTDOOR_TERRAIN  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, '..'))
 CUR = os.path.join(REPO, 'data', 'mm3', 'dosvga', 'MM3.CUR')
+CC = os.path.join(REPO, 'data', 'mm3', 'dosvga', 'MM3.CC')
 OUT = os.path.join(REPO, 'public', 'assets', 'mm3', 'dosvga')
 
 CELL = 14                       # px per maze cell in the wall plot
@@ -44,13 +51,46 @@ WALL = (232, 232, 240)          # blocking
 DECOR = (86, 108, 150)          # non-blocking but non-zero graphic index
 FLOOR = (34, 36, 46)
 
-# world-map terrain swatches, indexed by the low nibble of the outdoor word
-TERRAIN = [
-    (26, 52, 108), (70, 150, 60), (150, 112, 58), (46, 132, 46), (238, 240, 250),
-    (86, 120, 62), (206, 74, 30), (226, 206, 128), (120, 120, 128), (30, 96, 190),
-    (196, 156, 196), (158, 200, 244), (146, 146, 152), (92, 72, 52), (250, 250, 250),
-    (206, 60, 206),
-]
+OCEAN_FALLBACK = (26, 70, 150)  # only used if water.vga somehow fails to decode
+
+
+def load_terrain_colors() -> dict[str, tuple[int, int, int]]:
+    """Average real palette-mapped RGB per outdoor terrain sprite (+ `water`),
+    decoded directly from `MM3.CC` (same palette/codec the sprite extractor
+    uses). Used by `render_world` for a real-art world-map preview instead of
+    the old hand-picked swatch table (see the "wrong nibble" correction
+    below)."""
+    cc_data = open(CC, 'rb').read()
+    entries, _ = dos_cc.parse(cc_data)
+    by_hash: dict[int, object] = {}
+    for e in entries:
+        by_hash.setdefault(e.hash, e)
+    palette = [(scale_6_to_8(r), scale_6_to_8(g), scale_6_to_8(b))
+               for r, g, b in load_dos_palette(cc_data, entries)]
+    names = sorted({n for n in OUTDOOR_TERRAIN if n} | {'water'})
+    colors: dict[str, tuple[int, int, int]] = {}
+    for name in names:
+        e = by_hash.get(hash_filename(f'{name}.vga'))
+        if e is None:
+            continue
+        payload, _ = cc_extract_entry(cc_data, e)
+        if payload is None or not is_sprite_container(payload):
+            continue
+        try:
+            frames, _cw, _ch = decode_frames(payload)
+        except Exception:
+            continue
+        rs = gs = bs = n = 0
+        for fr in frames:
+            for row in fr:
+                for v in row:
+                    if v == TRANSPARENT:
+                        continue
+                    r, g, b = palette[v]
+                    rs += r; gs += g; bs += b; n += 1
+        if n:
+            colors[name] = (rs // n, gs // n, bs // n)
+    return colors
 
 
 def write_png(path: str, rgb: bytes, w: int, h: int) -> None:
@@ -119,18 +159,45 @@ def render_maze(m: Maze) -> tuple[bytes, int, int]:
     return bytes(cv.buf), w, h
 
 
-def render_world(mazes: dict[int, Maze], scale: int = 6) -> tuple[bytes, int, int]:
-    """The 24 outdoor sections as one 96x64 map: n+4 = east, n+1 = south."""
+def render_world(mazes: dict[int, Maze], terrain_colors: dict[str, tuple[int, int, int]],
+                  scale: int = 6) -> tuple[bytes, int, int]:
+    """The 24 outdoor sections as one 96x64 map: n+4 = east, n+1 = south.
+
+    Uses the real, palette-mapped average colour of each cell's resolved
+    ground terrain sprite (bits 4-6 of the wall word, via the maze's own
+    graphic-set table -- see `dos_outdoor_view.py`), blended toward the
+    overlay/scenery sprite's colour (bits 0-2) when one is present, so
+    forests/mountains/etc. visibly differ from plain ground. Ground index 0
+    (ocean) uses `water.vga`'s own colour.
+
+    > **Correction:** an earlier version indexed a hand-picked 16-colour
+    > swatch table by `wall_word(x, y) & 0xF` -- the wall word's **low**
+    > nibble, i.e. the WEST wall's indoor-only graphic+blocking nibble, not
+    > either outdoor terrain field (ground = bits 4-6, overlay = bits 0-2).
+    > That happened to look plausible (both fields share the same 3-bit
+    > range) but was reading the wrong bits entirely.
+    """
     w, h = 6 * GRID_W * scale, 4 * GRID_H * scale
     cv = Canvas(w, h)
+    ocean = terrain_colors.get('water', OCEAN_FALLBACK)
     for col in range(6):
         for rw in range(4):
             m = mazes.get(41 + 4 * col + rw)
             if m is None:
                 continue
+            handle: list[str | None] = [None] + [
+                OUTDOOR_TERRAIN[g] if g else None for g in m.graphic_sets
+            ]
             for y in range(GRID_H):
                 for x in range(GRID_W):
-                    c = TERRAIN[m.wall_word(x, y) & 0xF]
+                    word = m.wall_word(x, y)
+                    ground_name = handle[(word >> 4) & 7]
+                    overlay_name = handle[word & 7]
+                    c = terrain_colors.get(ground_name, ocean) if ground_name else ocean
+                    if overlay_name:
+                        oc = terrain_colors.get(overlay_name)
+                        if oc:
+                            c = tuple((a + b) // 2 for a, b in zip(c, oc))
                     px = (col * GRID_W + x) * scale
                     py = (rw * GRID_H + (GRID_H - 1 - y)) * scale
                     cv.rect(px, py, px + scale, py + scale, c)
@@ -201,7 +268,8 @@ def main() -> None:
                              'atlas': f'maps/{name}.json'})
         records.append(rec)
 
-    rgb, w, h = render_world(mazes)
+    terrain_colors = load_terrain_colors()
+    rgb, w, h = render_world(mazes, terrain_colors)
     write_png(os.path.join(OUT, 'maps', 'world.png'), rgb, w, h)
     json.dump({'frames': [{'name': 'world', 'x': 0, 'y': 0, 'w': w, 'h': h}],
                'width': w, 'height': h},
@@ -224,6 +292,14 @@ def main() -> None:
     json.dump(indoor_view, open(os.path.join(OUT, 'data', 'indoor-view.json'), 'w'))
     manifest.append({'name': 'data/indoor-view', 'sprites': 0, 'hasPalette': False, 'png': '',
                      'kind': 'data', 'data': 'data/indoor-view.json'})
+
+    # Same for the outdoor 3-D draw-list table -- see dos_outdoor_view.py.
+    outdoor_view_src = os.path.join(HERE, 'mm3lib', 'mm3_outdoor_view.json')
+    with open(outdoor_view_src) as f:
+        outdoor_view = json.load(f)
+    json.dump(outdoor_view, open(os.path.join(OUT, 'data', 'outdoor-view.json'), 'w'))
+    manifest.append({'name': 'data/outdoor-view', 'sprites': 0, 'hasPalette': False, 'png': '',
+                     'kind': 'data', 'data': 'data/outdoor-view.json'})
 
     merge_manifest(manifest)
     print(f'mazes decoded: {len(records)} '

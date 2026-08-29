@@ -70,6 +70,7 @@ import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import type { ScreenLike, Blit } from '../walker-mm/maze3d.ts';
 import { buildWallList, loadIndoorViewTable, type IndoorViewTable, type GetWall } from './mm3-indoor-view.ts';
+import { buildOutdoorDrawList, loadOutdoorViewTable, type OutdoorViewTable, type GetWallWord } from './mm3-outdoor-view.ts';
 import {
   VIEW_W,
   VIEW_H,
@@ -175,15 +176,18 @@ const FACING_NESW_TO_INDOOR = [0, 2, 1, 3];
 interface Mm3Maze {
   id: number;
   label: string;
+  kind: 'indoor' | 'outdoor';
   walls: number[];
+  /** 7-entry graphic-set id array (trailer bytes 0x00-0x06) — outdoor-terrain-only; all-zero for indoor mazes. */
+  graphicSets: number[];
   runPosition: { x: number; y: number };
   /** Screens-array index per direction (0=N,1=E,2=S,3=W), -1 if none/unloaded/outdoor. */
   neighbors: number[];
   /** ScreenLike view onto this maze's walls, for the shared frustum engine (collision unused — see module doc). */
   screen: ScreenLike;
-  /** `twn`/`cav`/`dun`/`cas`/`sci` — undefined for a maze the graphics extractor hasn't resolved yet (defensive; every shipped indoor maze has one). */
+  /** `twn`/`cav`/`dun`/`cas`/`sci` — undefined for a maze the graphics extractor hasn't resolved yet (defensive; every shipped indoor maze has one), and always undefined for outdoor mazes. */
   wallSeries: string | undefined;
-  /** e.g. `dun.sky` — undefined for `twn`/`cas` mazes, which ship no ceiling texture. */
+  /** e.g. `dun.sky` — undefined for `twn`/`cas` mazes, which ship no ceiling texture, and always undefined for outdoor mazes (they use `terrainSheets['day.vga']` instead). */
   sky: string | undefined;
 }
 
@@ -195,6 +199,10 @@ interface Mm3Data {
   skySheets: Record<string, Sheet | undefined>;
   /** The real indoor 3-D view geometry/dispatch table — undefined if it failed to load (falls back to the older frustum-based renderer). */
   indoorView: IndoorViewTable | undefined;
+  /** The real outdoor 3-D draw-list table — undefined if it failed to load (outdoor mazes render as a black screen). */
+  outdoorView: OutdoorViewTable | undefined;
+  /** Outdoor terrain sprite name (e.g. `grass.vga`, `water.vga`, `day.vga`) -> sheet, loaded from the `walls` subdir (same `.vga` container format). */
+  terrainSheets: Record<string, Sheet | undefined>;
 }
 
 export function wallBlocked(walls: number[], x: number, y: number, dir: number): boolean {
@@ -261,11 +269,12 @@ function loadMm3(): Promise<Mm3Data> {
   if (mm3Promise) return mm3Promise;
   mm3Promise = (async () => {
     const base = '/assets/mm3/dosvga';
-    const [raw, indoorView] = await Promise.all([
+    const [raw, indoorView, outdoorView] = await Promise.all([
       fetch(`${base}/data/mazes.json`).then((r) => r.json()),
       loadIndoorViewTable(base),
+      loadOutdoorViewTable(base),
     ]);
-    const records = (raw.mazes as MazeRecordJson[]).filter((m) => m.kind === 'indoor');
+    const records = raw.mazes as MazeRecordJson[];
     const idToIndex = new Map<number, number>();
     records.forEach((m, i) => idToIndex.set(m.id, i));
 
@@ -278,7 +287,9 @@ function loadMm3(): Promise<Mm3Data> {
       return {
         id: m.id,
         label,
+        kind: m.kind,
         walls: m.walls,
+        graphicSets: m.graphicSets,
         runPosition: m.runPosition,
         neighbors,
         screen: { index: m.id, visual, collision: dummyCollision, neighbors },
@@ -291,6 +302,14 @@ function loadMm3(): Promise<Mm3Data> {
     const skyList = [...new Set(mazes.map((m) => m.sky).filter((s): s is string => !!s))];
     const wallSheets: Record<string, (Sheet | undefined)[]> = {};
     const skySheets: Record<string, Sheet | undefined> = {};
+    const terrainSheets: Record<string, Sheet | undefined> = {};
+    const terrainNames = new Set<string>();
+    if (outdoorView) {
+      for (const t of outdoorView.terrain) if (t) terrainNames.add(`${t}.vga`);
+      terrainNames.add('water.vga');
+      terrainNames.add('day.vga');
+      terrainNames.add('night.vga'); // loaded for completeness; the draw-list table never selects it -- see `renderOutdoorView`'s doc.
+    }
     await Promise.all([
       ...seriesList.map(async (series) => {
         wallSheets[series] = await Promise.all([1, 2, 3, 4].map((n) => loadWallSheet(base, `${series}wl${n}`)));
@@ -298,9 +317,12 @@ function loadMm3(): Promise<Mm3Data> {
       ...skyList.map(async (sky) => {
         skySheets[sky] = await loadSkySheet(base, sky);
       }),
+      ...[...terrainNames].map(async (full) => {
+        terrainSheets[full] = await loadWallSheet(base, full.replace(/\.vga$/, ''));
+      }),
     ]);
 
-    return { mazes, wallSheets, skySheets, indoorView };
+    return { mazes, wallSheets, skySheets, indoorView, outdoorView, terrainSheets };
   })();
   return mm3Promise;
 }
@@ -374,6 +396,118 @@ function blitSize(b: Blit): [number, number] {
   return [SIDE_W[d]!, SIDE_H[d]!];
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Outdoor decimating-blit helpers (see MM3View.blitTerrainSprite's doc)
+// ──────────────────────────────────────────────────────────────────────────
+
+let _offA: HTMLCanvasElement | undefined;
+let _offB: HTMLCanvasElement | undefined;
+
+/** Two reused scratch canvases (source crop + decimated result) — avoids
+ * allocating a fresh canvas per sprite per frame. `second` picks which of
+ * the two to reuse; each call resizes it in place if needed. */
+function offscreenCanvas(w: number, h: number, second = false): HTMLCanvasElement {
+  const c = second ? (_offB ??= document.createElement('canvas')) : (_offA ??= document.createElement('canvas'));
+  if (c.width !== w) c.width = w;
+  if (c.height !== h) c.height = h;
+  return c;
+}
+
+/** Ported from the `re-codebreaker` escalation's `outview.py` `Rows` class:
+ * shifts a 16-bit pattern left each step; a step is "kept" iff the bit
+ * shifted out was 1, except once the shifted state hits exactly 0 it
+ * reloads from `(pattern<<1)&0xFFFF` (all 4 real `PAT` values have their
+ * LSB set, so this reload always lands on a "kept" step — see the module
+ * doc for why that means it can never stall). */
+function computeRowKeep(pattern: number, n: number): boolean[] {
+  let st = pattern & 0xffff;
+  const rl = (pattern << 1) & 0xffff;
+  const out: boolean[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const cf = (st >> 15) & 1;
+    st = (st << 1) & 0xffff;
+    if (cf === 0) {
+      out[i] = false;
+    } else {
+      if (st === 0) st = rl;
+      out[i] = true;
+    }
+  }
+  return out;
+}
+
+/** Ported from `outview.py`'s `Cols` class — differs from `Rows` only in
+ * its reload branch (reload forces a "kept" step regardless of `cf`); see
+ * that module's doc for why both give the same result for the 4 real
+ * `PAT` values in practice. */
+function computeColKeep(pattern: number, n: number): boolean[] {
+  let st = pattern & 0xffff;
+  const rl = (pattern << 1) & 0xffff;
+  const out: boolean[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const cf = (st >> 15) & 1;
+    st = (st << 1) & 0xffff;
+    if (st === 0) {
+      st = rl;
+      out[i] = true;
+    } else {
+      out[i] = cf === 1;
+    }
+  }
+  return out;
+}
+
+interface DecimateResult {
+  raster: { width: number; height: number; data: Uint8ClampedArray };
+  /** Decimated width of just the real (non-padding) content — the mirror pivot. */
+  contentDestWidth: number;
+}
+
+/** Drops non-kept rows/columns from `src` (an already-decoded RGBA frame —
+ * the sprite's own padded per-frame canvas, see `blitTerrainSprite`'s
+ * doc), compacting the survivors toward the top-left. A pixel at source
+ * `(c, r)` keeps its relative row/column order — this reproduces the real
+ * driver's "only advance the destination cursor on a kept pixel" behaviour
+ * exactly (verified algebraically, not by re-walking opcodes — see doc). */
+function decimateRaster(src: ImageData, pattern: number, contentWidth: number): DecimateResult {
+  const { width: cw, height: ch, data: s } = src;
+  const colKeep = computeColKeep(pattern, cw);
+  const rowKeep = computeRowKeep(pattern, ch);
+  const colDest = new Array<number>(cw);
+  let destW = 0;
+  let contentDestWidth = 0;
+  for (let c = 0; c < cw; c++) {
+    colDest[c] = destW;
+    if (colKeep[c]!) {
+      destW++;
+      if (c < contentWidth) contentDestWidth = destW;
+    }
+  }
+  const rowDest = new Array<number>(ch);
+  let destH = 0;
+  for (let r = 0; r < ch; r++) {
+    rowDest[r] = destH;
+    if (rowKeep[r]!) destH++;
+  }
+  const data = new Uint8ClampedArray(Math.max(1, destW) * Math.max(1, destH) * 4);
+  for (let r = 0; r < ch; r++) {
+    if (!rowKeep[r]) continue;
+    const dr = rowDest[r]!;
+    for (let c = 0; c < cw; c++) {
+      if (!colKeep[c]) continue;
+      const dc = colDest[c]!;
+      const si = (r * cw + c) * 4;
+      if (s[si + 3] === 0) continue; // transparent source pixel -- nothing to draw (matches the real blit's per-pixel skip)
+      const di = (dr * destW + dc) * 4;
+      data[di] = s[si]!;
+      data[di + 1] = s[si + 1]!;
+      data[di + 2] = s[si + 2]!;
+      data[di + 3] = s[si + 3]!;
+    }
+  }
+  return { raster: { width: destW, height: destH, data }, contentDestWidth };
+}
+
 const STEP_COOLDOWN_MS = 175;
 
 export class MM3View implements GameView {
@@ -387,6 +521,8 @@ export class MM3View implements GameView {
   private readonly wallSheets: Record<string, (Sheet | undefined)[]>;
   private readonly skySheets: Record<string, Sheet | undefined>;
   private readonly indoorView: IndoorViewTable | undefined;
+  private readonly outdoorView: OutdoorViewTable | undefined;
+  private readonly terrainSheets: Record<string, Sheet | undefined>;
   private pose_: Mm3Pose;
   private tick = 0;
   private noclip = false;
@@ -402,6 +538,8 @@ export class MM3View implements GameView {
     this.wallSheets = data.wallSheets;
     this.skySheets = data.skySheets;
     this.indoorView = data.indoorView;
+    this.outdoorView = data.outdoorView;
+    this.terrainSheets = data.terrainSheets;
     const idx = Math.max(0, this.mazes.findIndex((m) => m.id === startLevel));
     const maze = this.mazes[idx] ?? this.mazes[0]!;
     this.pose_ = startPose
@@ -480,6 +618,15 @@ export class MM3View implements GameView {
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
+    if (this.maze.kind === 'outdoor') {
+      if (this.outdoorView) {
+        this.renderOutdoorView(ctx);
+      } else {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      }
+      return;
+    }
     const series = this.maze.wallSeries;
     const sheets = series ? this.wallSheets[series] : undefined;
     const ready = this.indoorView && sheets && sheets.every((s) => s !== undefined);
@@ -487,6 +634,113 @@ export class MM3View implements GameView {
       this.renderIndoorView(ctx, sheets!);
     } else {
       this.renderCanvasFrustumFallback(ctx);
+    }
+  }
+
+  /**
+   * MM3's own real outdoor 3-D draw list (`tools/walker/mm3-outdoor-view.ts`
+   * `buildOutdoorDrawList`, backed by the frozen `data/outdoor-view.json`
+   * table — see that module's doc and `docs/mm3/dosvga/data-structure.md`
+   * "Outdoor mazes" for the citations). Uses the same 3-D view clip window
+   * as the indoor renderer (confirmed identical: `outview.py`'s own
+   * `CLIP=(8,8,223,138)` matches the indoor view's `vga`+0x2158 window
+   * exactly — same driver, same hard-coded rectangle).
+   *
+   * Sky: the draw-list table always emits `day.vga` — `LoadSky`'s
+   * clock-driven day/night selection was never traced/ported (the
+   * `re-codebreaker` escalation's own reference also hard-coded `day.vga`);
+   * this walker has no in-game clock to drive it either, so the sky is
+   * always day. `night.vga` is loaded and available in `terrainSheets` for
+   * whenever that selection logic gets decoded — documented as a known
+   * simplification, not silently dropped.
+   */
+  private renderOutdoorView(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(8, 8, 216, 131); // outview.py CLIP=(8,8,223,138) -- same window the indoor view clips to
+    ctx.clip();
+
+    const getWallWord: GetWallWord = (dx, dy) => {
+      const x = this.pose_.x + dx;
+      const y = this.pose_.y + dy;
+      if (x < 0 || x >= MAP_GRID || y < 0 || y >= MAP_GRID) return 0; // off-map -> nothing drawn, matches the verified reference
+      return this.maze.walls[y * MAP_GRID + x]!;
+    };
+    const facing = FACING_NESW_TO_INDOOR[this.pose_.facing & 3]!;
+    const alt = this.redrawCount % 2;
+    const draws = buildOutdoorDrawList(this.outdoorView!, getWallWord, this.maze.graphicSets, facing, alt);
+    for (const d of draws) {
+      const sheet = this.terrainSheets[d.sprite];
+      if (!sheet) continue;
+      const fr = sheet.frame(d.frame);
+      if (!fr) continue;
+      this.blitTerrainSprite(ctx, sheet, fr, d.x, d.y, d.flags);
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Outdoor blit — adds the driver's real **decimating shrink** (`vga`+
+   * 0x1EDC, `flags` bits 8-9, confirmed bit-pattern table
+   * `this.outdoorView.pat` = 16/16, 11/16, 7/16, 4/16 pixels kept on both
+   * rows and columns) on top of the indoor view's already-confirmed plain
+   * mirror (bit 0). The indoor view never sets the shrink bits (checked:
+   * every `mm3_indoor_view.json` literal flags value has bits 8-9 clear),
+   * so `blitSprite` never needed this — only the outdoor view does.
+   *
+   * The decimation state machine (`Rows`/`Cols` in the `re-codebreaker`
+   * escalation's `outview.py`) is a pure function of *absolute pixel
+   * position within the sprite's own padded per-frame canvas*, independent
+   * of which cell/opcode a pixel came from — proven by tracing the
+   * escalation's own Python reference: both the row and column decimators
+   * start fresh at the same phase for every draw and are never reset
+   * mid-cell, so a pixel's keep/drop state depends only on its (col, row)
+   * index into the canvas, not on run boundaries. Since every extracted
+   * `.vga` atlas frame already **is** that padded canvas (xOffset is 0 for
+   * every sampled outdoor terrain sprite — verified directly from the
+   * container's own cell headers), the decimation can be applied directly
+   * to the already-decoded/rendered PNG frame via `getImageData`, with no
+   * need to re-walk the source RLE opcode stream.
+   *
+   * Mirror + shrink combination is **not** independently disassembly-
+   * traced (only plain mirror and plain shrink are each confirmed
+   * separately) — this mirrors the *decimated* raster about its own real
+   * (shrunk) content width, generalizing the already-confirmed "mirror
+   * about the cell's real width, not the padded atlas width" rule
+   * (`mm3-walker-mirror-origin`) to shrunk content. Documented as an
+   * approximation for that specific combination; plain mirror and plain
+   * shrink each match the confirmed algorithm exactly.
+   */
+  private blitTerrainSprite(ctx: CanvasRenderingContext2D, sheet: Sheet, fr: AtlasFrame, dx: number, dy: number, flags: number): void {
+    const mirror = (flags & 1) !== 0;
+    const shrink = (flags >> 8) & 3;
+    if (shrink === 0) {
+      this.blitSprite(ctx, sheet, fr, dx, dy, mirror);
+      return;
+    }
+    const pat = this.outdoorView!.pat[shrink]!;
+    const off = offscreenCanvas(fr.w, fr.h);
+    const octx = off.getContext('2d')!;
+    octx.clearRect(0, 0, fr.w, fr.h);
+    octx.drawImage(sheet.img, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h);
+    const src = octx.getImageData(0, 0, fr.w, fr.h);
+    const { raster, contentDestWidth } = decimateRaster(src, pat, fr.cellW ?? fr.w);
+    if (raster.width === 0 || raster.height === 0) return;
+    const tmp = offscreenCanvas(raster.width, raster.height, /* second */ true);
+    const imageData = new ImageData(raster.width, raster.height);
+    imageData.data.set(raster.data);
+    tmp.getContext('2d')!.putImageData(imageData, 0, 0);
+    if (!mirror) {
+      ctx.drawImage(tmp, dx, dy);
+    } else {
+      ctx.save();
+      ctx.translate(dx + contentDestWidth, dy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(tmp, 0, 0);
+      ctx.restore();
     }
   }
 
