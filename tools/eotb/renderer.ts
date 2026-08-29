@@ -29,27 +29,60 @@
  * pixel-identical); door open/closed state (the `.MAZ` wallType byte is
  * static per this pass, see `decode-maze.ts`'s module doc).
  *
- * **Wall decorations (`drawWallDecorations`, 2026-08-29): real,
- * verified, but intentionally partial.** `EoBCoreEngine::
- * drawDecorations` (`engines/kyra/engine/scene_eob.cpp:667-716`) draws
- * TWO roles per visible cell per frame: `i=0` ("Down", the wall directly
- * facing the viewer -- this project's `role: 'front'` / `-south`-suffixed
+ * **Wall decorations (`drawWallDecorations`, 2026-08-29 -- extended to
+ * both roles this session): real, verified.** `EoBCoreEngine::
+ * drawDecorations` (`engines/kyra/engine/scene_eob.cpp:667-716`, fetched
+ * fresh and re-verified line-by-line this session, not trusted from
+ * paraphrase) draws TWO roles per visible cell per frame: `i=0` ("Down",
+ * the wall directly facing the viewer -- this project's `-south`-suffixed
  * slots) and `i=1` ("Right"/"Left", the side walls of cells further down
- * the corridor -- this project's `-east`/`-west` slots). This port
- * implements **`i=0` only**. Also not ported: the `ix<0` mirror-flip
- * (driven by `flags & 1` or `flags & 2 && _wllProcessFlag`, `scene_eob.
- * cpp:684-685`) and the `flags & 4` alternate-coordinate path
- * (`_dscShapeCoords[(index*5+4)<<1]` instead of the general `_dscShapeX
- * [index]` translation). All three are real, cited mechanisms with known
- * table locations (`dsc-tables.ts`), just out of this pass's time budget
- * -- see `docs/eotb/TODO.md`. What's real and verified: the `.DAT`
- * decoration-property/rect format (`decode-decorations.ts`, 0 residue
- * against all 5 real files), which decoration-load's `.CPS`/`.DAT` pair
- * is active for a given wall-mapping record (`decode-inf.ts`'s
- * `resolveWallDecorationAssignments`, using real interleaved record
- * order -- not the file's simple presence), and the depth-slot selection
- * + on-screen X translation tables (`DSC_SHAPE_INDEX`/`DSC_SHAPE_X`,
- * ScummVM's own literal Amiga-extracted `create_kyradat` byte arrays).
+ * the corridor -- this project's `-east`/`-west` slots). Both are now
+ * implemented in one unified pass over `resolved` (see `dsc-tables.ts`'s
+ * module doc for the full source excerpt and derivation).
+ *
+ * **Corrects this session's own starting assumption**: the `ix<0`
+ * flag-driven mirror-flip (`flg & 1 || (flg & 2 && _wllProcessFlag)`) is
+ * gated `(i == 0) &&` in the real source -- i.e. it is a FRONT-role-only
+ * mechanism, not a side-role one. Side-role mirroring instead comes for
+ * free from `DSC_SHAPE_INDEX`'s own static sign at `i=1` (negative for
+ * every `-west`-suffixed cell, positive for every `-east`-suffixed one --
+ * see `dsc-tables.ts`); the `ix<0` mirrored-DRAW formula itself is
+ * unconditional on `i`, only the extra flag-driven negation is
+ * front-role-only.
+ *
+ * `_wllProcessFlag` (gating `flg & 2`) has no static source in this game
+ * and is omitted rather than defaulted: a whole-corpus census of all 5
+ * real `.DAT` files' `DecorationProperty.flags` (198 properties total)
+ * found bit `0x02` set on **zero** records (`0x01`: 18/198 -- BRICK 10,
+ * BLUE 3, DROW 1, GREEN 0, XANATHA 4; `0x04`: 21/198 -- BRICK 6, BLUE 4,
+ * DROW 3, GREEN 2, XANATHA 6), so `flg & 2` cannot fire on any real EOB1
+ * Amiga decoration and isn't modelled at all (not left in as dead
+ * inert-by-default code). The `flags & 4` alternate-coordinate path
+ * (`_dscShapeCoords`, `dsc-tables.ts`'s `DSC_SHAPE_COORDS`, 180 real
+ * `kEoB1DscShapeCoordsAmiga` entries) IS real and DOES occur in the
+ * corpus (the 21/198 count above) and is implemented, front-role only
+ * (side role never reaches this branch -- see `dsc-tables.ts`).
+ *
+ * A shape's real pixel width for the mirrored-draw formula (`176 -
+ * shapeX[shpIx] - (shapeData[2] << 3)` in the real source, where
+ * `shapeData[2]<<3` is the shape's own encoded-header pixel width) is
+ * substituted here with `rect.w` directly -- this port never builds a
+ * `shapeData`-style encoded runtime shape at all, it blits straight from
+ * the decoded `.CPS` canvas using each `DecorationRect`'s own `w`/`h` as
+ * literal pixel dimensions (already pixel-exact verified for the
+ * non-mirrored case, see below), so `rect.w` and the source's
+ * `shapeData[2]<<3` necessarily name the same real pixel width.
+ *
+ * What's real and verified: the `.DAT` decoration-property/rect format
+ * (`decode-decorations.ts`, 0 residue against all 5 real files), which
+ * decoration-load's `.CPS`/`.DAT` pair is active for a given wall-mapping
+ * record (`decode-inf.ts`'s `resolveWallDecorationAssignments`, using
+ * real interleaved record order -- not the file's simple presence), and
+ * every table this rendering path reads (`DSC_SHAPE_INDEX`/`DSC_SHAPE_X`/
+ * `DSC_SHAPE_COORDS`, all ScummVM's own literal Amiga-extracted
+ * `create_kyradat` byte arrays). See `docs/eotb/amiga/data-structure.md`
+ * § "Decoration overlays" for the pixel-diff verification evidence for
+ * both roles.
  */
 import { IndexedSurface, type BlitSource } from '@seer-project/dungeon';
 import type { VcnData } from './decode-vcn.ts';
@@ -60,7 +93,7 @@ import type { MazeData } from './decode-maze.ts';
 import type { DecorationData } from './decode-decorations.ts';
 import { decorationChain } from './decode-decorations.ts';
 import type { WallDecorationAssignment } from './decode-inf.ts';
-import { DSC_SHAPE_INDEX, DSC_SHAPE_X, CELL_LETTERS } from './dsc-tables.ts';
+import { DSC_SHAPE_INDEX, DSC_SHAPE_X, DSC_SHAPE_COORDS, CELL_LETTERS } from './dsc-tables.ts';
 
 export const VIEWPORT_W = 176;
 export const VIEWPORT_H = 120;
@@ -143,13 +176,31 @@ export interface DecorationSheet {
 }
 
 /**
- * Draw the front/"Down"-role wall decorations for one resolved pose --
- * `EoBCoreEngine::drawDecorations`'s `i=0` half (`engines/kyra/engine/
- * scene_eob.cpp:667-716`), restricted to that half: see this module's
- * doc comment for why (the `i=1` "Right"/"Left" side-decoration roles,
- * `.DEC`-array `next`-chain, an `ix<0` mirror-flip driven by `flags &
- * 1`/`flags & 2`, and the `flags & 4` alternate-coordinate path are all
- * real, cited, but not implemented this pass -- `docs/eotb/TODO.md`).
+ * Which `drawDecorations` role (`i` in the real source) a resolved slot's
+ * label suffix belongs to -- `-south` is `i=0` (front/"Down"), `-east`/
+ * `-west` are `i=1` (side/"Right"-or-"Left"). `null` for a slot with
+ * neither suffix (shouldn't happen for real `WALL_RENDER_SLOTS` entries,
+ * defensive only).
+ */
+function decorationRole(label: string): 0 | 1 | null {
+  if (label.endsWith('-south')) return 0;
+  if (label.endsWith('-east') || label.endsWith('-west')) return 1;
+  return null;
+}
+
+/**
+ * Draw both wall-decoration roles for one resolved pose --
+ * `EoBCoreEngine::drawDecorations` (`engines/kyra/engine/scene_eob.cpp:
+ * 667-716`), both `i=0` (front/"Down") and `i=1` (side/"Right"-or-"Left")
+ * -- see this module's doc comment for the full derivation, the flag-flip
+ * front-role-only correction, and the `_wllProcessFlag`/`flags & 4`
+ * findings.
+ *
+ * A single pass over `resolved` (rather than two separate passes, one per
+ * role) preserves `WALL_RENDER_SLOTS`'s existing back-to-front authoring
+ * order across both roles combined -- that order already interleaves a
+ * cell's `-east`/`-west` and `-south` slots correctly (e.g. `B-east`
+ * before `B-south`), so no extra per-cell grouping is needed.
  *
  * `wallDecorations` is the level's `wallIndex -> {cpsFile, decIndex}`
  * table (`decode-inf.ts`'s `resolveWallDecorationAssignments`);
@@ -165,7 +216,8 @@ export function drawWallDecorations(
   sheets: Record<string, DecorationSheet>,
 ): void {
   for (const { slot, rawWallIndex, cellLetter } of resolved) {
-    if (!slot.label.endsWith('-south')) continue; // only the front/"Down" role -- see module doc.
+    const role = decorationRole(slot.label);
+    if (role === null) continue;
     const cellIndex = CELL_LETTERS.indexOf(cellLetter);
     if (cellIndex < 0) continue;
     const assignment = wallDecorations[rawWallIndex];
@@ -173,17 +225,45 @@ export function drawWallDecorations(
     const sheet = sheets[assignment.cpsFile];
     if (!sheet) continue;
 
-    const s = cellIndex * 2; // i=0 (front/"Down" role).
-    const ix = DSC_SHAPE_INDEX[s]!;
-    const shpIx = Math.abs(ix) - 1;
+    const s = cellIndex * 2 + role;
+    const baseIx = DSC_SHAPE_INDEX[s];
+    if (baseIx === undefined) continue;
 
     for (const prop of decorationChain(decorations, assignment.decIndex)) {
+      // `ix` is recomputed fresh from the static table for every chained
+      // property in the real source too (never accumulates across
+      // iterations) -- the front-role-only flag-driven negation
+      // (`_wllProcessFlag`'s `flags & 2` term omitted: never set in this
+      // corpus, see module doc) is the only per-property mutation.
+      let ix = baseIx;
+      if (role === 0 && prop.flags & 1) ix = -ix;
+      const shpIx = Math.abs(ix) - 1;
+      if (shpIx < 0 || shpIx > 9) continue; // degenerate (cellIndex,role) combo with no real depth-slot entry (e.g. G's side role) -- defensive, matches the shapeIndex==0xFFFF "nothing to draw" treatment below.
+
       const shapeIdx = prop.shapeIndex[shpIx];
       if (shapeIdx === undefined || shapeIdx === 0xffff) continue;
       const rect = decorations.rects[shapeIdx];
       if (!rect || rect.w === 0 || rect.h === 0) continue;
 
-      const finalX = prop.shapeX[shpIx]! + DSC_SHAPE_X[cellIndex]!;
+      let x = 0;
+      if (role === 0) {
+        if (prop.flags & 4) {
+          x += DSC_SHAPE_COORDS[cellIndex * 10 + 8]!; // (cellIndex*5+4)<<1, see dsc-tables.ts.
+        } else {
+          x += DSC_SHAPE_X[cellIndex]!;
+        }
+      }
+      // else (role===1): x stays 0 -- side-role placement carries no
+      // per-cell translation, it's entirely the property's own shapeX.
+
+      let mirror = false;
+      if (ix < 0) {
+        x += VIEWPORT_W - prop.shapeX[shpIx]! - rect.w;
+        mirror = true;
+      } else {
+        x += prop.shapeX[shpIx]!;
+      }
+      const finalX = x;
       const finalY = prop.shapeY[shpIx]!;
       const src: BlitSource = {
         data: sheet.indices,
@@ -191,7 +271,7 @@ export function drawWallDecorations(
         height: sheet.height,
         mask: maskForRegion(sheet, rect.x, rect.y, rect.w, rect.h),
       };
-      surface.blit(src, rect.x, rect.y, rect.w, rect.h, finalX, finalY, false, 'mask');
+      surface.blit(src, rect.x, rect.y, rect.w, rect.h, finalX, finalY, mirror, 'mask');
     }
   }
 }

@@ -8,9 +8,43 @@ full evidence and paths-tried tables — this file is pointers only.
 |----|--------|---------------------|----------|---------|
 | eotb1-dos-inf-opcode-operands | open | `.INF` event-script bytecode dispatcher and ~30 opcode names are confirmed from source; individual opcode operand byte-widths not exhaustively decoded | `dosvga/data-structure.md` § "INF — Level configuration" → "Event script" | 2026-08-02 game-re |
 | eotb1-dos-ega-comptype1-variant | open | A `compType=1` `.EGA` variant (`BRICK1/2/3.EGA`, `BLUE.EGA`, `DROW.EGA`, plus `ITEMRMP.EGA`'s empty-file case — 6 files total) was found while wiring the mainline `compType=4` `.EGA`/`.ECN`/`.EMP` pipeline and is skipped by the extractor; not yet decoded | `dosvga/data-structure.md` § "EGA render mode" → "Not extracted this session (open items)" | 2026-08-29 game-re |
-| eotb1-amiga-walker-decorations-sideroles | open | `decIndex`-driven decoration overlays are now real and rendered for the front/"Down" role only (`renderer.ts`'s `drawWallDecorations`). Still open: the `i=1` side-role half of `EoBCoreEngine::drawDecorations` (`_dscWallMapping`'s `Right`/`Left`-role entries, decoded but unconsumed), the `ix<0` mirror-flip path (`flags` bit0/bit1 + runtime `_wllProcessFlag`), and the `flags&4` alternate-coordinate path (`_dscShapeCoords`, not yet decoded) | `amiga/data-structure.md` § "Decoration overlays (`decIndex`)" → "Explicitly not ported" | 2026-08-29 amiga-disasm |
 | eotb1-amiga-vmp-zmask | open | VMP's per-tile `zMask` flag ("seam" hint) is decoded but unmodelled by the renderer | `amiga/data-structure.md` § "VMP — Wall View Mapping Table" | 2026-08-02 game-re |
 | eotb1-amiga-wallflags-untraced-bits | open | `specialType`/`flags` dispatch and 4 of 8 `flags` bits are traced from source (door/lever/niche semantics); bits `0x01`/`0x10`/`0x40`/`0x80` and the exact semantic role of the `flags^4` load-time inversion (bit `0x04`) not traced — not blocking (no rendering behaviour depends on them) | `amiga/data-structure.md` § "`specialType` / `flags` semantics" | 2026-08-29 amiga-disasm |
+
+## Closed this session (2026-08-29, side-role decoration session)
+
+- **`eotb1-amiga-walker-decorations-sideroles`** — **closed.** All three
+  remaining gaps from the front-role decoration work are implemented and
+  verified: the `i=1` (side/"Right"-or-"Left" role) half of
+  `EoBCoreEngine::drawDecorations`, the `ix<0` mirror-flip (confirmed
+  FRONT-role-only from real source — this closure corrects the task
+  brief's opposite starting assumption that side roles needed it), and
+  the `flg&4` alternate-coordinate path (`_dscShapeCoords`, newly decoded
+  as `dsc-tables.ts`'s `DSC_SHAPE_COORDS`, ScummVM's own literal
+  `kEoB1DscShapeCoordsAmiga`). `_wllProcessFlag` (gating `flg&2`) is
+  confirmed moot and omitted: a whole-corpus census of all 5 real `.DAT`
+  files' 198 `DecorationProperty` records found bit `0x02` set on zero of
+  them. All four mechanisms verified against real, reachable corpus cases
+  (not synthetic fixtures) via pixel diffs landing in-bounds with
+  plausible bboxes matching each case's source rect dimensions; 4 full
+  renders (`public/assets/eotb/amiga/renders/level1-6-4-f2.png`,
+  `level1-5-7-f0.png`, `level12-0-0-f1.png`, `level1-20-11-f2.png`) show
+  coherent, non-garbled dungeon views. The pre-existing front-role code
+  path is unchanged for the common case (algebraically identical formula
+  when a property's `flags===0`), confirmed via both a formula-equivalence
+  argument and a fresh real-corpus regression render. Modified:
+  `tools/eotb/dsc-tables.ts` (new `DSC_SHAPE_COORDS` export, expanded
+  citations), `tools/eotb/renderer.ts` (`drawWallDecorations` rewritten as
+  a single unified pass over both roles). `npx vitest run` (350/350),
+  `npx tsc --noEmit`, `npm run lint` all clean. See
+  `amiga/data-structure.md` § "Decoration overlays" → "Both roles
+  implemented and verified" for full derivation, the source excerpt, and
+  the verification table. Along the way, found and documented (via a
+  `> **Correction:**` block, not a silent edit) that the original
+  front-role work's cited verification pose (`LEVEL1` x=6,y=4,facing=1)
+  no longer reproduces against this session's regenerated build output —
+  recorded as a likely-stale citation, not a regression, since the
+  underlying mechanism re-verifies cleanly at other real poses.
 
 ## Closed this session (2026-08-29, amiga-disasm — decoration overlays, facing rotation, wall flags, door state)
 

@@ -631,6 +631,105 @@ that pose's `wallIndex=39 -> decIndex=0 -> rect[0]` (9x25px) to the pixel —
 see `public/assets/eotb/amiga/renders/` for the rendered PNG. The shape
 renders as a real, coherent (non-garbled) decoration silhouette, not noise.
 
+> **Correction (2026-08-29, side-role session):** the specific historical
+> pose cited above (`LEVEL1` x=6,y=4,facing=1 -> `wallIndex=39`) could not
+> be reproduced against this session's regenerated
+> `public/assets/eotb/amiga/dungeon/level1.json` (gitignored build
+> output) -- `resolveWallTypes` at that exact pose no longer resolves any
+> slot to `rawWallIndex=39` (it resolves `O-south -> wallIndex=29` and
+> `N-south -> wallIndex=60` instead). This is very likely a stale
+> citation from before some unrelated later regeneration of the build
+> output, not a decode regression: the underlying mechanism this
+> citation was verifying (`decIndex` resolution + front-role placement)
+> is untouched by anything in this project's history since, and a fresh
+> search this session re-confirmed `wallIndex 39 -> decIndex 0` is real
+> and still resolves correctly at other real poses (e.g. `LEVEL1`
+> x=21,y=19,facing=3, slot `B-south`) -- see "Both roles implemented and
+> verified" below for the current, reproducible evidence. Recorded here
+> per this project's "supersede in place, don't silently delete"
+> convention rather than editing the stale numbers away.
+
+### Both roles implemented and verified (2026-08-29, side-role session)
+
+**`i=1` (side/"Right"-or-"Left" role) decorations, the `ix<0` mirror-flip,
+and the `flg&4` alternate-coordinate path are now all implemented** in
+`tools/eotb/renderer.ts`'s `drawWallDecorations`, in one unified pass over
+`resolved` covering both roles (`decorationRole(slot.label)` maps a
+resolved slot's `-south`/`-east`/`-west` suffix to `i=0`/`i=1`). Real
+source refetched fresh this session (`scene_eob.cpp:667-716`, verbatim
+excerpt in `dsc-tables.ts`'s module doc) and re-verified line-by-line, not
+trusted from the prior session's paraphrase.
+
+**Correction to this session's own starting assumption** (the task brief
+that opened this work item assumed side roles need the flag-driven
+mirror-flip since "they're mirrored for left vs. right sides"): the real
+source gates `ix = -ix` with `(i == 0) &&` — this flip is FRONT-role-only.
+Side-role mirroring is carried entirely by `DSC_SHAPE_INDEX`'s own static
+sign at odd (`i=1`) table entries instead: negative for every
+`-west`-suffixed cell (E,F,K,L,O,Q), positive for every `-east`-suffixed
+one (A,B,C,H,I,M,P) — confirmed by cross-checking every cell's sign
+against its real `WALL_RENDER_SLOTS` suffix, zero mismatches. The `ix<0`
+mirrored-draw formula itself (`x = 176 - shapeX[shpIx] - shapeWidthPx`,
+drawn horizontally flipped) is unconditional on `i`; only the extra
+flag-driven negation is front-role-only.
+
+**`_wllProcessFlag` (gating `flg & 2`) is confirmed moot for this whole
+game, not modelled at all.** A whole-corpus census of all 5 real `.DAT`
+files' `DecorationProperty.flags` (198 properties total: BRICK 60, BLUE
+40, DROW 35, GREEN 36, XANATHA 27) found bit `0x02` set on **zero**
+records (bit `0x01`: 18/198 — BRICK 10, BLUE 3, DROW 1, GREEN 0, XANATHA
+4; bit `0x04`: 21/198 — BRICK 6, BLUE 4, DROW 3, GREEN 2, XANATHA 6). Since
+`flg & 2` can never fire on any real EOB1 Amiga decoration, it's omitted
+from the port entirely rather than defaulted to a guessed value.
+
+**`_dscShapeCoords` (the `flg & 4` table) is now decoded**, as
+`dsc-tables.ts`'s `DSC_SHAPE_COORDS` — ScummVM's own literal
+`kEoB1DscShapeCoordsAmiga` (180 `uint16`/signed entries, `eob1_amiga.h:
+906-931`), 18 cellIndex groups of 5 signed `(x,y)` pairs; only each
+group's 5th pair's X word (`cellIndex*10+8`, matching the real source's
+`(index*5+4)<<1` byte-for-byte) is consumed by this decoration path.
+
+**A shape's real pixel width, for the mirrored-draw formula.** The real
+source computes `176 - shapeX[shpIx] - (shapeData[2] << 3)`, where
+`shapeData[2] << 3` is a runtime encoded-shape's own header field. This
+port never builds that runtime `shapeData` at all (it blits straight from
+the decoded `.CPS` canvas using each `DecorationRect`'s own `w`/`h` as
+literal pixel dimensions — already independently verified pixel-exact for
+the non-mirrored case, see above), so `rect.w` is substituted directly:
+both quantities necessarily name the same real shape pixel width.
+
+**Verified against the real corpus, all four newly-implemented paths,
+each with a real reachable case (not a synthetic fixture):**
+
+| Mechanism | Real case | Result |
+|---|---|---|
+| Side role, non-mirrored (`-east`) | `LEVEL1` x=6,y=4,facing=2, `M-east`, `decIndex=32`, `shpIx=5` | 31 differing pixels, bbox `(31,33)-(32,52)` — matches the `w=2,h=20` source rect exactly |
+| Side role, non-mirrored, small rect | `LEVEL1` x=6,y=2,facing=2, `I-east`, `decIndex=36`, `shpIx=6` | 4 differing pixels, bbox `(57,39)-(57,42)` — matches the `w=1,h=4` source rect exactly |
+| Side role, mirrored (`-west`) | `LEVEL1` x=5,y=7,facing=0, `L-west`, `decIndex=32`, `shpIx=8` | 24 differing pixels, bbox `(174,36)-(175,47)` — matches the `w=2,h=12` source rect exactly, landing fully in-bounds near the right edge as the `176 - x - w` formula predicts |
+| `flg&1` mirror-flip (front role) | `LEVEL12` x=0,y=0,facing=1, `E-south`, `decIndex=12` (XANATHA wall set) | 26 differing pixels, bbox `(120,45)-(135,59)`, in-bounds |
+| `flg&4` alternate-coordinate (front role) | `LEVEL1` x=20,y=11,facing=2, `B-south`, `decIndex=29` | 74 differing pixels, bbox `(74,55)-(77,73)`, in-bounds |
+| Front-role regression (unchanged formula path) | `LEVEL1` x=21,y=19,facing=3, `B-south`, `wallIndex=39 -> decIndex=0` (the same chain the original front-role work verified) | 9 differing pixels, bbox `(106,37)-(172,63)`, in-bounds — confirms the front-role path is unchanged: for a property with `flags===0` the new unified formula is algebraically identical to the prior front-role-only code (same `s`, same `ix` sign, same `x` sum, `mirror=false`) |
+
+All four full-scene renders (`public/assets/eotb/amiga/renders/level1-6-4-f2.png`,
+`level1-5-7-f0.png`, `level12-0-0-f1.png`, `level1-20-11-f2.png`) show
+coherent, non-garbled dungeon views with a small, plausibly-placed
+decoration element visible on the relevant wall — not noise. One
+mirrored side-role candidate found during the search (`LEVEL1` x=19,y=11,
+facing=1, `O-west`, `decIndex=22`, `shpIx=5`) legitimately produces **0**
+differing pixels: its resolved source rect (`{x:34,y:138,w:1,h:25}`) is
+confirmed, by directly sampling the decoded `.CPS` sheet, to be entirely
+palette index 0 (transparent) at every one of its 25 pixels — a real
+"this specific depth slot has no authored content" case, not a bug (the
+masking logic correctly draws nothing).
+
+**Still not modelled, narrower than the original 3-item gap:** none of
+the three items in this section's original "explicitly not ported" list
+remain open. The only residual gap in this rendering path is unrelated to
+this session's work: `_sceneShpDim` clipping (a rectangular dim region
+the real engine passes to `drawBlockObject`) is not modelled by this
+port's `blit`, matching the pre-existing, separately-documented lack of
+per-slot clipping elsewhere in this renderer.
+
 ### `specialType` / `flags` semantics — traced (2026-08-29)
 
 **`specialType` is a dispatch selector for click-driven wall interactions**,
