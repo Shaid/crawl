@@ -32,6 +32,14 @@
     "mm2:pcgfx": "npx tsx tools/mm2/decode-pc-graphics.ts data/mm2/dosega",
     "mm3:dos": "python3 scripts/extract_mm3_dos.py",
     "mm3:amiga": "python3 scripts/extract_mm3_amiga.py",
+    "ishar:inventory": "npx tsx tools/ishar/amigaaga/inventory.ts",
+    "ishar2:inventory": "npx tsx tools/ishar2/amigaaga/inventory.ts",
+    "ishar3:inventory": "npx tsx tools/ishar3/amigaaga/inventory.ts",
+    "crystalsofarborea:inventory": "npx tsx tools/crystalsofarborea/amiga/inventory.ts",
+    "ishar:decompress": "npx tsx tools/ishar/amigaaga/decompress.ts",
+    "ishar2:decompress": "npx tsx tools/ishar2/amigaaga/decompress.ts",
+    "ishar3:decompress": "npx tsx tools/ishar3/amigaaga/decompress.ts",
+    "crystalsofarborea:decompress": "npx tsx tools/crystalsofarborea/amiga/decompress.ts",
     "sync-data-manifests": "npx tsx tools/sync-data-manifests.ts"
   },
   "dependencies": {
