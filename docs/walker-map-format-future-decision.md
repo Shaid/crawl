@@ -637,6 +637,34 @@ until that happens.
   multi-slot compositor — and wouldn't need either existing family or the
   MM3-compat superset. Map data storage model (per-cell vs. otherwise) not
   established even at hypothesis level yet.
+
+  > **Correction (2026-08-30): hypothesis REFUTED, real `game-re` pass on
+  > Pool of Radiance (Amiga).** Gold Box's first-person view is a true
+  > per-depth composited tile render, not a static picture library. Its
+  > `walldef.dax` stores per-wall-type, per-view **tile-index grids** (156-byte
+  > slices, 10 view sub-arrays each, confirmed byte-exact + a 3-way
+  > independent ID-arithmetic cross-check against `8x8d.dax`'s own
+  > directory), and `8x8d.dax` stores small, heavily-reused 8×8 tiles
+  > referenced by those indices — the same general strategy as every other
+  > family in this document, just at finer tile granularity. 105 rendered
+  > wall-view PNGs confirm this visually (a repeated door/torch feature
+  > reused identically across two different wallset ids; a distinct plain
+  > masonry-brick texture elsewhere) — real, non-degenerate, structurally
+  > coherent composited output, not a byte-count argument alone. Also
+  > corrected: the source wiki's "ByteKiller 2.0" compression label does not
+  > match the real algorithm (checked against `ancient`'s actual
+  > `ByteKillerDecompressor`: 0/843 corpus entries pass its own
+  > header/checksum check) — the real codec is a custom backward-reading,
+  > checksum-verified LZ77 variant, reverse-engineered from the wiki's own
+  > `pooldata.py` script rather than from the "ByteKiller" label. See
+  > `docs/poolofradiance/amiga/data-structure.md` for the full writeup and
+  > `docs/poolofradiance/TODO.md` for what's still open (`pic.dax`/`cpic.dax`
+  > content, `dungcom.dax` semantics). This resolves Gold Box's placement in
+  > this document's "at least three renderer shapes" tally below (§"Net
+  > effect on the recommendation") — Gold Box is a fourth **composited**
+  > shape (fine 8×8-tile granularity), not a fifth "static picture lookup"
+  > shape; Bard's Tale's own hypothesis (same paragraph) is unaffected and
+  > still unverified.
 - **Bard's Tale I/II/III — not ScummVM, deep independent community
   documentation.** [Kroah's Game Reverse Engineering
   page](http://bringerp.free.fr/RE/BardsTale/bard1.php5), a [Z80
@@ -647,19 +675,23 @@ until that happens.
   triggers; the IBM PC level data is Huffman-compressed. Predates Dungeon
   Master (1985 vs. 1987) and, like Gold Box, is generally understood to use
   a simpler nested-rectangle/static-picture first-person view rather than
-  DM-style real compositing — same "simpler than everything in this
-  document" hypothesis as Gold Box, same low confidence pending a real
-  pass. Not present in this corpus.
+  DM-style real compositing — the same hypothesis shape Gold Box carried
+  before its own 2026-08-30 correction above (which refuted it for Gold Box
+  specifically); Bard's Tale's version is unaffected and still just a
+  recalled, low-confidence guess pending its own real pass. Not present in
+  this corpus.
 
 **Net effect on the recommendation**: none of this changes the "don't force
 a merge yet" stance — if anything it reinforces it. The genre spans at least
 three structurally distinct wall-storage ideas now (per-cell redundant,
-shared-edge, Dungeon Master's type-derived) and at least three renderer
-shapes (slot-table, frustum, MM3's probe/chain dispatch, plus a plausible
-fourth "static picture lookup" for Gold Box/Bard's Tale) — more variety than
-four games justified normalising around, not less. The concrete next step,
-if any of this is worth pursuing, is a real `game-re` pass on whichever one
-game is most wanted next, not a speculative schema change.
+shared-edge, Dungeon Master's type-derived) and at least four renderer
+shapes (slot-table, frustum, MM3's probe/chain dispatch, and now Gold Box's
+confirmed fine-grained 8×8-tile compositor — see the 2026-08-30 correction
+above — with Bard's Tale's own "static picture lookup" hypothesis still
+unverified and separately tracked) — more variety than four games justified
+normalising around, not less. The concrete next step, if any of this is
+worth pursuing, is a real `game-re` pass on whichever one game is most
+wanted next, not a speculative schema change.
 
 ---
 
