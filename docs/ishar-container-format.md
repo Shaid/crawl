@@ -388,6 +388,31 @@ tuple-structured content, is itself a hint that the *overworld* payload may
 carry a real tile-index array in one region and a placement-record list in
 another).
 
+> **Correction (2026-08-30, user confirmation — the user has actually played
+> these games): the outdoor overworld is first-person too, not a separate
+> mode.** All three Ishar titles are "completely first-person crawlers,
+> except you spend a lot of time outdoors exploring islands and so on,
+> still in first-person" — there is no alternating top-down/node-graph
+> overworld screen the player navigates *instead of* the 3-D view; outdoor
+> exploration (forests, coastlines, islands) uses the *same* first-person
+> renderer as caves and dungeons. This substantially **strengthens** the
+> "one generic scene/resource descriptor used engine-wide" reading above,
+> rather than complicating it — `MAP.DO` and the cave/dungeon files sharing
+> an identical header shape is exactly what you'd expect if they're all
+> fed to the *same* first-person compositor, not evidence of a coincidental
+> format reuse across two different UI modes. It also reframes §4/TODO's
+> "THE MAP" vs. "3D MODE" manual-table-of-contents finding below: those are
+> most likely **an auxiliary top-down reference/overview map (a callable
+> overlay, the way EOB/Wizardry/Black Crypt-style blobbers in this same
+> repo's corpus have one) and the primary always-active first-person
+> renderer**, not two alternate ways of playing the game. The
+> `ishar-overworld-representation` open item's node-graph-vs-tile-grid
+> framing should be read as "what does the auxiliary map screen look like",
+> not "what does the player navigate through" — the player is always in the
+> first-person view, indoors and outdoors alike. See
+> `docs/ishar/TODO.md`'s updated `ishar-overworld-representation` and
+> `ishar-firstperson-view-mechanism` rows.
+
 **Confidence: STRUCTURAL** (cross-game byte-position agreement across 15+
 files, an unusually strong signal for this project's own conventions) but
 **not CONFIRMED** — no disassembly trace targeted the renderer/compositor
