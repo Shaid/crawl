@@ -6,13 +6,14 @@ only tracks what's still open, never restates findings.
 
 First of four sibling Gold Box titles staged in this repo. The other three
 (Curse of the Azure Bonds, Secret of the Silver Blades, Pools of Darkness)
-are still raw un-renamed floppy dumps in `data/curseoftheazurebonds/amiga/`,
-`data/secretofthesilverblades/amiga/`, `data/poolsofdarkness/amiga/` — not
-extracted this pass. Confirmed correspondence: their files share Pool of
-Radiance's base filenames with `.TLB`/`.GLB` extensions instead of `.dax`
-(plus a loose `ITEMS.DAT`) — see `data-structure.md` §0. Their own container
-byte layout was **not** opened or assumed to match the Amiga `.dax` format
-confirmed here.
+were opened in a later pass (2026-08-30) — see `docs/curseoftheazurebonds/TODO.md`,
+`docs/secretofthesilverblades/TODO.md`, `docs/poolsofdarkness/TODO.md`, and
+the shared `docs/goldbox-glib-format.md`. Their container format ("GLIB") is
+**confirmed different** from this game's `.dax` (no compression, a
+cumulative-offset directory instead of per-entry length fields), while the
+156-byte wall-slice/10-view compositor geometry this doc's §3 describes
+**is confirmed to transfer byte-for-byte unchanged** across all three
+sibling titles.
 
 ## 2026-08-30 — container + codec + wall-tile renderer solved; FPV hypothesis answered
 
@@ -63,4 +64,3 @@ confirmed here.
 | por-dungcom-semantics | open | `dungcom.dax` decompresses cleanly (~7.5 KB) but its field layout/semantics (dungeon/maze command data, per its filename) are undecoded | `amiga/data-structure.md` §5 | 2026-08-30 |
 | por-8x8d-header | open | `8x8d.dax`'s 4-byte per-tile-block leading header (meaning undecoded; tile pixel decode past it is only "rendered", not disassembly-confirmed) | `amiga/data-structure.md` §3 | 2026-08-30 |
 | por-full-catalog | open | Most `.dax` files' contents (sprites, bodies/heads, monsters, items, `ecl.dax`, `final.dax`, etc.) not catalogued this pass — explicitly deferred per task scope (container+codec+FPV question was the goal, not a full catalog) | `amiga/data-structure.md` (container/codec sections apply to all files; only walldef/8x8d/pic/cpic/dungcom examined) | 2026-08-30 |
-| por-sibling-titles | open | Curse of the Azure Bonds / Secret of the Silver Blades / Pools of Darkness Amiga data not extracted; `.TLB`/`.GLB` container byte layout not confirmed to match `.dax` | `amiga/data-structure.md` §0 | 2026-08-30 |

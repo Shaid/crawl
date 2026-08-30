@@ -665,6 +665,35 @@ until that happens.
   > shape (fine 8×8-tile granularity), not a fifth "static picture lookup"
   > shape; Bard's Tale's own hypothesis (same paragraph) is unaffected and
   > still unverified.
+  >
+  > **Addendum (2026-08-30): the composited-renderer finding generalises to
+  > all three sibling Gold Box titles, not just Pool of Radiance.** Curse of
+  > the Azure Bonds, Secret of the Silver Blades, and Pools of Darkness (the
+  > same engine family, 1989-1991) were opened this pass — their container
+  > format ("GLIB") turned out genuinely different from PoR's `.dax`: a
+  > cumulative-offset directory instead of per-entry lengths, and top-level
+  > containers are always stored, but **nested sub-containers are usually
+  > compressed** with one of two codecs (a 10-bit LZW and a byte-oriented
+  > LZ77, both traced in the games' own 68000 loaders and confirmed via a
+  > byte-exact cross-title oracle — see `docs/goldbox-glib-format.md` §5).
+  > The 156-byte wall-slice / 10-view-sub-array compositor geometry this
+  > correction describes transfers byte-for-byte unchanged across all three
+  > (zero deviation — `docs/curseoftheazurebonds/amiga/data-structure.md`
+  > §2, `docs/secretofthesilverblades/amiga/data-structure.md` §2,
+  > `docs/poolsofdarkness/amiga/data-structure.md` §2), and all three
+  > titles' own per-wall-id 8x8-tile banks — the pairing each `WALLDEF.GLB`
+  > is actually keyed to at runtime, not just a cross-disk stand-in — are now
+  > fully decoded and rendered (90/90, 95/95, 90/90 non-degenerate PNGs).
+  > Map data storage model (per-cell vs. shared-edge vs. type-derived, for
+  > the survey table below) is still not established for Gold Box at any
+  > confidence level — this pass only touched the wall-*rendering*
+  > mechanism, not a dungeon-grid/navigation format. One narrower question
+  > remains open in all three titles: whether a `WALLDEF.GLB` tile byte
+  > indexes a single 8x8 tile or a whole 48/56-byte tile block (tracked as
+  > `caob-tile-bank-index-unit`/`ssb-tile-bank-index-unit`/
+  > `pod-tile-bank-index-unit`) — doesn't change this renderer-family
+  > conclusion, since both readings already render as coherent, non-random
+  > wall art.
 - **Bard's Tale I/II/III — not ScummVM, deep independent community
   documentation.** [Kroah's Game Reverse Engineering
   page](http://bringerp.free.fr/RE/BardsTale/bard1.php5), a [Z80
