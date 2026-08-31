@@ -40,6 +40,10 @@
     "ishar2:decompress": "npx tsx tools/ishar2/amigaaga/decompress.ts",
     "ishar3:decompress": "npx tsx tools/ishar3/amigaaga/decompress.ts",
     "crystalsofarborea:decompress": "npx tsx tools/crystalsofarborea/amiga/decompress.ts",
+    "ishar:sprites": "npx tsx tools/ishar/amigaaga/sprites.ts",
+    "ishar2:sprites": "npx tsx tools/ishar2/amigaaga/sprites.ts",
+    "ishar3:sprites": "npx tsx tools/ishar3/amigaaga/sprites.ts",
+    "crystalsofarborea:sprites": "npx tsx tools/crystalsofarborea/amiga/sprites.ts",
     "sync-data-manifests": "npx tsx tools/sync-data-manifests.ts"
   },
   "dependencies": {

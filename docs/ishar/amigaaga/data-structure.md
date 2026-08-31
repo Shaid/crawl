@@ -188,7 +188,16 @@ in `docs/ishar-container-format.md` §2.3), `DEAD.DO`/`THEEND.DO`
 (presentation/title-sequence variants), `KNIGHT.DO`/`SAMB.DO`/`SAUB.DO`/
 `GERDEP.DO`/`GEREN.DO`/`DPLT.DO`/`EN1.DO`/`SCOMB.DO` (uncategorized).
 
-## 7. Open items
+## 7. Sprite/image pixel format — CONFIRMED
+
+See `docs/ishar-sprite-format.md` for the full byte-level spec and
+verification evidence (shared across all four Ishar-engine titles). 74/98
+files decode a valid resource directory, 1,608 sprites total; visually
+confirmed via `public/assets/ishar/amigaaga/sprites/barbare.png` (barbarian
+warriors), `dragon.png` (dragons), `arbre.png`/`orc.png`. Real AGA colour
+palette resolution remains open (see that doc's §5).
+
+## 8. Open items
 
 See `docs/ishar/TODO.md` (single status surface for the whole Ishar-engine
 family).

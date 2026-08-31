@@ -195,6 +195,16 @@ of the filename, not verified against content):
 | `ECRAN.CO` / `ECRANS.CO` | "screen" / "screens" — possibly a screen-selection or palette table |
 | `ENDIV.CO`, `HT.CO`, `EMOVE.CO` | unclear — not attempted |
 
+## 5.5 Sprite/image pixel format — CONFIRMED
+
+See `docs/ishar-sprite-format.md`. 31/36 files decode a valid resource
+directory, 905 sprites total
+(`public/assets/crystalsofarborea/amiga/sprites/`) — this title's corpus is
+dominated by the older raw-4-bit type (`0x00`/`0x02`, no palette-bank
+byte), distinct from Ishar 1-3's dominant banked-4-bit type. Visually
+confirmed via `orc_elf.png` (skeleton/humanoid figures) and `arbre.png`
+(tree/bush silhouettes).
+
 ## 6. Open items
 
 See `docs/ishar/TODO.md` (single status surface for the whole Ishar-engine

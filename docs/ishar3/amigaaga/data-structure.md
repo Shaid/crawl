@@ -59,6 +59,11 @@ addressing scheme (and the debug tool that edits it) is a genuine, stable
 engine-wide feature carried across the whole trilogy, not an Ishar-1-only
 artifact — see `docs/ishar/TODO.md`'s `ishar-overworld-representation` row.
 
+## 3.5 Sprite/image pixel format — CONFIRMED
+
+See `docs/ishar-sprite-format.md`. 113/136 files decode a valid resource
+directory, 2,744 sprites total (`public/assets/ishar3/amigaaga/sprites/`).
+
 ## 4. Open items
 
 See `docs/ishar/TODO.md`.

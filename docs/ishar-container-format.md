@@ -419,6 +419,81 @@ files, an unusually strong signal for this project's own conventions) but
 routine itself this session, and no field in this header has a proven
 semantic name yet (only offset positions and constancy/variability
 patterns). This is the natural next target for a follow-up pass or a
-`re-codebreaker` escalation if static analysis stalls: trace `T.X`'s (or
+`re-oracle` escalation if static analysis stalls: trace `T.X`'s (or
 Ishar 2's `T.X`'s) call site that reads a `DJ*.DO`/`*CAVE.DO` buffer after
 decompression, to pin down what offset 21's subtype byte actually selects.
+
+> **Update (fourth pass): the pixel/sprite format is now CONFIRMED**, and the
+> renderer architecture question above has a real, source-grounded (though
+> still not fully pinned to specific on-disk bytes) answer — see §7 and §8.
+
+## 7. Sprite/image pixel format — CONFIRMED
+
+Solved and moved to its own doc: `docs/ishar-sprite-format.md`. Summary: a
+per-script resource directory (`adresdes()`'s 2-level self-relative
+indirection, ported from `github.com/maestun/alis`) resolves numbered
+"bitmap header" records, each a small typed struct (6 pixel-encoding types
+confirmed: raw/banked 4-bit and direct 8-bit, each masked or opaque).
+Applied blind to real corpus bytes and confirmed via genuinely recognizable
+rendered art across all four titles (barbarian warriors, a dragon, a tree,
+an orc-like monster, a skeleton) — 1,608/2,244/2,744/905 sprites decoded for
+Ishar 1/2/3/Crystals respectively. Real AGA colour palette resolution
+remains open (VM-bytecode-selected, not statically located this pass — see
+that doc's §5).
+
+This closes the `ishar-png-render` TODO item and directly answers the task
+brief's Priority 1.
+
+## 8. First-person rendering mechanism — architecture identified (STRUCTURAL), exact on-disk geometry still open
+
+`alis`'s own `render3d.c`/`render3d_68k.c` contain a real, working
+implementation of Ishar/Crystals' first-person view: a **heightfield/voxel-
+column terrain raycaster** (Comanche-style column-span rendering, not a
+discrete per-depth wall-tile compositor and not a generic vector/placement-
+list format) — functions `openland`/`iniland`/`altiland`/`inilens`/
+`calctoy`/`spritland`/`landtopix`/`barland`/`tbarland` (and their 68k-
+specific counterparts `calclan0_68k`/`doland_68k`/`landtofi_68k`). Camera
+position, pitch, yaw, and FOV live in a "screen" struct (`screen.c`'s
+`eScreenVars` enum — e.g. `EScreenWidth=0x12`, `EScreenHeight=0x14`), gated
+by a `numelem` bit-2 flag (`EScreenNumElem & 0x2`) that selects the
+raycaster path.
+
+**This is a real, qualitative answer to the brief's Priority 2 question**:
+the engine is NOT compositing fixed wall tiles per depth cell (the Gold
+Box/Black Crypt convention elsewhere in this project's corpus), and it's
+more specific than "a generic vector/placement-list format" — it's
+specifically a terrain-height raycaster, which explains why outdoor
+(rolling landscape) and indoor (caves/dungeons, presumably modeled as
+enclosed height regions) content can share one rendering pipeline, matching
+the user's confirmation that both are first-person (§6 correction above).
+
+**What is NOT yet confirmed**: the exact on-disk location of any specific
+location's terrain height grid. An earlier attempt this session tried
+reading `xread16` at decompressed-file-offset 18 across the whole corpus
+(226/235 files reading exactly `0x0020`=32, tempting a "grid_width=33
+always" claim) — **this numeric claim is explicitly WITHDRAWN as
+unconfirmed**, not because the byte pattern isn't real (it is, reproducibly),
+but because the field-offset semantics it was interpreted under
+(`eScreenVars`) apply to `scene_addr = alis.basemain + scridx`, where
+`alis.basemain = alis.main->vram_org` is **MAIN's own script data**, not
+each individual `.DO` file's own raw decompressed bytes. Applying MAIN's
+internal "screen table" field offsets to a different file's own byte-0 base
+is exactly the kind of category error this project's pitfalls library warns
+about (see `indexed-operand-needs-base-provenance.md` in the game-re
+lessons library). The `0x0020` pattern may still be meaningful (worth
+re-deriving once MAIN's own internal screen-table records are located), but
+it is HYPOTHESIS, not CONFIRMED, pending either:
+
+1. locating MAIN.DO's own internal screen-table records (the same
+   `adresdes()`-directory-decode technique applied to MAIN's own resource
+   directory, analogous to §7's sprite work but for screen/scene records
+   instead of bitmaps — not attempted this session), or
+2. a real disassembly/bytecode trace of the `calloctab` opcode (`0xe9` in
+   `opcodes.c`) allocation calls that populate a screen's terrain grid at
+   runtime.
+
+Priority 3 (MAP.DO walkable grid geometry) and Priority 4 (a
+`tools/walker/games-ishar.ts` `GameView`) were **not attempted** this
+session: building a walker on this unconfirmed geometry would risk shipping
+a plausible-but-wrong "confirmed" walkable-maze claim, which this project's
+verification bar explicitly warns against. See `docs/ishar/TODO.md`.

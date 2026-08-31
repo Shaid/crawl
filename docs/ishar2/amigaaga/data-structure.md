@@ -75,6 +75,11 @@ different games' `MAIN.DO`) that strengthens the hierarchical
 country/zone/(code)/X/Y coordinate-model hypothesis for the overworld —
 see `docs/ishar/TODO.md`'s `ishar-overworld-representation` row.
 
+## 3.5 Sprite/image pixel format — CONFIRMED
+
+See `docs/ishar-sprite-format.md`. 119/137 files decode a valid resource
+directory, 2,244 sprites total (`public/assets/ishar2/amigaaga/sprites/`).
+
 ## 4. Open items
 
 See `docs/ishar/TODO.md`.
