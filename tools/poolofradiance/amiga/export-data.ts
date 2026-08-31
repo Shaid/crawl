@@ -29,6 +29,8 @@ import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { readDaxDirectory, decompressDaxEntry } from './dax.ts';
 import { decodeWallSlices, buildTileBank, renderView, VIEW_OFFSET } from './walldef.ts';
 import { assetDir, syncDataManifest, manifestEntry, writeManifest } from '../../shared/asset-paths.ts';
+import { decodePorGeoEntry } from '../../shared/goldbox-geo.ts';
+import { exportGeoDungeon } from '../../shared/goldbox-dungeon-export.ts';
 
 const GAME = 'poolofradiance';
 const PLATFORM = 'amiga';
@@ -126,6 +128,17 @@ export async function exportPoolOfRadianceData(dataDir: string) {
       GAME,
       PLATFORM,
     );
+  }
+
+  // 4. geo.dax — the 16x16 dungeon/city square grid (walls/doors CONFIRMED,
+  // see tools/shared/goldbox-geo.ts's module doc). One level per directory
+  // entry.
+  const geoPath = resolve(dataDir, 'geo.dax');
+  if (existsSync(geoPath)) {
+    const geoData = readBinary(geoPath);
+    const { entries } = readDaxDirectory(geoData);
+    const levels = entries.map((entry) => decodePorGeoEntry(decompressDaxEntry(geoData, entry), entry.indexID));
+    exportGeoDungeon(GAME, PLATFORM, levels);
   }
 
   syncDataManifest(GAME, PLATFORM);

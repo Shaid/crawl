@@ -9,7 +9,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { writePNG } from '@seer-project/pipeline';
 import { assetDir, manifestEntry, syncDataManifest, writeJson, writeManifest } from './asset-paths.ts';
-import { decodeGlibIndex, findBlockById, isTruncated, parseGlibContainer } from './goldbox-glib.ts';
+import { decodeGlibIndex, findBlockById, isTruncated, parseGlibContainer, readBlock } from './goldbox-glib.ts';
 import {
   buildFlatTileBank,
   buildWallSpecificTileBank,
@@ -19,6 +19,8 @@ import {
   resolveCompositeWallId,
   VIEW_OFFSET,
 } from './goldbox-walltiles.ts';
+import { decodeGeoRecord, GEO_RECORD_SIZE } from './goldbox-geo.ts';
+import { exportGeoDungeon } from './goldbox-dungeon-export.ts';
 
 /**
  * Number of raw wall slices (`decodeWallSlices` records) that share one
@@ -61,6 +63,14 @@ export interface WallRenderSource {
    * its own, in which case the universal prefix is simply empty).
    */
   universalTilesPath?: string;
+  /**
+   * Path to this title's own `GEO.GLB` — the 16x16 dungeon/city square grid
+   * (walls/doors CONFIRMED, see `goldbox-geo.ts`'s module doc). A top-level
+   * "DATA"-tagged GLIB container whose blocks are the raw 1024-byte GEO
+   * records directly (top-level containers are always stored, never
+   * compressed — §0/§5). Optional — omit if not yet located for a title.
+   */
+  geoPath?: string;
 }
 
 export async function exportGoldBoxGlibData(
@@ -259,6 +269,26 @@ export async function exportGoldBoxGlibData(
       game,
       platform,
     );
+  }
+
+  // 4. GEO — the 16x16 dungeon/city square grid (walls/doors CONFIRMED, see
+  // goldbox-geo.ts's module doc). One level per index entry; the wall-index
+  // scan (exportGeoDungeon) picks up whatever PNGs step 3 just wrote, so
+  // this must run after it.
+  if (wallRender?.geoPath) {
+    const gdata = readFileSync(resolve(dataDir, wallRender.geoPath));
+    const gcon = parseGlibContainer(gdata);
+    const gindex = decodeGlibIndex(gdata, gcon);
+    const levels = gindex
+      .map(({ id, blockIndex }) => {
+        const block = gcon.blocks[blockIndex];
+        const raw = readBlock(gdata, block);
+        if (raw.length !== GEO_RECORD_SIZE) return undefined;
+        return decodeGeoRecord(raw, id);
+      })
+      .filter((l) => l !== undefined);
+    console.log(`GEO: ${levels.length}/${gindex.length} level(s) matched the expected ${GEO_RECORD_SIZE}-byte record size`);
+    exportGeoDungeon(game, platform, levels);
   }
 
   syncDataManifest(game, platform);

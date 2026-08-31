@@ -49,9 +49,30 @@ now render via the semantically-correct scheme-2 pairing
 update block for the composite-arithmetic subtlety (5 slices per wallset)
 this integration surfaced.
 
+## 2026-08-31 — `GEO.GLB` dungeon maze grid SOLVED (connectivity); walker built
+
+17 levels' wall/door connectivity **CONFIRMED** (96.5%/97.5% cross-title
+self-consistency oracle, same technique as Curse and Pool of Radiance — see
+`docs/goldbox-glib-format.md` §7 and `amiga/data-structure.md` §5). Which
+WALLDEF wall-art texture faces the player per square is NOT resolved
+(escalated to `re-oracle`, shared item `caob-geo-plane01`, see Curse's
+TODO). `tools/walker/games-goldbox.ts` provides a real interactive walker
+for this title, built on the confirmed grid.
+
+## 2026-08-31 (follow-up) — `re-oracle` escalation SOLVED planes 0/1 + resolved tile-bank index unit (shared with Curse)
+
+Both `ssb-tile-bank-index-unit` and `ssb-geo-plane01` are CLOSED — same
+escalation and resolution as Curse's (`docs/curseoftheazurebonds/TODO.md`'s
+2026-08-31 follow-up section): a WALLDEF tile byte indexes one whole glyph
+block, and GEO planes 0/1 are wall-art TYPE per direction indexing a
+level-scoped ECL-loaded wallset table (plane 3's value labels were also
+corrected: 0=solid, 1=passable, 2/3=locked door). `tools/shared/
+goldbox-geo.ts` and `tools/walker/games-goldbox.ts` corrected accordingly.
+See `docs/goldbox-glib-format.md` §7.2/§5.6.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| ssb-tile-bank-index-unit | open | Shares `caob-tile-bank-index-unit` (tile-vs-block index unit); this title's walls 7/13 (max index 236) and 15 (193) are the cases the block-arithmetic does NOT fit | `docs/goldbox-glib-format.md` §5.6 | 2026-08-30 re-codebreaker |
+| ssb-wallset-ecl-binding | open | Shares `caob-wallset-ecl-binding` — which WALLDEF resource occupies each ECL-loaded wallset slot, needs ECL bytecode decode | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
 | ssb-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

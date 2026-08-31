@@ -162,7 +162,29 @@ is validated corpus-wide; individual files' semantic content is not
 catalogued. `ITEM.DAT` vs `ITEMS.DAT`'s relationship is also unresolved
 (both present, neither opened).
 
-## 5. Extractor and outputs
+## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
+
+**CONFIRMED for wall/door connectivity, OPEN for wall-art selection.** 32
+levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
+Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
+verified via a cross-title shared-wall self-consistency oracle at
+96.6%/95.1% (horizontal/vertical agreement) on this title specifically.
+Planes 0/1 (candidate wall-art selectors) remain open, escalated to
+`re-oracle`. Full writeup and cross-title verification table:
+`docs/goldbox-glib-format.md` §7. Implementation:
+`tools/shared/goldbox-geo.ts`; extractor wiring:
+`tools/shared/goldbox-glib-export.ts`'s `geoPath` option (this title passes
+`Disk3/GEO.GLB`). See `docs/poolsofdarkness/TODO.md`.
+
+> **Correction (2026-08-31, `re-oracle` escalation):** planes 0/1 are now
+> CONFIRMED (wall-art TYPE per direction, 0-15, indexing a level-scoped
+> ECL-loaded wallset table) and plane 3's value labels were corrected
+> (0=solid/blocked, 1=passable, 2/3=locked door — the original 0=open/
+> 1=wall/2=door guess had the right bit layout but backwards meanings). See
+> `docs/goldbox-glib-format.md` §7.2's correction block for the full
+> source-cited derivation.
+
+## 6. Extractor and outputs
 
 ```
 npx tsx tools/poolsofdarkness/amiga/export-data.ts data/poolsofdarkness/amiga
@@ -176,5 +198,10 @@ Writes to `public/assets/poolsofdarkness/amiga/`:
   renders (0 skipped), this title's first real texture output — see §3b's
   update block.
 
+- `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
+  `dungeon/wall-index.json` — 32 decoded GEO levels (§5) + the level list and
+  wall-texture index the walker (`tools/walker/games-goldbox.ts`) loads.
+
 `manifest.json` carries 92 entries (90 texture PNGs + 2 `data/` JSON
-records).
+records); the `dungeon/` outputs are consumed directly by the walker and
+are not part of `manifest.json`.

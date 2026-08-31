@@ -56,6 +56,12 @@ import { loadWizardry6Snes, wizardry6SnesLevelList } from './games-w6-snes.ts';
 import { loadEotb1View, eotbLevelList } from './games-eotb.ts';
 import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
+import {
+  loadPoolOfRadianceView,
+  loadCurseOfTheAzureBondsView,
+  loadSecretOfTheSilverBladesView,
+  loadPoolsOfDarknessView,
+} from './games-goldbox.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
@@ -344,6 +350,10 @@ const GAMES = [
   { id: 'eotb', label: 'Eye of the Beholder', loader: loadEotb1View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
+  { id: 'poolofradiance', label: 'Pool of Radiance', loader: loadPoolOfRadianceView, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'secretofthesilverblades', label: 'Secret of the Silver Blades', loader: loadSecretOfTheSilverBladesView, defaultLevel: 16, platform: 'amiga' as const },
+  { id: 'poolsofdarkness', label: 'Pools of Darkness', loader: loadPoolsOfDarknessView, defaultLevel: 1, platform: 'amiga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];

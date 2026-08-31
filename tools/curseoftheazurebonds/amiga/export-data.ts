@@ -38,6 +38,8 @@ export async function exportCurseOfTheAzureBondsData(dataDir: string) {
     // 203) prefix still lives on DISKA's 8X8D.TLB, not this file.
     specificTilesPath: 'DISKB/8X8D.TLB',
     universalTilesPath: 'DISKA/8X8D.TLB',
+    // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
+    geoPath: 'DISKB/GEO.GLB',
   });
 }
 

@@ -171,7 +171,29 @@ Same scope note as Curse (§4 there) — only the outer GLIB container
 structure is validated corpus-wide; individual files' semantic content is
 not catalogued.
 
-## 5. Extractor and outputs
+## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
+
+**CONFIRMED for wall/door connectivity, OPEN for wall-art selection.** 17
+levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
+Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
+verified via a cross-title shared-wall self-consistency oracle at
+96.5%/97.5% (horizontal/vertical agreement) on this title specifically.
+Planes 0/1 (candidate wall-art selectors) remain open, escalated to
+`re-oracle`. Full writeup and cross-title verification table:
+`docs/goldbox-glib-format.md` §7. Implementation:
+`tools/shared/goldbox-geo.ts`; extractor wiring:
+`tools/shared/goldbox-glib-export.ts`'s `geoPath` option (this title passes
+`DISK2/GEO.GLB`). See `docs/secretofthesilverblades/TODO.md`.
+
+> **Correction (2026-08-31, `re-oracle` escalation):** planes 0/1 are now
+> CONFIRMED (wall-art TYPE per direction, 0-15, indexing a level-scoped
+> ECL-loaded wallset table) and plane 3's value labels were corrected
+> (0=solid/blocked, 1=passable, 2/3=locked door — the original 0=open/
+> 1=wall/2=door guess had the right bit layout but backwards meanings). See
+> `docs/goldbox-glib-format.md` §7.2's correction block for the full
+> source-cited derivation.
+
+## 6. Extractor and outputs
 
 ```
 npx tsx tools/secretofthesilverblades/amiga/export-data.ts data/secretofthesilverblades/amiga
@@ -188,5 +210,10 @@ Writes to `public/assets/secretofthesilverblades/amiga/`:
   §3b's now-decodable per-wall-id scheme, the pairing WALLDEF is actually
   keyed to at runtime. Higher confidence than the `walldef-*` set.
 
+- `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
+  `dungeon/wall-index.json` — 17 decoded GEO levels (§5) + the level list and
+  wall-texture index the walker (`tools/walker/games-goldbox.ts`) loads.
+
 `manifest.json` carries 192 entries (190 texture PNGs + 2 data JSON
-records).
+records); the `dungeon/` outputs are consumed directly by the walker and
+are not part of `manifest.json`.

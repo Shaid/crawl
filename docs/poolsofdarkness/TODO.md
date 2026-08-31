@@ -49,10 +49,33 @@ for exactly this case — see `docs/goldbox-glib-format.md` §5.7) needed no
 title-specific code. 90/90 entries render (`walldef2-<id>-wall<n>-view6.png`),
 0 skips, 83/90 non-degenerate — Pools' first shipped texture asset.
 
+## 2026-08-31 — `GEO.GLB` dungeon maze grid SOLVED (connectivity); walker built
+
+32 levels' wall/door connectivity **CONFIRMED** (96.6%/95.1% cross-title
+self-consistency oracle, same technique as Curse/Secret/Pool of Radiance —
+see `docs/goldbox-glib-format.md` §7 and `amiga/data-structure.md` §5).
+Which WALLDEF wall-art texture faces the player per square is NOT resolved
+(escalated to `re-oracle`, shared item `caob-geo-plane01`, see Curse's
+TODO). `tools/walker/games-goldbox.ts` provides a real interactive walker
+for this title, built on the confirmed grid.
+
+## 2026-08-31 (follow-up) — `re-oracle` escalation SOLVED planes 0/1 + resolved tile-bank index unit (shared with Curse)
+
+Both `pod-tile-bank-index-unit` and `pod-geo-plane01` are CLOSED — same
+escalation and resolution as Curse's (`docs/curseoftheazurebonds/TODO.md`'s
+2026-08-31 follow-up section): a WALLDEF tile byte indexes one whole glyph
+block (this title's own 257-block/56-byte arithmetic was in fact the
+strongest single piece of evidence for that reading), and GEO planes 0/1
+are wall-art TYPE per direction indexing a level-scoped ECL-loaded wallset
+table (plane 3's value labels were also corrected: 0=solid, 1=passable,
+2/3=locked door). `tools/shared/goldbox-geo.ts` and `tools/walker/
+games-goldbox.ts` corrected accordingly. See `docs/goldbox-glib-format.md`
+§7.2/§5.6.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| pod-tile-bank-index-unit | open | Shares `caob-tile-bank-index-unit` (tile-vs-block index unit); this title's 257-block/56-byte banks against a byte index are the strongest evidence for the block reading | `docs/goldbox-glib-format.md` §5.6 | 2026-08-30 re-codebreaker |
+| pod-wallset-ecl-binding | open | Shares `caob-wallset-ecl-binding` — which WALLDEF resource occupies each ECL-loaded wallset slot, needs ECL bytecode decode | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
 | pod-item-dat-vs-items-dat | open | Both `ITEM.DAT` and `ITEMS.DAT` are present; their relationship (which is real/active) not investigated | `amiga/data-structure.md` §0 | 2026-08-30 |
 | pod-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

@@ -359,3 +359,222 @@ checked by a flat-pixel-value scan (Curse 90/90, Secret 90/95, Pools 83/90
 non-degenerate; the remainder are legitimate all-placeholder "nothing to
 draw" views, not errors) and spot-checked visually (clear structured
 horizontal-band/doorway and diagonal/herringbone patterns, not noise).
+
+> **Correction (2026-08-31, `re-oracle` escalation):** `caob-tile-bank-index-unit`
+> (§5.6) is now CONFIRMED, resolved as a byproduct of the GEO plane-0/1
+> escalation (§7.2). The decompiled DOS *Curse of the Azure Bonds* source's
+> `Put8x8Symbol` (`ovr038.cs`) defines a global 8x8-glyph symbol-id space —
+> id 0 invalid, ids 1-0x2D (45) universal, then 70 ids per wallset slot
+> (`0x2E-0x73`, `0x74-0xB9`, `0xBA-0xFF`) — matching this section's
+> `1 + 45 + 70k` block arithmetic exactly. A WALLDEF tile byte indexes one
+> whole bank BLOCK (= one glyph/symbol), not a single raw 8x8-tile-plane
+> byte; the "index = one 8x8 tile" reading this repo shipped happens to
+> coincide with the correct one for PoR's own simpler (single-scheme, no
+> wallset banking) `WALLDEF` geometry, which is why its renders were never
+> wrong — but the general rule for the GLIB titles' per-wall-id banked
+> scheme is "one byte = one glyph block", confirmed, not merely a coincident
+> plausible render. See §7.2 for the source citation and file offsets.
+
+## 7. GEO — the dungeon/city 16x16 square grid (2026-08-31)
+
+This section applies to **all four** sibling titles, including Pool of
+Radiance — GEO's record shape is byte-for-byte identical whether it arrives
+via PoR's `.dax` (`geo.dax`) or the GLIB container (`GEO.GLB`), so it is
+documented once here rather than four times. Implementation:
+`tools/shared/goldbox-geo.ts` (decoder) + `tools/shared/goldbox-dungeon-export.ts`
+(shared extractor step, wired into `tools/poolofradiance/amiga/export-data.ts`
+directly and into `tools/shared/goldbox-glib-export.ts`'s `geoPath` option for
+the other three). This is the format the task's standing "no dungeon maze
+grid exists yet" gap needed — see each title's own `TODO.md`.
+
+### 7.1 Container — CONFIRMED, one fixed-size record per level
+
+`GEO.GLB`/`geo.dax` holds one record per playable map/level, keyed by the
+container's own id (PoR: `geo.dax`'s directory `indexID`; the GLIB titles:
+`GEO.GLB`'s index-block `id` — GEO.GLB is always a top-level, uncompressed
+"DATA"-tagged container, so `readBlock` gives the record bytes directly with
+no decompression step, per §0/§5 above). Every record is **exactly 1024
+bytes** (PoR: 1026 bytes decompressed, of which the leading 2 bytes are a
+CONSTANT `0x0004` tag on literally every one of its 29 entries — not
+per-level data — followed by the same 1024-byte record). Verified
+corpus-wide, zero deviation: PoR 29/29 entries, Curse 16/16 blocks, Secret
+17/17, Pools 32/32, every one exactly 1024 (+2 for PoR) bytes.
+
+### 7.2 Record layout — CONFIRMED end-to-end (2026-08-31, `re-oracle` escalation)
+
+> **Correction (2026-08-31, `re-oracle` escalation):** everything in this
+> section below the correction notice describes the FIRST-PASS findings
+> (plane 3 CONFIRMED but with backwards value labels; plane 2 a plausible
+> guess; planes 0/1 fully open). The escalation found the actual DOS *Curse
+> of the Azure Bonds* executable decompiled by the `simeonpilgrim/coab`
+> project (same author/technique already trusted for `pooldata.py`) and
+> confirmed the Amiga ports run the same engine by locating 4 of its
+> constant tables **byte-exact** inside `data/poolofradiance/amiga/program`
+> (file-relative offsets): `symbol_set_fix` at `+0x6D53E`,
+> `MapDirectionXDelta`/`MapDirectionYDelta` at `+0x6D552`/`+0x6D55B`, and the
+> 3D renderer's 10-view `idxOffset` table at `+0x40E8B`. This is strong,
+> code-level ground truth, not a fan-doc guess — sources cited:
+> `Classes/GeoBlock.cs` (`MapInfo`), `engine/ovr031.cs`
+> (`draw_3D_8x8_titles`, `WallDoorFlagsGet`, `getMap_wall_type`,
+> `LoadWalldef`, `Load3DMap`), `engine/ovr015.cs` (`MapSetDoorUnlocked`,
+> move/bash handlers), `engine/ovr008.cs:655-684` (ECL wallset-slot
+> globals), `engine/ovr038.cs` (`Put8x8Symbol`/`Load8x8D`).
+>
+> **The corrected model, superseding everything below:**
+>
+> - **Planes 0/1 are wall-art TYPE per direction (0-15), not an ambient
+>   per-square property.** Plane 0's high nibble = North wall type, low
+>   nibble = East; plane 1's high nibble = South, low nibble = West (same
+>   N/E/S/W convention as plane 3). Value 0 = no wall drawn (always
+>   passable). Value 1-15 indexes a **level-scoped** 3-slot x 5-slice
+>   wallset table: `wallsetSlot = floor((n-1)/5)`, `slice = (n-1)%5)` —
+>   which WALLDEF resource occupies each of the 3 slots is written at
+>   runtime by that level's ECL bytecode (VM globals `0x322/0x324/0x326`,
+>   `ovr008.cs:655-684`), **not present in the GEO record itself**. This is
+>   exactly the missing indirection layer that defeated all three static
+>   hypotheses below: the nibble names a SLICE, not a resource id, so no
+>   direct nibble->WALLDEF mapping can exist without also decoding each
+>   level's ECL script (not done this pass). This also explains why the
+>   first-pass "populated on fully-open cells too" observation was true and
+>   not a refutation of anything — it was testing the wrong semantics
+>   (id-space membership) against the right field (wall-art type), not
+>   because wall type is unrelated to walls.
+> - **Plane 3's bit LAYOUT was right, its VALUE labels were backwards.**
+>   Per `WallDoorFlagsGet` (`ovr031.cs:181`) and `MapSetDoorUnlocked`
+>   (`ovr015.cs:7`, which WRITES 1 to unlock): `0`=solid/blocked (not
+>   "open"), `1`=passable/open arch or unlocked door (not "wall"),
+>   `2`=locked door (Bash/Pick/Knock), `3`=locked door, unpickable
+>   (Bash/Knock only). Critically, this code is **only consulted where the
+>   matching direction's wall type (planes 0/1) is non-zero** — corpus-wide,
+>   a plane-3 code != 0 with no matching wall art is near-nonexistent
+>   (88/16,896 fields in PoR, 3/5,168 in Secret, 13 in Pools, 59 in Curse).
+>   The original self-consistency oracle (§ below) is unaffected — it tested
+>   shared-wall PRESENCE agreement, which is value-symmetric and blind to
+>   which value means what; only the 0/1/2/3 *meaning* was inverted, not the
+>   N/E/S/W bit assignment. See
+>   `game-re-lessons/format-doc-semantic-labels-swapped.md`.
+> - **Plane 2 is CONFIRMED (source-backed), not just a plausible guess**: the
+>   `mapWallRoof` byte, read verbatim by ECL bytecode (VM read location 4).
+>   Bit 7 = roofed/indoor (selects indoor vs outdoor sky colour,
+>   `ovr029.cs:21-32`), bit 6 = city special-tile flag (`ovr011.cs:518`), low
+>   bits = zone/special-square id consumed by ECL scripts. Still not used by
+>   the walker (no lighting/sky-colour distinction implemented).
+>
+> `tools/shared/goldbox-geo.ts` implements the corrected model (`GeoCell`
+> now exposes `wallN/E/S/W` — the 0-15 type — and `doorN/E/S/W` — the
+> corrected 0-3 code — plus `isBlocked()`/`isDoor()`/`wallSlotSlice()`
+> helpers); `tools/walker/games-goldbox.ts` was updated to collide on
+> `isBlocked()` (wall type != 0 AND door code == 0) instead of the old,
+> backwards `code===0||code===2` rule, which silently treated ~75-87% of
+> real solid walls as passable. Re-verified corpus-wide after the fix: all
+> four extractors still decode their full level counts (PoR 29/29, Curse
+> 16/16, Secret 17/17, Pools 32/32) with the corrected field shape, and the
+> proportion of wall-drawn sides that are solid (door code 0) is 70-87%
+> across all four titles' first levels — a sane, non-degenerate rate.
+> `caob-tile-bank-index-unit` (§5.6) was resolved as a byproduct — see the
+> correction note there. The `*-geo-plane01` TODO rows are now CLOSED.
+>
+> Everything below this notice is the first-pass write-up, kept for its
+> still-valid evidence (the self-consistency oracle numbers, the corpus
+> statistics that motivated each refuted hypothesis) — read it as history,
+> not as the current model.
+
+### 7.2 (first-pass, corrected above) Record layout — CONFIRMED for plane 3 bit layout, STRUCTURAL for plane 2, OPEN for planes 0/1
+
+The 1024-byte record is **four consecutive 256-byte planes** over a 16x16
+grid (256 cells, `y*16+x` row-major) — NOT four interleaved bytes per cell.
+This was itself an empirical finding: interleaving the 4 bytes per cell
+produces spatially incoherent byte grids (no border/room coherence); slicing
+into four 256-byte planes instead produces four clearly distinct, spatially
+coherent data classes.
+
+**Plane 3 (bytes 768-1023) — CONFIRMED wall/door connectivity code.** Each
+byte packs four 2-bit fields: bits[0:2]=North, bits[2:4]=East,
+bits[4:6]=South, bits[6:8]=West. Field values: `0`=open, `1`=wall, `2`=door,
+`3`=a third, much rarer type (plausibly a secret door — no further evidence
+this pass). This is the maze grid the walker (`tools/walker/games-goldbox.ts`)
+is built on.
+
+Verified via a self-consistency oracle, not disassembly, since no ground
+truth beyond the games' own bytes was available: a wall shared by two
+adjacent cells should agree on "wall present" from both sides — cell
+`(x,y)`'s East field should agree with cell `(x+1,y)`'s West field, and cell
+`(x,y)`'s South field with cell `(x,y+1)`'s North field. All 24 permutations
+of which 2-bit field is which compass direction were tried (`itertools.
+permutations` over `{0,2,4,6}`, both a horizontal-neighbour and a
+vertical-neighbour agreement rate computed for each). The assignment above
+scored decisively above every other permutation, on **every** title:
+
+| Title | Horizontal agreement | Vertical agreement | Best of the other 23 permutations |
+|---|---|---|---|
+| Pool of Radiance | 95.3% | 95.4% | 55.7% |
+| Curse of the Azure Bonds | 90.8% | 91.6% | 55.7% |
+| Secret of the Silver Blades | 96.5% | 97.5% | ~55% |
+| Pools of Darkness | 96.6% | 95.1% | ~55% |
+
+The residual few percent disagreement is attributed to genuine one-way
+features (secret doors, map-edge boundaries where the neighbour is off the
+16x16 grid's used area) rather than a decode error — it is not remotely close
+in magnitude to the wrong-permutation baseline.
+
+**Plane 2 (bytes 512-767) — STRUCTURAL hypothesis: special-square/event
+index.** Mostly `0x00` (no special content on this square); sparse nonzero
+values cluster into small indices (1-4, 8, 25, 26 observed on Pool of
+Radiance) and high-bit-set indices (`0x80`-`0xa3`ish observed). This matches
+the Gold Box engine's well-documented "special square" (SS) mechanism
+described in the Digital Antiquarian's "Opening the Gold Box" series (each
+16x16 map may flag specific squares to run a scripted event on entry, and
+the total script-space budget for a map's special squares was a real,
+period-documented design constraint) — plausibly cross-referencing the
+per-title `ECL` bytecode resource (`ecl.dax`/`ECL.GLB`), which is
+container-decoded in this corpus (an offset/jump table followed by a
+bytecode stream — see `docs/poolofradiance/amiga/data-structure.md` for
+PoR's own `ecl.dax` container layout notes) but not disassembled or
+interpreted this pass. NOT used by the walker.
+
+**Planes 0 and 1 (bytes 0-511) — OPEN**, escalated to `re-oracle`. Real,
+non-degenerate, spatially-coherent per-square data present on EVERY cell,
+including fully open floor cells with no walls at all in any direction —
+this alone refutes "these are wall-art ids, silent where no wall exists".
+Three genuinely different hypotheses were tried on Pool of Radiance's own
+`geo.dax` corpus (7424 cells across all 29 levels) and none of them closed
+the question:
+
+| Approach | Result | Verdict |
+|---|---|---|
+| Raw byte value IS the WALLDEF wall-art id directly (WALLDEF's own confirmed id space is `0-9,17-21,23,24`) | Only 34.3% (767/2233) of cells with any confirmed wall/door present have a plane-0 byte value inside that id set | REFUTED as "the id directly" — too weak a fit to be the whole story |
+| Populated only where a wall exists (silent/zero on fully-open cells) | The single MOST common `(anyWall, plane0!=0, plane1!=0)` combination across the whole corpus is `(false, true, true)` — fully open cells with both planes nonzero, 1480/7424 cells, the largest bucket of all | REFUTED — planes 0/1 look like an ambient per-square property independent of wall presence (candidate: floor/ceiling texture id, room/region id, lighting zone) |
+| Nibble-halves correlate with wall style by axis, using the SAME adjacency-agreement oracle that solved plane 3, but testing nibble EQUALITY between neighbours restricted to edges plane 3 confirms are walled (739 horizontal / 800 vertical edges) | Plane 0's HIGH nibble matches between horizontally-adjacent walled cells 43.6% of the time (vs 17.4% on the wrong axis; ~6.25% chance for 16 possible values); its LOW nibble matches vertically-adjacent walled cells 41.6% of the time (vs 19.2% wrong-axis). Plane 1 shows the identical axis split (41.9%/44.0%). | INCONCLUSIVE — well above chance and axis-consistent (high nibble ~ E/W, low nibble ~ N/S), but far below the ~95% a "same physical wall stores the same id on both sides" model would need. Suggestive of a real but INDIRECT relationship (e.g. a shared room/area id, or an index into a level-local sub-table) rather than the id itself |
+
+A structural fact from the first hypothesis's failure, not yet reconciled
+with anything above: across the whole PoR `geo.dax` corpus, plane 0's low
+nibble (`value & 0x0F`) is **NEVER** `0x0F` (15) — every observed value's
+low nibble is in `0-14`. This is suggestive given WALLDEF entries have
+exactly 5, 10, or 15 "wallset" slices (§5.6-5.7 above) — a 0-based
+slice-index field capped at 14 would produce exactly this signature — but no
+attempt to test a two-level "(id or area) + slice index" hypothesis against
+real rendered wall-art coherence was made this pass.
+
+This item was escalated to `re-oracle` (2026-08-31) with the full evidence
+above plus pointers to PoR's own unopened `program` executable and the
+already-successful CODE-hunk-relative disassembly technique used for §5.1's
+compression-method dispatch. See the per-title `TODO.md` `*-geo-plane01`
+rows for the outcome once it lands.
+
+### 7.3 Walker integration — CONFIRMED connectivity + passability, RENDERED wall art
+
+`tools/walker/games-goldbox.ts` implements one shared `GameView` for all
+four titles, built on the CORRECTED model from §7.2's escalation:
+`isBlocked(cell,dir)` (wall type != 0 AND door code == 0) gates movement,
+`hasWall`/`isDoor` drive the minimap and the first-person side/front hints.
+Wall-art SELECTION (which specific WALLDEF texture a 1-15 wall type names)
+still requires each level's ECL bytecode — not decoded by this project — so
+the view does **not** claim per-square wall-art accuracy: it renders one
+deterministically-chosen, already render-confirmed WALLDEF wall texture per
+level (from that title's own `dungeon/wall-index.json`, itself built by
+scanning the extractor's own already-written `walldef*-<id>-wall<n>-
+view6.png` files) wherever the confirmed grid says a wall is drawn in that
+direction. This is a real Gold Box wall texture in the right place, not
+proven to be the *specific* texture the original game would draw there.
+Locked doors (code 2/3) get a distinct tint but are treated as passable (no
+key/lock mechanic implemented in the walker).

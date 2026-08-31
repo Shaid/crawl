@@ -38,6 +38,8 @@ export async function exportSecretOfTheSilverBladesData(dataDir: string) {
     // bucket in this file; the universal prefix comes from DISK1's copy.
     specificTilesPath: 'DISK2/8X8D.TLB',
     universalTilesPath: 'DISK1/8X8D.TLB',
+    // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
+    geoPath: 'DISK2/GEO.GLB',
   });
 }
 

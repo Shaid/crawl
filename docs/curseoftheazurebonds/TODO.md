@@ -62,9 +62,39 @@ all share one container format ("GLIB") different from PoR's `.dax`.
 - `buildFlatTileBank`'s own compression bug (it called `parseGlibContainer`
   directly on possibly-compressed on-disk bytes) is fixed as a byproduct.
 
+## 2026-08-31 — `GEO.GLB` dungeon maze grid SOLVED (connectivity); walker built
+
+16 levels' wall/door connectivity **CONFIRMED** (90.8%/91.6% cross-title
+self-consistency oracle, same technique and bit layout as Pool of Radiance's
+`geo.dax` and the other two GLIB titles — see
+`docs/goldbox-glib-format.md` §7 and `amiga/data-structure.md` §5). Which
+WALLDEF wall-art texture faces the player per square is NOT resolved
+(escalated to `re-oracle`, `caob-geo-plane01` below). `tools/walker/
+games-goldbox.ts` provides a real interactive walker for this title, built
+on the confirmed grid.
+
+## 2026-08-31 (follow-up) — `re-oracle` escalation SOLVED planes 0/1 + resolved `caob-tile-bank-index-unit` as a byproduct
+
+Both `caob-geo-plane01` and `caob-tile-bank-index-unit` are CLOSED. The
+escalation found the decompiled DOS *Curse of the Azure Bonds* source
+(`simeonpilgrim/coab`) and matched 4 of its constant tables byte-exact
+inside `data/poolofradiance/amiga/program`, confirming all four Amiga ports
+run the same engine. `caob-tile-bank-index-unit` resolved directly:
+`Put8x8Symbol` (`ovr038.cs`) confirms a `WALLDEF.GLB` tile byte indexes one
+whole 48/56-byte glyph BLOCK, not a single 8x8 tile — the block-count
+arithmetic (`1+45+70n`) was right. `caob-geo-plane01` resolved: planes 0/1
+are wall-art TYPE per direction (0-15) indexing a level-scoped, ECL-loaded
+3-slot wallset table (still needs each level's ECL script to resolve to an
+actual WALLDEF id — tracked as `caob-wallset-ecl-binding` below); plane 3's
+bit layout was right but its value labels were backwards (0=solid,
+1=passable, 2/3=locked door). `tools/shared/goldbox-geo.ts` and
+`tools/walker/games-goldbox.ts` corrected accordingly — the walker's old
+collision rule silently treated ~75-87% of real solid walls as passable.
+See `docs/goldbox-glib-format.md` §7.2's and §5.6's correction blocks.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| caob-tile-bank-index-unit | open | Does a `WALLDEF.GLB` tile byte index one 8x8 tile or a whole 48-byte (6-tile) block? Block-count arithmetic (1+45+70*n) fits exactly for Curse; PoR's confirmed geometry says single tile | `docs/goldbox-glib-format.md` §5.6 | 2026-08-30 re-codebreaker |
+| caob-wallset-ecl-binding | open | Which WALLDEF resource occupies each of a level's 3 ECL-loaded wallset slots (needed to resolve a wall-art type nibble to an actual texture id) — requires decoding `ecl.dax`/`ECL.GLB` bytecode, not attempted this pass | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
 | caob-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content (items, monsters, sprites, portraits, dungeon commands, strings) not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

@@ -56,11 +56,55 @@ sibling titles.
 | Gold Box Explorer's DOS-side EGA/VGA/sprite picture-block specs applied to `pic.dax`/`cpic.dax` | 0/59, 0/118 pass | Real negative — the Amiga port doesn't share the DOS port's picture format. `pic.dax`/`cpic.dax` content still open. |
 | Speculative "vector/geometric draw-command stream" hypothesis for `pic.dax` (periodicity, doubling-value pairs) | Inconclusive, not pursued further | Recorded as a lead only, not a finding — set aside once `walldef.dax` answered the FPV question directly |
 
+## 2026-08-31 — `geo.dax` dungeon maze grid SOLVED (connectivity); walker built
+
+- `geo.dax` (not `dungcom.dax`) is the maze/level-layout data the task
+  brief's "no dungeon maze grid" gap needed: 29 levels, each a 16x16 grid
+  whose wall/door connectivity (which cell connects to which, in which
+  compass direction) is **CONFIRMED** via a cross-title self-consistency
+  oracle (95.3%/95.4% horizontal/vertical shared-wall agreement, vastly
+  above every wrong bit-permutation tried) — see
+  `docs/goldbox-glib-format.md` §7 for the full writeup (shared byte-exact
+  across all four sibling titles) and `amiga/data-structure.md` §7 for this
+  title's own pointer.
+- Which WALLDEF wall-art texture faces the player in each direction (the
+  per-square record's other two data planes) is NOT resolved — three
+  different hypotheses were tried and none closed it; escalated to
+  `re-oracle` (`goldbox-geo-plane01` below).
+- `dungcom.dax`'s role is RE-TARGETED, not solved: the task's "maze data"
+  naming hypothesis for it is refuted now that `geo.dax` fills that role;
+  new evidence (the GLIB titles' same-named `DUNGCOM.TLB` is a plain 8x8-tile
+  picture container) points to combat-backdrop art instead — see
+  `amiga/data-structure.md` §5's correction block.
+- `tools/walker/games-goldbox.ts` — a real interactive first-person walker
+  for all four titles, built on the confirmed connectivity grid, rendering a
+  representative (not per-square-accurate) WALLDEF wall texture wherever a
+  wall/door/other blocks a direction.
+
+## 2026-08-31 (follow-up) — `re-oracle` escalation SOLVED `geo.dax` planes 0/1 + corrected plane-3 value semantics
+
+`por-geo-plane01` is CLOSED, not just advanced: the escalation found the
+decompiled DOS *Curse of the Azure Bonds* source (`simeonpilgrim/coab`) and
+matched 4 of its constant tables byte-exact inside `data/poolofradiance/
+amiga/program`, confirming the Amiga ports run the same engine. Planes 0/1
+are wall-art TYPE per direction (0-15), indexing a level-scoped, ECL-loaded
+3-slot wallset table — not directly resolvable to a WALLDEF id without
+decoding each level's ECL script (still open, but now a well-understood gap,
+not a mystery). Plane 3's bit layout was right but its VALUE labels were
+backwards (0=solid, 1=passable, 2/3=locked door, not the original
+0=open/1=wall/2=door guess) — `WallDoorFlagsGet`/`MapSetDoorUnlocked`
+disassembly-cited. `tools/shared/goldbox-geo.ts` and `tools/walker/
+games-goldbox.ts` were corrected accordingly (the walker's old collision
+rule silently treated ~75-87% of real solid walls as passable). See
+`docs/goldbox-glib-format.md` §7.2's correction block for the full source
+citation and file offsets.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
 | por-pic-format | open | What do `pic.dax`/`cpic.dax` actually contain? Confirmed NOT any Gold Box Explorer DOS picture-block shape (0/59, 0/118 pass) | `amiga/data-structure.md` §4 | 2026-08-30 |
-| por-dungcom-semantics | open | `dungcom.dax` decompresses cleanly (~7.5 KB) but its field layout/semantics (dungeon/maze command data, per its filename) are undecoded | `amiga/data-structure.md` §5 | 2026-08-30 |
+| por-dungcom-semantics | open | `dungcom.dax` decompresses cleanly (~7.5 KB) but its content class is now RE-TARGETED to "likely combat-backdrop art" (not maze data — see `geo.dax`), still no confirmed sub-structure | `amiga/data-structure.md` §5 | 2026-08-31 |
+| por-wallset-ecl-binding | open | Which WALLDEF resource occupies each of a level's 3 ECL-loaded wallset slots (needed to resolve a wall-art type nibble to an actual texture id) — requires decoding `ecl.dax` bytecode, not attempted this pass | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
 | por-8x8d-header | open | `8x8d.dax`'s 4-byte per-tile-block leading header (meaning undecoded; tile pixel decode past it is only "rendered", not disassembly-confirmed) | `amiga/data-structure.md` §3 | 2026-08-30 |
-| por-full-catalog | open | Most `.dax` files' contents (sprites, bodies/heads, monsters, items, `ecl.dax`, `final.dax`, etc.) not catalogued this pass — explicitly deferred per task scope (container+codec+FPV question was the goal, not a full catalog) | `amiga/data-structure.md` (container/codec sections apply to all files; only walldef/8x8d/pic/cpic/dungcom examined) | 2026-08-30 |
+| por-full-catalog | open | Most `.dax` files' contents (sprites, bodies/heads, monsters, items, `ecl.dax`, `final.dax`, etc.) not catalogued this pass — explicitly deferred per task scope (container+codec+FPV question was the goal, not a full catalog) | `amiga/data-structure.md` (container/codec sections apply to all files; only walldef/8x8d/pic/cpic/dungcom/geo examined) | 2026-08-30 |

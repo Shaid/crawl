@@ -35,6 +35,8 @@ export async function exportPoolsOfDarknessData(dataDir: string) {
     // bucket in this file (Pools' own format simplification — see
     // data-structure.md §2/§5).
     specificTilesPath: 'Disk2/8X8D.TLB',
+    // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
+    geoPath: 'Disk3/GEO.GLB',
   });
 }
 

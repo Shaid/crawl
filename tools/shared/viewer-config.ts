@@ -76,6 +76,30 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga', 'dosvga'],
   },
+  poolofradiance: {
+    gameId: 'poolofradiance',
+    name: GAME_DISPLAY_NAMES.poolofradiance,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  curseoftheazurebonds: {
+    gameId: 'curseoftheazurebonds',
+    name: GAME_DISPLAY_NAMES.curseoftheazurebonds,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  secretofthesilverblades: {
+    gameId: 'secretofthesilverblades',
+    name: GAME_DISPLAY_NAMES.secretofthesilverblades,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  poolsofdarkness: {
+    gameId: 'poolsofdarkness',
+    name: GAME_DISPLAY_NAMES.poolsofdarkness,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
 };
 
 export function getViewerConfig(gameId: GameId): ViewerConfig {

@@ -332,14 +332,59 @@ this session would not have changed that answer).
 
 Single block, decompresses to ~7,500 bytes (see `dungcom.json`'s
 `decompressedLength`), passing the §2 checksum oracle. Dense, structured
-binary with no record stride found yet by a first byte-level look (this is
-the game's likely dungeon-command/maze-layout data, per the task's naming
-hypothesis, but this pass did not confirm what its fields mean). Left
-**open** — see `docs/poolofradiance/TODO.md`.
+binary with no record stride found yet by a first byte-level look.
+
+> **Correction (2026-08-31):** the task-naming hypothesis that this file
+> holds dungeon/maze-layout data is now REFUTED — that role belongs to
+> `geo.dax` instead, which is fully solved (§7 below, connectivity CONFIRMED
+> via a cross-title self-consistency oracle). `dungcom.dax` is very likely
+> NOT maze data at all: the three sibling GLIB titles ship a same-named
+> `DUNGCOM.TLB` resource that decodes cleanly as a "TILE"-tagged container of
+> plain, header-less, exact-8-byte-multiple 8x8 1bpp tile blocks (25-30
+> blocks of exactly 296 = 37*8 bytes each, no leftover) — the same raw pixel
+> format `8x8d.dax`/`8X8D.TLB` uses for wall art. That strongly suggests
+> `DUNGCOM`/`RANDCOM`/`WILDCOM` are **combat-screen backdrop art** (dungeon /
+> random / wilderness encounter backgrounds), not encounter *tables* or maze
+> data, matching how these SSI Gold Box games render a distinct terrain
+> backdrop behind the tactical combat grid depending on where the fight
+> happens. PoR's own `dungcom.dax` does NOT cleanly fit this exact byte
+> shape as a single flat 8x8-tile stream (7,500 isn't a multiple of 8), so
+> this is recorded as a re-targeted, evidence-backed HYPOTHESIS for what
+> `dungcom.dax` is (combat backdrop art of some kind, still needing its own
+> header/sub-block resolved), not a second confirmed decode — left **open**,
+> retargeted away from "maze data", see `docs/poolofradiance/TODO.md`.
 
 ---
 
-## 6. Extractor and outputs
+## 7. `geo.dax` — the dungeon/city 16x16 square grid (the maze data)
+
+**CONFIRMED for wall/door connectivity, OPEN for wall-art selection.**
+`geo.dax` — not `dungcom.dax` (§5) — is the maze/level-layout data: 29
+entries, each decompressing to exactly 1,026 bytes (a constant 2-byte
+`0x0004` tag, identical on every entry, plus a 1024-byte record: four
+consecutive 256-byte planes over a 16x16 square grid). Plane 3 is a
+confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code, verified via a
+cross-title shared-wall self-consistency oracle at 95.3%/95.4%
+(horizontal/vertical agreement) on this title specifically. Planes 0/1
+(candidate wall-art selectors) remain open, escalated to `re-oracle`. Full
+writeup, cross-title verification table, and the walker integration this
+enables: `docs/goldbox-glib-format.md` §7 (this format is shared
+byte-for-byte with the three GLIB sibling titles' `GEO.GLB`, so it is
+documented there rather than four times). Implementation:
+`tools/shared/goldbox-geo.ts`; extractor wiring:
+`tools/poolofradiance/amiga/export-data.ts` step 4.
+
+> **Correction (2026-08-31, `re-oracle` escalation):** planes 0/1 are now
+> CONFIRMED (wall-art TYPE per direction, 0-15, indexing a level-scoped
+> ECL-loaded wallset table) and plane 3's value labels were corrected
+> (0=solid/blocked, 1=passable, 2/3=locked door — the original 0=open/
+> 1=wall/2=door guess had the right bit layout but backwards meanings). See
+> `docs/goldbox-glib-format.md` §7.2's correction block for the full
+> source-cited derivation.
+
+---
+
+## 8. Extractor and outputs
 
 Run from the repo root:
 
@@ -356,6 +401,14 @@ Writes to `public/assets/poolofradiance/amiga/`:
 - `textures/walldef-<id>-wall<n>-view6.png` — 105 composited wall-view
   renders (one per non-degenerate wall slice, view 6 = the 8×7 "front face"),
   the visual evidence cited in §3.
+- `dungeon/level-<id>.json` — 29 decoded `geo.dax` levels (§7), each a
+  16x16 grid of `{n,e,s,w,special,raw0,raw1}` cells.
+  `dungeon/levels-index.json` and `dungeon/wall-index.json` — the level
+  list and wall-texture index the walker (`tools/walker/games-goldbox.ts`)
+  loads.
 
 `manifest.json` carries 107 entries (105 texture PNGs + 2 data JSON records)
-after a clean rebuild.
+after a clean rebuild; the `dungeon/` outputs are consumed directly by the
+walker and are not (yet) part of `manifest.json`, matching the convention
+used by the other walker-enabled games in this repo (e.g. Black Crypt's
+`dungeon/levels.json`).

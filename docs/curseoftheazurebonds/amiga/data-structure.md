@@ -238,7 +238,31 @@ wall-renderer question), the remaining `.GLB`/`.TLB` files' semantic content
 NOT catalogued — only their outer GLIB container structure is validated
 (§1). See `docs/curseoftheazurebonds/TODO.md`.
 
-## 5. Extractor and outputs
+## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
+
+**CONFIRMED for wall/door connectivity, OPEN for wall-art selection.** 16
+levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
+Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
+verified via a cross-title shared-wall self-consistency oracle at
+90.8%/91.6% (horizontal/vertical agreement) on this title specifically —
+vastly above every wrong bit-permutation tried. Planes 0/1 (candidate
+wall-art selectors) remain open, escalated to `re-oracle`. Full writeup and
+cross-title verification table: `docs/goldbox-glib-format.md` §7 (this
+format is shared byte-for-byte with Pool of Radiance's `geo.dax` and the
+other two GLIB titles, so it's documented there rather than four times).
+Implementation: `tools/shared/goldbox-geo.ts`; extractor wiring:
+`tools/shared/goldbox-glib-export.ts`'s `geoPath` option (this title passes
+`DISKB/GEO.GLB`). See `docs/curseoftheazurebonds/TODO.md`.
+
+> **Correction (2026-08-31, `re-oracle` escalation):** planes 0/1 are now
+> CONFIRMED (wall-art TYPE per direction, 0-15, indexing a level-scoped
+> ECL-loaded wallset table) and plane 3's value labels were corrected
+> (0=solid/blocked, 1=passable, 2/3=locked door — the original 0=open/
+> 1=wall/2=door guess had the right bit layout but backwards meanings). See
+> `docs/goldbox-glib-format.md` §7.2's correction block for the full
+> source-cited derivation.
+
+## 6. Extractor and outputs
 
 Run from the repo root:
 
@@ -261,5 +285,10 @@ Writes to `public/assets/curseoftheazurebonds/amiga/`:
   confidence than the `walldef-*` set above, though still RENDERED not
   CONFIRMED pending §3b's own open tile/block index-unit question.
 
+- `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
+  `dungeon/wall-index.json` — 16 decoded GEO levels (§5) + the level list and
+  wall-texture index the walker (`tools/walker/games-goldbox.ts`) loads.
+
 `manifest.json` carries 182 entries (180 texture PNGs + 2 data JSON
-records) after a clean rebuild.
+records) after a clean rebuild; the `dungeon/` outputs are consumed
+directly by the walker and are not part of `manifest.json`.
