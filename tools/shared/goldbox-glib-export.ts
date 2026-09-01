@@ -9,7 +9,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { writePNG } from '@seer-project/pipeline';
 import { assetDir, manifestEntry, syncDataManifest, writeJson, writeManifest } from './asset-paths.ts';
-import { decodeGlibIndex, findBlockById, isTruncated, parseGlibContainer, readBlock } from './goldbox-glib.ts';
+import { decodeGlibIndex, findBlockById, readBlock } from './goldbox-glib.ts';
+import { loadGlibFile } from './goldbox-glib-codecs.ts';
 import {
   buildFlatTileBank,
   buildWallSpecificTileBank,
@@ -20,7 +21,7 @@ import {
   SLICES_PER_WALLSET,
   VIEW_OFFSET,
 } from './goldbox-walltiles.ts';
-import { decodeGeoRecord, GEO_RECORD_SIZE } from './goldbox-geo.ts';
+import { decodeGeoLevel } from './goldbox-geo.ts';
 import { exportGeoDungeon } from './goldbox-dungeon-export.ts';
 import { findWallsetBindings, type EclDecodeOptions } from './goldbox-ecl.ts';
 
@@ -33,8 +34,22 @@ function walk(dir: string, out: string[]) {
 }
 
 export interface WallRenderSource {
-  /** Path to this title's own WALLDEF.GLB (relative to dataDir). */
-  walldefPath: string;
+  /**
+   * Path to this title's own WALLDEF.GLB (relative to dataDir). Optional —
+   * omit for a title with no wall-art format at all: Dark Queen of Krynn's
+   * WHDLoad rip has no `WALLDEF`/`WALLS`-named file anywhere across its 3
+   * disks (an exhaustive `find` confirmed this), consistent with its own
+   * `PICA`/`PICB`/`PICC`/`BIGPIC`/`FRAME` file families and its variable-
+   * size (not fixed 16x16) `GEO.GLB` shape — see
+   * `docs/darkqueenofkrynn/amiga/data-structure.md` for the full evidence
+   * this title's dungeon exploration is rendered as static location
+   * pictures (a `PICTURE` ECL opcode already exists, `0x0e`), not composited
+   * first-person wall textures. GEO/ECL still decode and the walker still
+   * shows real connectivity/minimap movement; only wall-art rendering is
+   * skipped (the walker's existing "no rendered wall texture" placeholder
+   * covers this gracefully with zero code changes).
+   */
+  walldefPath?: string;
   /** Path to an 8x8-tile GLIB file using the "flat universal+specific" scheme (see goldbox-walltiles.ts). Optional — omit when no working flat source exists for this title (e.g. Pools of Darkness). */
   tilesPath?: string;
   /**
@@ -79,6 +94,16 @@ export interface WallRenderSource {
    * goldbox-ecl.ts's module doc.
    */
   eclOptions?: EclDecodeOptions;
+  /**
+   * Number of leading bytes to strip from each ECL block's raw bytes before
+   * decoding — Treasures of the Savage Frontier's own `ECL.glb` blocks
+   * carry a constant 2-byte `0x8813` tag (IDENTICAL to Pool of Radiance's
+   * `.dax`-based `POR_ECL_PREFIX_LENGTH`, confirmed constant across all 41
+   * blocks) before the real VM buffer, even though this is a GLIB container
+   * not a `.dax` — see `goldbox-ecl.ts`'s module doc. Default 0 (Curse,
+   * Secret, Pools, Gateway all need no strip).
+   */
+  eclBlockPrefixLength?: number;
 }
 
 export async function exportGoldBoxGlibData(
@@ -97,25 +122,39 @@ export async function exportGoldBoxGlibData(
 
   const results: Record<string, unknown> = {};
   let glibOk = 0;
+  let compressedTopLevel = 0;
   let truncated = 0;
   for (const path of glibFiles) {
     const rel = path.slice(dataDir.length + 1);
-    const data = readFileSync(path);
-    let container;
+    const raw = readFileSync(path);
+    let loaded;
     try {
-      container = parseGlibContainer(data);
+      loaded = loadGlibFile(raw);
     } catch (e) {
       results[rel] = { error: (e as Error).message };
       continue;
     }
-    const trunc = isTruncated(container, data.length);
+    const { data, container } = loaded;
+    const compressed = data !== raw; // loadGlibFile only decompresses when the top-level method isn't 0.
+    // A genuinely truncated/corrupted floppy dump still shows a totalSize
+    // mismatch AFTER attempting decompression (either decompressGlibBlock
+    // itself throws, or the decompressed body's own offset table is
+    // internally inconsistent) — see `loadGlibFile`'s module doc for why
+    // this superseded the old "totalSize !== fileSize" heuristic, which
+    // mislabelled 6 of Dark Queen of Krynn's real top-level-compressed
+    // files (and, retroactively, 7 files in the Curse/Secret/Pools corpus)
+    // as corrupted.
+    const trunc = container.totalSize !== data.length;
     const headerEnd = 16 + 4 * (container.blockCount + 1);
     const structOk = container.blocks[0]?.start === headerEnd;
     if (!trunc && structOk) glibOk++;
+    if (compressed && !trunc && structOk) compressedTopLevel++;
     if (trunc) truncated++;
     results[rel] = {
       totalSize: container.totalSize,
-      fileSize: data.length,
+      fileSize: raw.length,
+      decompressedSize: compressed ? data.length : undefined,
+      compressedTopLevel: compressed,
       blockCount: container.blockCount,
       flags: container.flags,
       tag: container.tag,
@@ -127,11 +166,12 @@ export async function exportGoldBoxGlibData(
   writeJson(resolve(dataOutDir, 'container-directory.json'), {
     totalGlibFiles: glibFiles.length,
     structurallyOk: glibOk,
+    compressedTopLevel,
     truncatedOrCorrupted: truncated,
     files: results,
   });
   console.log(
-    `container-directory.json: ${glibOk}/${glibFiles.length} GLIB files structurally OK, ${truncated} truncated/corrupted`,
+    `container-directory.json: ${glibOk}/${glibFiles.length} GLIB files structurally OK (${compressedTopLevel} top-level-compressed), ${truncated} truncated/corrupted`,
   );
 
   // 2. WALLDEF wall-slice geometry — 156-byte-multiple + 10-view-sum verification, corpus-wide.
@@ -139,8 +179,7 @@ export async function exportGoldBoxGlibData(
   const walldefResults: Record<string, unknown> = {};
   for (const path of walldefFiles) {
     const rel = path.slice(dataDir.length + 1);
-    const data = readFileSync(path);
-    const container = parseGlibContainer(data);
+    const { data, container } = loadGlibFile(readFileSync(path));
     const index = decodeGlibIndex(data, container);
     const entries = index.map(({ id, blockIndex }) => {
       const block = container.blocks[blockIndex];
@@ -159,17 +198,15 @@ export async function exportGoldBoxGlibData(
   const allRenderedFiles: string[] = [];
   const viewToRender = VIEW_OFFSET.length - 4; // view index 6, the 8x7 "front face"
 
-  if (wallRender) {
-    const wdata = readFileSync(resolve(dataDir, wallRender.walldefPath));
-    const wcon = parseGlibContainer(wdata);
+  if (wallRender?.walldefPath) {
+    const { data: wdata, container: wcon } = loadGlibFile(readFileSync(resolve(dataDir, wallRender.walldefPath)));
     const windex = decodeGlibIndex(wdata, wcon);
 
     // 3a. "Flat" universal+specific scheme — a working sanity check of the
     // pixel format + view-geometry compositor, not necessarily the file
     // this WALLDEF is paired with at runtime (see WallRenderSource doc).
     if (wallRender.tilesPath) {
-      const tdata = readFileSync(resolve(dataDir, wallRender.tilesPath));
-      const tcon = parseGlibContainer(tdata);
+      const { data: tdata, container: tcon } = loadGlibFile(readFileSync(resolve(dataDir, wallRender.tilesPath)));
       const bank = buildFlatTileBank(tdata, tcon);
       let skippedOutOfRange = 0;
       let rendered = 0;
@@ -203,13 +240,11 @@ export async function exportGoldBoxGlibData(
     // (docs/goldbox-glib-format.md §5.6) — labelled RENDERED, not CONFIRMED.
     if (wallRender.specificTilesPath) {
       const sPath = resolve(dataDir, wallRender.specificTilesPath);
-      const sdata = readFileSync(sPath);
-      const scon = parseGlibContainer(sdata);
+      const { data: sdata, container: scon } = loadGlibFile(readFileSync(sPath));
       const sindex = decodeGlibIndex(sdata, scon);
 
       const uPath = resolve(dataDir, wallRender.universalTilesPath ?? wallRender.specificTilesPath);
-      const udata = readFileSync(uPath);
-      const ucon = parseGlibContainer(udata);
+      const { data: udata, container: ucon } = loadGlibFile(readFileSync(uPath));
       const uindex = decodeGlibIndex(udata, ucon);
       const universalBlock = findBlockById(ucon, uindex, 203);
       const universalTiles = universalBlock ? decodeGlibTileBucket(udata, universalBlock) : [];
@@ -279,23 +314,23 @@ export async function exportGoldBoxGlibData(
     );
   }
 
-  // 4. GEO — the 16x16 dungeon/city square grid (walls/doors CONFIRMED, see
+  // 4. GEO — the dungeon/city square grid (walls/doors CONFIRMED, see
   // goldbox-geo.ts's module doc). One level per index entry; the wall-index
   // scan (exportGeoDungeon) picks up whatever PNGs step 3 just wrote, so
-  // this must run after it.
+  // this must run after it. `decodeGeoLevel` auto-detects the fixed 16x16
+  // shape (Curse/Secret/Pools/Gateway/Treasure/PoR) or Dark Queen of
+  // Krynn's own variable-size shape — see goldbox-geo.ts's module doc.
   if (wallRender?.geoPath) {
-    const gdata = readFileSync(resolve(dataDir, wallRender.geoPath));
-    const gcon = parseGlibContainer(gdata);
+    const { data: gdata, container: gcon } = loadGlibFile(readFileSync(resolve(dataDir, wallRender.geoPath)));
     const gindex = decodeGlibIndex(gdata, gcon);
     const levels = gindex
       .map(({ id, blockIndex }) => {
         const block = gcon.blocks[blockIndex];
         const raw = readBlock(gdata, block);
-        if (raw.length !== GEO_RECORD_SIZE) return undefined;
-        return decodeGeoRecord(raw, id);
+        return decodeGeoLevel(raw, id);
       })
       .filter((l) => l !== undefined);
-    console.log(`GEO: ${levels.length}/${gindex.length} level(s) matched the expected ${GEO_RECORD_SIZE}-byte record size`);
+    console.log(`GEO: ${levels.length}/${gindex.length} level(s) decoded (fixed 16x16 or Dark Queen's own variable-size shape)`);
 
     // 4b. Wallset-slot bindings (goldbox-ecl.ts) — attach each level's own
     // ECL-resolved {slot1,slot2,slot3} flat WALLDEF ids, when the title has
@@ -307,21 +342,20 @@ export async function exportGoldBoxGlibData(
     // literally handing its script off to another block's own entry
     // points, not a guess).
     if (wallRender.eclPath) {
-      const edata = readFileSync(resolve(dataDir, wallRender.eclPath));
-      const econ = parseGlibContainer(edata);
+      const { data: edata, container: econ } = loadGlibFile(readFileSync(resolve(dataDir, wallRender.eclPath)));
       const eindex = decodeGlibIndex(edata, econ);
       const eclById = new Map(eindex.map(({ id, blockIndex }) => [id, econ.blocks[blockIndex]] as const));
+      const prefixLen = wallRender.eclBlockPrefixLength ?? 0;
       const resolveBlock = (id: number): Uint8Array | undefined => {
         const block = eclById.get(id);
-        return block ? readBlock(edata, block) : undefined;
+        return block ? readBlock(edata, block).subarray(prefixLen) : undefined;
       };
       const eclOptions = { ...wallRender.eclOptions, resolveBlock };
       let resolvedSlots = 0;
       let levelsWithAnyBinding = 0;
       for (const level of levels) {
-        const block = eclById.get(level.id);
-        if (!block) continue;
-        const raw = readBlock(edata, block);
+        const raw = resolveBlock(level.id);
+        if (!raw) continue;
         const { binding } = findWallsetBindings(raw, eclOptions);
         const n = (binding.slot1 !== undefined ? 1 : 0) + (binding.slot2 !== undefined ? 1 : 0) + (binding.slot3 !== undefined ? 1 : 0);
         if (n > 0) {

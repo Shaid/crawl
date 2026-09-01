@@ -63,17 +63,24 @@
  *
  * Verified corpus-wide: `offsets[0]` and `offsets[blockCount]` match their
  * predicted values with **zero deviation** across the vast majority of
- * `.GLB`/`.TLB` files in all three titles (see each title's
- * `data-structure.md` §1 for the exact per-file count). A real minority of
- * files (7 across the whole corpus, all large `TILE`-tagged sprite/portrait
- * banks — `ALWAYS.TLB`, `COMSPR.TLB`, `TITLE.TLB`, `CBODY.TLB`, `CHEAD.TLB`,
- * `GEN.TLB` in specific disk images) have `totalSize` far exceeding the real
- * on-disk file size and a garbage offset table past the header — see
- * `isTruncated` and the docs for why this is diagnosed as real dump
- * truncation/corruption in these specific floppy images, not a format
- * variant (an earlier hypothesis that the `flags` field's high bits signal
- * this was tested and refuted: the same high-bit pattern also appears on
- * files that decode perfectly cleanly).
+ * `.GLB`/`.TLB` files across all sibling titles (see each title's
+ * `data-structure.md` §1 for the exact per-file count).
+ *
+ * **Correction (2026-09-01):** a `totalSize` far exceeding the real on-disk
+ * file size (`ALWAYS.TLB`, `COMSPR.TLB`, `TITLE.TLB`, `CBODY.TLB`,
+ * `CHEAD.TLB`, `GEN.TLB` in specific disk images across the Curse/Secret/
+ * Pools corpus, plus 6 similarly-named files in Dark Queen of Krynn) was
+ * previously diagnosed here as real dump truncation/corruption (`isTruncated`
+ * below). It was NOT: every one of these files is TOP-LEVEL compressed
+ * (`glibCompressionMethod(data, 0) !== 0`, same byte-LZ77 method 5 nested
+ * sub-containers already use), and `loadGlibFile` (`goldbox-glib-codecs.ts`)
+ * decompresses them into a perfectly well-formed GLIB body with zero
+ * deviation — see that function's doc for the full re-verification. Always
+ * load a freshly-`readFileSync`'d top-level file through `loadGlibFile`
+ * rather than `parseGlibContainer` directly; `isTruncated`/a raw
+ * `totalSize !== data.length` check is only meaningful AFTER that
+ * decompression step (a genuinely truncated/corrupted floppy dump still
+ * fails it post-decompression, or `loadGlibFile` itself throws).
  */
 
 export interface GlibBlock {

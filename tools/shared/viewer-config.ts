@@ -100,6 +100,36 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga'],
   },
+  championsofkrynn: {
+    gameId: 'championsofkrynn',
+    name: GAME_DISPLAY_NAMES.championsofkrynn,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  deathknightsofkrynn: {
+    gameId: 'deathknightsofkrynn',
+    name: GAME_DISPLAY_NAMES.deathknightsofkrynn,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  darkqueenofkrynn: {
+    gameId: 'darkqueenofkrynn',
+    name: GAME_DISPLAY_NAMES.darkqueenofkrynn,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  gatewaytothesavagefrontier: {
+    gameId: 'gatewaytothesavagefrontier',
+    name: GAME_DISPLAY_NAMES.gatewaytothesavagefrontier,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  treasureofthesavagefrontier: {
+    gameId: 'treasureofthesavagefrontier',
+    name: GAME_DISPLAY_NAMES.treasureofthesavagefrontier,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
   ishar: {
     gameId: 'ishar',
     name: GAME_DISPLAY_NAMES.ishar,

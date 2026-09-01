@@ -445,6 +445,21 @@ export async function loadSecretOfTheSilverBladesView(assetBase: string, levelId
 export async function loadPoolsOfDarknessView(assetBase: string, levelId: number, startPose: Pose | null): Promise<GoldBoxView> {
   return loadGoldBoxView('poolsofdarkness', 'Pools of Darkness', assetBase, levelId, startPose);
 }
+export async function loadDarkQueenOfKrynnView(assetBase: string, levelId: number, startPose: Pose | null): Promise<GoldBoxView> {
+  return loadGoldBoxView('darkqueenofkrynn', 'The Dark Queen of Krynn', assetBase, levelId, startPose);
+}
+export async function loadGatewayToTheSavageFrontierView(assetBase: string, levelId: number, startPose: Pose | null): Promise<GoldBoxView> {
+  return loadGoldBoxView('gatewaytothesavagefrontier', 'Gateway to the Savage Frontier', assetBase, levelId, startPose);
+}
+export async function loadTreasuresOfTheSavageFrontierView(assetBase: string, levelId: number, startPose: Pose | null): Promise<GoldBoxView> {
+  return loadGoldBoxView('treasureofthesavagefrontier', 'Treasures of the Savage Frontier', assetBase, levelId, startPose);
+}
+export async function loadChampionsOfKrynnView(assetBase: string, levelId: number, startPose: Pose | null): Promise<GoldBoxView> {
+  return loadGoldBoxView('championsofkrynn', 'Champions of Krynn', assetBase, levelId, startPose);
+}
+export async function loadDeathKnightsOfKrynnView(assetBase: string, levelId: number, startPose: Pose | null): Promise<GoldBoxView> {
+  return loadGoldBoxView('deathknightsofkrynn', 'Death Knights of Krynn', assetBase, levelId, startPose);
+}
 
 /**
  * Cached level lists for the harness's game dropdown — same shape as
@@ -463,4 +478,21 @@ export const goldboxLevelLists = {
     loadGoldBoxData(assetBase).then((d) => d.levels.map((l) => ({ id: l.id, label: `Map ${l.id}` }))),
   poolsofdarkness: (assetBase: string) =>
     loadGoldBoxData(assetBase).then((d) => d.levels.map((l) => ({ id: l.id, label: `Map ${l.id}` }))),
+  darkqueenofkrynn: (assetBase: string) =>
+    loadGoldBoxData(assetBase).then((d) => d.levels.map((l) => ({ id: l.id, label: `Map ${l.id}` }))),
+  gatewaytothesavagefrontier: (assetBase: string) =>
+    loadGoldBoxData(assetBase).then((d) => d.levels.map((l) => ({ id: l.id, label: `Map ${l.id}` }))),
+  treasureofthesavagefrontier: (assetBase: string) =>
+    loadGoldBoxData(assetBase).then((d) => d.levels.map((l) => ({ id: l.id, label: `Map ${l.id}` }))),
+  // Champions/Death Knights of Krynn namespace level ids as `bank*1000 +
+  // geoId` (2/3 independent campaign banks sharing one asset base) — see
+  // tools/championsofkrynn/amiga/export-data.ts's module doc.
+  championsofkrynn: (assetBase: string) =>
+    loadGoldBoxData(assetBase).then((d) =>
+      d.levels.map((l) => ({ id: l.id, label: `Bank ${Math.floor(l.id / 1000)} - Map ${l.id % 1000}` })),
+    ),
+  deathknightsofkrynn: (assetBase: string) =>
+    loadGoldBoxData(assetBase).then((d) =>
+      d.levels.map((l) => ({ id: l.id, label: `Bank ${Math.floor(l.id / 1000)} - Map ${l.id % 1000}` })),
+    ),
 };

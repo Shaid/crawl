@@ -134,6 +134,30 @@
  * `undefined`, and `resolveWallFlatId` correctly returns `undefined` for
  * every cell in that case (the walker's existing one-texture-per-level
  * placeholder is the fallback).
+ *
+ * ## Variable-size records (Dark Queen of Krynn, 2026-09-01)
+ *
+ * Dark Queen of Krynn's `GEO.GLB` (the only one of the sibling titles staged
+ * so far that does NOT use the fixed 1024-byte/16x16 shape) uses an 8-byte
+ * header -- `u8 width`, `u8 height`, 6 bytes of unknown/reserved content --
+ * followed by the SAME four consecutive `width*height`-byte planes in the
+ * SAME order (wall-type N/E, wall-type S/W, `mapWallRoof`, door/passability)
+ * with IDENTICAL bit-packing. Confirmed 20/20 zero deviation: every one of
+ * this title's GEO.GLB entries' raw block length equals exactly
+ * `8 + 4*raw[0]*raw[1]` (widths/heights observed: 10-39, never 16x16, so
+ * genuinely variable per level, not a fixed-size format in disguise), and
+ * the SAME adjacent-cell wall-presence self-consistency oracle used to
+ * confirm the fixed-size format scores 98.8% horizontal / 82.4% vertical
+ * agreement (11,462/11,468 and 11,468 edges) -- as strong a confirmation as
+ * the other titles' own 90-97% ranges, so the N/E/S/W bit assignment and
+ * 0-15 wall TYPE / 0-3 door CODE semantics transfer unchanged. The 6
+ * reserved header bytes are NOT constant across records and their meaning
+ * is undecoded (open item, low priority -- not consumed by anything the
+ * walker needs). `decodeGeoLevel` below auto-detects this shape (tried
+ * whenever the raw block length isn't exactly 1024) and is what
+ * `goldbox-glib-export.ts` calls instead of the old fixed-only
+ * `decodeGeoRecord` -- GEO records this short/large never coincide with
+ * 1024 in this corpus, so there is no ambiguity between the two shapes.
  */
 
 export const GEO_GRID_SIZE = 16;
@@ -187,17 +211,10 @@ export interface GeoLevel {
   wallsetBinding?: WallsetBinding;
 }
 
-/** Decode one already-isolated 1024-byte GEO payload (GLIB titles: the raw block bytes; PoR: `decompressed.subarray(2)`). */
-export function decodeGeoRecord(payload: Uint8Array, id: number): GeoLevel {
-  if (payload.length !== GEO_RECORD_SIZE) {
-    throw new Error(`geo record: expected ${GEO_RECORD_SIZE} bytes, got ${payload.length}`);
-  }
-  const p0 = payload.subarray(0, GEO_PLANE_SIZE);
-  const p1 = payload.subarray(GEO_PLANE_SIZE, GEO_PLANE_SIZE * 2);
-  const p2 = payload.subarray(GEO_PLANE_SIZE * 2, GEO_PLANE_SIZE * 3);
-  const p3 = payload.subarray(GEO_PLANE_SIZE * 3, GEO_PLANE_SIZE * 4);
+/** Decode four `planeSize`-byte planes (wall N/E, wall S/W, special, door) into `GeoCell`s -- shared by the fixed 16x16 and Dark Queen of Krynn's variable-size record shapes (see module doc). */
+function decodeGeoPlanes(p0: Uint8Array, p1: Uint8Array, p2: Uint8Array, p3: Uint8Array, planeSize: number): GeoCell[] {
   const cells: GeoCell[] = [];
-  for (let i = 0; i < GEO_PLANE_SIZE; i++) {
+  for (let i = 0; i < planeSize; i++) {
     const b3 = p3[i];
     const b0 = p0[i];
     const b1 = p1[i];
@@ -213,7 +230,62 @@ export function decodeGeoRecord(payload: Uint8Array, id: number): GeoLevel {
       special: p2[i],
     });
   }
+  return cells;
+}
+
+/** Decode one already-isolated 1024-byte GEO payload (GLIB titles: the raw block bytes; PoR: `decompressed.subarray(2)`). */
+export function decodeGeoRecord(payload: Uint8Array, id: number): GeoLevel {
+  if (payload.length !== GEO_RECORD_SIZE) {
+    throw new Error(`geo record: expected ${GEO_RECORD_SIZE} bytes, got ${payload.length}`);
+  }
+  const p0 = payload.subarray(0, GEO_PLANE_SIZE);
+  const p1 = payload.subarray(GEO_PLANE_SIZE, GEO_PLANE_SIZE * 2);
+  const p2 = payload.subarray(GEO_PLANE_SIZE * 2, GEO_PLANE_SIZE * 3);
+  const p3 = payload.subarray(GEO_PLANE_SIZE * 3, GEO_PLANE_SIZE * 4);
+  const cells = decodeGeoPlanes(p0, p1, p2, p3, GEO_PLANE_SIZE);
   return { id, width: GEO_GRID_SIZE, height: GEO_GRID_SIZE, cells };
+}
+
+/** Header size of Dark Queen of Krynn's variable-size GEO record shape -- see module doc's "Variable-size records" section. */
+export const GEO_VARIABLE_HEADER_SIZE = 8;
+
+/**
+ * Decode a Dark Queen of Krynn-style variable-size GEO record: `u8 width`,
+ * `u8 height`, 6 reserved bytes, then four `width*height`-byte planes in the
+ * same order/packing as the fixed 16x16 shape. Returns `undefined` if
+ * `payload.length` doesn't exactly equal `8 + 4*width*height` for the
+ * declared width/height (the self-consistency check that confirmed this
+ * shape corpus-wide -- see module doc).
+ */
+export function decodeVariableGeoRecord(payload: Uint8Array, id: number): GeoLevel | undefined {
+  if (payload.length < GEO_VARIABLE_HEADER_SIZE) return undefined;
+  const width = payload[0];
+  const height = payload[1];
+  const planeSize = width * height;
+  if (width === 0 || height === 0 || GEO_VARIABLE_HEADER_SIZE + 4 * planeSize !== payload.length) return undefined;
+  const base = GEO_VARIABLE_HEADER_SIZE;
+  const p0 = payload.subarray(base, base + planeSize);
+  const p1 = payload.subarray(base + planeSize, base + 2 * planeSize);
+  const p2 = payload.subarray(base + 2 * planeSize, base + 3 * planeSize);
+  const p3 = payload.subarray(base + 3 * planeSize, base + 4 * planeSize);
+  const cells = decodeGeoPlanes(p0, p1, p2, p3, planeSize);
+  return { id, width, height, cells };
+}
+
+/**
+ * Decode a GEO block of unknown shape: tries the fixed 1024-byte/16x16
+ * record first (`decodeGeoRecord`), then Dark Queen of Krynn's variable-size
+ * shape (`decodeVariableGeoRecord`). Returns `undefined` if neither matches
+ * -- the caller should skip that block (matches the existing per-title
+ * extractors' "levels.length < index.length is OK, not every block is a
+ * playable level" convention). No corpus sampled so far produces a record
+ * that satisfies both shapes (fixed records are always exactly 1024 bytes;
+ * Dark Queen of Krynn's own records are never 1024), so there's no
+ * ambiguity in trying fixed first.
+ */
+export function decodeGeoLevel(payload: Uint8Array, id: number): GeoLevel | undefined {
+  if (payload.length === GEO_RECORD_SIZE) return decodeGeoRecord(payload, id);
+  return decodeVariableGeoRecord(payload, id);
 }
 
 /** Decode a PoR `geo.dax` entry's decompressed bytes (2-byte constant prefix + 1024-byte record). */

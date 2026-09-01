@@ -108,7 +108,7 @@
  *   id 202, which is stored uncompressed (method 0). The two games ship the
  *   same universal tile bank, one packed and one not.
  */
-import type { GlibBlock } from './goldbox-glib.ts';
+import { parseGlibContainer, type GlibBlock, type GlibContainer } from './goldbox-glib.ts';
 
 const LZW_MAX_CODE = 0x400;
 const CHUNK = 0x2000;
@@ -280,4 +280,45 @@ export function decompressGlibBlock(data: Uint8Array, block: GlibBlock): Uint8Ar
   image.set(data.subarray(base, base + 16), 0);
   image.set(Uint8Array.from(out), 16);
   return image;
+}
+
+/**
+ * Parse a freshly-`readFileSync`'d GLIB file that may itself be COMPRESSED at
+ * the TOP level — not just a nested sub-container, as documented above.
+ *
+ * Confirmed on Dark Queen of Krynn (2026-09-01): 6 of its own `.TLB` files
+ * (`ALWAYS`, `COMSPR`, `TOPVIEW`, `GEN`, `CBODY`, `FRAME`) are compressed at
+ * the OUTERMOST level — `glibCompressionMethod(data, 0) === 5` and the
+ * header's own `totalSize` field exceeds the real on-disk file size, exactly
+ * the same symptom the corpus-wide validation step used to (wrongly) call
+ * "truncated/corrupted" (see `goldbox-glib.ts`'s module doc §3-equivalent
+ * and `docs/goldbox-glib-format.md` §3). Decompressing the WHOLE FILE as one
+ * `GlibBlock` (`{start: 0, end: data.length}`) through the exact same
+ * `decompressGlibBlock` nested sub-containers already use produces a
+ * perfectly well-formed GLIB body for all 6 files (`totalSize` matches
+ * exactly, `offsets[0]`/`offsets[blockCount]` both self-consistent, 0
+ * failures) — this is a real format variant, not corruption.
+ *
+ * **This retroactively re-explains the 7 files `docs/goldbox-glib-format.md`
+ * §3 previously diagnosed as "real dump truncation" in the Curse/Secret/
+ * Pools corpus** (`secretofthesilverblades/.../ALWAYS.TLB`,
+ * `.../TITLE.TLB`, `poolsofdarkness/.../ALWAYS.TLB`, `.../COMSPR.TLB`,
+ * `.../CBODY.TLB`, `.../CHEAD.TLB`, `.../GEN.TLB`) — every one of them is
+ * the SAME filename family Dark Queen of Krynn compresses, every one has
+ * `flags>>8 === 5` (byte LZ77, exactly like Dark Queen's), and every one
+ * decompresses cleanly to a well-formed GLIB body with 0 deviation
+ * (re-verified this session). None of the 7 was actually corrupted.
+ *
+ * Curse of the Azure Bonds, Secret of the Silver Blades, Pool of Radiance
+ * (via its own `.dax` container, unaffected), Pools of Darkness's OTHER
+ * files, Gateway to the Savage Frontier, and Treasures of the Savage
+ * Frontier never need this (their own top-level containers are always
+ * method 0), so calling this unconditionally on every top-level file read
+ * is a strict generalisation, not a behaviour change, for those titles.
+ */
+export function loadGlibFile(data: Uint8Array): { data: Uint8Array; container: GlibContainer } {
+  const method = glibCompressionMethod(data, 0);
+  if (method === 0) return { data, container: parseGlibContainer(data) };
+  const decoded = decompressGlibBlock(data, { start: 0, end: data.length });
+  return { data: decoded, container: parseGlibContainer(decoded, 0) };
 }

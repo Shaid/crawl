@@ -61,6 +61,11 @@ import {
   loadCurseOfTheAzureBondsView,
   loadSecretOfTheSilverBladesView,
   loadPoolsOfDarknessView,
+  loadDarkQueenOfKrynnView,
+  loadGatewayToTheSavageFrontierView,
+  loadTreasuresOfTheSavageFrontierView,
+  loadChampionsOfKrynnView,
+  loadDeathKnightsOfKrynnView,
 } from './games-goldbox.ts';
 import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from './games-ishar.ts';
 import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
@@ -356,6 +361,11 @@ const GAMES = [
   { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'secretofthesilverblades', label: 'Secret of the Silver Blades', loader: loadSecretOfTheSilverBladesView, defaultLevel: 16, platform: 'amiga' as const },
   { id: 'poolsofdarkness', label: 'Pools of Darkness', loader: loadPoolsOfDarknessView, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'darkqueenofkrynn', label: 'The Dark Queen of Krynn', loader: loadDarkQueenOfKrynnView, defaultLevel: 2, platform: 'amiga' as const },
+  { id: 'gatewaytothesavagefrontier', label: 'Gateway to the Savage Frontier', loader: loadGatewayToTheSavageFrontierView, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'treasureofthesavagefrontier', label: 'Treasures of the Savage Frontier', loader: loadTreasuresOfTheSavageFrontierView, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'championsofkrynn', label: 'Champions of Krynn', loader: loadChampionsOfKrynnView, defaultLevel: 1032, platform: 'amiga' as const },
+  { id: 'deathknightsofkrynn', label: 'Death Knights of Krynn', loader: loadDeathKnightsOfKrynnView, defaultLevel: 1032, platform: 'amiga' as const },
   { id: 'ishar', label: 'Ishar 1', loader: loadIshar1View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'ishar2', label: 'Ishar 2', loader: loadIshar2View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'ishar3', label: 'Ishar 3', loader: loadIshar3View, defaultLevel: 1, platform: 'amigaaga' as const },
@@ -370,9 +380,14 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   curseoftheazurebonds: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (10/16 levels), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
   secretofthesilverblades: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (5/17 levels), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
   poolsofdarkness: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (0/32 levels here), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
-  ishar: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
-  ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
-  ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
+  darkqueenofkrynn: 'maze connectivity + doors confirmed (variable-size GEO grid, a new record shape for this title); wall art NOT yet decoded (not confirmed absent -- real tile-pixel data + resolvable ECL wallset-binding calls both exist, but no WALLDEF-equivalent compositing table has been located yet) -- see docs/darkqueenofkrynn/amiga/data-structure.md',
+  gatewaytothesavagefrontier: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (22/30 levels, v1.1 opcode table unchanged), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
+  treasureofthesavagefrontier: 'maze connectivity confirmed; ECL wallset-slot resolution mostly unresolved (1/41 levels) -- a real 2-byte block prefix tag was found but a residual opcode-table mismatch remains open, escalated to re-oracle -- see docs/treasureofthesavagefrontier/amiga/data-structure.md',
+  championsofkrynn: 'maze connectivity + doors confirmed (2 campaign banks, level ids namespaced bank*1000+geoId); container is a genuinely different "DOS DaxFile" format from Pool of Radiance\'s own .dax codec -- see tools/shared/goldbox-dosdax.ts. ECL wallset-slot resolution 15/15 levels (v1.1 opcode table, base 0x8000, LOAD PIECES/0x37 -- same engine revision as PoR/Curse/Secret). Real wall art renders for bank 1 (confirmed visually against the 8X8D1.DAX tile bank); bank 2 reuses bank-1 tiles by id coincidence only where one exists -- see docs/championsofkrynn/amiga/data-structure.md',
+  deathknightsofkrynn: 'maze connectivity + doors confirmed (3 campaign banks, level ids namespaced bank*1000+geoId, same DOS DaxFile container as Champions of Krynn); ECL wallset-slot resolution 16/19 levels, same v1.1/0x8000/LOAD PIECES engine revision as Champions of Krynn (an earlier Pools-of-Darkness-style v1.3 hypothesis was tested and refuted by manual disassembly -- see data-structure.md). No confirmed 8x8-tile pixel source exists for this title\'s wall art (its only 8x8d1.daa resists every container/codec hypothesis tried) -- cells render via the walker\'s generic placeholder texture -- see docs/deathknightsofkrynn/amiga/data-structure.md',
+  ishar: 'top-down world-region map (confirmed geometry); press F for a real first-person view of CONT1\'s forest biome (executed ALIS bytecode, greyscale/no palette) -- not generalized to other biomes yet -- see tools/walker/games-ishar.ts',
+  ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
+  ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
 };
 

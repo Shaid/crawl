@@ -164,6 +164,35 @@ physical media, most likely), not a second container variant. Left as a
 genuine data-quality caveat, not re-derived further; no static analysis can
 recover bytes that were never captured.
 
+> **Correction (2026-09-01, Dark Queen/Gateway/Treasure pass): this whole
+> diagnosis was wrong for all 7 files — they are not truncated, they are
+> legitimately COMPRESSED at the TOP LEVEL.**
+>
+> Until this pass, `flags >> 8` compression (§5) was only ever observed on
+> NESTED sub-containers one level inside an outer, always-uncompressed
+> top-level GLIB file. The Dark Queen of Krynn corpus breaks that pattern:
+> several of its own top-level `.TLB` files (`ALWAYS`, `COMSPR`, `TOPVIEW`,
+> `GEN`, `CBODY`, `FRAME`) are compressed at the OUTERMOST level too — the
+> file's own leading 16-byte header describes the container **after**
+> decompression, exactly as §5 already established for nested blocks, just
+> one level shallower than anyone had checked. Once that possibility was
+> considered, it retroactively re-explains all 7 files above without
+> exception: each one's declared `totalSize`/garbage offset table is not
+> corruption, it's the correct decompressed-image header sitting on top of a
+> real compressed payload nobody had tried decompressing, because the whole
+> file was assumed to already be a plain (method-0) container.
+>
+> `loadGlibFile()` (`tools/shared/goldbox-glib-codecs.ts`) is the fix: it
+> checks a freshly-read top-level file's own `flags >> 8` BEFORE calling
+> `parseGlibContainer`, and decompresses first when it's nonzero. Every
+> extractor (`goldbox-glib-export.ts` and all six per-title `export-data.ts`
+> scripts) now reads top-level files exclusively through this function. The
+> "truncated" diagnosis is retired; `isTruncated()` still exists (a
+> `totalSize !== data.length` check makes sense as a post-decompression
+> sanity check) but nothing calls it to explain missing bytes as damage
+> anymore. See `docs/darkqueenofkrynn/amiga/data-structure.md` §1 for the
+> per-file confirmation on the title that surfaced this.
+
 ## 4. Wall-slice geometry and 8x8 tile format — see `tools/shared/goldbox-walltiles.ts`
 
 The 156-byte wall-slice / 10-view-sub-array geometry (Pool of Radiance's
@@ -399,6 +428,26 @@ CONSTANT `0x0004` tag on literally every one of its 29 entries — not
 per-level data — followed by the same 1024-byte record). Verified
 corpus-wide, zero deviation: PoR 29/29 entries, Curse 16/16 blocks, Secret
 17/17, Pools 32/32, every one exactly 1024 (+2 for PoR) bytes.
+
+> **Update (2026-09-01): The Dark Queen of Krynn uses a VARIABLE-size record
+> shape instead of the fixed 1024-byte record above.** Its own `Disk3/GEO.GLB`
+> records don't divide evenly by 1024/256; each one instead opens with an
+> 8-byte header — `u8 width, u8 height`, 6 reserved bytes (always `0` in this
+> corpus) — followed by 4 planes of `width*height` bytes each (the same
+> plane semantics/order as the fixed-size format, just non-16x16 grids: real
+> dimensions observed range roughly 8x8 to 24x20). Confirmed **20/20 zero
+> deviation**: every one of this title's records satisfies
+> `8 + 4*width*height === payload.length` exactly, and the same cross-cell
+> wall-presence self-consistency oracle §7.2 uses agrees at 98.8%/82.4%
+> (horizontal/vertical), comparable to the other titles' confirmed grids —
+> strong evidence plane 3's bit semantics transfer unchanged despite the new
+> variable header. `decodeGeoLevel()` (`tools/shared/goldbox-geo.ts`)
+> auto-detects fixed-vs-variable by checking `payload.length ===
+> GEO_RECORD_SIZE` first and falling back to the variable-size decoder
+> (`decodeVariableGeoRecord`) otherwise, so every existing sibling title's
+> extractor call is unaffected. See
+> `docs/darkqueenofkrynn/amiga/data-structure.md` §2 for the per-title
+> writeup.
 
 ### 7.2 Record layout — CONFIRMED end-to-end (2026-08-31, `re-oracle` escalation)
 
@@ -752,3 +801,48 @@ Full writeup, VM opcode table, and verification evidence:
   wallsetIndex `1` -> wallNumber `1*5+0=5` -> `walldef2-17-wall5-view6.png`
   (id 17's own directory entry has exactly `wallNumber` 0-9, confirming
   the 2-wallset span).
+
+> **Update (2026-09-01, Dark Queen/Gateway/Treasure pass): extended to two
+> more titles, with one new ECL prefix-tag finding and one open item.**
+>
+> **Gateway to the Savage Frontier uses the v1.1 opcode table (`OPCODE_TABLE`)
+> completely unchanged** — no adaptation needed. A corpus-wide reachability
+> walk over `DiskC/ECL.glb` (default `base=0x8000`, the same base Curse/
+> Secret/PoR use) produced **0 unknown opcodes and 0 desyncs**, resolving
+> 22/30 levels (64 slots); the remaining 8 levels have no reachable static
+> wallset-load hit and no successful `NEWECL` chase target, the same
+> "genuinely script-less" shape PoR's `30`/`31`/`32` already established as
+> a real, non-error outcome for this engine family.
+>
+> **Treasures of the Savage Frontier needed one real new finding — a
+> constant 2-byte `0x8813` prefix tag on every `ECL.GLB` block** (identical
+> in VALUE and ROLE to Pool of Radiance's own `ecl.dax`/`geo.dax` block
+> prefix — see the container bullet earlier in this section — but this is
+> the first GLIB-family title observed to carry it; Curse/Secret/Pools/
+> Gateway's own `ECL.GLB` blocks all have none). Stripping it
+> (`eclBlockPrefixLength: 2` in `tools/treasureofthesavagefrontier/amiga/
+> export-data.ts`) makes individual block headers and short hand-traced
+> sequences decode cleanly under the v1.1 table. **However, a corpus-wide
+> reachability walk still desyncs on unknown opcodes for roughly 10% of
+> visited instructions**, resolving only 1/41 levels — far below Gateway's
+> clean result despite the identical table and prefix fix. Every short
+> hand-trace attempted (including manually re-deriving `ON GOTO`/`ON GOSUB`
+> operand-group counts against `parseInstr`'s own logic) decoded cleanly
+> wherever followed, which is what rules out a further prefix/base
+> off-by-one and points instead at a genuine, not-yet-identified opcode-table
+> or operand-shape variant reachable only via specific control-flow paths a
+> short manual trace doesn't happen to hit. **Escalated to `re-oracle`**
+> (2026-09-01) with the full paths-tried table; see
+> `docs/treasureofthesavagefrontier/amiga/data-structure.md` §5 and
+> `docs/treasureofthesavagefrontier/TODO.md` for the brief and outcome.
+>
+> Updated coverage table:
+>
+> | Title | Levels with >=1 resolved slot | Total slots resolved |
+> |---|---|---|
+> | Curse of the Azure Bonds | 16/16 | 48 |
+> | Secret of the Silver Blades | 17/17 | 51 |
+> | Pool of Radiance | 26/29 | 78 |
+> | Pools of Darkness | 32/32 | 96 |
+> | Gateway to the Savage Frontier | 22/30 | 64 |
+> | Treasures of the Savage Frontier | 1/41 | 1 (open, escalated) |
