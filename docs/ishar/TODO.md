@@ -21,7 +21,8 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | ishar-sprite-palette | open | The real AGA colour palette for decoded sprites (§7/`docs/ishar-sprite-format.md`) is not yet recovered — `topalette()` resolves a palette resource via the same `adresdes()` directory mechanism as bitmaps, but the specific directory INDEX that is "the palette for this scene" is chosen by VM bytecode at runtime, not by any static marker. All shipped sprite renders are greyscale (RENDERED, not CONFIRMED colour) | `docs/ishar-sprite-format.md` §5 | 2026-08-31 |
 | ishar-scene-header-subtype-byte | open | The shared 16-byte scene header (§6's evidence) has a varying byte at offset 21 (`0x0a` graphics/Ishar-1 caves, `0x47` Ishar-2 dungeon files, `0x1e` a third subgroup) that looks like a content-subtype discriminator — not traced to any consumer code. (Note: this header is the ALIS *script* header — `id@0`, `code_loc@+4`→bytecode entry, `dirOff@+0x0e` — per §9's `script.c` layout, so the "subtype byte" is a script-header field, likely `vram_alloc`-adjacent) | `docs/ishar-container-format.md` §6, §9 | 2026-09-01 re-oracle |
 | ishar-firstperson-generalize | open | The first-person renderer now executes TWO script pairs end-to-end (`FORET.bin` and `VILLAGE.bin`, both Ishar 1 `CONT1`, both RENDERED and wired into the walker's `KeyC` cycle) and attempted a third (`TEMPLE.bin`, INCONCLUSIVE — real cell found and rendered but no visible foreground structure, not wired) — `RAMPART.bin`/`PLAINE.bin` disassemble clean under the same shell but weren't traced/tested; Ishar 2/3 global offsets weren't re-derived; `ORC.bin` (monster placement) deliberately not wired (no real per-frame encounter data to drive it honestly) | `docs/ishar-container-format.md` §8.3 | 2026-09-02 |
-| crystals-local-scene-array-indexing | open | Several Crystals of Arborea outdoor scripts (`ARBRE.CO`/`PLAGES.CO`/`NPLAINE.CO`/`CAVINT.CO`) share Ishar 1's exact facing/ring-loop scene-compositor shell and read a real local content array (`basemain+0x7c`, loaded from the real `INIT.FIC` file by `MAIN.CO`) via `omaintc`, but that array is `cdim`-declared `count=2` (2-dimensional) unlike Ishar 1's `count=1` world grids — the real N-ary `tabchar()` formula was traced to source and the interpreter generalized to support it, but the specific per-title constant assignment (which popped value maps to which `dims` entry, and `omainb(0x2b3c)`'s role) is unresolved; a best-effort attempt against `ARBRE.bin` produced a clearly-wrong result (600 placements, all off-screen) | `docs/ishar-container-format.md` §8.3, `docs/crystalsofarborea/amiga/data-structure.md` §8 | 2026-09-02 |
+| crystals-plages-cavint-position | open | `PLAGES.bin` ("beaches") and `CAVINT.bin` ("cave interior") use the same confirmed `omaintc(0x7c)` indexing formula as `ARBRE.bin`/`NPLAINE.bin` but were only tested at `ARBRE`'s own test position (23,39) — both produced non-trivial internal placement counts (46 and 208) but blank composited frames (every leaf off-screen/transparent), since nothing says that position is a real "beach" or "cave" cell under either script's own `cswitch` dispatch. Finding a real matching position (same scan technique used for `ARBRE`) would likely render both | `docs/crystalsofarborea/amiga/data-structure.md` §8 | 2026-09-02 |
+| crystals-scene-layer-selector-role | open | `omainb(0x2b3c)` (the `direct`/`varD7` additive term in the confirmed `index = direct + 2*pop() + 114*pop()` formula) has no writer in this session's reached CFG and defaults to 0, which resolves to the confirmed OUTDOOR terrain layer of `INIT.FIC`'s `[95,57,2]` array; a `Z=1` layer (a dense grid of rectangular room/building outlines, found by the same whole-array visual scan) is plausibly the indoor/`CAVINT`-side content but untested with a real matching position — where the real game sets this global (season/weather? indoor-vs-outdoor script selection?) is undecoded | `tools/shared/crystals-firstperson.ts` module doc, `docs/crystalsofarborea/amiga/data-structure.md` §8 | 2026-09-02 |
 | ishar-firstperson-backdrop-anchor | open | `FOND.bin`'s backdrop-panel anchor/tiling/parallax convention is UNVERIFIED against any real screenshot — panels resolve to large (up to 96×85px) composites anchored base-at-horizon, plausible as "distant hill/cloud silhouette" but two panels don't tile to cover the full 255px screen width, leaving flat placeholder sky visible at the frame edges (may be correct, may indicate a missing repeat rule) | `docs/ishar-container-format.md` §8.2 | 2026-09-01 |
 | ishar-greyscale-atlas-normalize | open | The already-shipped sprite atlas (`ishar-sprite-atlas.ts`) still uses the fixed-0-255-scale `isharBitmapToGreyscaleRGBA()`, which silently renders any bitmap with `palOffset` above ~40 as a near-flat block even though the real decoded indices vary normally (confirmed via a histogram on two `FOND.bin` sprites this session). A per-bitmap-normalized version now exists (`isharBitmapToNormalizedGreyscaleRGBA()`) and is used by the first-person renderer, but the corpus-wide atlas pipeline was not re-run with it | `tools/shared/ishar-sprites.ts` module doc | 2026-09-01 |
 | ishar-t3-crystals-executable-trace | deferred | Ishar 3's `START` and Crystals' `T.X` were not disassembled this pass (only Ishar 1's `T.X` was traced) — the `0xA1`/`0x81` codec port is now verified corpus-wide by output self-consistency + readable content instead, which is strong enough evidence to not require this, but a direct trace on a second title's executable would still strengthen the "one shared codec" claim further | `docs/ishar-container-format.md` §1, §2.5 | 2026-08-30 |
@@ -29,6 +30,51 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | crystals-carte-destination-mechanism | open | The real "travel to a location" mechanism: a confirmed consumer region hit-tests the 8 checklist rows (`cftstset`+"forme" collision test) and calls `clive` (load-and-run-another-script-by-id) on confirmation, but the literal script id(s) `clive` loads, and any per-location map hotspot/placement table (for "click a place on the map"), were not found this session | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
 
 ## Session log
+
+- **2026-09-02 (eleventh pass — Crystals of Arborea's local-scene-array
+  indexing SOLVED, `ARBRE.CO` renders a real forest first-person view)**:
+  Closed `crystals-local-scene-array-indexing` (previous pass's open item).
+  Re-derived the real `tabchar()` push/pop semantics directly from the
+  vendored `github.com/maestun/alis` source (`alis.c:1431`'s `*acc++` reads
+  the SAME direction `opushacc`/`opile` push/pop the VM eval stack, i.e.
+  LIFO) and found the previous pass's best-effort formula had the right
+  shape but the wrong pop order (FIFO instead of LIFO). Real formula:
+  `index = direct + 2*pop() + 114*pop()`, `direct = omainb(0x2b3c)`
+  (defaults to 0, no writer found), first `pop()` = last-pushed
+  (`odirb(0x25)`), second `pop()` = first-pushed (`odirb(0x24)`). Verified
+  three independent ways: (1) the formula's implied bounds tile
+  `INIT.FIC`'s real 10,830-byte size with ZERO remainder (`95*114=10,830`
+  exactly); (2) a whole-array visual render at `Z=0`/`Z=1` shows two
+  different coherent maps (a sparse terrain-feature map matching Ishar 1's
+  `CONT1.FIC` alphabet shape, and a dense room/building-outline grid,
+  matching `MANUEL.CO`'s own "THE MAP"/"3D MODE" distinction); (3) feeding
+  the formula real bytes into `alis-interp.ts` and running `ARBRE.bin`'s
+  actual bytecode for 4 real positions/facings produces frames that are,
+  via `Read`, unambiguously forest scenes (multiple distinct trees,
+  responsive to position/facing) — `ARBRE` being French for "tree".
+  `NPLAINE.bin` ("plain") independently renders a semantically different
+  sparse low-vegetation band at the same position. `PLAGES.bin`/
+  `CAVINT.bin` were tried with the same formula/position and produced
+  non-trivial placement counts but blank frames (expected — wrong test
+  position for either script's own cell range, not a formula failure; new
+  open item `crystals-plages-cavint-position`). `CAVINT.bin` was also found
+  to use the same formula for a second, structurally distinct purpose (8
+  call sites with `+1`/`-1` neighbour-offset arithmetic — a movement/
+  collision test analogous to `GERDEP.bin`, not traced further). Shipped:
+  `tools/shared/crystals-firstperson.ts` (new), a `fillPlaceholderSkyGround()`
+  helper factored out of `ishar-firstperson.ts` (regression-verified: FORET
+  still produces its expected non-zero placement count unchanged),
+  `tools/crystalsofarborea/amiga/scripts.ts` (exports `ARBRE.bin`/
+  `NPLAINE.bin` + raw `INIT.FIC` as browser assets, not wired into
+  `package.json`), and a `KeyF`/`KeyC`/`WASD` first-person test-bench mode
+  added to `tools/walker/games-crystalsofarborea.ts` (the existing
+  checklist-screen mode is unchanged and still the default). New open item
+  `crystals-scene-layer-selector-role` (what sets `omainb(0x2b3c)`, and
+  whether `Z=1` is really the indoor layer). `npx tsc --noEmit -p .` and
+  `npx eslint` clean on all changed/new files; `npm test` still 370/370 (no
+  regressions). Full evidence: `docs/ishar-container-format.md` §8.3
+  (correction block), `docs/crystalsofarborea/amiga/data-structure.md` §8
+  (correction block), `tools/shared/crystals-firstperson.ts`'s module doc.
 
 - **2026-09-02 (tenth pass — generalization: a second Ishar 1 location
   RENDERED, a third attempted, a real N-ary indexing mechanism found in

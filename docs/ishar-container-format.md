@@ -829,7 +829,30 @@ mechanism: `MAIN.CO`'s own bytecode (`cfopen("INIT.FIC",2)` +
 `EN1.FIC` scatter-array convention (§9.3) done as one big block read instead
 of many small ones.
 
-However, ARBRE/PLAGES/NPLAINE/CAVINT's own `omaintc(0x7c)` reads push **TWO**
+> **Correction (2026-09-02 follow-up pass): the N-ary indexing formula below
+> is now SOLVED, not just traced-to-source.** `ARBRE.bin` renders a real,
+> unambiguous forest scene end-to-end (4 real positions/facings, all
+> visually confirmed via `Read` as coherent multi-tree first-person views);
+> `NPLAINE.bin` renders a semantically-distinct sparse low-vegetation band at
+> the same test position. The role assignment left open below (which popped
+> value pairs with which `dims` entry, and `omainb(0x2b3c)`'s real role) is
+> now pinned down: `index = direct + 2*pop() + 114*pop()`, where the FIRST
+> `pop()` (multiplied by `dims[0]=2`) is the LAST-pushed eval-stack value and
+> the SECOND `pop()` (multiplied by `dims[1]=114`) is the FIRST-pushed value
+> (`tabchar()`'s `*acc++` reads the SAME direction `opushacc`/`opile` push/pop
+> the stack, i.e. LIFO — a detail the original best-effort attempt below got
+> backwards). `omainb(0x2b3c)` (the `direct`/`varD7` term) has no writer in
+> this session's reached CFG and defaults to 0, which resolves to what turned
+> out to be the OUTDOOR terrain layer (`Z=0`); an untested `Z=1` layer, found
+> by the same array-wide visual scan, is a dense grid of rectangular room/
+> building outlines — plausibly the indoor/`CAVINT`-side content, not
+> confirmed (see `tools/shared/crystals-firstperson.ts`'s module doc for the
+> full derivation and verification chain, and
+> `docs/crystalsofarborea/amiga/data-structure.md` §8 for the per-title
+> write-up). Wired into `tools/walker/games-crystalsofarborea.ts` (`KeyF`
+> toggle, `KeyC` cycles `ARBRE`/`NPLAINE`).
+
+ARBRE/PLAGES/NPLAINE/CAVINT's own `omaintc(0x7c)` reads push **TWO**
 values before the indexed read (`[odirb(0x24) opushacc odirb(0x25) opushacc
 omainb(0x2b3c) omaintc(0x7c)]`), not Ishar 1's one — because `basemain+0x7c`
 is `cdim`-declared with `count=2` (two dimensions), not Ishar 1's `count=1`.
@@ -854,11 +877,11 @@ bytes) was tried against `ARBRE.bin` — it produced a highly-suspicious
 off-screen), a strong signal that the specific role assignment (which popped
 value pairs with which `dims` entry, and what `omainb(0x2b3c)`'s real
 semantic meaning is) is **not yet correctly resolved**. This is reported
-honestly as an OPEN, NOT-shipped, NOT-wired finding — see
-`crystals-local-scene-array-indexing` in `docs/ishar/TODO.md`. The underlying
-discovery (the real mechanism is N-ary, traced to source, with a working
-generalized interpreter) is solid; only the final per-title constant
-assignment for Crystals remains unresolved.
+honestly as an OPEN, NOT-shipped, NOT-wired finding at the time — see the
+correction block above this paragraph for the resolution (the role
+assignment was the LIFO pop order, not the formula itself, which was already
+right). Kept here as the paths-tried record: `crystals-local-scene-array-
+indexing` is now SOLVED and its row removed from `docs/ishar/TODO.md`.
 
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 

@@ -367,7 +367,95 @@ browser session this pass (no amiberry/browser access used — static
 type-checked + hand-traced against the confirmed bytecode/UI-string
 evidence only).
 
-## 8. Location scene scripts and `INIT.FIC` — STRUCTURAL, real render blocked on a genuine engine mechanism difference
+## 8. Location scene scripts and `INIT.FIC` — SOLVED: `ARBRE.CO` renders a real forest first-person view
+
+> **Correction (2026-09-02 follow-up pass): the indexing formula this
+> section originally left open is now CONFIRMED**, and `ARBRE.bin`
+> ("tree") renders end-to-end as an unmistakable forest scene.
+> `tools/shared/crystals-firstperson.ts` has the full derivation; summary:
+>
+> `index = direct + 2*pop() + 114*pop()`
+>
+> — where `direct` is the accumulator value at the `omaintc(0x7c)` call
+> (`omainb(0x2b3c)`, no writer found in this session's reached CFG, defaults
+> to 0), the FIRST `pop()` (multiplied by `dims[0]=2`) is the LAST-pushed
+> eval-stack value (`odirb(0x25)` = `omainb(0x2b39) - ring`, a party-Y-like
+> "depth" local), and the SECOND `pop()` (multiplied by `dims[1]=114`) is the
+> FIRST-pushed value (`odirb(0x24)` = `omainb(0x2b38) + lateral`, a
+> party-X-like "column" local). The prior best-effort attempt (below, kept
+> as the paths-tried record) had the right formula shape but the wrong pop
+> order (treated the first-PUSHED value as the first-POPPED, i.e. FIFO
+> instead of `tabchar()`'s real LIFO `*acc++` semantics — `alis.c:1431`,
+> re-read directly from the vendored `github.com/maestun/alis` source this
+> session rather than re-deriving from the disassembly summary alone).
+>
+> **Three independent confirmations** (Method §4's verification bar):
+> 1. **Byte-exact size fit**: the formula's implied bounds (`X` in `0..94`,
+>    `2*Y+direct` in `0..113`) tile `INIT.FIC`'s real 10,830-byte size with
+>    ZERO remainder (`95 * 114 = 10,830` exactly).
+> 2. **Whole-array visual render**: plotting `INIT.FIC[114*X + 2*Y + Z]` as a
+>    95x57 grid for each `Z` in `{0,1}` shows two different, unmistakably
+>    coherent maps — `Z=0` is a sparse terrain-feature map (small positive
+>    codes 1-20 over a mostly-void field, bordered by high-bit/negative
+>    "obstacle" codes, the same alphabet shape as Ishar 1's confirmed
+>    `CONT1.FIC`) and `Z=1` is a dense grid of rectangular room/building
+>    outlines (walls of negative/high-bit codes enclosing small floor
+>    areas) — matching the two content classes `MANUEL.CO` itself names
+>    ("THE MAP" vs. "3D MODE", §4 above).
+> 3. **Real bytecode execution**: feeding the formula real `INIT.FIC` bytes
+>    into `alis-interp.ts` and running `ARBRE.bin`'s actual compiled
+>    bytecode for 4 real party positions/facings (`(23,39)` facing
+>    N/S, `(22,38)` facing E, `(77,32)` facing W — the first three chosen
+>    from a scan for a dense real cluster of in-range terrain-feature cells
+>    at `Z=0`) produces composited frames that are, via `Read`,
+>    **unambiguously forest scenes** — multiple distinct tree silhouettes of
+>    varying size/position/density, responsive to both position and facing.
+>    `NPLAINE.bin` ("plain") at the same `(23,39)` position independently
+>    renders a semantically DIFFERENT, sparse low-vegetation ground band
+>    (no tall trees) — a second, free semantic cross-check that the terrain-
+>    type dispatch is really being driven by real, varying cell content, not
+>    a lucky coincidence.
+>
+> **Not confirmed / not shipped**: `PLAGES.bin` ("beaches") and `CAVINT.bin`
+> ("cave interior", tested with `sceneLayer=1`) were tried at the SAME
+> `(23,39)` test position with the identical formula and both produced
+> non-trivial internal placement counts (46 and 208 respectively) but BLANK
+> composited frames (every leaf lands off-screen or fully transparent) —
+> expected, not a formula failure, since that position was found from
+> `ARBRE`'s own terrain cluster and there's no reason it should also be a
+> "beach" cell under `PLAGES`'s own dispatch table or a valid interior cell
+> under `CAVINT`'s. Finding a real matching position for either (the same
+> technique used for `ARBRE`: scan `INIT.FIC` for cells matching that
+> script's own `cswitch` value range) is a plausible, cheap follow-up, not
+> attempted this session. `CAVINT.bin` was also found to use the SAME
+> `omaintc(0x7c)` formula for a SECOND, structurally distinct purpose: 8
+> call sites with an explicit `+1`/`-1` local-variable offset (checking the
+> 4 orthogonal neighbour cells of the current position) — almost certainly a
+> movement/collision test analogous to Ishar 1's `GERDEP.bin`, not traced
+> further.
+>
+> **Shipped**: `tools/shared/crystals-firstperson.ts` (the Crystals
+> `SceneEnv`/renderer, reusing `ishar-firstperson.ts`'s already-verified
+> `computeScenePlacements()`/`compositeFrame()`/new shared
+> `fillPlaceholderSkyGround()` helper unchanged), `tools/crystalsofarborea/
+> amiga/scripts.ts` (exports `ARBRE.bin`/`NPLAINE.bin` decompressed bytes +
+> raw `INIT.FIC` as browser assets — not wired into `package.json`, same as
+> `tools/ishar/amigaaga/scripts.ts`), and `tools/walker/
+> games-crystalsofarborea.ts` (a `KeyF` toggle into first-person mode, `KeyC`
+> cycles `ARBRE`/`NPLAINE`, `WASD`/arrows move a synthetic test position
+> across the confirmed 95x57 coordinate space — explicitly NOT a decoded
+> spawn/travel mechanic, exactly like Ishar 1's own `KeyC` location-cycling
+> caveat). The game screen (`cdefsc scridx=0x000e` in `MAIN.bin`, the same
+> magic `scridx` Ishar 1 uses) gives `xCenter=159, horizonY=112, width=319,
+> height=151` — CONFIRMED via the same field-offset convention as Ishar 1's
+> `ISHAR1_GAME_SCREEN`.
+>
+> See `docs/ishar-container-format.md` §8.3 for the shared write-up (same
+> engine mechanism as Ishar 1's `omaintc`/`tabchar`).
+
+The rest of this section (below) is kept as the original paths-tried record.
+
+### 8.x (original write-up, superseded above) — real render blocked on a genuine engine mechanism difference
 
 A follow-up session (2026-09-02, extending Ishar 1's first-person renderer —
 `docs/ishar-container-format.md` §8.2 — to a second title) confirmed Crystals
@@ -416,13 +504,13 @@ highly suspicious 600 placements (far beyond any Ishar script's observed
 9-116 range) with every placement landing off-screen, meaning the specific
 role assignment (which popped value pairs with which `dims` entry; what
 `omainb(0x2b3c)`'s real semantic role is) is **not correctly resolved**.
-**Honest status: NOT rendered, NOT wired into the walker.** The mechanism
-itself (real, N-ary, traced to source) is solid; only the final per-title
-constant assignment for Crystals remains open. See
-`crystals-local-scene-array-indexing` in `docs/ishar/TODO.md`, and
-`docs/ishar-container-format.md` §8.3 for the full account (shared write-up,
-since this is fundamentally the same engine mechanism as Ishar 1's already-
-documented `omaintc`/`tabchar`).
+**Status at the time this paragraph was written: NOT rendered, NOT wired.**
+Superseded by the correction block at the top of §8 (2026-09-02) — the
+role-assignment bug was the pop ORDER (FIFO vs. the real LIFO), not the
+formula shape; `ARBRE.bin`/`NPLAINE.bin` now render end-to-end and are wired
+into the walker. `crystals-local-scene-array-indexing` is closed and its row
+removed from `docs/ishar/TODO.md`. See `docs/ishar-container-format.md` §8.3
+for the full shared write-up.
 
 ## 9. Open items
 

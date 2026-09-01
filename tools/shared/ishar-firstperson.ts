@@ -240,15 +240,21 @@ export interface LocationFrameOptions {
  * order -- see `alis-interp.ts`'s test coverage and
  * `docs/ishar-container-format.md` §8).
  */
-export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPersonFrame {
-  const screen = opts.screen ?? ISHAR1_GAME_SCREEN;
-  const warnings: string[] = [];
-  const canvas = new Uint8Array(screen.width * screen.height * 4);
-  // Sky/ground fill -- a flat two-tone placeholder split at the horizon line,
-  // NOT derived from real palette data (see module doc). Deliberately flat
-  // (not a gradient) so it reads unambiguously as "sky" vs "ground" during
-  // visual verification, rather than producing an internal colour-banding
-  // artifact that can be mistaken for backdrop sprite content.
+/**
+ * Flat two-tone sky/ground placeholder fill split at `screen.horizonY`, NOT
+ * derived from real palette data (no AGA/OCS palette has been recovered for
+ * this engine family -- see module doc / `ishar-sprite-format.md`).
+ * Deliberately flat (not a gradient) so it reads unambiguously as "sky" vs
+ * "ground" during visual verification, rather than producing an internal
+ * colour-banding artifact that could be mistaken for backdrop sprite
+ * content. Shared by every location renderer in this engine family
+ * (Ishar 1-3, Crystals of Arborea) since none of them have real palette
+ * data yet either.
+ */
+export function fillPlaceholderSkyGround(
+  canvas: Uint8Array,
+  screen: { width: number; height: number; horizonY: number },
+): void {
   for (let y = 0; y < screen.height; y++) {
     const above = y < screen.horizonY;
     for (let x = 0; x < screen.width; x++) {
@@ -261,6 +267,13 @@ export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPerso
       canvas[i + 3] = 255;
     }
   }
+}
+
+export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPersonFrame {
+  const screen = opts.screen ?? ISHAR1_GAME_SCREEN;
+  const warnings: string[] = [];
+  const canvas = new Uint8Array(screen.width * screen.height * 4);
+  fillPlaceholderSkyGround(canvas, screen);
 
   const globals: Record<number, number> = {
     [ISHAR1_GLOBALS.partyX]: opts.partyX,
