@@ -65,8 +65,8 @@ levels coexist in one `dungeon/levels-index.json` — see
 size. `tools/poolofradiance/amiga/walldef.ts`'s `decodeWallSlices`/`renderView`
 apply unchanged.
 
-## 4. 8x8 tile pixel format — CONFIRMED for bank 1's `8X8D1.DAX`; the
-separate `8X8D0/1/2.DAA` files are OPEN (undecoded)
+## 4. 8x8 tile pixel format — CONFIRMED for `8X8D1.DAX` AND for the
+separate `8X8D0/1/2.DAA` files (SOLVED 2026-09-02, see correction below)
 
 `8X8D1.DAX` is itself a DOS-DaxFile container (8 entries: 201/202/203/11/12/
 31/32/23). Its tiles decode with the **headerless** GLIB-style convention
@@ -133,13 +133,67 @@ wall-art visual grammar.
 > `8X8D1.DAA`), not a real bug in the shipped renders; they stand as
 > originally confirmed below.
 
+> **Correction (2026-09-02, this session): the pixel payload is now
+> SOLVED, and so is the WALLDEF addressing model that consumes it — the
+> "genuinely open sub-problem" framing above no longer applies.**
+>
+> **Pixel payload shape** — the "9-byte header + 64-byte palette +
+> planeCount x tileCount x 8 bytes" Death Knights model was the wrong
+> shape to apply here, not a close-but-broken guess. The fix: re-test
+> the header's OTHER fields against the body-length divisibility oracle
+> instead of assuming offset-2 (which reads a constant, uninformative `1`
+> in every Champions entry — never the tile count, unlike Death Knights)
+> was necessarily `tileCount` just because it plays that role in Death
+> Knights' own header. The real tile count is the header's offset-8 BYTE
+> field, and the body has **no embedded palette at all** — plane data
+> starts immediately after the 9-byte header. `(bodyLen - 9) / (4*8)`
+> (4 planes = 16-colour tiles) matches the header's offset-8 byte exactly
+> for **24/25 real entries** across `8X8D0.DAA` (11/11) and `8X8D2.DAA`
+> (13/13) — the sole exception, id 203, is off by exactly one (header
+> says 45, body-length division says the real value is 46), the SAME
+> class of single-entry off-by-one anomaly Death Knights' own id 202 has.
+> This also fully explains the "every entry's palette-shaped region is
+> non-zero" observation flagged above as a real structural puzzle: that
+> region was never a palette, it's just the first 64 bytes of real plane
+> data (naturally non-zero). Full derivation, with the off-by-one and
+> the corrected decoder (`decodeChampionsWallTileSurface`): `tools/shared/
+> goldbox-daa-tiles.ts`'s module doc.
+>
+> **Addressing model** — RENDERED, not CONFIRMED (the same open question
+> `docs/goldbox-glib-format.md` already flags for the GLIB titles' scheme
+> 1 vs. scheme 2, hit again here in a different container). A first
+> attempt built one small per-wall bank via the `10*wallId+wallset`
+> composite-id arithmetic (mirroring the GLIB titles' own scheme 2) — this
+> only covered 60/115 WALLDEF view slices across both banks (view-index
+> bytes go up to `233`, vs. each per-wall bank's own ~70-116-tile size),
+> silently falling back to a placeholder tile for the rest (a render-time
+> fallback, not a crash, so this failure mode is easy to miss without
+> explicitly counting it). `buildChampionsFlatTileBank` instead builds
+> ONE flat, whole-file bank per `8X8D<bank>.DAA` file — `[placeholder,
+> ...universal(id 203), ...every other entry's tiles, in directory
+> order]` — the exact structure `buildFlatTileBank` already uses for the
+> GLIB titles' scheme 1. This fits **every** view slice with 0
+> out-of-range indices (**115/115** across both banks) and renders
+> coherent, non-degenerate wall art (door/gate-frame borders, brick
+> patterns, a diamond/checkerboard motif) for slices that previously fell
+> back to a blank placeholder.
+>
+> **Practical impact**: bank 1 now renders **50/50** wall views (was
+> 25/50) and bank 2 renders **65/65** (was 10/65, via coincidental id
+> overlap with bank 1's `8X8D1.DAX`) — both banks now use their own real
+> `8X8D<bank>.DAA` tile source, 0 skipped in either bank. Rendered in
+> greyscale (a synthetic 16-step grey ramp) — **no real colour palette
+> for these tiles has been located** (a secondary, lower-priority open
+> item; would need a further disassembly pass for a boot-time `LoadRGB4`-
+> style call, not attempted this session). Visually confirmed via `Read`
+> at multiple ids in both banks (e.g. `walldef-1001-wall5-view6.png`,
+> `walldef-2019-wall2-view6.png`) — real, structured, non-degenerate
+> geometric wall art, not noise.
+
 **`8X8D0.DAA`, `8X8D1.DAA` (byte-identical to each other), and `8X8D2.DAA`'s
-PIXEL PAYLOAD remains UNDECODED** (container solved — see correction
-above). Practical impact unchanged: bank 2's own wall-specific tiles (its
-real source is presumably `8X8D2.DAA`) are not decoded — 10/65 of bank 2's
-wall views render, reusing bank 1's tile bank via coincidental id overlap
-(wall ids 11/23 happen to also exist in `8X8D1.DAX`); the other 55 skip
-with "no tile-bank entry" rather than rendering wrong art.
+PIXEL PAYLOAD is now SOLVED** (see correction immediately above). Bank 1
+and bank 2 both render 100% of their own wall views from their own real
+`8X8D<bank>.DAA` tile source.
 
 **Paths tried on `8X8D*.DAA`** (all against `8X8D0.DAA`, 25916 bytes, and/or
 `8x8d1.daa` from the sibling Death Knights title, 63376 bytes):
@@ -153,11 +207,16 @@ with "no tile-bank entry" rather than rendering wrong art.
 | PoR 4-byte-per-block header (H=4) | Renders as uniform noise | Same as above, no improvement |
 | Whole-file PackBits decode with no directory (apply this doc's own §1 codec starting at byte 0, no length cap) | Short (~30-40 tile) recognizable region at the very start, then degrades into noise | Consistent with a real per-block directory existing that this approach doesn't have, causing desync once decode runs into the next block's own header bytes misread as compressed data — but no directory shape tried so far (see above) reproduces this |
 | **`re-oracle` escalation: BE DaxFile sibling container** (`readAmigaDaaDirectory`, BE fields, `dataOffset = headerLen` exact) | **CONTAINER SOLVED** — 12/13 (`8X8D0/1.DAA`) and 13/13 (`8X8D2.DAA`) entries byte-exact, chain contiguous, EOF exact | This resolves the container/codec question (shared with Death Knights' `8x8d1.daa` — see correction above), but the inner 8x8-tile pixel payload does NOT match Death Knights' 9-byte-header+64-byte-palette+plane-data shape (`tileCount` field reads a uniform, implausible `1`) — genuinely still open, see correction above |
+| Re-test EVERY header field (not just offset 2) against the `(bodyLen-headerLen)/(planeCount*8)` divisibility oracle, sweeping `planeCount` and header length | **PIXEL PAYLOAD SOLVED** — offset-8 byte = real tile count, `planeCount=4` fixed, NO embedded palette (plane data starts right after the 9-byte header) — matches 24/25 entries exactly across `8X8D0.DAA`+`8X8D2.DAA` (the 1 exception, id 203, off by exactly one, same anomaly class as Death Knights' id 202) | Greyscale render of every sampled id (11, 202, 10, 13, 14, 23, 191, 192) shows real, structured, non-degenerate brick/door/panel/diamond-motif tile art |
+| Per-wall composite-id tile bank (`10*wallId+wallset` arithmetic, mirroring GLIB scheme 2) for the render step, once the pixel shape was solved | Only 60/115 WALLDEF view slices across both banks land in-bounds (view-index bytes go up to 233, bank size ~70-116) — the rest silently fall back to a placeholder tile | WALLDEF's raw view-index bytes don't address a per-wall-local tile space |
+| ONE flat, whole-file tile bank per `8X8D<bank>.DAA` (`buildChampionsFlatTileBank`: `[placeholder, universal(203), every other entry in directory order]`) — mirroring GLIB's own scheme 1 | **SOLVED** — 115/115 view slices in-bounds (50/50 bank 1, 65/65 bank 2), coherent non-degenerate art (door/gate frames, brick, diamond motifs) | This is the real addressing model (RENDERED-grade evidence — not yet disassembly-confirmed, same open-question class as the GLIB titles' own scheme-1-vs-2 ambiguity) |
 
-The pixel-payload sub-problem (not the container, now solved) remains a
-candidate for a further `re-codebreaker`/`re-oracle` escalation if wall-art
-completeness for bank 2 becomes a priority — not escalated further this
-pass since the walker already has a working, honestly-labelled fallback.
+Both the pixel-payload shape and the render-time addressing model are now
+solved to RENDERED/CONFIRMED-structural confidence; see the correction
+block above for the full split. The one remaining open item for this
+resource is a real colour palette (currently rendered in synthetic
+greyscale) — not escalated, a secondary/cosmetic concern relative to the
+geometry decode.
 
 ## 5. ECL wallset-slot bindings — CONFIRMED, v1.1 engine revision (same as
 Pool of Radiance/Curse/Secret, NOT Pools of Darkness's v1.3)
@@ -192,7 +251,9 @@ errors).
 | WALLDEF geometry | CONFIRMED | 15 entries, all exact multiples of 156 bytes |
 | 8x8 tiles (`8X8D1.DAX`) | CONFIRMED | Visual: recognizable crenellation/door composite render |
 | 8x8 tiles (`8X8D*.DAA`) container | CONFIRMED | BE DaxFile sibling container, 12/13 + 13/13 entries byte-exact (id 201 is a genuine all-zero stub) |
-| 8x8 tiles (`8X8D*.DAA`) pixel payload | OPEN | Container solved; inner tile/plane shape doesn't match Death Knights' sibling format (see §4 correction) |
+| 8x8 tiles (`8X8D*.DAA`) pixel payload | CONFIRMED | 24/25 entries' offset-8 tile count matches body-length division exactly (1 off-by-one, see §4); greyscale renders show real structured tile art |
+| 8x8 tiles (`8X8D*.DAA`) addressing model | RENDERED | Flat whole-file bank fits 115/115 view slices (0 out-of-range) vs. 60/115 for a per-wall composite bank; not disassembly-confirmed |
+| 8x8 tiles (`8X8D*.DAA`) colour palette | OPEN | No embedded or external palette source located; rendered in synthetic greyscale |
 | ECL wallset bindings | CONFIRMED | 15/15 levels, base 0x8000, v1.1 table, real varied slot values |
 
-See `docs/championsofkrynn/TODO.md` for the open item.
+See `docs/championsofkrynn/TODO.md` for the remaining open item (colour palette only — the pixel payload and addressing model that were previously open are now solved).

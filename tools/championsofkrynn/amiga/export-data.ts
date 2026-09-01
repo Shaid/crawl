@@ -21,10 +21,19 @@
  *   public/assets/championsofkrynn/amiga/data/container-directory.json
  *     — every `.DAX` file's directory, decompressed + verified.
  *   public/assets/championsofkrynn/amiga/textures/walldef-<id>-wall<n>-view6.png
- *     — composited wall-view renders using the confirmed headerless 8x8
- *       tile bank in `8X8D1.DAX` (see module doc below for why the
- *       *separate*, similarly-named `8X8D0/1/2.DAA` files are NOT used —
- *       they remain an undecoded, structurally distinct resource).
+ *     — composited wall-view renders using `8X8D<bank>.DAA`'s own
+ *       Champions-specific tile-bank payload (`decodeChampionsWallTileSurface`
+ *       + `buildChampionsFlatTileBank` in `tools/shared/goldbox-daa-tiles.ts`
+ *       — cracked 2026-09-02, a genuinely different pixel shape AND
+ *       addressing model from Death Knights' sibling `.DAA` format despite
+ *       the shared BE DaxFile container). Real per-bank art for both banks
+ *       — this supersedes an earlier revision of this extractor that used
+ *       bank 1's `8X8D1.DAX` tile bank for BOTH banks (a coincidental id
+ *       overlap gave bank 2 only 10/65 renders). 115/115 view slices
+ *       across both banks (50/50 bank 1, 65/65 bank 2 — 0 skipped) render
+ *       with the flat whole-file tile bank; rendered in greyscale (a
+ *       synthetic 16-step grey ramp) — no real colour palette for these
+ *       tiles has been located yet.
  *   public/assets/championsofkrynn/amiga/dungeon/level-<bank*1000+id>.json
  *     — GEO cell grids + ECL-resolved wallset bindings, one file per level.
  *
@@ -35,14 +44,8 @@ import { resolve } from 'node:path';
 import { mkdirSync, readdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { readDosDaxDirectory, decompressDosDaxEntry, type DosDaxEntry } from '../../shared/goldbox-dosdax.ts';
-import {
-  decodeWallSlices,
-  renderView,
-  decode8x8Tiles,
-  resolveCompositeWallId,
-  buildWallSpecificTileBank,
-  SLICES_PER_WALLSET,
-} from '../../shared/goldbox-walltiles.ts';
+import { decodeWallSlices } from '../../shared/goldbox-walltiles.ts';
+import { buildChampionsFlatTileBank, renderColorView } from '../../shared/goldbox-daa-tiles.ts';
 import { assetDir, syncDataManifest, manifestEntry, writeManifest } from '../../shared/asset-paths.ts';
 import { decodePorGeoEntry, type GeoLevel } from '../../shared/goldbox-geo.ts';
 import { exportGeoDungeon } from '../../shared/goldbox-dungeon-export.ts';
@@ -53,18 +56,6 @@ const PLATFORM = 'amiga';
 const BANKS = [1, 2] as const;
 /** Level ids are namespaced per bank so both banks coexist in one dungeon index. */
 const LEVEL_ID_MULTIPLIER = 1000;
-
-function grey8ToRGBA(pixels: Uint8Array, width: number, height: number): Uint8Array {
-  const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    const v = pixels[i];
-    rgba[i * 4] = v;
-    rgba[i * 4 + 1] = v;
-    rgba[i * 4 + 2] = v;
-    rgba[i * 4 + 3] = 255;
-  }
-  return rgba;
-}
 
 function decodeAllEntries(data: Uint8Array): { dataOffset: number; entries: DosDaxEntry[]; byId: Map<number, Uint8Array> } {
   const { dataOffset, entries } = readDosDaxDirectory(data);
@@ -110,17 +101,23 @@ export async function exportChampionsOfKrynnData(dataDir: string) {
   });
   console.log(`container-directory.json: ${totalOk}/${totalEntries} entries verified (chain + exact decompressed length)`);
 
-  // 2. Wall-view PNG renders, per bank. Tile pixel source: 8X8D1.DAX (the
-  // ONE dos-dax-container 8x8-tile file — confirmed via visual inspection
-  // to render recognizable brick/stone wall texture, headerless 8-byte/tile
-  // GLIB-style encoding). id 203 = "universal" tiles (present corpus-wide
-  // in this engine family); other ids follow Pool of Radiance's own
-  // `10*wallId + wallsetNumber` composite-id arithmetic, falling back to
-  // the wall id directly when no composite entry exists (id 23's own case).
-  const tilesPath = resolve(dataDir, '8X8D1.DAX');
-  const tilesData = readBinary(tilesPath);
-  const { byId: tileBankById } = decodeAllEntries(tilesData);
-  const universalTiles = tileBankById.has(203) ? decode8x8Tiles(tileBankById.get(203)!) : [];
+  // 2. Wall-view PNG renders, per bank. Tile pixel source: `8X8D<bank>.DAA`
+  // (the BE DaxFile sibling container Champions shares with Death Knights
+  // — see `goldbox-daa-tiles.ts`'s module doc for the full derivation of
+  // this title's own, genuinely different payload shape AND its addressing
+  // model). `buildChampionsFlatTileBank` builds ONE flat, whole-file RGBA
+  // tile bank per DAA file (`[placeholder, ...universal(id 203), ...every
+  // other entry's tiles in directory order]`) — WALLDEF's raw view-index
+  // bytes address directly into this flat bank, NOT a per-wall composite-id
+  // bank (an earlier attempt at the latter only covered 60/115 view slices
+  // across both banks; the flat model covers 115/115 with 0 out-of-range
+  // indices — see the module doc's "Addressing model" section). `8X8D2.DAA`
+  // (bank 2) has no id 202/203 of its own, so its flat bank has no
+  // "universal" prefix of its own — a documented asymmetry, not a bug.
+  const daaTilesByBank = new Map<number, Uint8Array[]>([
+    [1, buildChampionsFlatTileBank(readBinary(resolve(dataDir, '8X8D1.DAA')))],
+    [2, buildChampionsFlatTileBank(readBinary(resolve(dataDir, '8X8D2.DAA')))],
+  ]);
 
   const allRenderedFiles: string[] = [];
   const perBankLevels: GeoLevel[][] = [];
@@ -129,30 +126,23 @@ export async function exportChampionsOfKrynnData(dataDir: string) {
     const walldefPath = resolve(dataDir, `WALLDEF${bank}.DAX`);
     const walldefData = readBinary(walldefPath);
     const { entries: wEntries, byId: wById } = decodeAllEntries(walldefData);
+    const tileBank = daaTilesByBank.get(bank)!;
 
     let rendered = 0;
-    let skippedNoEntry = 0;
+    let skippedOutOfRange = 0;
     for (const entry of wEntries) {
       const decoded = wById.get(entry.id)!;
       if (decoded.length % 156 !== 0) continue;
       const slices = decodeWallSlices(decoded);
-      const wallsetCount = Math.ceil(slices.length / SLICES_PER_WALLSET);
       for (const slice of slices) {
         const view = slice.views[slice.views.length - 4]; // view index 6, "front face"
         if (view.rows * view.cols <= 1) continue;
-        const wallsetIndex = Math.floor(slice.wallNumber / SLICES_PER_WALLSET);
-        const compositeId = resolveCompositeWallId(entry.id, wallsetIndex, wallsetCount);
-        const specificRaw = tileBankById.get(compositeId) ?? tileBankById.get(entry.id);
-        if (!specificRaw) {
-          skippedNoEntry++;
+        const maxIdx = Math.max(...view.tileIndices.flat());
+        if (maxIdx >= tileBank.length) {
+          skippedOutOfRange++;
           continue;
         }
-        const specificTiles = decode8x8Tiles(specificRaw);
-        const tileBank = buildWallSpecificTileBank(universalTiles, specificTiles);
-        const maxIdx = Math.max(...view.tileIndices.flat());
-        if (maxIdx >= tileBank.length) continue;
-        const { width, height, pixels } = renderView(view, tileBank);
-        const rgba = grey8ToRGBA(pixels, width, height);
+        const { width, height, pixels: rgba } = renderColorView(view, tileBank);
         // Namespaced by bank*1000 (same convention as level ids below) so
         // Champions' two independent WALLDEF id spaces (bank 1 and bank 2
         // can both use e.g. wall id 23 for unrelated art) don't collide in
@@ -165,7 +155,7 @@ export async function exportChampionsOfKrynnData(dataDir: string) {
         rendered++;
       }
     }
-    console.log(`bank ${bank}: walldef textures: ${rendered} PNGs written (${skippedNoEntry} skipped, no tile-bank entry)`);
+    console.log(`bank ${bank}: walldef textures: ${rendered} PNGs written (${skippedOutOfRange} skipped, index out of range)`);
 
     // 3. GEO + ECL wallset bindings, per bank.
     const geoPath = resolve(dataDir, `GEO${bank}.DAX`);
