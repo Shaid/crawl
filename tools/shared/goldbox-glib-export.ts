@@ -23,7 +23,7 @@ import {
 } from './goldbox-walltiles.ts';
 import { decodeGeoLevel } from './goldbox-geo.ts';
 import { exportGeoDungeon } from './goldbox-dungeon-export.ts';
-import { findWallsetBindings, type EclDecodeOptions } from './goldbox-ecl.ts';
+import { findWallsetBindings, type EclDecodeOptions, type WallsetBinding } from './goldbox-ecl.ts';
 
 function walk(dir: string, out: string[]) {
   for (const f of readdirSync(dir)) {
@@ -98,12 +98,25 @@ export interface WallRenderSource {
    * Number of leading bytes to strip from each ECL block's raw bytes before
    * decoding — Treasures of the Savage Frontier's own `ECL.glb` blocks
    * carry a constant 2-byte `0x8813` tag (IDENTICAL to Pool of Radiance's
-   * `.dax`-based `POR_ECL_PREFIX_LENGTH`, confirmed constant across all 41
+   * `.dax`-based `POR_ECL_PREFIX_LENGTH`, confirmed constant across all 30
    * blocks) before the real VM buffer, even though this is a GLIB container
    * not a `.dax` — see `goldbox-ecl.ts`'s module doc. Default 0 (Curse,
    * Secret, Pools, Gateway all need no strip).
    */
   eclBlockPrefixLength?: number;
+  /**
+   * Per-geo-id wallset-binding OVERRIDE, applied AFTER (and in preference
+   * to) any ECL-derived binding for that level id. For a title whose real
+   * engine hardcodes per-geo wallset ids in its own executable and
+   * unconditionally overwrites whatever the ECL bytecode's own operands say
+   * — confirmed for Treasures of the Savage Frontier via a `re-oracle`
+   * executable trace, independently re-verified against real bytes (see
+   * `goldbox-ecl.ts`'s "Treasures of the Savage Frontier" module-doc
+   * section and `docs/treasureofthesavagefrontier/amiga/data-structure.md`
+   * §4). Return `undefined` for a geo id with no override (that level keeps
+   * whatever ECL resolution found, if any).
+   */
+  wallsetOverride?: (geoId: number) => WallsetBinding | undefined;
 }
 
 export async function exportGoldBoxGlibData(
@@ -367,6 +380,24 @@ export async function exportGoldBoxGlibData(
       console.log(
         `ECL wallset bindings: ${levelsWithAnyBinding}/${levels.length} level(s) got at least one statically-resolved slot (${resolvedSlots} slot(s) total)`,
       );
+    }
+
+    // 4c. Wallset-binding OVERRIDE (goldbox-ecl.ts's `wallsetOverride`) — for
+    // a title whose real engine hardcodes per-geo wallset ids in its own
+    // executable and ignores the ECL bytecode's own operands for those geo
+    // ids (Treasures of the Savage Frontier — see goldbox-ecl.ts's module
+    // doc). Runs AFTER the ECL step above and REPLACES whatever it found,
+    // since the override is the confirmed runtime authority, not a guess.
+    if (wallRender.wallsetOverride) {
+      let overridden = 0;
+      for (const level of levels) {
+        const binding = wallRender.wallsetOverride(level.id);
+        if (binding) {
+          level.wallsetBinding = binding;
+          overridden++;
+        }
+      }
+      console.log(`Wallset binding override: ${overridden}/${levels.length} level(s) replaced with the executable-derived table`);
     }
 
     exportGeoDungeon(game, platform, levels);

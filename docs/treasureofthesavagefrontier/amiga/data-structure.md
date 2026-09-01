@@ -56,56 +56,76 @@ variable-size adaptation needed (unlike The Dark Queen of Krynn) — 41/41
 levels, zero deviation. This is the largest level count of any GLIB title
 in this corpus.
 
-## 4. `ECL.GLB` — a new constant 2-byte block-prefix tag CONFIRMED; opcode table OPEN, escalated to `re-oracle`
+## 4. `ECL.GLB` — SOLVED (2026-09-01, `re-oracle` escalation, independently re-verified against real bytes): new opcode table + a real "the ECL isn't the authority" finding
 
-`diskb/ecl.glb` decodes as a standard GLIB container (30 blocks — fewer
-than GEO's 41 levels; extra GEO levels with no matching ECL block are a
-known, non-error shape already established on sibling titles). Unlike every
-other GLIB title's `ECL.GLB`, this title's blocks each carry a **constant
-2-byte `0x8813` prefix tag** before the real bytecode stream starts —
-identical in both VALUE and ROLE to Pool of Radiance's own `.dax`-family
-`ecl.dax`/`geo.dax` block prefix (`docs/goldbox-glib-format.md` §7.4's
-container bullet), but this is the first title in the GLIB container family
-observed to carry it. Stripping it
-(`eclBlockPrefixLength: 2` in this title's `export-data.ts`) is confirmed
-necessary: without the strip, even short hand-traced instruction sequences
-misparse immediately; with it, individual block headers and short traces
-decode cleanly.
+`diskb/ecl.glb` decodes as a standard GLIB container (**30 blocks**, not
+41 — 41 is `geo.glb`'s own entry count; ECL block id equals geo id for
+`16`-`40`/`47`/`49`-`51`, block `4` is a game-start script, and block `29`
+also manages geo `48`). Unlike every other GLIB title's `ECL.GLB`, this
+title's blocks each carry a **constant 2-byte `0x8813` prefix tag** before
+the real bytecode stream starts — identical in both VALUE and ROLE to Pool
+of Radiance's own `.dax`-family `ecl.dax`/`geo.dax` block prefix
+(`docs/goldbox-glib-format.md` §7.4's container bullet), the first GLIB
+title observed to carry it. Stripping it (`eclBlockPrefixLength: 2`) is
+necessary but was not sufficient on its own.
 
-**A residual opcode-table mismatch remained after the prefix fix** — a
-corpus-wide reachability walk under the v1.1 table (`OPCODE_TABLE`, the
-table Curse/Secret/PoR/Gateway all use unchanged) still desyncs on unknown
-opcodes for roughly 10% of visited instructions, resolving only 1/41 levels
-(and that one resolution's own slot value, `33104`, is far outside any
-plausible WALLDEF id range — a desync artifact, not real data). This is
-qualitatively different from Gateway's clean 0-unknown-opcode result under
-the identical table, despite both titles sharing the v1.1 engine lineage —
-strong evidence of a genuine, title-specific opcode-table or operand-shape
-variant, not a leftover prefix/base error.
+**The real opcode table is `OPCODE_TABLE_TREASURE_V13X`** (`tools/shared/
+goldbox-ecl.ts`): Pools of Darkness's v1.3 table (`OPCODE_TABLE_POOLS_V13`)
+with every one of its deltas applying verbatim, plus three new opcodes —
+`0x42` ("LOAD AREA", 4 operands `(geoId, slot1, slot2, slot3)` — this
+title's wallset-load call, replacing v1.3's `0x21` remap), `0x43` ("NPC
+SEARCH BY ATTRIBUTES", 4 operands, unrelated to wallsets), and `0x44` (4
+operands, engine-registered but 0 occurrences in this corpus). Confirmed
+via a headless-Ghidra disassembly of this title's own AmigaOS executable
+(`data/ssi/TreasureSavageFrontNTSC/data/Treasure`, no symbol table) —
+operand counts read directly from the executable's own `SkipNextCommand`
+size-dispatch table (69 entries, `0x00`-`0x44`), not guessed. **Result: 0
+unknown opcodes / 0 desyncs across all 30,338 visited instructions in the
+full corpus-wide reachability walk (30 blocks)** — re-run independently
+against real bytes this session (not just taken on the escalation's
+report), reproducing its number exactly.
 
-**Escalated to `re-oracle` (2026-09-01)** with the full paths-tried table
-below. Interim finding from the escalation (session in progress at time of
-writing): the real recipe is **the 2-byte `0x8813` strip + the ALREADY-KNOWN
-v1.3 opcode table (`OPCODE_TABLE_POOLS_V13`, previously only used for Pools
-of Darkness) + two previously-undocumented opcodes, `0x42` and `0x43`, both
-taking 4 plain operands with no dynamic tail** — this combination gives
-**0 unknown opcodes and 0 desyncs across all 20,588 visited instructions in
-the full corpus-wide reachability walk (30 ECL blocks)**. Wallset-load
-semantics differ from Pools' own `0x21` remap: opcode `0x42` is the real
-wallset-load call here, `0x42(geoId, slot1, slot2, slot3)`, where operand 1
-is confirmed (at 22/23 call sites) to be the block's own geo id, and a
-`0xff` sentinel in `slot3` correlates with levels whose GEO data uses no
-type-11..15 walls. One puzzle is still open inside the escalation itself:
-the resolved slot values cluster in `{7..16}`, which doesn't directly match
-`WALLDEF.GLB`'s own sparse id list (`{2,4,5,6,7,8,9,13,30,31,32,36}`) —
-either a remap layer or a different id convention than the sibling titles
-use. The escalation is tracing this title's own AmigaOS executable (which
-carries a `HUNK_SYMBOL` block) to settle it. **This finding is not yet
-independently re-verified against real bytes by this pass** — treat the
-opcode-table/prefix combination as a strong, promising lead, and the
-slot-id resolution as still open, until the escalation's full report lands
-and is cross-checked (per this project's standing rule: treat specialist
-output like any other hypothesis, verify before marking confirmed).
+**The bigger finding: for dungeon geos (ids 16-50), the ECL bytecode's own
+wallset operands are DEAD DATA.** Both `0x21` and the new `0x42` call a
+shared `getAreaWallsets(geoId, &slots)` routine which, for any `geoId` in
+`[16,50]`, unconditionally OVERWRITES all 3 slot bytes with a hardcoded,
+per-geo constant from a 35-entry jump table baked into the executable —
+before `LoadWalldef` ever sees the ECL-supplied values. This is presumably
+leftover DOS-build data the Amiga port's engine silently ignores (e.g. geo
+23's ECL leaves slot3 as the "don't touch" sentinel `0xff`, but its GEO
+grid needs slot 3 — the executable's own table supplies a real id there).
+**No opcode-table fix alone could ever have produced this title's real
+bindings from ECL bytecode** — the executable-derived table
+(`TREASURE_EXE_WALLSETS` in `goldbox-ecl.ts`) is the actual authority,
+wired in as a `wallsetOverride` that replaces whatever ECL resolution finds
+for those 29 geo ids.
+
+**Verification, independently re-run this session**: `TREASURE_EXE_WALLSETS`'s
+87 raw values (29 geos x 3 slots), after `LoadWalldef`'s own confirmed
+`id===15 -> 32` remap, land **87/87 inside `WallDef.glb`'s real directory**
+`{2,4,5,6,7,8,9,13,30,31,32,36}` — 0 deviations — and every one of the 11
+geos whose own GEO grid uses a slot-2/slot-3 wall type has a real id
+resolved in that slot (no gap where one was needed). The extractor's actual
+run confirms this exactly: **ECL bytecode alone now resolves 24/41 levels
+(72 slots)** with the corrected table, and the `wallsetOverride` then
+**replaces 29/41 levels (87 slots)** with the executable-derived table —
+29 is exactly the count of this corpus's GEO ids that fall in the
+executable's `[16,50]` table range (`16`-`40` plus `47`-`50`; ids `51`-`62`
+are wilderness and outside the table, see below).
+
+**Verified resolved-cell example** (level 16, `wallsetBinding = {slot1: 9,
+slot2: 4, slot3: 32}`): cell `(0,0)` facing North has wall type `1` ->
+`(slot 0, slice 0)` -> `slot1` = flat id `9` -> WALLDEF id `9`, wallset
+index `0` -> `walldef2-9-wall0-view6.png` — visually inspected (4x
+nearest-neighbor upscale), a clean, structured, non-degenerate wall-panel
+render.
+
+**Open**: wilderness geos `51`-`62` (type-1 walls only) fall outside the
+executable's table entirely — hub block 51's own `LOAD FILES` passes the
+geo id itself through as a slot value, which `LoadWalldef` finds no match
+for (an engine fail path); their real wall-art source (`Sky.tlb`?
+`wildcom.tlb`?) is unresolved — genuinely open, not pursued further this
+pass (see `docs/treasureofthesavagefrontier/TODO.md`).
 
 ### Paths tried
 
@@ -113,8 +133,9 @@ output like any other hypothesis, verify before marking confirmed).
 |---|---|---|
 | Apply the v1.1 opcode table unchanged, no prefix strip (the Gateway/Curse/Secret/PoR recipe) | Immediate desync, near-0% resolution | This title's blocks carry a leading 2-byte tag the others don't |
 | Strip the 2-byte `0x8813` prefix, then apply the v1.1 table | Individual block headers and short hand-traces decode cleanly; but a full corpus-wide reachability walk still desyncs on ~10% of visited opcodes, 1/41 levels resolved (that one resolution's slot value is implausible, `33104`) | Short traces don't exercise every opcode a real reachability walk visits — the real mismatch was only visible at full-corpus scale |
-| Strip the prefix, apply the v1.3 table (`OPCODE_TABLE_POOLS_V13`) WITHOUT re-checking for title-specific opcode additions | (per the `re-oracle` escalation's own report) run without the strip initially, so it "nearly worked immediately" once combined with the strip — not independently re-tried by this pass before escalating | Two genuinely different hypotheses (table alone, prefix alone) had already failed by the time this was tried; escalating was the right call once both were exhausted |
-| Escalated to `re-oracle` (2026-09-01): 2 distinct failed hypotheses (table swap alone; prefix strip alone) met the escalation bar | **Interim: opcode-table-level SOLVED** — 2-byte prefix strip + v1.3 table + two new opcodes (`0x42`/`0x43`, n=4 plain operands) gives 0 unknown opcodes / 0 desyncs across the whole corpus. Slot-id semantics (why resolved values `{7..16}` don't match `WALLDEF.GLB`'s own `{2,4,...,36}` id list) still open, escalation tracing the executable to resolve it. | See the interim-finding paragraph above; full report pending at time of writing |
+| Strip the prefix, apply the v1.3 table (`OPCODE_TABLE_POOLS_V13`) WITHOUT re-checking for title-specific opcode additions | (per the `re-oracle` escalation's own report) tried without the strip initially, isolating the residue to opcodes `0x42`/`0x43` only once combined with the strip | Two genuinely different hypotheses (table alone, prefix alone) had already failed by the time this was tried; escalating was the right call once both were exhausted |
+| Escalated to `re-oracle` (2026-09-01): 2 distinct failed hypotheses (table swap alone; prefix strip alone) met the escalation bar | **SOLVED** — prefix strip + `OPCODE_TABLE_TREASURE_V13X` (v1.3 + `0x42`/`0x43`/`0x44`, all 4-operand) gives 0 unknown/0 desync corpus-wide (30,338 instructions, 30 blocks); confirmed via headless-Ghidra disassembly of the real executable, not guessed | Independently re-verified this session against real bytes (identical numbers reproduced) |
+| Assume ECL bytecode operands ARE the wallset-binding authority once the opcode table is fixed | ECL-alone resolution (24/41 levels, 72 slots) leaves several dungeon levels with implausible/sentinel slot values | The Amiga port's `getAreaWallsets` unconditionally overwrites ECL's own slot bytes for geo ids 16-50 from a hardcoded executable table — confirmed via disassembly, not a decode bug. `wallsetOverride` (29/41 levels, 87 slots) is the real fix, independently re-verified 87/87 against `WallDef.glb`'s own directory |
 
 ## 5. Extractor and outputs
 
@@ -135,10 +156,11 @@ npx tsx tools/treasureofthesavagefrontier/amiga/export-data.ts
 - `textures/walldef2-<id>-wall<n>-view6.png` — 60 scheme-2 renders (0
   skipped).
 - `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
-  `dungeon/wall-index.json` — 41 decoded GEO levels; wallset-binding data
-  currently resolves only 1/41 levels pending the opcode-table fix above
-  being integrated and re-verified, so the walker for this title falls back
-  to the standard per-level placeholder for effectively every level today.
+  `dungeon/wall-index.json` — 41 decoded GEO levels; wallset bindings for
+  29/41 levels (87 slots) from the executable-derived override table, plus
+  24/41 (72 slots) from ECL bytecode directly where the override doesn't
+  apply (wilderness geos `51`-`62` remain unresolved). The walker now
+  renders real per-cell wall art for every dungeon level in this corpus.
 
 ## 6. Full file catalog — not attempted this pass
 

@@ -814,27 +814,48 @@ Full writeup, VM opcode table, and verification evidence:
 > "genuinely script-less" shape PoR's `30`/`31`/`32` already established as
 > a real, non-error outcome for this engine family.
 >
-> **Treasures of the Savage Frontier needed one real new finding — a
-> constant 2-byte `0x8813` prefix tag on every `ECL.GLB` block** (identical
-> in VALUE and ROLE to Pool of Radiance's own `ecl.dax`/`geo.dax` block
-> prefix — see the container bullet earlier in this section — but this is
-> the first GLIB-family title observed to carry it; Curse/Secret/Pools/
-> Gateway's own `ECL.GLB` blocks all have none). Stripping it
-> (`eclBlockPrefixLength: 2` in `tools/treasureofthesavagefrontier/amiga/
-> export-data.ts`) makes individual block headers and short hand-traced
-> sequences decode cleanly under the v1.1 table. **However, a corpus-wide
-> reachability walk still desyncs on unknown opcodes for roughly 10% of
-> visited instructions**, resolving only 1/41 levels — far below Gateway's
-> clean result despite the identical table and prefix fix. Every short
-> hand-trace attempted (including manually re-deriving `ON GOTO`/`ON GOSUB`
-> operand-group counts against `parseInstr`'s own logic) decoded cleanly
-> wherever followed, which is what rules out a further prefix/base
-> off-by-one and points instead at a genuine, not-yet-identified opcode-table
-> or operand-shape variant reachable only via specific control-flow paths a
-> short manual trace doesn't happen to hit. **Escalated to `re-oracle`**
-> (2026-09-01) with the full paths-tried table; see
-> `docs/treasureofthesavagefrontier/amiga/data-structure.md` §5 and
-> `docs/treasureofthesavagefrontier/TODO.md` for the brief and outcome.
+> **Treasures of the Savage Frontier needed a constant 2-byte `0x8813`
+> prefix tag on every `ECL.GLB` block** (identical in VALUE and ROLE to Pool
+> of Radiance's own `ecl.dax`/`geo.dax` block prefix — see the container
+> bullet earlier in this section — the first GLIB-family title observed to
+> carry it; Curse/Secret/Pools/Gateway's own `ECL.GLB` blocks all have
+> none), PLUS a genuinely different opcode-table revision. **SOLVED
+> 2026-09-01 via a `re-oracle` escalation, independently re-verified against
+> real bytes**: `OPCODE_TABLE_TREASURE_V13X` (`tools/shared/goldbox-ecl.ts`)
+> is Pools of Darkness's own v1.3 table plus three new opcodes this title's
+> executable registers — `0x42` ("LOAD AREA", 4 operands, this title's real
+> wallset-load call), `0x43` ("NPC SEARCH BY ATTRIBUTES", 4 operands), `0x44`
+> (4 operands, unused in this corpus) — confirmed via a headless-Ghidra
+> disassembly of the title's own executable (operand counts read directly
+> from its `SkipNextCommand` size-dispatch table, not guessed). Corpus-wide
+> reachability walk: **0 unknown opcodes / 0 desyncs across 30,338 visited
+> instructions, all 30 `ECL.GLB` blocks** — reproduced exactly by an
+> independent re-run against real bytes, not just taken on the escalation's
+> word.
+>
+> **A second, more consequential finding rode along with the opcode fix:
+> for this title's dungeon geos (ids 16-50), the ECL bytecode's own wallset
+> operands are dead data.** The Amiga port's `getAreaWallsets` routine
+> (shared by both `0x21` and the new `0x42`) unconditionally overwrites all
+> 3 slot bytes from a hardcoded, 35-entry per-geo table baked into the
+> executable, before `LoadWalldef` ever sees the ECL-supplied values —
+> presumably stale leftover DOS-build data the Amiga engine silently
+> ignores. **No opcode-table fix alone could ever have produced this
+> title's real bindings** — the executable-derived table
+> (`TREASURE_EXE_WALLSETS`, with `LoadWalldef`'s own confirmed `id===15 ->
+> 32` remap) is wired in as a `wallsetOverride`
+> (`tools/shared/goldbox-glib-export.ts`) that replaces whatever ECL
+> resolution finds for those 29 geo ids. Verified 87/87 (29 geos x 3 slots)
+> land inside `WallDef.glb`'s real directory after the remap, 0 deviations,
+> with every slot a geo's own GEO grid actually needs correctly filled.
+> Final, independently re-run: ECL bytecode alone resolves 24/41 levels (72
+> slots); the override then replaces 29/41 levels (87 slots) — exactly the
+> geo ids inside the executable's `[16,50]` table range. Wilderness geos
+> `51`-`62` fall outside this table entirely and remain unresolved — a
+> genuinely open item, see `docs/treasureofthesavagefrontier/TODO.md`.
+>
+> Full writeup: `docs/treasureofthesavagefrontier/amiga/data-structure.md`
+> §4; escalation brief and outcome: `docs/treasureofthesavagefrontier/TODO.md`.
 >
 > Updated coverage table:
 >
@@ -845,4 +866,4 @@ Full writeup, VM opcode table, and verification evidence:
 > | Pool of Radiance | 26/29 | 78 |
 > | Pools of Darkness | 32/32 | 96 |
 > | Gateway to the Savage Frontier | 22/30 | 64 |
-> | Treasures of the Savage Frontier | 1/41 | 1 (open, escalated) |
+> | Treasures of the Savage Frontier | 29/41 (override) + 24/41 (ECL-only, overlapping) | 87 (override, authoritative for dungeon geos) |

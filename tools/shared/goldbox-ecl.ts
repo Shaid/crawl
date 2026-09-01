@@ -178,6 +178,51 @@
  * (`base`, `opcodeTable`, `wallsetLoad`) so each title supplies its own
  * engine-revision parameters rather than this module hardcoding one table/
  * base for all four.
+ *
+ * ### Treasures of the Savage Frontier — SOLVED (2026-09-01, `re-oracle`
+ * escalation, independently re-verified against real bytes this session):
+ * a new opcode-table delta AND a real "the ECL is not the authority" finding
+ *
+ * This title's `ECL.GLB` blocks carry the same constant 2-byte `0x8813`
+ * prefix tag PoR's `.dax` entries do (`eclBlockPrefixLength: 2` in its
+ * `export-data.ts`) — confirmed necessary but NOT sufficient: a corpus-wide
+ * reachability walk under the v1.1 table still desynced on ~10% of visited
+ * opcodes even with the prefix stripped. The real recipe, confirmed via a
+ * headless-Ghidra disassembly of this title's own AmigaOS executable
+ * (`data/ssi/TreasureSavageFrontNTSC/data/Treasure`, no symbol table):
+ * **`OPCODE_TABLE_POOLS_V13` (every Pools of Darkness v1.3 delta applies
+ * verbatim) plus three new opcodes** (`OPCODE_TABLE_TREASURE_V13X` below):
+ * `0x42` ("LOAD AREA", 4 operands `(geoId, slot1, slot2, slot3)` — this
+ * title's own wallset-load call, replacing v1.3's `0x21` remap), `0x43`
+ * ("NPC SEARCH BY ATTRIBUTES", 4 operands, unrelated to wallsets), and
+ * `0x44` (4 operands, engine-registered but 0 occurrences in this corpus).
+ * All three operand counts are read directly from the executable's own
+ * `SkipNextCommand` size-dispatch table (69 entries, `0x00`-`0x44`), not
+ * guessed — confirmed by a corpus-wide reachability walk producing **0
+ * unknown opcodes and 0 desyncs across all 20,338+ visited instructions in
+ * all 30 `ECL.GLB` blocks** (independently re-run this session against real
+ * bytes, not just taken on the escalation's word — see
+ * `docs/treasureofthesavagefrontier/amiga/data-structure.md` §4).
+ *
+ * **The bigger finding: for this title, the ECL bytecode's own wallset
+ * operands are DEAD DATA for every dungeon geo (ids 16-50).** Both `0x21`
+ * ("LOAD FILES", now `slots=[op2,0xFF,0xFF]` in this revision) and the new
+ * `0x42` ("LOAD AREA", `slots=[op2,op3,op4]`) call a shared
+ * `getAreaWallsets(geoId, &slots)` routine which — for any `geoId` in
+ * `[16,50]` — UNCONDITIONALLY OVERWRITES all 3 slot bytes from a
+ * hardcoded, per-geo constant table baked into the executable (a 35-entry
+ * jump table), before `LoadWalldef` ever sees the ECL-supplied values.
+ * This is presumed leftover DOS-build data the Amiga port's engine
+ * silently ignores — several ECL-declared slot values would leave a level's
+ * own required wall type unbound otherwise (e.g. geo 23's ECL leaves slot3
+ * as `0xff`/"don't touch", but its GEO grid needs slot 3; the executable's
+ * own table supplies a real id there). **No opcode-table fix could ever
+ * have resolved this title's real bindings from ECL bytecode alone** — see
+ * `TREASURE_EXE_WALLSETS` below, the executable-derived per-geo lookup
+ * table that is the actual authority for this title's dungeon geos.
+ * Wilderness geos (`51`-`62`, type-1 walls only) fall outside the
+ * executable's table and outside this whole mechanism — their wall-art
+ * source is unresolved, a genuinely open item (see the per-title TODO).
  */
 
 export interface EclOperand {
@@ -306,6 +351,70 @@ export const OPCODE_TABLE_POOLS_V13: Record<number, OpcodeInfo> = (() => {
   for (const [k, v] of Object.entries(deltas)) table[Number(k)] = v;
   return table;
 })();
+
+/**
+ * Treasures of the Savage Frontier's own engine revision: `OPCODE_TABLE_POOLS_V13`
+ * plus three new opcodes this title's executable registers (`0x42`-`0x44`) —
+ * see the module doc's "Treasures of the Savage Frontier" section for the
+ * full evidence (headless-Ghidra-disassembled operand counts, 0 unknown/0
+ * desync corpus-wide). Wallset loading here is opcode `0x42` ("LOAD AREA"),
+ * NOT `0x21` — see `TREASURE_WALLSET_LOAD` below. Built the same way
+ * `OPCODE_TABLE_POOLS_V13` is: clone the v1.3 table, apply only the new
+ * deltas.
+ */
+export const OPCODE_TABLE_TREASURE_V13X: Record<number, OpcodeInfo> = (() => {
+  const table: Record<number, OpcodeInfo> = {};
+  for (const [k, v] of Object.entries(OPCODE_TABLE_POOLS_V13)) table[Number(k)] = { ...v };
+  table[0x42] = { n: 4, name: 'LOAD AREA (geoId,slot1,slot2,slot3)' };
+  table[0x43] = { n: 4, name: 'NPC SEARCH BY ATTRIBUTES' };
+  table[0x44] = { n: 4, name: 'unknown 0x44 (engine-registered, 0 occurrences in corpus)' };
+  return table;
+})();
+
+/**
+ * Treasures of the Savage Frontier's wallset-load shape: opcode `0x42`
+ * ("LOAD AREA"), 4 operands `(geoId, slot1, slot2, slot3)` — the first
+ * operand is NOT a slot, so this is `'load-pieces'`'s shape shifted right by
+ * one operand. See `WallsetLoadConfig`'s `'load-pieces-skip-first'` mode.
+ *
+ * **Passing this to `findWallsetBindings` resolves the CFG/opcode-stream
+ * correctly, but its resolved slot VALUES are not authoritative for this
+ * title's dungeon geos (16-50)** — the real per-geo wallset ids are
+ * hardcoded in the executable and unconditionally overwrite whatever the
+ * ECL bytecode says (see the module doc). Use `TREASURE_EXE_WALLSETS` (with
+ * `remapTreasureWallId`) as the actual binding source for those geo ids;
+ * this config is retained for wilderness geos / future non-wallset ECL
+ * decoding of this title, where it's still the mechanically-correct parse.
+ */
+export const TREASURE_WALLSET_LOAD: WallsetLoadConfig = { opcode: 0x42, mode: 'load-pieces-skip-first' };
+
+/**
+ * Treasures of the Savage Frontier's REAL per-geo wallset table — hardcoded
+ * in the executable (`getAreaWallsets`'s 35-entry jump table), not decoded
+ * from ECL bytecode at all (see the module doc). Raw values as stored;
+ * apply `remapTreasureWallId` to each before resolving against
+ * `WALLDEF.GLB`'s own directory (the executable's own `LoadWalldef` applies
+ * this remap, confirmed via disassembly). Verified 87/87 (29 geos x 3
+ * slots) land inside this title's real `WallDef.glb` id set
+ * `{2,4,5,6,7,8,9,13,30,31,32,36}` after the remap, 0 deviations, and every
+ * geo whose GEO grid needs a slot-2/slot-3 wall type has a real id there —
+ * independently re-verified this session, not just taken on the
+ * escalation's report. Geo ids outside this table (wilderness, `51`-`62`)
+ * have no executable-hardcoded binding — see the module doc.
+ */
+export const TREASURE_EXE_WALLSETS: Record<number, [number, number, number]> = {
+  16: [9, 4, 15], 17: [30, 30, 30], 18: [2, 15, 31], 19: [15, 30, 31], 20: [36, 36, 36],
+  21: [6, 15, 6], 22: [8, 8, 8], 23: [36, 31, 15], 24: [5, 13, 13], 25: [31, 31, 31],
+  26: [4, 15, 6], 27: [9, 15, 8], 28: [15, 9, 2], 29: [9, 15, 9], 30: [9, 15, 31],
+  31: [6, 9, 15], 32: [7, 15, 9], 33: [30, 30, 30], 34: [8, 8, 8], 35: [9, 31, 15],
+  36: [9, 31, 15], 37: [9, 31, 15], 38: [9, 31, 15], 39: [36, 15, 31], 40: [5, 13, 13],
+  47: [8, 15, 9], 48: [31, 15, 15], 49: [30, 30, 30], 50: [30, 30, 30],
+};
+
+/** `LoadWalldef`'s own `id===15 -> 32` remap (confirmed via disassembly, `Treasure` file+0x2B674) — applied to every raw `TREASURE_EXE_WALLSETS` value before resolving against `WallDef.glb`'s real directory. */
+export function remapTreasureWallId(id: number): number {
+  return id === 15 ? 32 : id;
+}
 
 /** PoR's `.dax`-decompressed ECL entries carry this constant 2-byte tag before the real VM buffer (confirmed identical across all 29 entries) — same convention as `POR_GEO_PREFIX_LENGTH` in `goldbox-geo.ts`. */
 export const POR_ECL_PREFIX_LENGTH = 2;
@@ -462,11 +571,14 @@ export interface ReachabilityResult {
  * `'fill-all-from-second-operand'` (Pools of Darkness's v1.3 revision):
  * `opcode` is `0x21` ("LOAD FILES", 2 operands `(geoId, walldefId)` in this
  * revision's table) and its 2nd operand fills ALL THREE slots identically —
- * see module doc.
+ * see module doc. `'load-pieces-skip-first'` (Treasures of the Savage
+ * Frontier's `0x42` "LOAD AREA"): 4 operands `(geoId, slot1, slot2, slot3)`
+ * — same direct per-slot mapping as `'load-pieces'`, just shifted right by
+ * one operand since operand 0 is a geo id, not a slot.
  */
 export interface WallsetLoadConfig {
   opcode: number;
-  mode: 'load-pieces' | 'fill-all-from-second-operand';
+  mode: 'load-pieces' | 'fill-all-from-second-operand' | 'load-pieces-skip-first';
 }
 
 const DEFAULT_WALLSET_LOAD: WallsetLoadConfig = { opcode: 0x37, mode: 'load-pieces' };
@@ -539,6 +651,16 @@ export function reachabilityScanWallsets(
           slot1: staticCmdValue(instr.ops[0]),
           slot2: staticCmdValue(instr.ops[1]),
           slot3: staticCmdValue(instr.ops[2]),
+        });
+      } else if (wallsetLoad.mode === 'load-pieces-skip-first') {
+        // Treasures of the Savage Frontier's 0x42 "LOAD AREA": operand 0 is
+        // the geo id, slots are operands 1-3 — see module doc.
+        hits.push({
+          atPos: pos,
+          via: 'LOAD PIECES',
+          slot1: staticCmdValue(instr.ops[1]),
+          slot2: staticCmdValue(instr.ops[2]),
+          slot3: staticCmdValue(instr.ops[3]),
         });
       } else {
         // 'fill-all-from-second-operand': one wallset id fills all 3 slots.

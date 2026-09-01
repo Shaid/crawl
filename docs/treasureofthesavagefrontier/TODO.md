@@ -10,33 +10,36 @@ Gateway to the Savage Frontier. Opened in the same pass as The Dark Queen of
 Krynn and Gateway, extending the decoders first built for Curse of the
 Azure Bonds / Secret of the Silver Blades / Pools of Darkness.
 
-## 2026-09-01 — container/GEO/WALLDEF confirmed unchanged; ECL prefix tag found; opcode table escalated to `re-oracle`
+## 2026-09-01 — container/GEO/WALLDEF confirmed unchanged; ECL fully SOLVED via `re-oracle` escalation
 
 - Container, `WALLDEF.GLB`-equivalent geometry, and `GEO.GLB`'s fixed
   1024-byte/16x16 shape all transfer unchanged: 25/25 GLIB files OK, 41/41
   GEO levels (the largest level count in the corpus), 60+60 wall-texture
   PNGs rendered with 0 skips in either tile-bank scheme.
-- Found a genuinely new container-level detail: `ECL.GLB` blocks carry a
-  constant 2-byte `0x8813` prefix tag (matching Pool of Radiance's own
-  `.dax`-family prefix convention, but never seen before on a GLIB-family
-  title's `ECL.GLB`). Stripping it is necessary but not sufficient — a
-  corpus-wide reachability walk under the v1.1 opcode table (used unchanged
-  by Curse/Secret/PoR/Gateway) still desyncs on ~10% of visited opcodes,
-  resolving only 1/41 levels (that resolution's own slot value, `33104`, is
-  implausible — a desync artifact).
-- **Escalated to `re-oracle`** after 2 genuinely distinct failed hypotheses
-  (table unchanged + no prefix; prefix stripped + v1.1 table still desyncs
-  at full-corpus scale). Interim finding: strip + the v1.3 table
-  (`OPCODE_TABLE_POOLS_V13`) + two new opcodes (`0x42`/`0x43`, 4 plain
-  operands each) gives 0 unknown opcodes / 0 desyncs across the whole
-  corpus (20,588 instructions, 30 blocks) — the wallset-load call is `0x42`
-  here, not `0x21` (Pools) or `0x37` (v1.1). One puzzle remains open inside
-  the escalation itself: resolved slot values cluster in `{7..16}`, not
-  matching `WALLDEF.GLB`'s own sparse id list (`{2,4,5,6,7,8,9,13,30,31,32,
-  36}`) directly — a remap layer or different id convention, being traced
-  against this title's own AmigaOS executable (has a `HUNK_SYMBOL` block).
-  **Not yet independently re-verified by this pass** — see
-  `amiga/data-structure.md` §4 for the full paths-tried table and caveats.
+- `ECL.GLB` needed a new opcode-table variant (`OPCODE_TABLE_TREASURE_V13X`
+  — Pools of Darkness's v1.3 table plus 3 new opcodes, `0x42`-`0x44`) on top
+  of the already-found constant 2-byte `0x8813` block prefix. **Escalated
+  to `re-oracle`** after 2 genuinely distinct failed hypotheses; the
+  escalation found the fix via a headless-Ghidra disassembly of this
+  title's own executable, and it was **independently re-verified against
+  real bytes this session** (0 unknown opcodes / 0 desyncs across 30,338
+  instructions, reproduced exactly; the exe-derived wallset table's 87
+  values checked 87/87 inside `WallDef.glb`'s real directory).
+- **A second, bigger finding came with it**: for this title's dungeon geos
+  (16-50), the ECL bytecode's own wallset-slot operands are dead data — the
+  Amiga executable's `getAreaWallsets` unconditionally overwrites them from
+  a hardcoded per-geo table. Wired in as a `wallsetOverride`
+  (`tools/shared/goldbox-glib-export.ts`) that replaces ECL's own
+  resolution for those 29 geo ids. Final: ECL bytecode alone resolves
+  24/41 levels (72 slots); the override then correctly replaces 29/41
+  levels (87 slots) — exactly the corpus's geo ids inside the executable's
+  `[16,50]` table range.
+- A resolved dungeon cell (level 16, cell (0,0) facing North) was traced
+  end-to-end to its real texture (`walldef2-9-wall0-view6.png`) and
+  visually confirmed non-degenerate.
+- The walker (`tools/walker/walker.ts`, id `treasureofthesavagefrontier`)
+  now renders real per-cell wall art for every dungeon-geo level in this
+  corpus.
 
 ### Paths tried
 
@@ -47,5 +50,5 @@ not status, per this project's documentation convention).
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| tsf-ecl-opcode-table | escalated:re-oracle | Full ECL opcode table + wallset-slot-id remap not yet confirmed (interim: prefix+v1.3 table+2 new opcodes gives 0 desyncs corpus-wide, but resolved slot ids `{7..16}` don't match `WALLDEF.GLB`'s own id list `{2,4,...,36}` — escalation tracing the executable) | `amiga/data-structure.md` §4 | 2026-09-01 |
+| tsf-wilderness-wallset | open | Wilderness geos 51-62 (type-1 walls only) fall outside the executable's per-geo wallset table entirely; real wall-art source (Sky.tlb? wildcom.tlb?) unresolved | `amiga/data-structure.md` §4 | 2026-09-01 |
 | tsf-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content (items, monsters, sprites, portraits, dungeon commands, strings, sounds) not catalogued — only outer container structure validated | `amiga/data-structure.md` §6 | 2026-09-01 |
