@@ -561,20 +561,123 @@ already-successful CODE-hunk-relative disassembly technique used for §5.1's
 compression-method dispatch. See the per-title `TODO.md` `*-geo-plane01`
 rows for the outcome once it lands.
 
-### 7.3 Walker integration — CONFIRMED connectivity + passability, RENDERED wall art
+### 7.3 Walker integration — CONFIRMED connectivity + passability, wall art PER-CELL where §7.4 resolves it
 
 `tools/walker/games-goldbox.ts` implements one shared `GameView` for all
 four titles, built on the CORRECTED model from §7.2's escalation:
 `isBlocked(cell,dir)` (wall type != 0 AND door code == 0) gates movement,
 `hasWall`/`isDoor` drive the minimap and the first-person side/front hints.
 Wall-art SELECTION (which specific WALLDEF texture a 1-15 wall type names)
-still requires each level's ECL bytecode — not decoded by this project — so
-the view does **not** claim per-square wall-art accuracy: it renders one
-deterministically-chosen, already render-confirmed WALLDEF wall texture per
-level (from that title's own `dungeon/wall-index.json`, itself built by
-scanning the extractor's own already-written `walldef*-<id>-wall<n>-
-view6.png` files) wherever the confirmed grid says a wall is drawn in that
-direction. This is a real Gold Box wall texture in the right place, not
-proven to be the *specific* texture the original game would draw there.
-Locked doors (code 2/3) get a distinct tint but are treated as passable (no
-key/lock mechanic implemented in the walker).
+is now resolved per-cell for levels whose ECL script statically names its
+wallset bindings — see §7.4. For every other level (or any cell whose
+resolution fails, e.g. a dynamic slot or a `0x7f`/`0xff` sentinel), the view
+falls back to its original behaviour: one deterministically-chosen,
+already render-confirmed WALLDEF wall texture per level (from that title's
+own `dungeon/wall-index.json`, itself built by scanning the extractor's own
+already-written `walldef*-<id>-wall<n>-view6.png` files) wherever the
+confirmed grid says a wall is drawn in that direction — a real Gold Box
+wall texture in the right place, not proven to be the *specific* texture
+the original game would draw there. Locked doors (code 2/3) get a distinct
+tint but are treated as passable (no key/lock mechanic implemented in the
+walker).
+
+### 7.4 Wallset-slot binding — ECL bytecode CONFIRMED for Curse/Secret, OPEN for PoR/Pools (2026-09-01)
+
+§7.2 identified the missing indirection: a 1-15 wall-art TYPE names a
+level-scoped `(wallsetSlot 0-2, slice 0-4)` pair, and which WALLDEF
+resource occupies each of the 3 runtime slots is written by that level's
+own ECL bytecode at area-setup time (`LoadWalldef(slot, id)`,
+`ovr008.cs:655-684`/`ovr003.cs:501-587`). This session decoded the ECL
+container + bytecode VM and used it to resolve real per-level bindings.
+Full writeup, VM opcode table, and verification evidence:
+`tools/shared/goldbox-ecl.ts`'s module doc. Summary:
+
+- **Container**: PoR's `ecl.dax` is the SAME `.dax` directory format as
+  `geo.dax` (29 entries, `indexID` = level id), with the SAME kind of
+  constant 2-byte prefix tag GEO's PoR entries carry (`0x8813` here,
+  confirmed constant across all 29 entries). The three GLIB titles'
+  `ECL.GLB` is the SAME GLIB container as `GEO.GLB` (top-level, stored, no
+  prefix needed).
+- **Bytecode VM**: CONFIRMED end-to-end against the `simeonpilgrim/coab`
+  decompile (`ovr008.cs`, `ovr003.cs`, `Classes/Opperation.cs`,
+  `Classes/EclBlock.cs`) — a flat command stream over a 16-bit-address-space
+  buffer, opcode + N typed operand groups, 65 opcodes. Opcode `0x37` ("LOAD
+  PIECES") directly calls `LoadWalldef(slot, id)` for all 3 slots from its
+  3 operands — simpler than the `vm_SetMemoryValue`-intercepted
+  `0x322/0x324/0x326` path §7.2 originally cited (that path — opcode `0x09`
+  "SAVE" to those addresses — is also detected, but never observed to fire
+  in this corpus; every real hit came from `0x37` directly).
+- **Verification oracle**: a worklist-based reachability walk (following
+  `GOTO`/`GOSUB`/`ON GOTO`/`ON GOSUB` targets, not just linear fallthrough)
+  from each of a level's 5 header addresses, with **zero unknown opcodes
+  and zero desyncs among the visited set** as the self-consistency check.
+  Curse of the Azure Bonds' block 1 disassembles perfectly clean for 700+
+  instructions and resolves `LOAD PIECES(1,2,3)` immediately after its own
+  `LOAD FILES` call — all 3 ids exist in Curse's own `WALLDEF.GLB`
+  directory. Cross-checked further: two of Curse's resolved values (`15`,
+  `18`) do NOT appear in `WALLDEF.GLB`'s own sparse id list (`1-14,16,17`)
+  — these are not a decode error but the SAME multi-wallset-entry
+  phenomenon §5.6/§5.7 already established (`resolveCompositeWallId`'s
+  `10*id+n` scheme for the *texture* lookup): ids `14` and `17` are exactly
+  the two entries with `wallsetCount===2` (raw length `1560 = 2*780`), and
+  `15`/`18` land exactly one past them. `resolveFlatWalldefId`
+  (`goldbox-walltiles.ts`) generalizes this into a "flat id space is
+  contiguous across a multi-wallset entry's own span" resolver, used by
+  both the wallset-binding consumer and (implicitly, by construction) the
+  already-shipped composite-id texture lookup.
+- **Coverage** (levels with a matching GEO entry; a title's ECL.GLB can
+  have more blocks than GEO has levels — those extras are presumably
+  non-dungeon scripts, not resolved or needed here):
+
+  | Title | Levels with >=1 resolved slot | Total slots resolved |
+  |---|---|---|
+  | Curse of the Azure Bonds | 10/16 | 30 |
+  | Secret of the Silver Blades | 5/17 | 15 |
+  | Pool of Radiance | 0/29 | 0 |
+  | Pools of Darkness | 0/32 | 0 |
+
+  **Pool of Radiance** (an earlier, structurally different engine
+  revision — already documented for its `.dax` vs GLIB container and its
+  GEO 2-byte prefix): its header's `preCampCheckAddr`/
+  `campInterruptedAddr`/`eclInitialEntryPoint` fields routinely reference
+  addresses OUTSIDE that level's own ECL block (e.g. block 1: those 3
+  words are `0xb618/0xb653/0xb6a0`, all >13,800 bytes past the block's own
+  7,671-byte length, while `vmRunAddr1`/`searchLocationAddr` DO land
+  in-range and disassemble cleanly) — so 3 of the 5 usual entry points
+  are simply not addresses into this buffer for this engine revision, and
+  the ones that are in-range don't reach a `LOAD PIECES`/`SAVE`-to-0x322
+  call via reachability (the one hit found, block 13, is a
+  memory-dereferenced/dynamic operand). **Pools of Darkness** (the latest
+  title): entry points all resolve in-range and disassemble cleanly (0
+  unknown opcodes), and `LOAD PIECES` calls ARE found (5 blocks), but
+  every one of them uses a memory-dereferenced (dynamic) operand, not a
+  literal — this title's engine revision computes wallset ids at runtime
+  rather than hardcoding them per level.
+- **Paths tried for PoR/Pools** (before accepting these as genuine,
+  narrowed-down engine-revision differences rather than a decode bug):
+  linear (non-reachability) scan from each header address — found
+  spurious "hits" from misaligned/unreachable bytes, refuted by the
+  reachability walker finding 0 hits from the same start; scanning from
+  `headerEndPos` directly (bypassing header-word selection entirely) —
+  clean small graphs, no `0x37` opcode found for most PoR levels;
+  `SAVE`-to-`0x322/0x324/0x326` detection — implemented and wired, 0 hits
+  anywhere in the whole 4-title corpus (not PoR/Pools-specific — Curse and
+  Secret's resolved bindings all came from `0x37` directly too).
+- **Wired end-to-end**: `GeoLevel.wallsetBinding` (flat ids per slot,
+  `goldbox-geo.ts`), `resolveWallFlatId` (cell+dir -> flat id + slice),
+  `resolveFlatWalldefId` (flat id -> real WALLDEF id + wallset index,
+  `goldbox-walltiles.ts`), and `GoldBoxView.wallTextureForCell`
+  (`tools/walker/games-goldbox.ts`) resolve a real per-cell texture when
+  possible, falling back to the existing per-level placeholder otherwise.
+  Example resolutions (Curse block 1, `wallsetBinding = {slot1:1,
+  slot2:2, slot3:3}`): cell `(2,12)` facing East has wall type `1` ->
+  `(slot 0, slice 0)` -> `slot1` = flat id `1` -> WALLDEF id `1`,
+  wallsetIndex `0` -> `walldef2-1-wall0-view6.png`; cell `(0,0)` facing
+  North has wall type `6` -> `(slot 1, slice 0)` -> `slot2` = flat id `2`
+  -> `walldef2-2-wall0-view6.png`. Composite case (Curse block 64,
+  `{slot1:17, slot2:18, slot3:16}`): cell `(8,2)` facing South has wall
+  type `6` -> `(slot 1, slice 0)` -> `slot2` = flat id `18` ->
+  `resolveFlatWalldefId` finds WALLDEF id `17`'s span covers `[17,19)` ->
+  wallsetIndex `1` -> wallNumber `1*5+0=5` -> `walldef2-17-wall5-view6.png`
+  (id 17's own directory entry has exactly `wallNumber` 0-9, confirming
+  the 2-wallset span).

@@ -84,17 +84,28 @@ run the same engine. `caob-tile-bank-index-unit` resolved directly:
 whole 48/56-byte glyph BLOCK, not a single 8x8 tile — the block-count
 arithmetic (`1+45+70n`) was right. `caob-geo-plane01` resolved: planes 0/1
 are wall-art TYPE per direction (0-15) indexing a level-scoped, ECL-loaded
-3-slot wallset table (still needs each level's ECL script to resolve to an
-actual WALLDEF id — tracked as `caob-wallset-ecl-binding` below); plane 3's
-bit layout was right but its value labels were backwards (0=solid,
+3-slot wallset table (resolving each level's ECL script to an actual
+WALLDEF id was tracked as `caob-wallset-ecl-binding`, closed below); plane
+3's bit layout was right but its value labels were backwards (0=solid,
 1=passable, 2/3=locked door). `tools/shared/goldbox-geo.ts` and
 `tools/walker/games-goldbox.ts` corrected accordingly — the walker's old
 collision rule silently treated ~75-87% of real solid walls as passable.
 See `docs/goldbox-glib-format.md` §7.2's and §5.6's correction blocks.
 
+## 2026-09-01 — ECL wallset-slot binding SOLVED for 10/16 levels
+
+`caob-wallset-ecl-binding` is CLOSED. Decoded `ECL.GLB`'s bytecode VM and
+used a worklist-based reachability walk to statically resolve real WALLDEF
+ids for 10 of 16 levels (30 slots), verified self-consistent (0 unknown
+opcodes, 0 desyncs) and cross-checked against `WALLDEF.GLB`'s own sparse id
+list. `tools/walker/games-goldbox.ts` now renders the real per-cell/
+per-direction WALLDEF texture for those levels' cells, falling back to the
+existing per-level placeholder elsewhere. Full writeup:
+`docs/goldbox-glib-format.md` §7.4; per-title summary: `amiga/
+data-structure.md` §5.1.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| caob-wallset-ecl-binding | open | Which WALLDEF resource occupies each of a level's 3 ECL-loaded wallset slots (needed to resolve a wall-art type nibble to an actual texture id) — requires decoding `ecl.dax`/`ECL.GLB` bytecode, not attempted this pass | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
 | caob-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content (items, monsters, sprites, portraits, dungeon commands, strings) not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

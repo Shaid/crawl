@@ -37,6 +37,12 @@ export async function exportPoolsOfDarknessData(dataDir: string) {
     specificTilesPath: 'Disk2/8X8D.TLB',
     // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
     geoPath: 'Disk3/GEO.GLB',
+    // Level-scripting bytecode (tools/shared/goldbox-ecl.ts) — wired for
+    // completeness, but Pools of Darkness's own LOAD PIECES operands are
+    // consistently memory-dereferenced (runtime-computed), not literal, so
+    // this resolves 0 static slot bindings corpus-wide (confirmed, not a
+    // decode failure — see data-structure.md's wallset-binding section).
+    eclPath: 'Disk3/ECL.GLB',
   });
 }
 

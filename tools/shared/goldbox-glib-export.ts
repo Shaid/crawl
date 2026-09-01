@@ -17,22 +17,12 @@ import {
   decodeWallSlices,
   renderView,
   resolveCompositeWallId,
+  SLICES_PER_WALLSET,
   VIEW_OFFSET,
 } from './goldbox-walltiles.ts';
 import { decodeGeoRecord, GEO_RECORD_SIZE } from './goldbox-geo.ts';
 import { exportGeoDungeon } from './goldbox-dungeon-export.ts';
-
-/**
- * Number of raw wall slices (`decodeWallSlices` records) that share one
- * scheme-2 wallset tile bank. A WALLDEF entry decoding to N slices has
- * `N / SLICES_PER_WALLSET` wallsets, each covering a contiguous run of 5
- * slices — confirmed against every entry's own byte length (780, 1560, 2340
- * are all multiples of 780 = 5*156) and against Curse's own scheme-2 index
- * table (ids 1-13,16 = 1 wallset -> direct id; ids 14,17 = 2 wallsets ->
- * composite ids 141/142, 171/172, one composite id per 5-slice chunk, not
- * per individual slice).
- */
-const SLICES_PER_WALLSET = 5;
+import { findWallsetBindings } from './goldbox-ecl.ts';
 
 function walk(dir: string, out: string[]) {
   for (const f of readdirSync(dir)) {
@@ -71,6 +61,16 @@ export interface WallRenderSource {
    * compressed — §0/§5). Optional — omit if not yet located for a title.
    */
   geoPath?: string;
+  /**
+   * Path to this title's own `ECL.GLB` — the level-scripting bytecode that
+   * resolves each level's 3 wallset slots (`goldbox-ecl.ts`). Optional —
+   * omit if not yet located, or when the title's own ECL scripts don't
+   * statically resolve slot bindings (Pools of Darkness's LOAD PIECES
+   * operands are consistently runtime-computed — see that module's doc).
+   * Same GLIB container/index convention as `geoPath`, same `id` space
+   * (one ECL block per level, matched to GEO's own level `id`).
+   */
+  eclPath?: string;
 }
 
 export async function exportGoldBoxGlibData(
@@ -288,6 +288,36 @@ export async function exportGoldBoxGlibData(
       })
       .filter((l) => l !== undefined);
     console.log(`GEO: ${levels.length}/${gindex.length} level(s) matched the expected ${GEO_RECORD_SIZE}-byte record size`);
+
+    // 4b. Wallset-slot bindings (goldbox-ecl.ts) — attach each level's own
+    // ECL-resolved {slot1,slot2,slot3} flat WALLDEF ids, when the title has
+    // an ECL.GLB and this level's own script statically resolves them (see
+    // goldbox-ecl.ts's module doc — Curse/Secret resolve well, Pools of
+    // Darkness's operands are consistently runtime-computed and won't).
+    if (wallRender.eclPath) {
+      const edata = readFileSync(resolve(dataDir, wallRender.eclPath));
+      const econ = parseGlibContainer(edata);
+      const eindex = decodeGlibIndex(edata, econ);
+      const eclById = new Map(eindex.map(({ id, blockIndex }) => [id, econ.blocks[blockIndex]] as const));
+      let resolvedSlots = 0;
+      let levelsWithAnyBinding = 0;
+      for (const level of levels) {
+        const block = eclById.get(level.id);
+        if (!block) continue;
+        const raw = readBlock(edata, block);
+        const { binding } = findWallsetBindings(raw);
+        const n = (binding.slot1 !== undefined ? 1 : 0) + (binding.slot2 !== undefined ? 1 : 0) + (binding.slot3 !== undefined ? 1 : 0);
+        if (n > 0) {
+          level.wallsetBinding = binding;
+          levelsWithAnyBinding++;
+          resolvedSlots += n;
+        }
+      }
+      console.log(
+        `ECL wallset bindings: ${levelsWithAnyBinding}/${levels.length} level(s) got at least one statically-resolved slot (${resolvedSlots} slot(s) total)`,
+      );
+    }
+
     exportGeoDungeon(game, platform, levels);
   }
 

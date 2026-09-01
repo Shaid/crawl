@@ -76,6 +76,6 @@ games-goldbox.ts` corrected accordingly. See `docs/goldbox-glib-format.md`
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| pod-wallset-ecl-binding | open | Shares `caob-wallset-ecl-binding` — which WALLDEF resource occupies each ECL-loaded wallset slot, needs ECL bytecode decode | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
+| pod-wallset-ecl-binding | open | `ECL.GLB` bytecode VM decoded + wired (`tools/shared/goldbox-ecl.ts`), but resolves 0/32 levels — every reached `LOAD PIECES` call uses a dynamic (memory-dereferenced) operand, this title's engine revision computes wallset ids at runtime (genuine engine-revision difference, confirmed not a decode bug) | `amiga/data-structure.md` §5.1, `docs/goldbox-glib-format.md` §7.4 | 2026-09-01 |
 | pod-item-dat-vs-items-dat | open | Both `ITEM.DAT` and `ITEMS.DAT` are present; their relationship (which is real/active) not investigated | `amiga/data-structure.md` §0 | 2026-08-30 |
 | pod-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

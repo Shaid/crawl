@@ -113,6 +113,27 @@
  *   70 ids per wallset slot (`0x2E-0x73`, `0x74-0xB9`, `0xBA-0xFF`) — matching
  *   §5.6's `1+45+70k` block arithmetic exactly. A WALLDEF tile byte indexes
  *   one whole bank BLOCK (= one glyph), not a single raw tile-plane byte.
+ *
+ * ## Wallset-slot resolution (2026-09-01, `tools/shared/goldbox-ecl.ts`)
+ *
+ * The "which WALLDEF resource occupies each of the 3 slots" gap above is
+ * now resolved for MOST of Curse of the Azure Bonds and Secret of the
+ * Silver Blades' levels by decoding each level's own ECL "LOAD PIECES"
+ * script (`goldbox-ecl.ts`'s module doc has the full VM writeup and
+ * verification evidence). `WallsetBinding` + `resolveWallFlatId` below
+ * expose this: a level's `wallsetBinding` (attached by
+ * `goldbox-glib-export.ts`'s GEO step) gives each slot's **flat** WALLDEF
+ * piece id (`undefined` = not statically resolved for this level — a
+ * dynamic/computed operand, or no ECL hit found at all); turning a flat id
+ * into a real WALLDEF entry id + wallset-within-entry is
+ * `resolveFlatWalldefId` in `goldbox-walltiles.ts` (needs that title's own
+ * WALLDEF directory, not just the GEO/ECL data this module has). Pool of
+ * Radiance and Pools of Darkness are NOT resolved this way (see
+ * `goldbox-ecl.ts`'s doc and each title's own `data-structure.md`/
+ * `TODO.md` for why) — their `wallsetBinding` fields are absent/all-
+ * `undefined`, and `resolveWallFlatId` correctly returns `undefined` for
+ * every cell in that case (the walker's existing one-texture-per-level
+ * placeholder is the fallback).
  */
 
 export const GEO_GRID_SIZE = 16;
@@ -144,12 +165,26 @@ export interface GeoCell {
   special: number;
 }
 
+/**
+ * A level's resolved wallset-slot bindings — each slot's flat WALLDEF piece
+ * id (see `goldbox-ecl.ts`'s `findWallsetBindings` and this module's
+ * "Wallset-slot resolution" doc section above). `undefined` = not
+ * statically resolved for this level.
+ */
+export interface WallsetBinding {
+  slot1?: number;
+  slot2?: number;
+  slot3?: number;
+}
+
 export interface GeoLevel {
   id: number;
   width: number;
   height: number;
   /** Row-major, index = y*width+x. */
   cells: GeoCell[];
+  /** This level's own ECL-resolved wallset bindings, when statically resolvable — see `WallsetBinding`. Absent for titles/levels where resolution isn't done (Pool of Radiance, Pools of Darkness) or didn't statically resolve. */
+  wallsetBinding?: WallsetBinding;
 }
 
 /** Decode one already-isolated 1024-byte GEO payload (GLIB titles: the raw block bytes; PoR: `decompressed.subarray(2)`). */
@@ -241,4 +276,28 @@ export function wallSlotSlice(wallType: number): { slot: 0 | 1 | 2; slice: 0 | 1
   if (wallType <= 0) return undefined;
   const n = wallType - 1;
   return { slot: Math.floor(n / 5) as 0 | 1 | 2, slice: (n % 5) as 0 | 1 | 2 | 3 | 4 };
+}
+
+/**
+ * Resolve a cell's wall in direction `dir` to `{flatId, slice}` — the flat
+ * WALLDEF piece id (still needs `resolveFlatWalldefId` in
+ * `goldbox-walltiles.ts` to become a real WALLDEF entry id + wallset
+ * index) and which of that wallset's 5 slices to use. Returns `undefined`
+ * if there's no wall in that direction, or if this level's own
+ * `wallsetBinding` doesn't statically name the relevant slot (see
+ * `WallsetBinding`'s doc) — callers should fall back to a placeholder
+ * texture in that case, exactly as the walker already did before any
+ * binding was known.
+ */
+export function resolveWallFlatId(
+  cell: GeoCell,
+  dir: Direction,
+  binding: WallsetBinding | undefined,
+): { flatId: number; slice: 0 | 1 | 2 | 3 | 4 } | undefined {
+  const wallType = wallTypeFor(cell, dir);
+  const ss = wallSlotSlice(wallType);
+  if (!ss || !binding) return undefined;
+  const flatId = ss.slot === 0 ? binding.slot1 : ss.slot === 1 ? binding.slot2 : binding.slot3;
+  if (flatId === undefined) return undefined;
+  return { flatId, slice: ss.slice };
 }

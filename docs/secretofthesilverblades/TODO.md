@@ -70,9 +70,19 @@ corrected: 0=solid, 1=passable, 2/3=locked door). `tools/shared/
 goldbox-geo.ts` and `tools/walker/games-goldbox.ts` corrected accordingly.
 See `docs/goldbox-glib-format.md` §7.2/§5.6.
 
+## 2026-09-01 — ECL wallset-slot binding SOLVED for 5/17 levels
+
+`ssb-wallset-ecl-binding` is CLOSED. Same ECL bytecode decode and
+reachability-walk resolution as Curse (`tools/shared/goldbox-ecl.ts`)
+statically resolved real WALLDEF ids for 5 of 17 levels (15 slots).
+`tools/walker/games-goldbox.ts` now renders the real per-cell/per-direction
+WALLDEF texture for those levels' cells, falling back to the existing
+per-level placeholder elsewhere. Full writeup:
+`docs/goldbox-glib-format.md` §7.4; per-title summary: `amiga/
+data-structure.md` §5.1.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| ssb-wallset-ecl-binding | open | Shares `caob-wallset-ecl-binding` — which WALLDEF resource occupies each ECL-loaded wallset slot, needs ECL bytecode decode | `docs/goldbox-glib-format.md` §7.2 | 2026-08-31 |
 | ssb-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

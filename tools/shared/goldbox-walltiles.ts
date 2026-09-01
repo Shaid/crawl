@@ -161,6 +161,63 @@ export function resolveCompositeWallId(baseId: number, wallsetIndex: number, wal
 }
 
 /**
+ * Number of raw 156-byte wall slices that share one bundled wallset — the
+ * same quantum `resolveCompositeWallId`'s `wallsetIndex` counts in.
+ * Previously a private constant duplicated in `goldbox-glib-export.ts`;
+ * hoisted here so `resolveFlatWalldefId` (below, needed by
+ * `goldbox-ecl.ts`'s wallset-slot binding consumers) and the render step
+ * share one definition.
+ */
+export const SLICES_PER_WALLSET = 5;
+
+export interface FlatWalldefEntry {
+  /** This WALLDEF entry's own directory id. */
+  id: number;
+  /** `Math.ceil(entrySlices.length / SLICES_PER_WALLSET)` for this entry. */
+  wallsetCount: number;
+}
+
+export interface FlatWalldefResolution {
+  /** The real WALLDEF directory id (what `wall-index.json` keys textures by). */
+  baseId: number;
+  /** Which of that entry's bundled wallsets (0-based) the flat id named. */
+  wallsetIndex: number;
+  wallsetCount: number;
+}
+
+/**
+ * Resolve an ECL "LOAD PIECES"/`LoadWalldef` **flat** piece id to its real
+ * WALLDEF entry id + which bundled wallset it names.
+ *
+ * `LoadWalldef`'s own `block_id` argument (`ovr031.cs:642-687`) is passed
+ * straight through to `load_decode_dax(..., block_id, "WALLDEF<area>.dax")`
+ * in the DOS original, where WALLDEF is a PER-AREA file — but this
+ * project's Amiga corpus has ONE combined `WALLDEF.GLB`/`.dax` per title,
+ * whose own directory ids are sparse (Curse: `1-14,16,17` — no `15` or
+ * `18`). Real ECL scripts nonetheless reference `15` and `18` directly
+ * (Curse blocks 51/53 and 64/69's own `LOAD PIECES` operands) — these are
+ * NOT separate ids at all: `14` and `17` are exactly the two Curse entries
+ * whose raw byte length is `2 * WALL_SLICE_SIZE * SLICES_PER_WALLSET`
+ * (i.e. `wallsetCount === 2`, the same multi-wallset entries
+ * `resolveCompositeWallId` already handles for the scheme-2 texture
+ * lookup), and `15`/`18` land exactly one past them. The flat id space is
+ * therefore contiguous across a multi-wallset entry's own span:
+ * `[id, id + wallsetCount)`. Confirmed by construction (every gap in the
+ * WALLDEF directory's own id sequence is exactly filled by its immediately
+ * preceding multi-wallset entry's span, zero leftover gaps) — see
+ * `docs/goldbox-glib-format.md`'s wallset-binding section.
+ */
+export function resolveFlatWalldefId(entries: FlatWalldefEntry[], flatId: number): FlatWalldefResolution | undefined {
+  const sorted = [...entries].sort((a, b) => a.id - b.id);
+  for (const e of sorted) {
+    if (flatId >= e.id && flatId < e.id + e.wallsetCount) {
+      return { baseId: e.id, wallsetIndex: flatId - e.id, wallsetCount: e.wallsetCount };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Compose the tile bank for one specific wall-id's own scheme-2 tile
  * bucket: `[placeholder, ...universalTiles, ...specificTiles]` — the exact
  * 3-part structure Pool of Radiance's own `buildTileBank`

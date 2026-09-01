@@ -382,6 +382,37 @@ documented there rather than four times). Implementation:
 > `docs/goldbox-glib-format.md` §7.2's correction block for the full
 > source-cited derivation.
 
+### 7.1 Wallset-slot binding — OPEN (0/29 levels, genuine engine-revision difference, not a decode bug)
+
+`ecl.dax` (same `.dax` directory/codec as `geo.dax`, same 2-byte constant
+prefix convention, `0x8813` here) was decoded down to a full bytecode VM
+(`tools/shared/goldbox-ecl.ts`, shared with the three GLIB titles) and
+wired into this extractor (`eclPath` step 4b), but resolves **0 of 29**
+levels' wallset slots statically — confirmed as a real, narrowed-down
+engine-revision difference, not a gap in the decode:
+
+- Pool of Radiance's own header fields
+  (`preCampCheckAddr`/`campInterruptedAddr`/`eclInitialEntryPoint`)
+  routinely point OUTSIDE that level's own ECL block (e.g. block 1: those 3
+  words are `0xb618/0xb653/0xb6a0`, all >13,800 bytes past the block's
+  7,671-byte length) — 3 of the usual 5 entry points simply aren't
+  addresses into this buffer for this engine revision. The other 2
+  (`vmRunAddr1`/`searchLocationAddr`) DO land in-range and disassemble
+  cleanly (0 unknown opcodes).
+- Every `LOAD PIECES` (opcode `0x37`) call actually reached via a
+  worklist-based reachability walk from an in-range entry point uses a
+  memory-dereferenced (dynamic) operand, not a literal id — so even where
+  the call is reached, the id it would load isn't staticly knowable.
+- Paths tried: linear (non-reachability) scan from each header address
+  (found spurious hits refuted by 0 hits from a proper reachability walk);
+  scanning from `headerEndPos` directly, bypassing header-word selection
+  (clean small graphs, no `0x37` found); `SAVE`-to-`0x322/0x324/0x326`
+  detection (implemented, 0 hits anywhere in the whole 4-title corpus).
+
+Full writeup and cross-title coverage table: `docs/goldbox-glib-format.md`
+§7.4. Tracked as `por-wallset-ecl-binding` in `docs/poolofradiance/TODO.md`.
+Levels fall back to `GoldBoxView`'s existing per-level placeholder texture.
+
 ---
 
 ## 8. Extractor and outputs

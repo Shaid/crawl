@@ -40,6 +40,10 @@ export async function exportCurseOfTheAzureBondsData(dataDir: string) {
     universalTilesPath: 'DISKA/8X8D.TLB',
     // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
     geoPath: 'DISKB/GEO.GLB',
+    // Level-scripting bytecode resolving each level's 3 wallset slots — see
+    // tools/shared/goldbox-ecl.ts. Curse resolves well (12/25 blocks get at
+    // least one statically-known slot, per its own data-structure.md).
+    eclPath: 'DISKB/ECL.GLB',
   });
 }
 

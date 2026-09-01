@@ -13,21 +13,29 @@
  * only if a wall is drawn AND its code is solid). Movement in this view is
  * built directly on that data.
  *
- * Wall ART selection is NOT fully resolved: which specific WALLDEF texture
- * a 1-15 wall type names requires each level's ECL bytecode (which ECL
- * script loaded which WALLDEF resource into which of 3 runtime slots) —
- * this project has not decoded ECL. Rather than overclaim a resolution,
- * this view renders a **single representative wall texture per level**
- * (deterministically chosen from that title's own `dungeon/wall-index.json`,
- * which lists every WALLDEF wall-view PNG the extractor already rendered
- * and confirmed non-degenerate) wherever the confirmed grid says a
- * direction is blocked. This is a real, render-confirmed Gold Box wall
- * texture in the right *place*, just not proven to be the *specific*
- * texture the original game would draw there — labelled "rendered" via the
- * harness's confidence banner, same as Wizardry 6's dungeon-view wall
- * values. Locked doors (code 2/3) render with a distinct tint/colour from
- * solid walls but are treated as passable by the walker (no
- * key/lock-and-key mechanic implemented).
+ * Wall ART selection is now RESOLVED per-cell for levels whose ECL script
+ * statically names its wallset-slot bindings (`tools/shared/goldbox-ecl.ts`
+ * decodes each level's own "LOAD PIECES" bytecode — see that module's doc
+ * for the full VM writeup and per-title coverage). `wallTextureForCell`
+ * below does the real resolution: `resolveWallFlatId` (goldbox-geo.ts)
+ * turns a cell's wall type into a flat WALLDEF piece id via this level's
+ * `wallsetBinding`, then `resolveFlatWalldefId` (goldbox-walltiles.ts)
+ * turns that into a real WALLDEF entry id + wallset-within-entry, from
+ * which the exact `(id, wallNumber)` texture is looked up in
+ * `dungeon/wall-index.json`. This resolves well for Curse of the Azure
+ * Bonds and Secret of the Silver Blades; Pool of Radiance (an earlier,
+ * structurally different engine revision) and Pools of Darkness (whose
+ * own LOAD PIECES operands are consistently runtime-computed, not
+ * literal) do not statically resolve — for those, and for any cell whose
+ * resolution fails for any other reason (no binding, flat id not found in
+ * this title's own WALLDEF directory), this view falls back to the same
+ * **single representative wall texture per level** it always used
+ * (deterministically chosen from `dungeon/wall-index.json`) — a real,
+ * render-confirmed Gold Box wall texture in the right *place*, just not
+ * proven to be the *specific* texture the original game would draw there.
+ * Locked doors (code 2/3) render with a distinct tint/colour from solid
+ * walls but are treated as passable by the walker (no key/lock-and-key
+ * mechanic implemented).
  *
  * Like MM1/MM2 (`games-mm.ts`), this view draws the whole main canvas
  * itself via `renderCanvas` (bypassing the DrawItem composite path — Gold
@@ -39,7 +47,8 @@ import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/d
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import type { GeoLevel, GeoCell, Direction } from '../shared/goldbox-geo.ts';
-import { isBlocked, isDoor, hasWall } from '../shared/goldbox-geo.ts';
+import { isBlocked, isDoor, hasWall, resolveWallFlatId } from '../shared/goldbox-geo.ts';
+import { resolveFlatWalldefId, SLICES_PER_WALLSET, type FlatWalldefEntry } from '../shared/goldbox-walltiles.ts';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Asset loading
@@ -54,6 +63,8 @@ interface WallTextureEntry {
 interface GoldBoxData {
   levels: GeoLevel[];
   walls: WallTextureEntry[];
+  /** One entry per distinct WALLDEF id in `walls`, `wallsetCount` re-derived from the max `wallNumber` seen for that id — see `resolveFlatWalldefId`'s doc. */
+  flatEntries: FlatWalldefEntry[];
   assetBase: string;
 }
 
@@ -65,6 +76,18 @@ async function fetchJSON<T>(url: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+/** Re-derive each WALLDEF id's `wallsetCount` from the rendered wall-index (rather than re-reading WALLDEF.GLB/dax directly, which the browser walker has no access to) — the highest `wallNumber` seen for an id is `wallsetCount*SLICES_PER_WALLSET - 1` at most (some slices may be missing from the index if they failed to render, so this is a lower bound, but matches every real corpus case checked). */
+function deriveFlatWalldefEntries(walls: WallTextureEntry[]): FlatWalldefEntry[] {
+  const maxWallNumber = new Map<number, number>();
+  for (const w of walls) {
+    const prev = maxWallNumber.get(w.id) ?? -1;
+    if (w.wallNumber > prev) maxWallNumber.set(w.id, w.wallNumber);
+  }
+  return [...maxWallNumber.entries()]
+    .map(([id, maxN]) => ({ id, wallsetCount: Math.ceil((maxN + 1) / SLICES_PER_WALLSET) }))
+    .sort((a, b) => a.id - b.id);
+}
+
 function loadGoldBoxData(assetBase: string): Promise<GoldBoxData> {
   const existing = dataCache.get(assetBase);
   if (existing) return existing;
@@ -72,7 +95,7 @@ function loadGoldBoxData(assetBase: string): Promise<GoldBoxData> {
     const index = await fetchJSON<{ levels: Array<{ id: number; file: string }> }>(`${assetBase}/dungeon/levels-index.json`);
     const levels = await Promise.all(index.levels.map((l) => fetchJSON<GeoLevel>(`${assetBase}/${l.file}`)));
     const wallIndex = await fetchJSON<{ walls: WallTextureEntry[] }>(`${assetBase}/dungeon/wall-index.json`);
-    return { levels, walls: wallIndex.walls, assetBase };
+    return { levels, walls: wallIndex.walls, flatEntries: deriveFlatWalldefEntries(wallIndex.walls), assetBase };
   })();
   dataCache.set(assetBase, promise);
   return promise;
@@ -179,6 +202,26 @@ export class GoldBoxView implements GameView {
       this.wallTextureByLevel.set(level.id, walls.length ? walls[level.id % walls.length] : undefined);
     }
     return this.wallTextureByLevel.get(level.id);
+  }
+
+  /**
+   * Real per-cell wall texture, when this level's ECL-resolved
+   * `wallsetBinding` statically names the relevant slot (see module doc)
+   * — falls back to `wallTextureFor`'s single per-level placeholder
+   * otherwise (no binding, dynamic slot, or a flat id this title's own
+   * WALLDEF directory doesn't cover, e.g. a `0x7f`/`0xff` sentinel).
+   */
+  private wallTextureForCell(level: GeoLevel, cell: GeoCell, dir: Direction): WallTextureEntry | undefined {
+    const resolved = resolveWallFlatId(cell, dir, level.wallsetBinding);
+    if (resolved) {
+      const entry = resolveFlatWalldefId(this.data.flatEntries, resolved.flatId);
+      if (entry) {
+        const wallNumber = entry.wallsetIndex * SLICES_PER_WALLSET + resolved.slice;
+        const tex = this.data.walls.find((w) => w.id === entry.baseId && w.wallNumber === wallNumber);
+        if (tex) return tex;
+      }
+    }
+    return this.wallTextureFor(level);
   }
 
   get levelId(): number {
@@ -290,11 +333,13 @@ export class GoldBoxView implements GameView {
       ctx.fillRect(CANVAS_W * 0.78, CANVAS_H * 0.18, CANVAS_W * 0.22, CANVAS_H * 0.64);
     }
 
-    // Front wall: the one confirmed, render-verified WALLDEF texture for
-    // this level, scaled up and centred, whenever the confirmed grid says
-    // a wall is drawn on this side (regardless of door/passability code).
+    // Front wall: the real per-cell WALLDEF texture where this level's ECL
+    // bindings resolve it, else the level's placeholder texture (see
+    // wallTextureForCell's doc) — scaled up and centred, whenever the
+    // confirmed grid says a wall is drawn on this side (regardless of
+    // door/passability code).
     if (front) {
-      const tex = this.wallTextureFor(level);
+      const tex = this.wallTextureForCell(level, cell, facing);
       if (tex) {
         const img = loadImageCached(`${this.data.assetBase}/${tex.name}.png`);
         if (img.complete && img.naturalWidth > 0) {

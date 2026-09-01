@@ -40,6 +40,10 @@ export async function exportSecretOfTheSilverBladesData(dataDir: string) {
     universalTilesPath: 'DISK1/8X8D.TLB',
     // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
     geoPath: 'DISK2/GEO.GLB',
+    // Level-scripting bytecode resolving each level's 3 wallset slots — see
+    // tools/shared/goldbox-ecl.ts. Resolves well (7/22 blocks get at least
+    // one statically-known slot, per this title's own data-structure.md).
+    eclPath: 'DISK2/ECL.GLB',
   });
 }
 

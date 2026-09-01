@@ -184,6 +184,22 @@ Planes 0/1 (candidate wall-art selectors) remain open, escalated to
 > `docs/goldbox-glib-format.md` §7.2's correction block for the full
 > source-cited derivation.
 
+### 5.1 Wallset-slot binding — OPEN (0/32 levels, genuine engine-revision difference, not a decode bug)
+
+`Disk3/ECL.GLB` (same GLIB container, same bytecode VM,
+`tools/shared/goldbox-ecl.ts`) was wired into this extractor (`eclPath`)
+but resolves **0 of 32** levels' wallset slots statically — a real,
+confirmed engine-revision difference, not a gap in the decode. Every
+header entry point resolves in-range and disassembles cleanly (0 unknown
+opcodes), and `LOAD PIECES` (opcode `0x37`) calls ARE found (5 blocks) via
+the worklist-based reachability walk, but every one of them uses a
+memory-dereferenced (dynamic) operand rather than a literal id — Pools of
+Darkness's engine revision computes wallset ids at runtime rather than
+hardcoding them per level. Full writeup and cross-title coverage table:
+`docs/goldbox-glib-format.md` §7.4. Tracked as `pod-wallset-ecl-binding` in
+`docs/poolsofdarkness/TODO.md`. Levels fall back to `GoldBoxView`'s
+existing per-level placeholder texture.
+
 ## 6. Extractor and outputs
 
 ```

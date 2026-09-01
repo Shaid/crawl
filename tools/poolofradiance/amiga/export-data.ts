@@ -31,6 +31,7 @@ import { decodeWallSlices, buildTileBank, renderView, VIEW_OFFSET } from './wall
 import { assetDir, syncDataManifest, manifestEntry, writeManifest } from '../../shared/asset-paths.ts';
 import { decodePorGeoEntry } from '../../shared/goldbox-geo.ts';
 import { exportGeoDungeon } from '../../shared/goldbox-dungeon-export.ts';
+import { findWallsetBindings, POR_ECL_PREFIX_LENGTH } from '../../shared/goldbox-ecl.ts';
 
 const GAME = 'poolofradiance';
 const PLATFORM = 'amiga';
@@ -138,6 +139,40 @@ export async function exportPoolOfRadianceData(dataDir: string) {
     const geoData = readBinary(geoPath);
     const { entries } = readDaxDirectory(geoData);
     const levels = entries.map((entry) => decodePorGeoEntry(decompressDaxEntry(geoData, entry), entry.indexID));
+
+    // 4b. ecl.dax — wallset-slot bindings (tools/shared/goldbox-ecl.ts). Same
+    // .dax directory/codec as geo.dax, one entry per level (indexID matches
+    // GEO's own level id), same 2-byte constant-tag prefix convention.
+    // WIRED FOR COMPLETENESS, NOT CURRENTLY RESOLVING: Pool of Radiance is a
+    // genuinely earlier/different engine revision (already documented for
+    // its container/codec and GEO prefix) — its own header's
+    // preCampCheckAddr/campInterruptedAddr/eclInitialEntryPoint fields
+    // routinely point outside a level's own ECL block, and every reachable
+    // LOAD PIECES hit found in this corpus used memory-dereferenced
+    // (dynamic) operands, not literals. See
+    // docs/poolofradiance/amiga/data-structure.md's wallset-binding section
+    // for the concrete evidence and paths tried.
+    const eclPath = resolve(dataDir, 'ecl.dax');
+    if (existsSync(eclPath)) {
+      const eclData = readBinary(eclPath);
+      const { entries: eclEntries } = readDaxDirectory(eclData);
+      const eclById = new Map(eclEntries.map((e) => [e.indexID, e]));
+      let levelsWithAnyBinding = 0;
+      for (const level of levels) {
+        const entry = eclById.get(level.id);
+        if (!entry) continue;
+        const decoded = decompressDaxEntry(eclData, entry);
+        const buf = decoded.subarray(POR_ECL_PREFIX_LENGTH);
+        const { binding } = findWallsetBindings(buf);
+        const n = (binding.slot1 !== undefined ? 1 : 0) + (binding.slot2 !== undefined ? 1 : 0) + (binding.slot3 !== undefined ? 1 : 0);
+        if (n > 0) {
+          level.wallsetBinding = binding;
+          levelsWithAnyBinding++;
+        }
+      }
+      console.log(`ECL wallset bindings: ${levelsWithAnyBinding}/${levels.length} level(s) got at least one statically-resolved slot`);
+    }
+
     exportGeoDungeon(GAME, PLATFORM, levels);
   }
 
