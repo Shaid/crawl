@@ -972,6 +972,157 @@ structural hunch that Z=1 is the indoor/room-outline layer — the earlier
 "tested with `sceneLayer=1`, blank frame, INCONCLUSIVE" result was a wrong
 TEST POSITION, not a wrong layer guess.
 
+### 8.6 Generalizing to Ishar 2/3 (2026-09-01) — Ishar 2 CONFIRMED (two scripts), Ishar 3 attempted and left OPEN
+
+Task: generalize the proven mechanism (§8.2-8.5) to Ishar 2/3, reusing
+`computeScenePlacements()`/`compositeFrame()`/`fillPlaceholderSkyGround()`
+unchanged (per the `crystals-firstperson.ts` precedent) rather than
+reinventing them.
+
+**Ishar 2 — CONFIRMED, RENDERED.** Dungeon files (`DJ*.DO`) were tried
+first (the task's own initial suggestion) and rejected: `DJ1.bin` disassembles
+as a 100 KB, 1,303-instruction script with a genuinely different
+rectangular-area-scan structure, not the simple facing/ring-loop shell.
+Pivoting to Ishar 2's own OUTDOOR location scripts (`FORET1.DO`, `VILLE.DO`,
+`PLAINE1.DO`, `ARBO.DO`, `MONTAGNE.DO`) found they share Ishar 1's exact
+facing/ring-loop shell byte-for-byte in STRUCTURE — only addresses and
+tuning constants differ. This structural correspondence (same shell, same
+operand-position roles feeding `omaintc`, only the literal addresses/
+constants swapped) is the evidence for:
+
+- `ISHAR2_GLOBALS`: `partyX = 0x2ab4`, `partyY = 0x2ab5`,
+  `partyFacing = 0x2ab6` (a `cswitch2 base=-1 count=3` on `0x2ab6`, matching
+  Ishar 1's `rawValue = facingIndex + 1` convention exactly — confirmed
+  empirically: facing-block=1's world-Y update direction matches Ishar 1's
+  own facing-value-1 block), `gridBufferA = 0x80`, `gridBufferB = 0x159c`.
+- `ISHAR2_GAME_SCREEN = {xCenter:127, horizonY:78, width:255, height:112}`,
+  from `MAIN.bin`'s own `cdefsc scridx=0x000e` config block (same field
+  offsets as Ishar 1's own `cdefsc` block) — byte-identical to Ishar 3's own
+  block (see below), both distinct from Ishar 1's.
+
+Unlike Ishar 1 (one shared `FOND.bin` for every outdoor script), **Ishar 2
+ships a PER-LOCATION backdrop file** (`FOND1.DO` for `FORET1.DO`,
+`FVILLE.DO` for `VILLE.DO`).
+
+RENDERED end-to-end, 9 real position/facing combinations, all visually
+distinct and non-degenerate (`tools/.scratch/probe-ishar2*.ts`, PNGs
+inspected via `Read`):
+
+- `FORET1.bin` + `FOND1.bin` against real `CONT1.FIC` cells (terrain
+  dispatch `cswitch2 base=-30 count=3`, i.e. sign-extended cell value in
+  `[30,33]` — a dense 563-cell cluster around x=8-45,y=48+): `(20,50)` all
+  4 facings + `(30,55)` facing N — 5 renders, all show coherent, clearly
+  tree-like branching/root structures against sky+water, each facing/
+  position producing a visibly different composition (e.g. `(30,55,N)`
+  shows a horizon tree-line with a wide water gap, `(20,50,E)` shows
+  multiple distinct tree clusters spread across the frame).
+- `VILLE.bin` + `FVILLE.bin` against real `CONT3.FIC` cells: `(35,9)` all 4
+  facings — 4 renders, each showing a recognizable row of building
+  roofs/walls along the horizon over a cobblestone ground, with clearly
+  different building silhouettes per facing (N: a continuous roofline; E: a
+  fence/gate structure plus a tall tower; S: a stacked-wall/brick
+  structure).
+
+Minor open caveat: `FORET1.bin`'s runs hit the interpreter's
+`STEP_BUDGET` (200,000 steps, `alis-interp.ts`) before naturally
+terminating (`'step budget exceeded -- aborting run'` warning) — the
+rendered frames still look coherent (near-field content composites first),
+so this doesn't block shipping, but a fuller/more distant background may be
+missing for this specific script. Not investigated further this session.
+
+`ARBO.bin`/`PLAINE1.bin`/`MONTAGNE.bin` disassemble clean under the same
+shell (0 decode errors) but weren't exercised end-to-end — `MONTAGNE.bin`
+is structurally more complex (1,462 instructions vs. ~200-500, 8
+`cswitch2` sites instead of 2), likely a multi-sub-biome script, out of
+scope this pass.
+
+Shipped: `tools/shared/ishar2-firstperson.ts` (mirrors
+`crystals-firstperson.ts`'s module shape: `ISHAR2_GLOBALS`,
+`ISHAR2_GAME_SCREEN`, `renderIshar2LocationFrame()`), export pipeline
+`tools/ishar2/amigaaga/scripts.ts` (ships `foret1.bin`/`fond1.bin`/
+`ville.bin`/`fville.bin` under `public/assets/ishar2/amigaaga/scripts/`),
+and `tools/walker/games-ishar.ts` generalized to dispatch the render
+function and location-script table per game id (`LOCATION_SCRIPTS`,
+`RENDER_FRAME`, both keyed by `IsharGameId`) — `KeyF`/`KeyC` now work
+identically for Ishar 2 as they already did for Ishar 1.
+
+**Ishar 3 — attempted, NOT achieved this session. Left OPEN, well-scoped.**
+The same structural-correspondence approach found:
+
+- `ISHAR3_GLOBALS`: `partyX = 0x14b6` (clamped against 57, matching
+  `ISHAR_REGION_LAYOUT.ishar3.width`), `partyY = 0x257` (clamped against
+  82, matching `.height`), `partyFacing = 0x14b7`, `gridBufferA = 0x260`,
+  `gridBufferB = 0x14ae` (the latter two match §9's already-confirmed
+  `MAIN.bin` loader trace) — CONFIRMED by disassembly.
+- A facing dispatch (`cswitch2 base=2 count=4`, targets
+  `[869,608,1126,82,345]`) exists at a position analogous to Ishar 1/2's,
+  and a 4-entry raw-value table (`ISHAR3_FACING_RAW = [-2,-1,2,1]` for
+  N/E/S/W) was derived by tracing which world-coordinate axis/sign each of
+  the 4 non-default target blocks updates.
+- `ISHAR3_GAME_SCREEN` is byte-identical to Ishar 2's `cdefsc` block.
+
+**However, rendering `FORET.bin` (+ `FFORET.bin`) against real `CONT4-3.FIC`
+cells produces a noisy, non-forest-like image at every position/facing
+tried** (5 positions across 2 test cells, one near a region edge and one
+well interior — ruling out an edge-clamp artifact). Root-caused (not just
+observed) via direct disassembly of the shared per-cell subroutine chain
+(`cjsr target=1127` at four call sites in `FORET.bin`, decimal target 1127
+= file offset `0x467`, itself immediately calling `cjsr target=1747` =
+`0x6d3`, the ring-depth-to-screen-scale table): **Ishar 3's outdoor scripts
+use a materially different, more complex shell than Ishar 1/2.** Instead of
+a single facing-SELECTED forward-scan (one of 4 blocks executes, chosen by
+the facing dispatch), Ishar 3's `FORET.bin` executes **all 4 of a
+"diamond scan" set of blocks unconditionally** (found via `grep`-ing every
+`cjsr target=1127` call site — 4 distinct call sites, none behind the
+facing `cswitch2`), each sweeping a depth x lateral double loop along a
+DIFFERENT pair of world axes (two blocks feed the lateral loop variable into
+world-Y with a fixed world-X depth offset; the other two feed it into
+world-X with a fixed world-Y depth offset — i.e. north/south/east/west
+strips around the player, not one forward frustum). The per-cell
+screen-projection formula (`sdirw(0x5e) = odirb(0x58) * scaleConstant[ring]`,
+found in the shared `0x6d3` subroutine) is confirmed structurally sound in
+isolation — but the OUTER ring loop's lateral-bound narrowing/widening logic
+(`0x59` ring counter decrementing, `0x54`/`0x55` lateral bounds
+accumulate-unless-clamped each ring) allows the observed lateral magnitude
+to reach ~28-49 in practice, not the ~7 the initial one-time clamp suggests
+— multiplied by scale constants up to 192, this produces on-screen x-offsets
+from -9,408 to +1,197 against a 255px-wide screen (confirmed via direct
+instrumentation of `runIsharScene()`'s raw placement list, not just the
+final composited image).
+
+**Confirmed NOT script-specific**: `JUNGLE.bin` (paired `FJUNGLE.bin`)
+shares the byte-identical shell shape — also exactly 4 `cjsr target=1127`
+call sites, 0 decode errors — so this is a title-wide structural
+difference in Ishar 3's outdoor renderer, not a `FORET.bin` quirk.
+
+Paths tried (all on real `FORET.bin`/`JUNGLE.bin` bytes, not synthetic
+data):
+
+| Approach | Result | Why it failed |
+|---|---|---|
+| Structural-correspondence global/facing derivation (the approach that worked for Ishar 2) | Globals/screen constants confirmed; render still broken | Correspondence holds for the FACING dispatch and globals, but Ishar 3's terrain-scan CONTROL FLOW is a different shape (4 unconditional quadrant blocks, not 1 facing-selected block) — the assumption "same shell, only addresses differ" was true for Ishar 2 but false for Ishar 3's scan structure specifically |
+| Test at 5 positions/facings against `FORET.bin` | All 5 renders equally noisy/wrong | Rules out a single bad test position; the bug is structural, not position-dependent |
+| Interior vs. near-edge test position (`(7,3)` vs `(28,40)` in a 57x82 grid) | Both produce wildly out-of-range x (`-9,408..1,197` and `-5,376..384` respectively) | Rules out an edge-clamp artifact as the sole cause — the out-of-range magnitude scales with position but never resolves to a plausible range |
+| Direct instrumentation of `runIsharScene()`'s raw placement list (bypassing composite-leaf `dx`/`dy`/`dz` offsets) | Confirmed the huge x values originate at the `cputnat`/`cxputat` placement-command level itself, not in `resolveIsharComposite()`'s composite expansion | Narrowed the bug to the script's own coordinate-computation subroutine, not the shared renderer library |
+| Traced the shared per-cell subroutine chain (`0x467`->`0x6d3`, the ring-scale table) to its full body | Formula itself (`lateral * scaleConstant[ring]`) is internally consistent and looks correct in isolation | The bug is in what feeds "lateral" into that formula — the OUTER ring-loop bound-narrowing logic across 4 differently-shaped scan blocks, which needs a full CFG-level re-derivation, not a one-function read |
+| `JUNGLE.bin` as an alternative script (this session's own planned fallback) | Confirmed the identical 4x-`cjsr`-1127 shell shape (same call-site count, 0 decode errors) | Rules out "just try a simpler script" — the shell difference is title-wide, not one script's authoring quirk |
+
+Not escalated to `re-oracle` this session: the negative is well-scoped (a
+specific, named structural difference — 4 unconditional quadrant blocks vs.
+1 facing-selected block — with concrete file offsets and evidence, not a
+vague "doesn't work"), and the task's own instructions explicitly permit
+leaving one title as a scoped follow-up when the other is solid. A future
+pass should fully disassemble all 4 scan blocks' lateral-bound
+narrow/widen logic (the `0x37c`-`0x466`-shaped tail already partially read
+above) to determine which block (if any) corresponds to the "forward
+view" and whether the other 3 feed a DIFFERENT, not-yet-found screen
+formula rather than the shared `0x6d3` one.
+
+`ishar3-firstperson.ts` is left in the tree (globals/facing table/screen
+constants are genuinely CONFIRMED and may be useful groundwork), but its
+module doc no longer claims a working render, and it is NOT wired into
+`tools/walker/games-ishar.ts` (`LOCATION_SCRIPTS.ishar3 = []`).
+
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 
 Found by the 2026-09-01 `re-oracle` pass. The actual walkable-world data

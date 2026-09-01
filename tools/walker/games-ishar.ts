@@ -34,6 +34,27 @@
  * §8.2/§8.4 for the exact scope boundary and what's honestly unverified
  * (backdrop anchor/tiling convention, no real palette).
  *
+ * **Ishar 2 first-person, added 2026-09-01** (`tools/shared/
+ * ishar2-firstperson.ts`) — same generic scene-compositor mechanism, DIFFERENT
+ * global addresses/facing convention, CONFIRMED by direct disassembly
+ * comparison against Ishar 1's already-verified shell (see that module's doc
+ * comment). Two scripts RENDERED end-to-end against real `CONT1`/`CONT3`
+ * grid data: `FORET1.bin` (forest, own backdrop `FOND1.bin`) and `VILLE.bin`
+ * (village, own backdrop `FVILLE.bin`) — unlike Ishar 1, Ishar 2 ships a
+ * PER-LOCATION backdrop file rather than one shared `FOND.bin`. `ARBO.bin`/
+ * `PLAINE1.bin`/`MONTAGNE.bin` disassemble clean under the same shell but
+ * aren't wired up here (not exercised end-to-end).
+ *
+ * **Ishar 3 first-person: attempted, NOT achieved this session** (see
+ * `docs/ishar-container-format.md` §8.5 and `docs/ishar/TODO.md`). Global
+ * addresses and screen constants ARE confirmed by disassembly, but Ishar 3's
+ * outdoor scripts (`FORET.bin`/`JUNGLE.bin`, both checked) use a materially
+ * different, more complex shell than Ishar 1/2 — an unconditional 4-quadrant
+ * "diamond scan" around the player (not a single facing-gated forward scan)
+ * — and the per-cell screen-projection formula produces wildly out-of-range
+ * x-offsets for most cells. Not wired into this walker; `ishar3` gets no
+ * first-person option this session.
+ *
  * What IS confirmed (`docs/ishar-container-format.md` §9, independently
  * re-verified this session — an ASCII/pixel render of the decoded grid
  * shows an unmistakable coherent world: coastline borders, village/building
@@ -55,7 +76,8 @@ import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/d
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import { ISHAR_REGION_LAYOUT, isBlocked, type IsharRegionLayout } from '../shared/ishar-regions.ts';
-import { renderIsharLocationFrame, type RegionGridSource } from '../shared/ishar-firstperson.ts';
+import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame } from '../shared/ishar-firstperson.ts';
+import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -76,11 +98,20 @@ interface IsharRegion {
   terrain: Uint8Array;
 }
 
-/** One first-person-renderable location script, verified end-to-end against real `CONT1` grid data (see module doc). */
+/**
+ * One first-person-renderable location script, verified end-to-end against
+ * real grid data (see module doc). `fond`, if present, is THIS location's
+ * OWN backdrop (Ishar 2's per-location `FOND1.bin`/`FVILLE.bin` convention);
+ * if absent, the caller falls back to `IsharData.firstPerson.sharedFond`
+ * (Ishar 1's one-`FOND.bin`-for-everything convention).
+ */
 interface IsharLocation {
   key: string;
   label: string;
   data: Uint8Array;
+  fond?: Uint8Array;
+  /** Region name pattern this location was verified against (`firstPersonAvailable` gate). */
+  regionPattern: RegExp;
 }
 
 interface IsharData {
@@ -88,15 +119,12 @@ interface IsharData {
   layout: IsharRegionLayout;
   regions: IsharRegion[];
   /**
-   * Ishar 1's `FOND.bin` (shared sky backdrop, every outdoor script uses the
-   * same one) plus every location script fetched successfully — currently
-   * `FORET.bin` and `VILLAGE.bin`, the two this project has verified
-   * end-to-end (see module doc). Empty `locations` for ishar2/ishar3 (not
-   * attempted) or if the asset fetch failed (e.g. the export step,
-   * `tools/ishar/amigaaga/scripts.ts`, hasn't been run — it is NOT wired
-   * into `npm run` since it isn't registered in package.json).
+   * Every location script fetched successfully for this game (empty/absent
+   * for `ishar3` — see module doc — or if the export step hasn't been run:
+   * `tools/ishar/amigaaga/scripts.ts` / `tools/ishar2/amigaaga/scripts.ts`,
+   * neither wired into `npm run`).
    */
-  firstPerson?: { fond: Uint8Array; locations: IsharLocation[] };
+  firstPerson?: { sharedFond?: Uint8Array; locations: IsharLocation[] };
 }
 
 const loadPromises = new Map<IsharGameId, Promise<IsharData>>();
@@ -107,26 +135,74 @@ function regionId(name: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-const LOCATION_SCRIPTS: Array<{ key: string; label: string }> = [
-  { key: 'foret', label: 'Forest (FORET.bin)' },
-  { key: 'village', label: 'Village (VILLAGE.bin)' },
-  { key: 'plaine', label: 'Plains (PLAINE.bin)' },
-  { key: 'rampart', label: 'Rampart (RAMPART.bin)' },
-];
+interface LocationScriptSpec {
+  key: string;
+  label: string;
+  /** Own backdrop asset key (Ishar 2 convention) — omit to use the game's shared `fond.bin` (Ishar 1 convention). */
+  fondKey?: string;
+  regionPattern: RegExp;
+}
 
-async function tryLoadFirstPersonAssets(base: string): Promise<{ fond: Uint8Array; locations: IsharLocation[] } | undefined> {
+/** Per-game render function — both share the same options/return shape (see each module's doc). */
+type LocationFrameRenderer = (opts: {
+  location: Uint8Array;
+  fond?: Uint8Array;
+  partyX: number;
+  partyY: number;
+  facing: 0 | 1 | 2 | 3;
+  grid: RegionGridSource;
+}) => FirstPersonFrame;
+
+const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
+  ishar: [
+    { key: 'foret', label: 'Forest (FORET.bin)', regionPattern: /^CONT1$/i },
+    { key: 'village', label: 'Village (VILLAGE.bin)', regionPattern: /^CONT1$/i },
+    { key: 'plaine', label: 'Plains (PLAINE.bin)', regionPattern: /^CONT1$/i },
+    { key: 'rampart', label: 'Rampart (RAMPART.bin)', regionPattern: /^CONT[34]/i },
+  ],
+  // Own per-location backdrop (fondKey), unlike Ishar 1's single shared fond.bin.
+  ishar2: [
+    { key: 'foret1', label: 'Forest (FORET1.bin)', fondKey: 'fond1', regionPattern: /^CONT1$/i },
+    { key: 'ville', label: 'Village (VILLE.bin)', fondKey: 'fville', regionPattern: /^CONT3$/i },
+  ],
+  // Ishar 3: attempted, not achieved this session (see module doc §8.5 / docs/ishar/TODO.md).
+  ishar3: [],
+};
+
+const RENDER_FRAME: Record<IsharGameId, LocationFrameRenderer> = {
+  ishar: renderIsharLocationFrame,
+  ishar2: renderIshar2LocationFrame,
+  ishar3: renderIsharLocationFrame, // unused (LOCATION_SCRIPTS.ishar3 is empty)
+};
+
+async function tryLoadFirstPersonAssets(
+  base: string,
+  game: IsharGameId,
+): Promise<{ sharedFond?: Uint8Array; locations: IsharLocation[] } | undefined> {
+  const specs = LOCATION_SCRIPTS[game];
+  if (specs.length === 0) return undefined;
   try {
-    const fondRes = await fetch(`${base}/scripts/fond.bin`);
-    if (!fondRes.ok) return undefined;
-    const fond = new Uint8Array(await fondRes.arrayBuffer());
+    let sharedFond: Uint8Array | undefined;
+    const needsSharedFond = specs.some((s) => !s.fondKey);
+    if (needsSharedFond) {
+      const fondRes = await fetch(`${base}/scripts/fond.bin`);
+      if (!fondRes.ok) return undefined;
+      sharedFond = new Uint8Array(await fondRes.arrayBuffer());
+    }
     const locations: IsharLocation[] = [];
-    for (const { key, label } of LOCATION_SCRIPTS) {
-      const res = await fetch(`${base}/scripts/${key}.bin`);
+    for (const spec of specs) {
+      const res = await fetch(`${base}/scripts/${spec.key}.bin`);
       if (!res.ok) continue;
-      locations.push({ key, label, data: new Uint8Array(await res.arrayBuffer()) });
+      const data = new Uint8Array(await res.arrayBuffer());
+      let fond: Uint8Array | undefined;
+      if (spec.fondKey) {
+        const fRes = await fetch(`${base}/scripts/${spec.fondKey}.bin`);
+        if (fRes.ok) fond = new Uint8Array(await fRes.arrayBuffer());
+      }
+      locations.push({ key: spec.key, label: spec.label, data, fond, regionPattern: spec.regionPattern });
     }
     if (locations.length === 0) return undefined;
-    return { fond, locations };
+    return { sharedFond, locations };
   } catch {
     return undefined;
   }
@@ -153,8 +229,8 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
         };
       })
       .sort((a, b) => a.id - b.id);
-    // First-person scripts are only wired up for Ishar 1 (see module doc).
-    const firstPerson = game === 'ishar' ? await tryLoadFirstPersonAssets(base) : undefined;
+    // First-person scripts are wired up for Ishar 1/2 (see module doc); LOCATION_SCRIPTS.ishar3 is empty.
+    const firstPerson = await tryLoadFirstPersonAssets(base, game);
     return { game, layout, regions, firstPerson };
   })();
   loadPromises.set(game, promise);
@@ -242,17 +318,18 @@ export class IsharView implements GameView {
   }
 
   /**
-   * Ishar 1, one of the regions with at least one confirmed real cell
-   * cluster for some location script — `CONT1` (`FORET`/`VILLAGE`/`PLAINE`),
-   * `CONT3`/`CONT4` (`RAMPART`'s real fortress-perimeter cluster spans
-   * both — `docs/ishar-container-format.md` §8.4). Cycling `KeyC` still
-   * tries any script against whichever region is current (manual
-   * test-bench, not the real region-to-scene dispatch) — most script/region
-   * combinations outside each script's own confirmed region will render
-   * few or no placements, which is expected, not a bug.
+   * True if this region has at least one loaded location script whose own
+   * `regionPattern` matches it (Ishar 1: `CONT1`/`CONT3`/`CONT4`; Ishar 2:
+   * `CONT1`/`CONT3`; Ishar 3: none, see module doc). Cycling `KeyC` still
+   * tries any of THIS game's loaded scripts against whichever region is
+   * current (manual test-bench, not the real region-to-scene dispatch) —
+   * most script/region combinations outside each script's own confirmed
+   * region will render few or no placements, which is expected, not a bug.
    */
   get firstPersonAvailable(): boolean {
-    return this.id === 'ishar' && /^CONT[134]$/i.test(this.region.name) && !!this.data.firstPerson;
+    const locations = this.data.firstPerson?.locations;
+    if (!locations || locations.length === 0) return false;
+    return locations.some((loc) => loc.regionPattern.test(this.region.name));
   }
 
   /** Currently-selected location script (cycled with `KeyC`), or `undefined` if none loaded. */
@@ -359,12 +436,14 @@ export class IsharView implements GameView {
   }
 
   /**
-   * Render one first-person frame (see `tools/shared/ishar-firstperson.ts`)
-   * by actually executing the currently-selected location script's (`KeyC`
-   * cycles it) bytecode, plus the shared `FOND.bin` backdrop, against this
-   * region's real terrain layer for the current pose. Cached by
-   * `x,y,facing,location` so it's only recomputed when the party actually
-   * moves or the script is switched, not every animation-frame tick.
+   * Render one first-person frame (see `tools/shared/ishar-firstperson.ts` /
+   * `ishar2-firstperson.ts`, dispatched by `RENDER_FRAME[this.id]`) by
+   * actually executing the currently-selected location script's (`KeyC`
+   * cycles it) bytecode, plus its backdrop (own per-location backdrop if it
+   * has one, else the game's shared `fond.bin`), against this region's real
+   * terrain layer for the current pose. Cached by `x,y,facing,location` so
+   * it's only recomputed when the party actually moves or the script is
+   * switched, not every animation-frame tick.
    */
   private renderFirstPerson(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const firstPerson = this.data.firstPerson!;
@@ -383,9 +462,10 @@ export class IsharView implements GameView {
           return v >= 128 ? v - 256 : v; // sign-extend, per ishar-regions.ts's tabchar() convention
         },
       };
-      const frame = renderIsharLocationFrame({
+      const renderFrame = RENDER_FRAME[this.id as IsharGameId];
+      const frame = renderFrame({
         location: location.data,
-        fond: firstPerson.fond,
+        fond: location.fond ?? firstPerson.sharedFond,
         partyX: x,
         partyY: y,
         facing: (facing & 3) as 0 | 1 | 2 | 3,
@@ -435,8 +515,12 @@ export class IsharView implements GameView {
     this.drawGrid(ctx, w, h);
     ctx.font = '10px monospace';
     ctx.fillStyle = '#ffe080';
+    const scriptLabels = this.data.firstPerson?.locations
+      .filter((loc) => loc.regionPattern.test(this.region.name))
+      .map((loc) => loc.label)
+      .join(', ');
     const fpNote = this.firstPersonAvailable
-      ? 'press F for first-person (Ishar 1: forest/village/plains/rampart scripts, RENDERED)'
+      ? `press F for first-person (${scriptLabels}, RENDERED)`
       : 'first-person not decoded for this region';
     ctx.fillText(`${this.region.label} — top-down (CONFIRMED world geometry) — ${fpNote}`, 4, 12);
   }
