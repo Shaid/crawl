@@ -54,15 +54,29 @@
  * `PLAINE1.bin`/`MONTAGNE.bin` disassemble clean under the same shell but
  * aren't wired up here (not exercised end-to-end).
  *
- * **Ishar 3 first-person: attempted, NOT achieved this session** (see
- * `docs/ishar-container-format.md` §8.5 and `docs/ishar/TODO.md`). Global
- * addresses and screen constants ARE confirmed by disassembly, but Ishar 3's
- * outdoor scripts (`FORET.bin`/`JUNGLE.bin`, both checked) use a materially
- * different, more complex shell than Ishar 1/2 — an unconditional 4-quadrant
- * "diamond scan" around the player (not a single facing-gated forward scan)
- * — and the per-cell screen-projection formula produces wildly out-of-range
- * x-offsets for most cells. Not wired into this walker; `ishar3` gets no
- * first-person option this session.
+ * **Ishar 3 first-person: CONFIRMED this session**, superseding an earlier
+ * "attempted, NOT achieved" verdict (see `docs/ishar-container-format.md`
+ * §8.6's correction block and `docs/ishar/TODO.md`). The earlier verdict's
+ * "4 unconditional quadrant blocks" claim was a misdiagnosis: a flat grep
+ * for `cjsr target=1127` found 4 lexical call sites but never checked CFG
+ * reachability — each site sits inside its OWN facing-gated block (one per
+ * `cswitch2` target, exactly Ishar 1/2's shell shape) and each block ends by
+ * jumping to the shared `cret`, so only ONE of the 4 runs per frame,
+ * selected by facing, same as Ishar 1/2. `renderIshar3LocationFrame()` (see
+ * `tools/shared/ishar3-firstperson.ts`) needed NO code change — running the
+ * existing, unmodified interpreter/dispatch against real bytecode + real
+ * grid data already produces coherent, non-degenerate first-person frames.
+ * `FORET.bin` (forest, own backdrop `FFORET.bin`) and `JUNGLE.bin`
+ * (jungle, own backdrop `FJUNGLE.bin`) both RENDERED against real
+ * `CONT4-3.FIC` cells at multiple interior positions/facings — recognizable
+ * tree/foliage silhouettes against sky, distinct per facing. A real,
+ * source-confirmed residual quirk remains (one lateral scan bound can
+ * "widen" toward a region edge instead of shrinking, and the per-ring
+ * narrowing logic doesn't always catch up across the ~6-7 available rings)
+ * — empirically HARMLESS for interior positions (the over-wide placements
+ * land off-screen and get clipped by the compositor) but visibly messier
+ * for a position near a grid CORNER (both axes near their edges at once,
+ * e.g. `(7,3)`); see §8.6 for the full evidence and paths-tried table.
  *
  * What IS confirmed (`docs/ishar-container-format.md` §9, independently
  * re-verified this session — an ASCII/pixel render of the decoded grid
@@ -87,6 +101,7 @@ import type { GameView } from './games.ts';
 import { ISHAR_REGION_LAYOUT, isBlocked, type IsharRegionLayout } from '../shared/ishar-regions.ts';
 import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame } from '../shared/ishar-firstperson.ts';
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
+import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -129,9 +144,9 @@ interface IsharData {
   regions: IsharRegion[];
   /**
    * Every location script fetched successfully for this game (empty/absent
-   * for `ishar3` — see module doc — or if the export step hasn't been run:
-   * `tools/ishar/amigaaga/scripts.ts` / `tools/ishar2/amigaaga/scripts.ts`,
-   * neither wired into `npm run`).
+   * if the export step hasn't been run: `tools/ishar/amigaaga/scripts.ts` /
+   * `tools/ishar2/amigaaga/scripts.ts` / `tools/ishar3/amigaaga/scripts.ts`,
+   * none wired into `npm run`).
    */
   firstPerson?: { sharedFond?: Uint8Array; locations: IsharLocation[] };
 }
@@ -178,14 +193,22 @@ const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
     { key: 'foret1', label: 'Forest (FORET1.bin)', fondKey: 'fond1', regionPattern: /^CONT1$/i },
     { key: 'ville', label: 'Village (VILLE.bin)', fondKey: 'fville', regionPattern: /^CONT3$/i },
   ],
-  // Ishar 3: attempted, not achieved this session (see module doc §8.5 / docs/ishar/TODO.md).
-  ishar3: [],
+  // Ishar 3: FORET.bin CONFIRMED (see module doc + docs/ishar-container-
+  // format.md §8.6's correction) against real CONT4-3.FIC forest cells;
+  // JUNGLE.bin also RENDERED (coherent, non-degenerate) against the same
+  // region, though its own canonical CONT<n>-3.FIC region isn't
+  // independently pinned (its cell-value dispatch range is too broad to
+  // discriminate one region from another the way FORET's is).
+  ishar3: [
+    { key: 'foret', label: 'Forest (FORET.bin)', fondKey: 'fforet', regionPattern: /^CONT4/i },
+    { key: 'jungle', label: 'Jungle (JUNGLE.bin)', fondKey: 'fjungle', regionPattern: /^CONT4/i },
+  ],
 };
 
 const RENDER_FRAME: Record<IsharGameId, LocationFrameRenderer> = {
   ishar: renderIsharLocationFrame,
   ishar2: renderIshar2LocationFrame,
-  ishar3: renderIsharLocationFrame, // unused (LOCATION_SCRIPTS.ishar3 is empty)
+  ishar3: renderIshar3LocationFrame,
 };
 
 async function tryLoadFirstPersonAssets(
@@ -242,7 +265,7 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
         };
       })
       .sort((a, b) => a.id - b.id);
-    // First-person scripts are wired up for Ishar 1/2 (see module doc); LOCATION_SCRIPTS.ishar3 is empty.
+    // First-person scripts are wired up for all three games (see module doc).
     const firstPerson = await tryLoadFirstPersonAssets(base, game);
     return { game, layout, regions, firstPerson };
   })();
@@ -333,7 +356,7 @@ export class IsharView implements GameView {
   /**
    * True if this region has at least one loaded location script whose own
    * `regionPattern` matches it (Ishar 1: `CONT1`/`CONT3`/`CONT4`; Ishar 2:
-   * `CONT1`/`CONT3`; Ishar 3: none, see module doc). Cycling `KeyC` still
+   * `CONT1`/`CONT3`; Ishar 3: `CONT4`, see module doc). Cycling `KeyC` still
    * tries any of THIS game's loaded scripts against whichever region is
    * current (manual test-bench, not the real region-to-scene dispatch) —
    * most script/region combinations outside each script's own confirmed

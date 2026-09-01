@@ -1123,6 +1123,85 @@ constants are genuinely CONFIRMED and may be useful groundwork), but its
 module doc no longer claims a working render, and it is NOT wired into
 `tools/walker/games-ishar.ts` (`LOCATION_SCRIPTS.ishar3 = []`).
 
+> **Correction (2026-09-02):** the "4 unconditional quadrant blocks" verdict
+> above was WRONG — a genuine misdiagnosis, not a hard structural limitation.
+> The prior pass's evidence ("4 distinct `cjsr target=1127` call sites, none
+> gated by the facing `cswitch2`") only checked that no SINGLE gate wrapped
+> all 4 sites textually; it never checked CFG reachability from the `cswitch2`
+> dispatch itself. A full disassembly this session (`FORET.bin`, entry
+> `scriptEntryPoint()`-derived, 247 instructions, 0 decode errors) shows:
+>
+> - The `cswitch2 base=2 count=4` at file offset `0x3c` has 5 targets
+>   (`[869, 608, 1126, 82, 345]`); target `1126` (`0x466`) is a bare `cret`
+>   (the value=0/out-of-range no-op case).
+> - Each of the OTHER 4 targets (`0x365`=N, `0x260`=E, `0x159`=S, `0x52`=W —
+>   matching `ISHAR3_FACING_RAW`) is its OWN self-contained block: its own
+>   depth-cap setup (`0x56`/`0x59`, bounded by the depth-axis global capped
+>   at 7), its own lateral-bound setup (`0x54`/`0x55`, bounded by the
+>   lateral-axis global against the region's OTHER dimension), its own ring
+>   loop with its own `cjsr target=1127` call site — and EVERY block ends
+>   with `cjmp target=1126` (0x466, the shared `cret`), not a fallthrough
+>   into the next block.
+> - This is EXACTLY Ishar 1/2's shell shape (one facing-selected block, not
+>   4 unconditional ones) — the earlier pass's "materially different shell"
+>   conclusion doesn't hold up under a real CFG trace. See
+>   `false-positive-bytecode-hit-without-cfg-reachability.md` — this is a
+>   textbook instance of that pitfall: a flat opcode-occurrence grep mistaken
+>   for a liveness/reachability proof.
+> - Independently double-checked the interpreter's comparison-operator
+>   semantics against `github.com/maestun/alis`'s real source
+>   (`src/opernames.c`'s `readexec_opername_saveD7()` + `osup()`: saves the
+>   PRE-token accumulator into `varD6`, reads the operand into `varD7`, then
+>   `varD7 = (varD6 > varD7) ? -1 : 0`) — confirms `alis-interp.ts`'s
+>   `applyBinary(op, accBefore, newOperand)` convention is correct, ruling
+>   out an operand-order decode bug as an alternative explanation.
+>
+> **Result: `renderIshar3LocationFrame()` needed NO code change.** Running
+> the existing, unmodified interpreter/`SceneEnv` against real `FORET.bin`/
+> `JUNGLE.bin` bytecode and real `CONT4-3.FIC` grid cells at 7 real
+> position/facing combinations (`(28,41)` all 4 facings, `(15,20)` facing N,
+> `(40,60)` facing S, plus JUNGLE at `(28,41)` facing N) produced coherent,
+> non-degenerate first-person frames for 6/7 (visually inspected via `Read`:
+> distinct tree/foliage silhouette shapes against a sky/ground split,
+> different per facing/position — `(40,60)` facing S rendered only the
+> backdrop with 2 foreground placements, an empty-but-not-garbage scene,
+> plausibly because no FOREST_SET-matching cell falls within view from that
+> specific pose). `JUNGLE.bin`'s own cell-value dispatch (`cswitch2
+> base=-7 count=26`, accepted range `[-7,19]`) is much broader than
+> FORET's explicit `cswitch1` list and doesn't discriminate one
+> `CONT<n>-3.FIC` region from another the way FORET's does (a corpus scan
+> found `CONT4-3.FIC` has by far the strongest FOREST_SET match — 4,057/4,674
+> cells, 87% — but every region matches JUNGLE's broader set at 50-90%), so
+> JUNGLE is shipped against the same `CONT4-3.FIC` region as FORET on the
+> strength of its own real, non-degenerate render rather than an
+> independently-pinned canonical region.
+>
+> **The residual "lateral bound can widen instead of shrink" anomaly is
+> real** (re-derived and confirmed by disassembly, not retracted) but turns
+> out to be empirically HARMLESS for interior party positions: `blit()`'s
+> per-pixel clip silently drops placements whose computed screen X falls
+> outside the visible range, and for an interior position the vast majority
+> of VISIBLE (in-range) pixels come from the correctly-scaled near rings.
+> Direct instrumentation confirmed raw placement x-offsets at `(28,41)`
+> facing N span `-5,376..384` (matching the "widens to ~28-49 cells laterally,
+> times up to 192 scale" mechanism previously found) while the COMPOSITED,
+> clipped frame still shows a clean, recognizable scene. Testing a
+> near-CORNER position (`(7,3)`, both axes close to their own edges
+> simultaneously — the previous session's own test position) DOES show a
+> visibly messier, less-structured result than any interior position, which
+> is consistent with this quirk being real and position-dependent, just not
+> disqualifying for normal (non-corner) play. Not investigated further —
+> low priority, doesn't block shipping.
+>
+> Shipped this session: `tools/ishar3/amigaaga/scripts.ts` (exports
+> `foret`/`fforet`/`jungle`/`fjungle` to
+> `public/assets/ishar3/amigaaga/scripts/`, matching Ishar 1/2's own
+> `scripts.ts` convention — not wired into `npm run`), and
+> `tools/walker/games-ishar.ts`'s `LOCATION_SCRIPTS.ishar3`/`RENDER_FRAME.ishar3`
+> now dispatch to `renderIshar3LocationFrame()` exactly like Ishar 1/2 — `KeyF`/
+> `KeyC` work identically for Ishar 3 now. `ishar3-firstperson.ts`'s module doc
+> has been rewritten to match (CONFIRMED, not "attempted, not achieved").
+
 ### 8.7 Fifth pass on Ishar 1 (2026-09-02) — `TEMPLE.bin` RENDERED, superseding the §8.3 INCONCLUSIVE verdict
 
 §8.3 left `TEMPLE.bin` at "attempted end-to-end, INCONCLUSIVE": its own

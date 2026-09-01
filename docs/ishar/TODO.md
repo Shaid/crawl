@@ -20,7 +20,7 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | ishar-fic-semantics | open | Remaining `.FIC` semantics now that the format layer is solved (§9): the role split between the two region-grid buffers (`basemain+0x80` vs `+0x234a` — adjacent-region staging vs pristine-copy both fit the paired reads); `EN1.FIC`'s 28/29 per-array record layouts (sizes byte-exact from bytecode, content undecoded); `TAB1.FIC`'s 19×19 {1..4} grid's role; Ishar 2/3's second grid layer's meaning | `docs/ishar-container-format.md` §9.1-9.3 | 2026-09-01 re-oracle |
 | ishar-sprite-palette | open | The real AGA colour palette for decoded sprites (§7/`docs/ishar-sprite-format.md`) is not yet recovered — `topalette()` resolves a palette resource via the same `adresdes()` directory mechanism as bitmaps, but the specific directory INDEX that is "the palette for this scene" is chosen by VM bytecode at runtime, not by any static marker. All shipped sprite renders are greyscale (RENDERED, not CONFIRMED colour) | `docs/ishar-sprite-format.md` §5 | 2026-08-31 |
 | ishar-scene-header-subtype-byte | open | The shared 16-byte scene header (§6's evidence) has a varying byte at offset 21 (`0x0a` graphics/Ishar-1 caves, `0x47` Ishar-2 dungeon files, `0x1e` a third subgroup) that looks like a content-subtype discriminator — not traced to any consumer code. (Note: this header is the ALIS *script* header — `id@0`, `code_loc@+4`→bytecode entry, `dirOff@+0x0e` — per §9's `script.c` layout, so the "subtype byte" is a script-header field, likely `vram_alloc`-adjacent) | `docs/ishar-container-format.md` §6, §9 | 2026-09-01 re-oracle |
-| ishar-firstperson-generalize | open | The first-person renderer now executes FIVE Ishar 1 location scripts (`FORET.bin`, `VILLAGE.bin`, `PLAINE.bin`, `RAMPART.bin`, `TEMPLE.bin` — all RENDERED, wired into the walker's `KeyC` cycle; `TEMPLE.bin` supersedes an earlier INCONCLUSIVE verdict, see the correction in `docs/ishar-container-format.md` §8.7) plus TWO Ishar 2 location scripts (`FORET1.bin`, `VILLE.bin` — RENDERED, wired, per-location backdrop convention) — `ORC.bin` (Ishar 1 monster placement) deliberately not wired (no real per-frame encounter data to drive it honestly). Ishar 3 attempted and NOT achieved: globals/facing table/screen constants ARE confirmed, but its outdoor scripts (`FORET.bin`/`JUNGLE.bin`) execute an unconditional 4-quadrant "diamond scan" (not a facing-selected forward scan like Ishar 1/2) whose per-cell screen-projection produces wildly out-of-range x-offsets — root-caused to a specific outer ring-loop lateral-bound issue, not yet fixed | `docs/ishar-container-format.md` §8.6 (Ishar 3), §8.7 (TEMPLE) | 2026-09-02 |
+| ishar-firstperson-generalize | open | The first-person renderer now executes FIVE Ishar 1 location scripts (`FORET.bin`, `VILLAGE.bin`, `PLAINE.bin`, `RAMPART.bin`, `TEMPLE.bin` — all RENDERED, wired into the walker's `KeyC` cycle; `TEMPLE.bin` supersedes an earlier INCONCLUSIVE verdict, see the correction in `docs/ishar-container-format.md` §8.7), TWO Ishar 2 location scripts (`FORET1.bin`, `VILLE.bin` — RENDERED, wired, per-location backdrop convention), and now TWO Ishar 3 location scripts (`FORET.bin`, `JUNGLE.bin` — RENDERED, wired, CONFIRMED — see the correction in §8.6: the earlier "4 unconditional diamond-scan blocks" verdict was a CFG-reachability misdiagnosis, the real shell is Ishar 1/2's single facing-selected block, no code change was needed) — `ORC.bin` (Ishar 1 monster placement) deliberately not wired (no real per-frame encounter data to drive it honestly), and Ishar 2/3's `ARBO.bin`/`PLAINE1.bin`/`MONTAGNE.bin` remain unexercised (structurally more complex, out of scope) | `docs/ishar-container-format.md` §8.6 (Ishar 3 correction), §8.7 (TEMPLE) | 2026-09-02 |
 | ishar-cavint-sceneLayer-writer | open | `CAVINT.bin`'s own real cell-value alphabet is now confirmed to live in `INIT.FIC`'s Z=1 sub-array (not Z=0), meaning the real game must set `omainb(0x2b3c)` to 1 somewhere in `CAVINT`'s own launch path (most likely `MAIN.CO`'s scene/location dispatcher) — that write site was not located this session (the walker forces `sceneLayer=1` as a wired, RENDERED-not-CONFIRMED convention) | `docs/ishar-container-format.md` §8.5, `docs/crystalsofarborea/amiga/data-structure.md` §8 correction block | 2026-09-02 |
 | ishar-firstperson-backdrop-anchor | open | `FOND.bin`'s backdrop-panel anchor/tiling/parallax convention is UNVERIFIED against any real screenshot — panels resolve to large (up to 96×85px) composites anchored base-at-horizon, plausible as "distant hill/cloud silhouette" but two panels don't tile to cover the full 255px screen width, leaving flat placeholder sky visible at the frame edges (may be correct, may indicate a missing repeat rule) | `docs/ishar-container-format.md` §8.2 | 2026-09-01 |
 | ishar-greyscale-atlas-normalize | open | The already-shipped sprite atlas (`ishar-sprite-atlas.ts`) still uses the fixed-0-255-scale `isharBitmapToGreyscaleRGBA()`, which silently renders any bitmap with `palOffset` above ~40 as a near-flat block even though the real decoded indices vary normally (confirmed via a histogram on two `FOND.bin` sprites this session). A per-bitmap-normalized version now exists (`isharBitmapToNormalizedGreyscaleRGBA()`) and is used by the first-person renderer, but the corpus-wide atlas pipeline was not re-run with it | `tools/shared/ishar-sprites.ts` module doc | 2026-09-01 |
@@ -29,6 +29,49 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | crystals-carte-destination-mechanism | open | The real "travel to a location" mechanism: a confirmed consumer region hit-tests the 8 checklist rows (`cftstset`+"forme" collision test) and calls `clive` (load-and-run-another-script-by-id) on confirmation, but the literal script id(s) `clive` loads, and any per-location map hotspot/placement table (for "click a place on the map"), were not found this session | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
 
 ## Session log
+
+- **2026-09-02 (fourteenth pass — Ishar 3 first-person CONFIRMED, correcting
+  the thirteenth pass's "4 unconditional diamond-scan blocks" verdict)**:
+  Tasked with fully disassembling the 4 scan blocks' lateral-bound
+  narrow/widen logic per the thirteenth pass's own stated next step. A full
+  CFG-level disassembly of `FORET.bin` (247 instructions, 0 errors) found
+  the prior verdict's central claim was WRONG: the 4 `cjsr target=1127`
+  call sites are NOT unconditional — each sits inside its own facing-gated
+  block (one per `cswitch2 base=2 count=4` target, exactly Ishar 1/2's
+  shell), and every block ends with `cjmp` to the shared `cret`. Only ONE
+  block runs per frame, selected by facing, never 4 — the earlier "4x
+  quadrant scan" reading came from a flat call-site grep that never checked
+  CFG reachability (see `false-positive-bytecode-hit-without-cfg-
+  reachability.md`, a new pitfall this session). Independently
+  double-checked the interpreter's comparison-operator semantics against
+  `github.com/maestun/alis`'s real source (fetched directly via `curl`,
+  `src/opernames.c`) to rule out an operand-order decode bug as an
+  alternative explanation — confirmed `alis-interp.ts`'s `acc-before OP
+  new-operand` convention matches `osup()`'s real C implementation exactly.
+  **Result: no code change was needed in `alis-interp.ts` or
+  `ishar3-firstperson.ts`.** Running the existing, unmodified renderer
+  against real `FORET.bin`/`JUNGLE.bin` bytecode + real `CONT4-3.FIC` grid
+  cells at 7 real position/facing combinations produced coherent,
+  recognizable forest/jungle scenes for 6/7 (the 7th, an interior position
+  facing directly at a non-forest patch, rendered an empty-but-plausible
+  backdrop-only frame — not garbage). A real, source-confirmed residual
+  quirk (one lateral-scan bound can widen toward a region edge instead of
+  shrinking, and the per-ring narrowing loop's exact-match condition never
+  catches up) was re-confirmed but found to be empirically HARMLESS for
+  interior positions (over-wide placements land off-screen and get clipped)
+  — only visibly messier at a grid CORNER (`(7,3)`, the prior session's own
+  test position, which explains why that session saw a genuinely worse
+  result there than the interior positions this session tested). Shipped:
+  `tools/ishar3/amigaaga/scripts.ts` (new, matches Ishar 1/2's convention),
+  `tools/walker/games-ishar.ts`'s `LOCATION_SCRIPTS.ishar3`/
+  `RENDER_FRAME.ishar3` now wired (`foret`+`fforet`, `jungle`+`fjungle`,
+  region pattern `CONT4`) — `KeyF`/`KeyC` now work for Ishar 3 exactly like
+  Ishar 1/2. `ishar3-firstperson.ts`'s module doc rewritten (CONFIRMED, not
+  "attempted, not achieved"). No amiberry/emulator use — static
+  disassembly + real-cell scanning + `Read`-based visual inspection only.
+  `npx tsc --noEmit -p .`/`npx eslint` clean on all changed/new files;
+  `npm test` still 370/370 (no regressions — see below). Full evidence:
+  `docs/ishar-container-format.md` §8.6's correction block.
 
 - **2026-09-01 (thirteenth pass — Ishar 2 first-person CONFIRMED (two
   scripts), Ishar 3 attempted and left OPEN with a well-scoped negative)**:
