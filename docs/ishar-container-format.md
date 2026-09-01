@@ -1123,6 +1123,114 @@ constants are genuinely CONFIRMED and may be useful groundwork), but its
 module doc no longer claims a working render, and it is NOT wired into
 `tools/walker/games-ishar.ts` (`LOCATION_SCRIPTS.ishar3 = []`).
 
+### 8.7 Fifth pass on Ishar 1 (2026-09-02) — `TEMPLE.bin` RENDERED, superseding the §8.3 INCONCLUSIVE verdict
+
+§8.3 left `TEMPLE.bin` at "attempted end-to-end, INCONCLUSIVE": its own
+`cswitch2 base=-10 count=6` dispatch was read as accepting cell values
+`[-10,-4]`, a scan of `CONT1-6.FIC` found only 4 matching cells
+corpus-wide, and the one rendered position produced just 7 placements with
+no visible foreground structure. This pass re-derived the dispatch from
+scratch (re-disassembling `TEMPLE.bin`'s own `cswitch2` at file-relative
+bytecode offset `0x4c9`, confirmed byte-for-byte against the raw bytes:
+`expr=odirb(33)`, `count=6`, `base=-10`) and found the earlier value range
+was **wrong — a sign error, not a data absence**.
+
+**The fix**: `alis`'s own `opcodes.c` `cswitch2()` (lines 743-761,
+vendored copy at `/tmp/.../scratchpad/alis/src/opcodes.c` from an earlier
+`re-oracle` escalation) reads `alis.varD7 += script_read16()` (i.e.
+`varD7 = value + base`) and then tests `0 <= varD7 <= count`, so the real
+relationship is **`index = value + base`**, equivalently `value = index -
+base`. Applying this correctly to `base=-10`, `count=6` (7 slots, index
+`0..6`) gives `value = index - (-10) = index + 10`, i.e. the real accepted
+range is **`[10,16]`**, not `[-10,-4]` as the earlier pass computed
+(apparently by using `value = index + base` instead). Cross-checked against
+two ALREADY-CONFIRMED dispatches in this same doc using the same
+`value = index - base` formula: RAMPART's `base=-100,count=11` gives
+`[100,111]` (matches §8.4's cited range exactly) and VILLAGE's
+`base=0x19,count=0x18` gives `[-25,-1]` (matches §8.2/§8.3's cited range
+exactly) — both already-shipped, visually-confirmed renders are consistent
+with the corrected formula, confirming the formula itself (not just this
+one instance) and isolating the earlier TEMPLE-specific error to that one
+derivation.
+
+**Scan result**: cells with sign-extended value in `{10,...,16}` are
+common across the WHOLE corpus (CONT1: 165, CONT2: 1,112, CONT3: 65,
+CONT4: 169, CONT5: 818, CONT6: 42 matches) — not "4 cells total" as the
+wrong range implied. This terrain code is evidently a common decorative
+feature (like PLAINE's terrain, not a single unique building placement
+like VILLAGE's compound), present in every region; this pass only
+rendered/visually-confirmed `CONT3`, `CONT4`, and `CONT6` (`regionPattern`
+is scoped to those three, consistent with the project's "test-bench, not
+exhaustive" convention for `firstPersonAvailable`).
+
+**Disassembling the two content-placing branches** (values 10/11/12 to
+subroutine `0x5f3`; values 15/16 to subroutine `0x63a`; values 13/14
+return immediately with no placement) found a real, coherent architectural
+design, not arbitrary dispatch noise: values 11/12 test
+`facing==East OR facing==West` (`omainb(0x137e)`, the confirmed party-facing
+global) and, when FALSE (i.e. facing North or South — looking straight
+down a corridor), place a **MIRRORED PAIR** of the same sprite at lateral
+offsets `dx=∓99` (value 11) or `dx=∓113` (value 12) via one `cputnat` +
+one `cxputat` call sharing a scratch var (`sdirb(40)`) set to `-99`/`+99`
+(or `-113`/`+113`) between them — a textbook "two columns flanking a
+path" layout. When TRUE (facing East/West — looking across the corridor),
+it instead calls the shared small-facade subroutine (`0x5f3`, gated
+further by a toggle byte `odirb(42)` alternating between two sprite
+indices). Values 15/16 place a single (non-mirrored) object via
+subroutine `0x63a`, each suppressed for exactly one facing (15 hides when
+facing North, 16 hides when facing South) — plausibly a landmark object
+whose sprite is only drawn from angles where it isn't edge-on to the
+camera. Value 10 has no mirrored-pair branch (only the small-facade-or-
+nothing choice).
+
+**Rendered 6 test poses** (`renderIsharLocationFrame`, `TEMPLE.bin` +
+its own backdrop `FTEMPLE.bin` — see below): `CONT4 (20,20) facing N`
+(15 placements), `CONT4 (20,7) facing S` (26 placements), `CONT3 (54,12)
+facing N` (5 placements), `CONT3 (55,49) facing N` (11 placements),
+`CONT6 (50,17) facing S` (13 placements), `CONT6 (50,23) facing N` (13
+placements) — all real, non-degenerate, varied placement counts.
+**Visually confirmed via `Read`**: the `CONT4 facing S` pose shows two
+clearly SYMMETRIC vertical pillar/column shapes flanking a dark
+central archway, against a mottled stone-arch backdrop — an unmistakably
+temple/architectural composition, visually distinct from every other
+rendered script (FORET's tree-line, VILLAGE's timber building, PLAINE's
+grass field, RAMPART's fortress walls). The other 5 poses show a single
+thin pillar/pole silhouette or a dark building-block silhouette against
+the same stone-arch backdrop — coherent and varied, though less
+dramatically legible than the paired-pillar pose.
+
+**A previously-undocumented per-location backdrop convention found for
+Ishar 1**: `MAIN.bin`'s resource manifest (§3) contains a straight-line
+`cload(id=68, "ftemple.AO"); cload(id=69, "temple.AO")` instruction pair
+at file-relative bytecode offsets `0x1a88`/`0x1a96` — exactly 14 bytes
+apart, matching `cload`'s own encoded instruction length exactly, i.e. two
+adjacent statements with NO branch between them, not a coincidental
+address gap. This means Ishar 1 does NOT uniformly share one `FOND.bin`
+backdrop for every outdoor location as §8.2 claimed ("no per-biome
+backdrop file exists on disk") — `FTEMPLE.DO` (11,412 B on disk, 17,056 B
+decompressed) genuinely exists and is `TEMPLE`'s own companion asset, the
+same per-location-backdrop convention already established for Ishar 2
+(§8.6's `FOND1.bin`/`FVILLE.bin`). (`FVILLE.DO` also exists in Ishar 1's
+own data directory, alongside `VILLAGE.DO` — raising the same question for
+the already-shipped `VILLAGE.bin` render, which currently uses the shared
+`FOND.bin`; not re-tested this session, see `docs/ishar/TODO.md`.) Both
+`FOND.bin` and `FTEMPLE.bin` render plausibly as TEMPLE's backdrop (spot-
+checked); `FTEMPLE.bin` was shipped as the default since it is TEMPLE's
+own confirmed companion asset per the manifest evidence above.
+
+**Shipped**: `TEMPLE.bin` + `FTEMPLE.bin` exported
+(`public/assets/ishar/amigaaga/scripts/{temple,ftemple}.bin`,
+`tools/ishar/amigaaga/scripts.ts`) and wired into
+`tools/walker/games-ishar.ts`'s `LOCATION_SCRIPTS.ishar` (`fondKey:
+'ftemple'`, `regionPattern: /^CONT[346]/i`) and `KeyC` cycle.
+
+**Paths tried** (superseding §8.3's row for this item):
+
+| Approach | Result | Why it failed / succeeded |
+|---|---|---|
+| §8.3: scan `CONT*.FIC` for `cswitch2` value range `[-10,-4]` (formula `value = index + base`), render the one real hit | 4 matches corpus-wide; rendered frame showed no visible foreground structure | Wrong formula — should be `value = index - base`, confirmed against `opcodes.c` source and two already-shipped dispatches (RAMPART, VILLAGE) using the same formula correctly |
+| §8.7 (this pass): re-derive from `opcodes.c` source, scan for `[10,16]` | 165-1,112 matches per region, 6/6 test poses render real, varied, temple-coherent content (paired pillars) | Correct formula; the earlier session's range was simply computed backwards for this one instance (RAMPART/VILLAGE happened to be computed correctly) |
+
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 
 Found by the 2026-09-01 `re-oracle` pass. The actual walkable-world data

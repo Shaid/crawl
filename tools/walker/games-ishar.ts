@@ -28,11 +28,20 @@
  * cells: `PLAINE.bin` (plains — CONT1, a wide grass-field texture with
  * small shrub clumps) and `RAMPART.bin` (fortress — CONT3/CONT4, real
  * cells forming a closed fortress-perimeter polygon; renders tall
- * tower/wall silhouettes rising above the horizon). All four scripts are
- * wired up here, cycled with `KeyC` while in first-person mode; every other
- * region/game still renders top-down only — see `renderCanvas()` below and
- * §8.2/§8.4 for the exact scope boundary and what's honestly unverified
- * (backdrop anchor/tiling convention, no real palette).
+ * tower/wall silhouettes rising above the horizon). A later session (§8.7)
+ * added a FIFTH: `TEMPLE.bin` (CONT3/CONT4/CONT6, its own per-location
+ * backdrop `FTEMPLE.bin` — a real stone-arch texture, distinct from every
+ * other Ishar 1 script's shared `fond.bin`) — this SUPERSEDES the earlier
+ * "INCONCLUSIVE" verdict for TEMPLE (§8.3): that attempt scanned the WRONG
+ * cell-value range (`[-10,-4]`) due to a sign error in applying `cswitch2`'s
+ * `index = value + base` formula; the real accepted range is `[10,16]`,
+ * which has hundreds of real matches corpus-wide (not 4) and renders a
+ * genuinely temple-like symmetric mirrored-pillar-pair facade. All five
+ * scripts are wired up here, cycled with `KeyC` while in first-person mode;
+ * every other region/game still renders top-down only — see
+ * `renderCanvas()` below and §8.2/§8.4/§8.7 for the exact scope boundary
+ * and what's honestly unverified (backdrop anchor/tiling convention, no
+ * real palette).
  *
  * **Ishar 2 first-person, added 2026-09-01** (`tools/shared/
  * ishar2-firstperson.ts`) — same generic scene-compositor mechanism, DIFFERENT
@@ -159,6 +168,10 @@ const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
     { key: 'village', label: 'Village (VILLAGE.bin)', regionPattern: /^CONT1$/i },
     { key: 'plaine', label: 'Plains (PLAINE.bin)', regionPattern: /^CONT1$/i },
     { key: 'rampart', label: 'Rampart (RAMPART.bin)', regionPattern: /^CONT[34]/i },
+    // Own per-location backdrop (FTEMPLE.bin, confirmed via MAIN.bin's
+    // straight-line `cload("ftemple.AO"); cload("temple.AO")` manifest pair)
+    // rather than the shared fond.bin every other Ishar 1 script here uses.
+    { key: 'temple', label: 'Temple (TEMPLE.bin)', fondKey: 'ftemple', regionPattern: /^CONT[346]/i },
   ],
   // Own per-location backdrop (fondKey), unlike Ishar 1's single shared fond.bin.
   ishar2: [

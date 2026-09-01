@@ -19,21 +19,31 @@
  * verified against real `CONT1.FIC` cells in the `[-25,-1]` range, which
  * cluster in a real compound at x=52-56,y=14-20 — exactly where a visual
  * inspection of the decoded grid independently noted "building/compound
- * rectangles", see `docs/ishar-container-format.md` §9.1). `TEMPLE.bin`
- * disassembles clean (252 instrs, 0 errors) under the same shell shape
- * (elevation table byte-identical) with its own cell-value dispatch
- * (`cswitch2 base=-10 count=6`, values `[-10,-4]`) and WAS executed
- * end-to-end against the one real matching cell found in the corpus
- * (`CONT4.FIC` value `-8` at `(67,26)`) — but the result is INCONCLUSIVE,
- * not a confirmed render: only a handful of placements resulted and the
- * composited frame shows no clearly-visible foreground structure (see
- * `docs/ishar-container-format.md` §8.2's "Not generalized" list for the
- * detail). NOT wired into the walker. `RAMPART.bin` (439 instrs, ring cap 7
- * rather than 6) and `PLAINE.bin` (295 instrs) also disassemble clean under
- * the same shell shape but were not traced for cell-dispatch structure or
- * exercised end-to-end this session. Ishar 2/3 use different global-variable
- * offsets and screen geometry (see the module-level constants below, which
- * are Ishar-1-specific) — not re-derived this session.
+ * rectangles", see `docs/ishar-container-format.md` §9.1). `PLAINE.bin`
+ * and `RAMPART.bin` were RENDERED in a later pass (§8.4) the same way.
+ *
+ * `TEMPLE.bin` — RENDERED (§8.7), superseding an earlier INCONCLUSIVE
+ * verdict. Disassembles clean (252 instrs, 0 errors) under the same shell
+ * shape (elevation table byte-identical) with its own cell-value dispatch
+ * (`cswitch2 base=-10 count=6`). The earlier pass computed the accepted
+ * value range as `[-10,-4]` and found only 4 matching cells corpus-wide,
+ * which rendered inconclusively — that range was WRONG (a sign error: the
+ * real formula, confirmed against `opcodes.c`'s `cswitch2` C source, is
+ * `index = value + base`, so `value = index - base`, giving `[10,16]` for
+ * `base=-10`, not `[value = index + base] = [-10,-4]`). The corrected range
+ * has hundreds of real matches in `CONT3`/`CONT4`/`CONT6` and renders a
+ * genuinely temple-like scene: values 11/12 place a MIRRORED PILLAR PAIR
+ * (two placements at `dx=∓99` / `dx=∓113`) when facing north/south (i.e.
+ * looking along a colonnade), and a smaller facade sprite when facing
+ * east/west — a coherent architectural design, not noise. Uses its own
+ * per-location backdrop `FTEMPLE.bin` (a stone-arch texture), confirmed as
+ * TEMPLE's real companion asset via `MAIN.bin`'s manifest (`cload("ftemple.AO")`
+ * immediately followed, byte-exact instruction-length apart with no branch
+ * between, by `cload("temple.AO")`) rather than the shared `fond.bin` every
+ * other Ishar 1 script here uses. `RAMPART.bin`/`PLAINE.bin` were RENDERED
+ * in §8.4. Ishar 2/3 use different global-variable offsets and screen
+ * geometry (see the module-level constants below, which are Ishar-1-specific)
+ * — not re-derived this session.
  *
  * Confidence: the underlying algorithm execution is CONFIRMED for FORET and
  * VILLAGE (the interpreter reproduces, from real bytecode + real grid data +
