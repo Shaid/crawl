@@ -54,12 +54,32 @@
  * position and facing. `NPLAINE.bin` ("plain") is also RENDERED, showing a
  * semantically-distinct sparse low-vegetation ground band at the same test
  * position — no tall trees, as expected for a "plain" terrain script.
- * Toggle with `KeyF` (from the checklist screen); `KeyC` cycles between the
- * two verified scripts; `WASD`/arrows move a synthetic test position across
+ *
+ * **Two more scripts added (2026-09-02 follow-up)**, by disassembling each
+ * script's own `cswitch1` cell-value dispatch and scanning real `INIT.FIC`
+ * bytes for matching cells (the same technique used for `RAMPART.bin`/
+ * `PLAINE.bin` in the Ishar 1 walker): `PLAGES.bin` ("beaches") RENDERS a
+ * rocky/dune coastal terrain (grey rock-texture horizon band + foreground
+ * mounds), confirmed at 4 real positions along a dense coastal cell band
+ * near the `x=94` map edge. `CAVINT.bin` ("cave interior") RENDERS a dense,
+ * mostly-enclosed interior (little open sky, filled with wall/rock texture)
+ * — but needs `sceneLayer=1`, not the default 0 every other script uses; see
+ * `docs/crystalsofarborea/amiga/data-structure.md` §8's correction block for
+ * why (the previous session's "guess sceneLayer=1" attempt produced a blank
+ * frame at the WRONG position — the layer guess was actually right, the
+ * position wasn't).
+ *
+ * Toggle with `KeyF` (from the checklist screen); `KeyC` cycles between all
+ * four verified scripts; `WASD`/arrows move a synthetic test position across
  * the local scene array's real `95x57` coordinate space (there is no
  * confirmed link between this position and `CARTE.CO`'s own undecoded
  * travel-destination mechanism — this is a manual test-bench, exactly like
- * `games-ishar.ts`'s own `KeyC` location cycling).
+ * `games-ishar.ts`'s own `KeyC` location cycling). Note: the default start
+ * position (`testX=23,testY=39`, chosen for `ARBRE`'s own dense terrain
+ * cluster) is NOT a good starting point for `PLAGES`/`CAVINT` — cycle to
+ * one of them and move with `WASD` to find their own real clusters (`PLAGES`
+ * is dense along the `x=90-94` edge; `CAVINT`'s room-outline cluster is
+ * broad, e.g. around `x=20-60,y=0-50`).
  */
 import type { KeyStateLike } from '@seer-project/dungeon';
 import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/dungeon';
@@ -116,11 +136,28 @@ interface CrystalsLocation {
   key: string;
   label: string;
   data: Uint8Array;
+  /** Forwarded to `renderCrystalsLocationFrame()`'s `sceneLayer` param -- see `LOCATION_SCRIPTS`. */
+  sceneLayer?: number;
 }
 
-const LOCATION_SCRIPTS: Array<{ key: string; label: string }> = [
+/**
+ * `sceneLayer` defaults to 0 (the outdoor/terrain `INIT.FIC` layer) for
+ * every script except `CAVINT.bin`, which needs `sceneLayer=1` (the indoor
+ * room-outline layer) -- CAVINT's own disassembled cell-value dispatch
+ * (`docs/crystalsofarborea/amiga/data-structure.md` §8's correction block)
+ * reads the identical default-0 `omainb(0x2b3c)` global as every other
+ * script, but its own confirmed cell-value alphabet (`-94..-90`, `-79..-70`,
+ * `80..85`) only exists in `INIT.FIC`'s Z=1 sub-array, not Z=0 -- meaning
+ * the real game sets this global to 1 somewhere in `CAVINT`'s OWN launch
+ * path (outside this one script's bytecode), not a hardcoded constant this
+ * script itself carries. Superseded the prior "guess sceneLayer=1, got a
+ * blank frame" attempt -- see the doc for the full account.
+ */
+const LOCATION_SCRIPTS: Array<{ key: string; label: string; sceneLayer?: number }> = [
   { key: 'arbre', label: 'Forest (ARBRE.bin)' },
   { key: 'nplaine', label: 'Plain (NPLAINE.bin)' },
+  { key: 'plages', label: 'Beaches (PLAGES.bin)' },
+  { key: 'cavint', label: 'Cave interior (CAVINT.bin)', sceneLayer: 1 },
 ];
 
 interface CrystalsData {
@@ -138,10 +175,10 @@ async function tryLoadFirstPersonAssets(base: string): Promise<{ initFic: Uint8A
     if (!initRes.ok) return undefined;
     const initFic = new Uint8Array(await initRes.arrayBuffer());
     const locations: CrystalsLocation[] = [];
-    for (const { key, label } of LOCATION_SCRIPTS) {
+    for (const { key, label, sceneLayer } of LOCATION_SCRIPTS) {
       const res = await fetch(`${base}/scripts/${key}.bin`);
       if (!res.ok) continue;
-      locations.push({ key, label, data: new Uint8Array(await res.arrayBuffer()) });
+      locations.push({ key, label, sceneLayer, data: new Uint8Array(await res.arrayBuffer()) });
     }
     if (locations.length === 0) return undefined;
     return { initFic, locations };
@@ -428,6 +465,7 @@ export class CrystalsOfArboreaView implements GameView {
         partyX: this.testX,
         partyY: this.testY,
         facing: this.testFacing,
+        sceneLayer: location.sceneLayer,
       });
       this.fpCache = { key, frame };
     }
@@ -478,7 +516,7 @@ export class CrystalsOfArboreaView implements GameView {
     ctx.font = '10px monospace';
     ctx.fillText('CARTE.CO — party roster/travel screen (RENDERED map, CONFIRMED checklist structure)', 4, h - 24);
     const fpNote = this.firstPersonAvailable
-      ? 'press F for first-person (ARBRE/NPLAINE scripts, RENDERED — test-bench, not a decoded travel mechanic)'
+      ? 'press F for first-person (ARBRE/NPLAINE/PLAGES/CAVINT scripts, RENDERED — test-bench, not a decoded travel mechanic)'
       : 'first-person assets not exported (see tools/crystalsofarborea/amiga/scripts.ts)';
     ctx.fillText(`W/S or click: navigate. Space/Enter or click: toggle/activate. ${fpNote}`, 4, h - 12);
     if (this.lastAction) {

@@ -453,6 +453,68 @@ evidence only).
 > See `docs/ishar-container-format.md` §8.3 for the shared write-up (same
 > engine mechanism as Ishar 1's `omaintc`/`tabchar`).
 
+> **Correction (2026-09-02 follow-up pass — `PLAGES.bin`/`CAVINT.bin` now
+> RENDERED)**: the "not confirmed / not shipped" paragraph above tried both
+> scripts at `ARBRE`'s own test position, which this session's disassembly
+> confirms was never going to work — neither script's own cell-value
+> dispatch accepts anything near `ARBRE`'s terrain-feature codes. Applying
+> the same technique §8.3 used for Ishar 1's `VILLAGE.bin` (disassemble the
+> script's own `cswitch1`/`cswitch2`, then scan the real data source for
+> matching cells) solved both:
+>
+> - **`PLAGES.bin` ("beaches")**: its own `cswitch1` on `odirb(0x2c)`
+>   (fed by the same `omaintc(0x7c)` read as `ARBRE`, with `direct =
+>   omainb(0x2b3c)` defaulting to 0 — the outdoor Z=0 layer) accepts
+>   `{-25, -24, -23, -22, -21, -20, 50}`. A scan of `INIT.FIC`'s Z=0
+>   sub-array (`index = 114*x + 2*y`) for these values found **787
+>   matches**, densely clustered along the map's `x=94` edge column and in
+>   diagonal bands elsewhere — plausibly the island's coastline. Rendered 4
+>   real positions (`(93,17)` facing N/S, `(88,33)` facing E, `(45,45)`
+>   facing W): placement counts 65/76/242/117 (real, non-degenerate,
+>   varied). **Visually confirmed via `Read`**: all four frames show a
+>   grey, jagged rock/dune-textured horizon band with small isolated mound
+>   shapes in the foreground — a rocky coastal terrain, semantically
+>   distinct from `ARBRE`'s tree silhouettes and `NPLAINE`'s low-vegetation
+>   band.
+> - **`CAVINT.bin` ("cave interior")**: its own `cswitch1` on `odirb(0x34)`
+>   accepts `{-94..-90, -79..-70, 80..85}` (21 distinct values) — and reads
+>   the SAME `omaintc(0x7c)` formula with the SAME default-0
+>   `omainb(0x2b3c)` global as `PLAGES`/`ARBRE` (no writer for that global
+>   in this script's own reached CFG either). Scanning `INIT.FIC`'s Z=0
+>   sub-array for these values found **zero matches** — but scanning the
+>   Z=1 sub-array (`index = 114*x + 2*y + 1`) found **1,947 matches**,
+>   forming real, coherent, closed room/wall outlines (border codes like
+>   `-70..-94` enclosing floor-fill codes `80..85` — exactly the "dense
+>   grid of rectangular room/building outlines" content class the original
+>   whole-array visual scan (§8 above) found at `Z=1` but never confirmed a
+>   real consumer for). This means the real game must set the
+>   `omainb(0x2b3c)` global to 1 somewhere in `CAVINT`'s OWN launch path
+>   (most likely `MAIN.CO`'s scene/location dispatcher, outside this one
+>   script's bytecode) — the script's own code doesn't need to touch it
+>   because whatever loads it presumably always launches it with the
+>   global pre-set. Rendered with `sceneLayer=1` forced at 4 real positions
+>   (`(25,15)` facing N/E/S, `(58,38)` facing W): placement counts
+>   346/78/284/139. **Visually confirmed via `Read`**: dense, mostly-
+>   enclosed frames (little open sky, filled with repeated wall/rock
+>   texture and a few darker vertical structural elements) — a genuinely
+>   different visual character (enclosed/interior) from every outdoor
+>   script rendered so far. This **confirms** (not just re-guesses) the
+>   prior session's untested "maybe Z=1 is the indoor layer" structural
+>   hunch — the earlier attempt's failure was the WRONG TEST POSITION
+>   (borrowed from `ARBRE`'s outdoor cluster), not a wrong `sceneLayer`
+>   guess.
+>
+> **Shipped**: both scripts added to `LOCATION_SCRIPTS` in
+> `tools/crystalsofarborea/amiga/scripts.ts` (exported as
+> `public/assets/crystalsofarborea/amiga/scripts/{plages,cavint}.bin`) and
+> to `tools/walker/games-crystalsofarborea.ts`'s `KeyC` cycle, with a new
+> per-script `sceneLayer` field so `CAVINT` renders with `sceneLayer=1`
+> while every other script keeps the default 0. `renderCrystalsLocationFrame()`
+> itself needed no changes (it already accepted an optional `sceneLayer`
+> param — the walker just wasn't threading it through per-script before).
+> See `docs/ishar-container-format.md` §8.5 for the cross-referenced
+> write-up.
+
 The rest of this section (below) is kept as the original paths-tried record.
 
 ### 8.x (original write-up, superseded above) — real render blocked on a genuine engine mechanism difference

@@ -22,11 +22,17 @@
  * `CONT1` grid data: `VILLAGE.bin` (a building/compound biome, verified
  * against real cells in the `[-25,-1]` value range clustered at
  * `x=52-56,y=14-20` — a real, recognizable timber-framed building render,
- * see `docs/ishar-container-format.md` §8.2). Both scripts are wired up
- * here, cycled with `KeyC` while in first-person mode; every other
+ * see `docs/ishar-container-format.md` §8.2). A later session (§8.4) added
+ * TWO more scripts by disassembling each one's own `cswitch1`/`cswitch2`
+ * cell-value dispatch and scanning the real `CONT*.FIC` grids for matching
+ * cells: `PLAINE.bin` (plains — CONT1, a wide grass-field texture with
+ * small shrub clumps) and `RAMPART.bin` (fortress — CONT3/CONT4, real
+ * cells forming a closed fortress-perimeter polygon; renders tall
+ * tower/wall silhouettes rising above the horizon). All four scripts are
+ * wired up here, cycled with `KeyC` while in first-person mode; every other
  * region/game still renders top-down only — see `renderCanvas()` below and
- * §8.2 for the exact scope boundary and what's honestly unverified (backdrop
- * anchor/tiling convention, no real palette).
+ * §8.2/§8.4 for the exact scope boundary and what's honestly unverified
+ * (backdrop anchor/tiling convention, no real palette).
  *
  * What IS confirmed (`docs/ishar-container-format.md` §9, independently
  * re-verified this session — an ASCII/pixel render of the decoded grid
@@ -104,6 +110,8 @@ function regionId(name: string): number {
 const LOCATION_SCRIPTS: Array<{ key: string; label: string }> = [
   { key: 'foret', label: 'Forest (FORET.bin)' },
   { key: 'village', label: 'Village (VILLAGE.bin)' },
+  { key: 'plaine', label: 'Plains (PLAINE.bin)' },
+  { key: 'rampart', label: 'Rampart (RAMPART.bin)' },
 ];
 
 async function tryLoadFirstPersonAssets(base: string): Promise<{ fond: Uint8Array; locations: IsharLocation[] } | undefined> {
@@ -233,9 +241,18 @@ export class IsharView implements GameView {
     return [];
   }
 
-  /** Ishar 1, region `CONT1`, with at least one location script fetched — the only first-person-renderable combination (see module doc). */
+  /**
+   * Ishar 1, one of the regions with at least one confirmed real cell
+   * cluster for some location script — `CONT1` (`FORET`/`VILLAGE`/`PLAINE`),
+   * `CONT3`/`CONT4` (`RAMPART`'s real fortress-perimeter cluster spans
+   * both — `docs/ishar-container-format.md` §8.4). Cycling `KeyC` still
+   * tries any script against whichever region is current (manual
+   * test-bench, not the real region-to-scene dispatch) — most script/region
+   * combinations outside each script's own confirmed region will render
+   * few or no placements, which is expected, not a bug.
+   */
   get firstPersonAvailable(): boolean {
-    return this.id === 'ishar' && /^CONT1$/i.test(this.region.name) && !!this.data.firstPerson;
+    return this.id === 'ishar' && /^CONT[134]$/i.test(this.region.name) && !!this.data.firstPerson;
   }
 
   /** Currently-selected location script (cycled with `KeyC`), or `undefined` if none loaded. */
@@ -419,7 +436,7 @@ export class IsharView implements GameView {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#ffe080';
     const fpNote = this.firstPersonAvailable
-      ? 'press F for first-person (Ishar 1: forest/village scripts, RENDERED)'
+      ? 'press F for first-person (Ishar 1: forest/village/plains/rampart scripts, RENDERED)'
       : 'first-person not decoded for this region';
     ctx.fillText(`${this.region.label} — top-down (CONFIRMED world geometry) — ${fpNote}`, 4, 12);
   }

@@ -883,6 +883,95 @@ assignment was the LIFO pop order, not the formula itself, which was already
 right). Kept here as the paths-tried record: `crystals-local-scene-array-
 indexing` is now SOLVED and its row removed from `docs/ishar/TODO.md`.
 
+### 8.4 Fourth pass (2026-09-02) — `RAMPART.bin`/`PLAINE.bin` RENDERED by disassembling each script's own cell-value dispatch
+
+§8.2/§8.3 left `RAMPART.bin` and `PLAINE.bin` at "disassembles clean under
+the same shell shape, not traced further" — the same gap `TEMPLE.bin` fell
+into (a real matching cell found, but not from the script's *own* declared
+dispatch range, just a guessed test position). This pass closed both by
+**disassembling each script's own `cswitch1`/`cswitch2` cell-value dispatch
+instruction directly** (`tools/shared/alis-disasm.ts`, no new tooling
+needed) rather than guessing a test position first, then scanning the real
+`CONT*.FIC` grids for cells the script's own dispatch actually accepts —
+the same method §8.3 used for `VILLAGE.bin`, generalized to both remaining
+scripts (and, in Crystals' case, revealing a real correction — see the next
+section).
+
+**`PLAINE.bin` ("plains") — RENDERED.** Its own cell dispatch is a
+`cswitch1` on `odirb(0x1c)` (fed from `omaintc(0x80)`/`omaintc(0x234a)`,
+the same CONT-grid read every outdoor script uses) with an explicit value
+set: `{-27, -26, 12, 13, 14, ..., 25, 34, 35, 36, 37}` (20 distinct values —
+a sorted-linear-scan dispatch, not a contiguous range like FORET/VILLAGE's
+`cswitch2`s). A scan of `CONT1.FIC` for cells in that set found **1,039
+matches** — this terrain type is common, unlike VILLAGE's tight compound
+cluster. Rendered 4 test poses near a dense cluster
+(`(25,9)`/`(30,10)`/`(40,8)`/`(20,14)`, facing N/E/S/W): placement counts
+39/347/81/169 (real, varied, non-degenerate). **Visually confirmed via
+`Read`**: all four frames show a wide, textured grey-toned grass/field band
+along the ground plus small rounded shrub/bush clumps in the foreground —
+open, low vegetation, semantically distinct from FORET's dense tree-line
+band and VILLAGE's angular building silhouette.
+
+**`RAMPART.bin` ("fortress rampart") — RENDERED.** Its own dispatch is a
+`cswitch2` on `odirb(0x26)` with `base=-100, count=11` — i.e. `index =
+value - 100`, valid for `index` in `0..11`, so the accepted cell-value range
+is **exactly `100..111`** (12 contiguous values, structurally the same
+"cswitch2 on a small contiguous range" shape as VILLAGE's building selector,
+just with a different base/sign). A scan of all 6 `CONT<n>.FIC` files found
+**zero** matches in `CONT1`/`CONT2`/`CONT5`/`CONT6` but **101 matches in
+CONT3 and 58 in CONT4** — and plotting the hits shows something no other
+script's cluster has shown yet: a **closed polygon perimeter** (real cell
+coordinates trace a rough pentagon: `(71-77,16-17)` → `(78-86,18-29)` →
+`(83-87,22-37)` → `(78-84,38-44)` → `(56-71,29-45)` → `(58-66,18-27)` → back
+to start), unmistakably a fortification wall enclosing an interior area —
+exactly what "rampart" predicts, and a stronger structural match than any
+other script's cluster shape so far (FORET/PLAINE are diffuse fields,
+VILLAGE is a compact blob, this is a closed ring). Rendered 4 test poses
+near/inside this ring in `CONT3.FIC` (`(65,22)` facing N/E, `(75,40)`
+facing S, `(60,27)` facing W): placement counts 20/12/18/59. **Visually
+confirmed via `Read`** for 3 of 4 poses: tall, narrow, angular
+vertical silhouettes rising well above the horizon/tree-line — read as
+towers/wall segments, a visual character no other rendered script shows
+(everything else stays low and horizontal). The 4th pose (facing E from
+`(65,22)`) shows only backdrop+ground with no visible foreground structure
+despite 12 non-zero placements — honestly reported as "wall not currently
+in view at this specific facing," the same kind of facing-dependent gap
+already documented for FORET/TEMPLE, not a decode failure (the OTHER 3
+poses from nearby positions are unambiguous).
+
+**Shipped**: both scripts added to `LOCATION_SCRIPTS` in
+`tools/ishar/amigaaga/scripts.ts` (exported as
+`public/assets/ishar/amigaaga/scripts/{plaine,rampart}.bin`) and to
+`tools/walker/games-ishar.ts`'s `KeyC` cycle. `RAMPART.bin`'s real cluster
+being in `CONT3`/`CONT4` (not `CONT1`, unlike every other wired script)
+meant `firstPersonAvailable`'s region gate was widened from `CONT1`-only to
+`CONT1|CONT3|CONT4` — the existing "any script against any region" test-
+bench convention (§8.2/§8.3) already tolerated a script rendering nothing
+useful outside its own confirmed region, so this is a pure widening, not a
+new mechanism.
+
+### 8.5 Crystals of Arborea companion pass (2026-09-02) — `PLAGES.bin`/`CAVINT.bin` RENDERED, and a real correction to the `sceneLayer`/`CAVINT` guess
+
+See `docs/crystalsofarborea/amiga/data-structure.md` §8's correction block
+for the full write-up (same method as §8.4 above, applied to Crystals'
+`INIT.FIC` local-scene array instead of Ishar's `CONT*.FIC` grids). Summary:
+`PLAGES.bin` ("beaches") RENDERS a rocky/dune coastal terrain at 4 real
+positions found from its own `cswitch1` dispatch (`{-25..-20, 50}`).
+`CAVINT.bin` ("cave interior") also RENDERS, but needed a real correction:
+its own `cswitch1` dispatch (`{-94..-90, -79..-70, 80..85}`) reads the
+identical default-0 `omainb(0x2b3c)` `sceneLayer` global as every other
+Crystals script (no writer in reached CFG, same as `ARBRE`/`PLAGES`) — yet
+none of its accepted values exist anywhere in `INIT.FIC`'s Z=0 sub-array.
+They DO exist, densely (1,947 matches, forming real closed room/wall
+outlines), in the Z=1 sub-array — meaning the real game must set this
+global to 1 somewhere in `CAVINT`'s own launch path (outside the script's
+own bytecode, e.g. `MAIN.CO`'s scene dispatcher), not that `CAVINT` reads
+Z=0 like everything else. This **confirms** (via real disassembly + real
+cell matching, not the earlier untested guess) the previous session's
+structural hunch that Z=1 is the indoor/room-outline layer — the earlier
+"tested with `sceneLayer=1`, blank frame, INCONCLUSIVE" result was a wrong
+TEST POSITION, not a wrong layer guess.
+
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 
 Found by the 2026-09-01 `re-oracle` pass. The actual walkable-world data
