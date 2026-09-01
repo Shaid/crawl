@@ -54,6 +54,20 @@
 const PACKER_KIND_OLD = 0x81;
 const PACKER_KIND_OLD_INTERLACED = 0x80;
 const PACKER_KIND_NEW = 0xa1;
+/**
+ * "Stored" class (`docs/ishar-container-format.md` §2.2) — no compression at
+ * all, `decompressedSize === fileSize` exactly. Confirmed for 6 files in
+ * Crystals of Arborea (`CARTE.CO`, `DEBUTER.CO`, `EBRAIN.CO`, `EMOVE.CO`, +2
+ * more); no Ishar 1/2/3 file uses it in the sampled corpus. This function
+ * originally only recognized the two compressed packer kinds, silently
+ * returning `null` for every `0x01` file — which meant the sprite-atlas
+ * pipeline (`ishar-sprite-atlas.ts`, driven off this function) skipped all 6
+ * stored files entirely, even though `ishar-decompress.ts` had its own,
+ * separately-fixed stored-class path (see that module's history). Header is
+ * just the 6-byte `[magic][isMain]` prefix — no VM-specs block (stored files
+ * are never the engine's main script) and no LZ77 dictionary.
+ */
+const PACKER_KIND_STORED = 0x01;
 const PACKED_HEADER_SIZE = 6; // magic (4) + isMain u16 (2)
 const PACKED_DICTIONARY_SIZE = 8;
 const VM_SPECS_SIZE = 16;
@@ -269,7 +283,12 @@ export function unpackSilmarilsScript(buf: Buffer | Uint8Array): UnpackResult | 
 
   const magic = view.readUInt32BE(0);
   const packerKind = magic >>> 24;
-  if (packerKind !== PACKER_KIND_OLD && packerKind !== PACKER_KIND_OLD_INTERLACED && packerKind !== PACKER_KIND_NEW) {
+  if (
+    packerKind !== PACKER_KIND_OLD &&
+    packerKind !== PACKER_KIND_OLD_INTERLACED &&
+    packerKind !== PACKER_KIND_NEW &&
+    packerKind !== PACKER_KIND_STORED
+  ) {
     return null;
   }
 
@@ -296,6 +315,8 @@ export function unpackSilmarilsScript(buf: Buffer | Uint8Array): UnpackResult | 
   let data: Uint8Array;
   if (unpackedSize <= 0) {
     data = new Uint8Array(0);
+  } else if (packerKind === PACKER_KIND_STORED) {
+    data = packedBuffer.subarray(0, unpackedSize);
   } else if (packerKind === PACKER_KIND_NEW) {
     data = unpackNew(packedBuffer, unpackedSize, dictionary);
   } else if (packerKind === PACKER_KIND_OLD) {

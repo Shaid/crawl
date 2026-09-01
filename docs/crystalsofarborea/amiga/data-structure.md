@@ -131,6 +131,137 @@ open questions** — it was already reading the record array and name
 strings correctly by coincidence of relative positioning; only absolute
 offsets cited in this doc needed correcting, which is now done.
 
+### 3.5 The 8-entry record array — RESOLVED: it is real ALIS bytecode, and it is NOT a destination/adjacency table
+
+> **Correction (2026-09-01 session): §3.2's framing above was wrong on two
+> counts.** The "38 00 II 3a 1a ZZ 1e 00 XX" pattern is not a static data
+> record at all — it is genuine, executing ALIS bytecode (confirmed by a
+> from-scratch mini interpreter covering exactly the opcodes/opernames/
+> storenames involved, ported from `github.com/maestun/alis`'s `opcodes.c`/
+> `opernames.c`/`storenames.c`) — and its content is not an 8-directional
+> adjacency table but a **party-roster/companion-selection checklist**.
+
+**Container-fixing prerequisite (a real, generalizable pipeline bug found
+along the way)**: `tools/shared/silmarils-unpack.ts`'s `unpackSilmarilsScript()`
+only recognized the two *compressed* packer kinds (`0x81`/`0x80`/`0xA1`) and
+silently returned `null` for `classByte == 0x01` ("stored", §2.2) — which
+meant the sprite-atlas batch pipeline (`ishar-sprite-atlas.ts`, built on this
+function) silently skipped all 6 of Crystals' stored files, including
+`CARTE.CO` itself, even though `ishar-decompress.ts` had its own,
+separately-fixed stored-class path (§3.4). Fixed this session (added a
+`PACKER_KIND_STORED = 0x01` branch that copies the post-header bytes
+verbatim, no algorithm needed). Re-ran `npm run crystalsofarborea:sprites`:
+33/42 files now produce a decodable sprite directory (up from 31/36, since 6
+more files are now even attempted), 931 sprites (up from 905) — Ishar 1/2/3
+re-run afterward for regression: identical counts (1608/2244/2744 sprites),
+confirming the fix is purely additive (no Ishar 1-3 file uses the stored
+class in the sampled corpus).
+
+**`CARTE.bin`'s own sprite directory** (now reachable thanks to the fix
+above): `findIsharDirectory()` resolves `dirOff=4832` (`0x12E0`),
+`baseDelta=88` (one of the two corpus-wide constants, §7 of
+`docs/ishar-sprite-format.md`), `length=31`; 25/31 slots decode to a valid
+bitmap. The 7 largest (indices 5-11, heights 90-167px) form the overworld
+**map picture** — visually confirmed (`public/assets/crystalsofarborea/amiga/sprites/carte.png`):
+an unmistakable island/continent coastline silhouette (RENDERED, greyscale —
+no AGA palette recovered, per `docs/ishar-sprite-format.md` §5). The
+remaining ~18 slots are much smaller (16-64px wide, 1-38px tall) — plausibly
+UI icon/glyph bitmaps, but their exact role (font glyphs vs. map markers vs.
+checkbox states) is **not determined**; visual inspection alone is not
+proof of semantic role (see `plausible-render-not-semantic-label.md`).
+
+**The bytecode itself** (`CARTE.bin` content offset 42-183, verified via a
+purpose-built mini interpreter, `/tmp` scratch script, not committed —
+re-derivable directly from the trace below): one `cscmov` (0x38, "move
+current screen", 6 bytes: `38 00 00 3a 1a 3c`) — reads `x=0` (`oimmb`),
+`y=0` (unchanged, since the second opername is `ofin`/0x3a which never
+touches the accumulator register `varD7`), `z=` the *first script-local
+scratch array's own index-0 cell* (`odirtc` reading `tabchar(vram_org+0x3c)`
+with `varD7==0` at that point) — followed by **15 `cstore` instructions**
+(9 bytes each, `1e 00 <val> 38 00 <idx> 3a 1a <arrayOff>`), each of which:
+pushes an immediate `val` onto the accumulator (`oimmb`), runs a nested
+`oeval` loop that computes an index `idx` via a second `oimmb` (this becomes
+the *live* `varD7` seen by the following store), then dispatches `sdirtc`
+(storename `0x1a`) which computes `tabchar(vram_org+arrayOff) + varD7` (i.e.
+`array[arrayOff][idx]`, exactly the same 1-D array-indexing convention
+`tabchar()` uses for the already-solved `CONT*.FIC` region grid — see
+`docs/ishar-container-format.md` §9.1) and stores the popped `val` there.
+This walk **self-terminates exactly at the expected boundary**: byte 183
+(right after the 15th store) is `0x94` (`cfindtyp`), an unrelated,
+well-formed *different* top-level opcode — a strong, boundary-agnostic
+forward-walk confirmation (Method §4) that this really is the intended
+instruction stream, not a coincidental byte-pattern match.
+
+**Net effect — CONFIRMED values** (two 8-element signed-byte scratch arrays
+declared at this script's own vram offsets `0x3c` and `0x46`):
+
+| index | 0x3c | 0x46 |
+|---|---|---|
+| 0 | *(read by `cscmov`, never explicitly written here — default, unconfirmed, assumed 0)* | -1 |
+| 1 | 1 | -1 |
+| 2 | 1 | 0 |
+| 3 | 1 | 1 |
+| 4 | 0 | 1 |
+| 5 | -1 | 1 |
+| 6 | -1 | 0 |
+| 7 | -1 | -1 |
+
+**The index order matches, exactly, 8 confirmed UI strings** found later in
+the same file (content offsets 236-433, a plain printable-run scan):
+`JON`(236) `ZACH`(256) `IRVAN`(277) `AKEER`(299) `OLBAR`(322) `THORM`(345)
+`ALL`(368) `NONE`(389) — 8 strings, immediately followed by `MOVE`(411)
+`EXIT`(433) action-button strings. This is a **genuine correction** to
+§3.2's original "8-directional adjacency" hypothesis: the natural reading is
+a **party-composition checklist** — the player character (JON) plus 5
+recruitable companions (ZACH/IRVAN/AKEER/OLBAR/THORM), plus `ALL`/`NONE`
+select-shortcut buttons, immediately followed by `MOVE` (confirm) and `EXIT`
+(cancel). **STRUCTURAL, not fully CONFIRMED**: the count/order match is
+exact and not cherry-picked, but which array means "currently selected" vs.
+some other axis (e.g. "available/has joined yet") is HYPOTHESIS — the values
+don't cleanly split into one all-boolean "selected" array (both arrays mix
+-1/0/1 across all 8 rows, including the two non-checkbox `ALL`/`NONE` slots).
+
+**A real consumer of both arrays exists later in the same file** (content
+offsets ~3567-3767, found by searching for `1a 3c`/`1a 46` — the same
+`sdirtc`/`odirtc` array-offset immediates — beyond the init block): an
+interleaved run of reads from both arrays inside code built from `cftstset`
+(0x56 — "hit-test setup": reads 5 opernames into `wcx`/`wcy`/`wcz`/`matmask`/
+`wforme`, then calls `clipform()`+`crstent()`, the exact "forme"
+collision-test mechanism `docs/ishar-sprite-format.md` §1 already named as
+`adresform()`/`cforme`/`ctstmov`-family), `cboxf` (0x7c — fills a rectangle
+at an accumulating draw position, i.e. a **checkbox/row highlight
+drawer**), branch opcodes `cbz8`/`cbz24`/`cbeq24` (0x12/0x14/0x1a as
+TOP-LEVEL opcodes here, not opernames — same byte values, different
+dispatch table per file+line in `alis`'s own source, exactly the "same byte,
+different table" convention `docs/ishar-container-format.md` §9's worked
+GERDEP example already established), and — decisively — **`clive`** (0x40,
+"load and run another script by a literal 16-bit id", `opcodes.c:1032`).
+This is strong, converging (STRUCTURAL) evidence the screen supports
+click-to-toggle interaction on the 8 rows and, on confirmation (`MOVE`),
+**launches a different script by id** — consistent with `MOVE` starting the
+actual travel/exploration script. **Not decoded**: which literal id(s)
+`clive` loads here, and any per-location hotspot/placement table for a
+"click a place on the map to go there" mechanic — no such table was found
+this session; if it exists, it lives outside this traced 200-byte window.
+
+**Answer to the task's core movement question**: Crystals of Arborea's
+overworld screen (`CARTE.CO`) is **not** a WASD/grid-walked space and (so
+far as decoded) **not** a literal destination-adjacency graph either — it is
+a **mouse-driven party-roster/travel-confirmation UI** layered over a static
+map picture. Combined with the confirmed total absence of any
+`CONT*.FIC`-style region grid on disk (`ls data/crystalsofarborea/amiga/`
+shows only `INIT.FIC`), this settles Priority 2 of the task brief: no
+grid-walker `GameView` is appropriate for this title. A menu/checklist-style
+`GameView` was built instead — see §7 below.
+
+#### Paths tried (the 8-entry array's semantic role)
+
+| Approach | Result | Why it stalled/succeeded |
+|---|---|---|
+| Naive fixed-9-byte-stride byte scan (§3.2, original pass) | Found the right byte region and the right `II` cycling-0-7 signal, but mis-paired which byte was "the value" vs. "the index" (conflated a coincidental byte value `0x38`/`0x00` that recurs inside every `cstore`'s own `seval`+`oimmb` sub-sequence with a second top-level `cscmov` instruction that doesn't actually recur) | A structural/statistical read with no VM semantics behind it — see `bytecode-residue-recurring-groups.md`-style pitfall: recurring byte groups in a real bytecode stream are not proof of a flat record array |
+| Full VM-semantics mini interpreter (this session) | Solved: 1×`cscmov` + 15×`cstore`, self-terminating at the exact expected byte boundary, both arrays' real values recovered | Ported the *exact* byte-consumption rules for the handful of opcodes/opernames/storenames actually used, from `alis`'s real source, rather than guessing a fixed stride |
+| Matching array values to the 8 confirmed UI strings | STRUCTURAL match on count+order (not values) — reframes "destinations" to "party roster" | The exact semantic split (which array = "selected") remains open — no further bytecode traced past the `clive` call |
+
 ## 4. `MANUEL.CO`/`MESSAGE2.CO`/`MESSAGES.CO` — CONFIRMED via full decompression
 
 The `0x81`-class RLE codec is now cracked corpus-wide
@@ -197,15 +328,46 @@ of the filename, not verified against content):
 
 ## 5.5 Sprite/image pixel format — CONFIRMED
 
-See `docs/ishar-sprite-format.md`. 31/36 files decode a valid resource
-directory, 905 sprites total
-(`public/assets/crystalsofarborea/amiga/sprites/`) — this title's corpus is
-dominated by the older raw-4-bit type (`0x00`/`0x02`, no palette-bank
-byte), distinct from Ishar 1-3's dominant banked-4-bit type. Visually
-confirmed via `orc_elf.png` (skeleton/humanoid figures) and `arbre.png`
-(tree/bush silhouettes).
+See `docs/ishar-sprite-format.md`. 33/42 files decode a valid resource
+directory (up from 31/36 this session — the stored-class pipeline bug fixed
+in §3.5 let 6 more files be attempted, including `CARTE.CO`), 931 sprites
+total (up from 905) (`public/assets/crystalsofarborea/amiga/sprites/`) —
+this title's corpus is dominated by the older raw-4-bit type (`0x00`/`0x02`,
+no palette-bank byte), distinct from Ishar 1-3's dominant banked-4-bit type.
+Visually confirmed via `orc_elf.png` (skeleton/humanoid figures), `arbre.png`
+(tree/bush silhouettes), and `carte.png` (§3.5's map picture — a
+recognizable island/coastline silhouette).
 
-## 6. Open items
+## 7. Walker `GameView` — `CrystalsOfArboreaView`
+
+`tools/walker/games-crystalsofarborea.ts` implements the shared walker
+harness's `GameView` interface for this title. Per §3.5's findings, this is
+**not** a spatial walker (no grid, no first-person view, no automap) — it's
+a menu/checklist screen reproducing `CARTE.CO`'s confirmed party-roster UI:
+
+- Renders the confirmed map picture (§3.5, `carte.png`'s 7 largest strips,
+  shelf-packed side by side) as a backdrop, greyscale (RENDERED, no AGA
+  palette).
+- Renders the 8 confirmed rows (`JON`/`ZACH`/`IRVAN`/`AKEER`/`OLBAR`/
+  `THORM`/`ALL`/`NONE`) as togglable checkboxes seeded from the CONFIRMED
+  `0x3c`-array values (§3.5's table; the one un-written index defaults to
+  unchecked), plus `MOVE`/`EXIT` action rows.
+- Keyboard (`W`/`S`/arrows` to move focus, `Space`/`Enter` to
+  toggle/activate) and mouse (`pick()`) both drive the same toggle logic;
+  `ALL`/`NONE` apply their real confirmed semantics (check/uncheck every
+  companion row). `MOVE`/`EXIT` surface a status line explaining what's
+  confirmed (a `clive` script-launch happens; the destination is not
+  decoded) rather than silently no-op'ing.
+- `pose`/`items`/`automap`/`palette` are all trivial/empty per the `GameView`
+  contract — there is no spatial state to track for this screen.
+
+Verified: `npx tsc --noEmit -p .` and `npx eslint` clean on the new file;
+`npm test` (370 tests, whole repo) unaffected. Not verified in a live
+browser session this pass (no amiberry/browser access used — static
+type-checked + hand-traced against the confirmed bytecode/UI-string
+evidence only).
+
+## 8. Open items
 
 See `docs/ishar/TODO.md` (single status surface for the whole Ishar-engine
 family, covers this title too).

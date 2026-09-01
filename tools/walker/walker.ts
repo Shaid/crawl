@@ -63,6 +63,7 @@ import {
   loadPoolsOfDarknessView,
 } from './games-goldbox.ts';
 import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from './games-ishar.ts';
+import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
@@ -358,6 +359,7 @@ const GAMES = [
   { id: 'ishar', label: 'Ishar 1', loader: loadIshar1View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'ishar2', label: 'Ishar 2', loader: loadIshar2View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'ishar3', label: 'Ishar 3', loader: loadIshar3View, defaultLevel: 1, platform: 'amigaaga' as const },
+  { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
@@ -371,6 +373,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
   ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
+  crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
 };
 
 /**
@@ -403,6 +406,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'ishar') return isharLevelLists.ishar();
   if (game === 'ishar2') return isharLevelLists.ishar2();
   if (game === 'ishar3') return isharLevelLists.ishar3();
+  if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));

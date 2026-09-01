@@ -118,6 +118,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amigaaga',
     supportedPlatforms: ['amigaaga'],
   },
+  crystalsofarborea: {
+    gameId: 'crystalsofarborea',
+    name: GAME_DISPLAY_NAMES.crystalsofarborea,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
 };
 
 export function getViewerConfig(gameId: GameId): ViewerConfig {

@@ -23,8 +23,44 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | ishar-scene-header-subtype-byte | open | The shared 16-byte scene header (§6's evidence) has a varying byte at offset 21 (`0x0a` graphics/Ishar-1 caves, `0x47` Ishar-2 dungeon files, `0x1e` a third subgroup) that looks like a content-subtype discriminator — not traced to any consumer code. (Note: this header is the ALIS *script* header — `id@0`, `code_loc@+4`→bytecode entry, `dirOff@+0x0e` — per §9's `script.c` layout, so the "subtype byte" is a script-header field, likely `vram_alloc`-adjacent) | `docs/ishar-container-format.md` §6, §9 | 2026-09-01 re-oracle |
 | ishar-walker-topdown-only | open | `tools/walker/games-ishar.ts` (built this session) renders the CONFIRMED top-down `CONT*.FIC` region grid for Ishar 1/2/3, NOT a first-person view — the actual first-person mechanism (generic VM sprite/scene compositing keyed by cell value, §9's premise-correction finding) is not decoded to the point of rendering a frame. Walkability is the HYPOTHESIS-level `isBlocked()` rule (see `ishar-cell-value-semantics`), independently re-verified this session only as "produces a coherent, non-random render" — not as a traced collision-check opcode | `docs/ishar-container-format.md` §9, `tools/walker/games-ishar.ts` module doc | 2026-09-01 |
 | ishar-t3-crystals-executable-trace | deferred | Ishar 3's `START` and Crystals' `T.X` were not disassembled this pass (only Ishar 1's `T.X` was traced) — the `0xA1`/`0x81` codec port is now verified corpus-wide by output self-consistency + readable content instead, which is strong enough evidence to not require this, but a direct trace on a second title's executable would still strengthen the "one shared codec" claim further | `docs/ishar-container-format.md` §1, §2.5 | 2026-08-30 |
+| crystals-carte-array-role | open | `CARTE.CO`'s two confirmed 8-element scratch arrays (`0x3c`/`0x46`) match the 8 confirmed UI strings `JON/ZACH/IRVAN/AKEER/OLBAR/THORM/ALL/NONE` in count+order (STRUCTURAL), but which array means "currently selected" vs. some other axis, and what index 0's un-written default value really is, is not decoded | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
+| crystals-carte-destination-mechanism | open | The real "travel to a location" mechanism: a confirmed consumer region hit-tests the 8 checklist rows (`cftstset`+"forme" collision test) and calls `clive` (load-and-run-another-script-by-id) on confirmation, but the literal script id(s) `clive` loads, and any per-location map hotspot/placement table (for "click a place on the map"), were not found this session | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
 
 ## Session log
+
+- **2026-09-01 (eighth pass — Crystals of Arborea's `CARTE.CO` overworld
+  cracked: no region grid, no destination graph — a party-roster bytecode
+  UI)**: Crystals has no `CONT*.FIC` files at all (confirmed: only
+  `INIT.FIC` exists on disk), so the Ishar region-grid walker technique
+  doesn't apply. Found and fixed a real, generalizable pipeline bug along
+  the way: `silmarils-unpack.ts`'s `unpackSilmarilsScript()` only recognized
+  the two compressed packer kinds, silently skipping every `classByte==0x01`
+  ("stored") file — including `CARTE.CO` itself — in the sprite-atlas
+  pipeline (added a `PACKER_KIND_STORED` branch; Crystals now 33/42 files
+  with a decodable sprite directory, 931 sprites, up from 31/36 and 905;
+  Ishar 1/2/3 re-verified byte-identical, confirming no regression). With
+  `CARTE.CO`'s own sprite directory now reachable, resolved its confirmed
+  map picture (an island/coastline silhouette). Then built a from-scratch
+  mini ALIS interpreter (covering just the opcodes/opernames/storenames
+  involved — `cscmov`/`cstore`/`oimmb`/`ofin`/`odirtc`/`sdirtc`/`seval`)
+  and used it to fully resolve the previously-"structural, unclear" 8-entry
+  byte-record array found in the first pass: it is real, self-terminating
+  bytecode (1×`cscmov` + 15×`cstore`, ending exactly at the expected
+  boundary on an unrelated opcode) that initializes two 8-element scratch
+  arrays whose index order matches, exactly, 8 confirmed UI strings found
+  later in the file — `JON/ZACH/IRVAN/AKEER/OLBAR/THORM/ALL/NONE` — a
+  **correction** of the original "8-directional adjacency table" hypothesis
+  to a **party-roster/companion-selection checklist**. Found a real
+  consumer region (`cftstset` hit-test + `cboxf` highlight-draw + `clive`
+  script-launch-by-id) implementing click-to-toggle interaction, confirming
+  the screen is mouse-driven UI, not a walked space. Built
+  `tools/walker/games-crystalsofarborea.ts` (`CrystalsOfArboreaView`): a
+  menu/checklist `GameView` (map picture backdrop + 8 togglable rows +
+  MOVE/EXIT), explicitly NOT a grid walker or first-person view, matching
+  what's actually confirmed. `npx tsc --noEmit -p .`/`npx eslint` clean,
+  `npm test` (370 tests) unaffected. New open rows:
+  `crystals-carte-array-role`, `crystals-carte-destination-mechanism`. See
+  `docs/crystalsofarborea/amiga/data-structure.md` §3.5, §7.
 
 - **2026-09-01 (seventh pass — walker built on the confirmed region grids,
   re-oracle's claims independently re-verified)**: Before trusting the

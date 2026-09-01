@@ -18,6 +18,7 @@ export const GAME_IDS = [
   'ishar',
   'ishar2',
   'ishar3',
+  'crystalsofarborea',
 ] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
@@ -52,6 +53,7 @@ export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   ishar: 'Ishar: Legend of the Fortress',
   ishar2: 'Ishar 2: Messengers of Doom',
   ishar3: 'Ishar 3: The Seven Gates of Infinity',
+  crystalsofarborea: 'Crystals of Arborea',
 };
 
 export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
