@@ -6,27 +6,40 @@
  * `CONT*.FIC` region grid (`tools/shared/ishar-regions.ts`) and the
  * CONFIRMED sprite/bitmap decoder (`tools/shared/ishar-sprites.ts`).
  *
- * Scope, honestly: this renders exactly ONE Ishar 1 outdoor biome —
- * `FORET.bin` (forest) plus its `FOND.bin` backdrop companion — chosen
- * because it's the one script this session hand-verified byte-for-byte
- * against the reference source (`docs/ishar-container-format.md` §8's
- * "First-person rendering mechanism" section). `VILLAGE.bin` shares the
- * identical facing/ring-loop shell (byte-for-byte, including the whole
- * per-ring elevation/scale constant table) but dispatches its CELL value
- * via `cswitch2` rather than `FORET`'s `cswitch1` — the interpreter handles
- * both dispatch shapes fine (see `alis-interp.ts`), so `renderIsharScene()`
- * below is not actually FORET-specific; it was simply only exercised
- * end-to-end against FORET this session. Not attempted this session:
- * TEMPLE/RAMPART/PLAINE, caves/dungeons (a materially different indoor
- * shape wasn't traced), and Ishar 2/3 (different global-variable offsets
- * and screen geometry — see the module-level constants below, which are
- * Ishar-1-specific).
+ * Scope: the underlying machinery (`computeScenePlacements()`,
+ * `compositeFrame()`, `renderIsharLocationFrame()`) is GENERAL — any Ishar 1
+ * outdoor location script sharing the confirmed facing/ring-loop shell can be
+ * passed in. Two scripts have been executed end-to-end and visually verified
+ * this project: `FORET.bin` (forest, hand-verified byte-for-byte against the
+ * reference source during the original `re-oracle` escalation — see
+ * `docs/ishar-container-format.md` §8) and `VILLAGE.bin` (village/building
+ * biome — shares FORET's exact per-ring elevation/scale constant table
+ * byte-for-byte but dispatches its cell value via `cswitch2` against a real
+ * building-style selector rather than FORET's `cswitch1` terrain selector;
+ * verified against real `CONT1.FIC` cells in the `[-25,-1]` range, which
+ * cluster in a real compound at x=52-56,y=14-20 — exactly where a visual
+ * inspection of the decoded grid independently noted "building/compound
+ * rectangles", see `docs/ishar-container-format.md` §9.1). `TEMPLE.bin`
+ * disassembles clean (252 instrs, 0 errors) under the same shell shape
+ * (elevation table byte-identical) with its own cell-value dispatch
+ * (`cswitch2 base=-10 count=6`, values `[-10,-4]`) and WAS executed
+ * end-to-end against the one real matching cell found in the corpus
+ * (`CONT4.FIC` value `-8` at `(67,26)`) — but the result is INCONCLUSIVE,
+ * not a confirmed render: only a handful of placements resulted and the
+ * composited frame shows no clearly-visible foreground structure (see
+ * `docs/ishar-container-format.md` §8.2's "Not generalized" list for the
+ * detail). NOT wired into the walker. `RAMPART.bin` (439 instrs, ring cap 7
+ * rather than 6) and `PLAINE.bin` (295 instrs) also disassemble clean under
+ * the same shell shape but were not traced for cell-dispatch structure or
+ * exercised end-to-end this session. Ishar 2/3 use different global-variable
+ * offsets and screen geometry (see the module-level constants below, which
+ * are Ishar-1-specific) — not re-derived this session.
  *
- * Confidence: the underlying algorithm execution is CONFIRMED (the
- * interpreter reproduces, from real bytecode + real grid data + a real
- * party pose, exactly the per-ring elevation/lateral-scale constants and
- * per-cell sprite-index-base values that were hand-decoded and cross-
- * checked against `github.com/maestun/alis`'s C source this session — see
+ * Confidence: the underlying algorithm execution is CONFIRMED for FORET and
+ * VILLAGE (the interpreter reproduces, from real bytecode + real grid data +
+ * a real party pose, exactly the per-ring elevation/lateral-scale constants
+ * and per-cell sprite-index-base values that were hand-decoded and cross-
+ * checked against `github.com/maestun/alis`'s C source — see
  * `alis-interp.ts`'s module doc). The PIXEL COMPOSITING below (sprite
  * anchor point, backdrop layering, palette) is RENDERED/HYPOTHESIS: no
  * real screenshot or emulator capture was available to check pixel-exact
@@ -35,6 +48,19 @@
  * a reasonable but UNVERIFIED convention for "billboarded objects standing
  * on terrain"), or the FOND backdrop's real tiling/parallax behavior (see
  * that function's own doc comment for what wasn't resolved).
+ *
+ * A benign artifact seen running EVERY script tried so far (FORET, VILLAGE,
+ * and structurally in TEMPLE): after the real per-frame placement pass
+ * completes and returns (`cret`), the calling shell's `cjsr(0x5a); cstart(N);
+ * cjmp(back-to-cjsr)` idiom is the game's own "re-render every tick"
+ * coroutine scheduler — `cstart` spawns a sibling task rather than
+ * transferring control, which this interpreter (no task scheduler) treats
+ * as a documented no-op and falls through into, producing a tight 2-
+ * instruction infinite loop that the `STEP_BUDGET` catches and reports as
+ * `'step budget exceeded'`. This is EXPECTED, not a bug: it happens strictly
+ * AFTER the one real placement pass has already run and populated
+ * `placements`, so it costs a fixed, cheap 200,000-step spin (sub-
+ * millisecond) and does not affect output correctness.
  */
 
 import { scriptEntryPoint } from './alis-disasm.ts';
@@ -80,8 +106,14 @@ function makeSceneEnv(globals: Record<number, number>, grid: RegionGridSource): 
     readMain(addr) {
       return globals[addr] ?? 0;
     },
-    readGrid(addr, x, y) {
+    // Ishar 1's CONT grids are `cdim count=1` (a single row-width stride) --
+    // one `pop()` call (the confirmed `x` role), `direct` (the accumulator
+    // at call time) plays the confirmed `y` role. See SceneEnv.readGrid's
+    // doc comment for the general N-ary formula this is the count=1 case of.
+    readGrid(addr, pop, direct) {
       const buf = addr === ISHAR1_GLOBALS.gridBufferB ? 'B' : 'A';
+      const x = pop();
+      const y = direct;
       if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) return 0;
       return grid.read(buf, x, y);
     },
@@ -182,10 +214,10 @@ export function compositeFrame(
   }
 }
 
-export interface ForestFrameOptions {
-  /** Decompressed `FORET.bin`. */
-  foret: Uint8Array;
-  /** Decompressed `FOND.bin` (sky/backdrop companion) -- optional; omit to skip the backdrop layer. */
+export interface LocationFrameOptions {
+  /** Decompressed location script (e.g. `FORET.bin`, `VILLAGE.bin`). */
+  location: Uint8Array;
+  /** Decompressed `FOND.bin` (sky/backdrop companion) -- optional; omit to skip the backdrop layer. Ishar 1 ships exactly one `FOND.DO`, shared by every outdoor location script (no per-biome backdrop file exists on disk). */
   fond?: Uint8Array;
   partyX: number;
   partyY: number;
@@ -196,8 +228,10 @@ export interface ForestFrameOptions {
 }
 
 /**
- * Render one Ishar 1 forest-biome first-person frame. See module doc for
- * scope/confidence. `facing` uses this project's own N/E/S/W = 0/1/2/3
+ * Render one Ishar 1 outdoor-biome first-person frame by executing
+ * `opts.location`'s real bytecode. See module doc for scope/confidence
+ * (which scripts have actually been exercised end-to-end vs. only
+ * disassembled). `facing` uses this project's own N/E/S/W = 0/1/2/3
  * convention (`tools/walker/games-ishar.ts`'s `dirs` array) -- internally
  * converted to the raw bytecode facing value (CONFIRMED empirically: the
  * script's `cswitch2 omainb(0x137e) ... base=-1` dispatch needs
@@ -206,7 +240,7 @@ export interface ForestFrameOptions {
  * order -- see `alis-interp.ts`'s test coverage and
  * `docs/ishar-container-format.md` §8).
  */
-export function renderIsharForestFrame(opts: ForestFrameOptions): FirstPersonFrame {
+export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPersonFrame {
   const screen = opts.screen ?? ISHAR1_GAME_SCREEN;
   const warnings: string[] = [];
   const canvas = new Uint8Array(screen.width * screen.height * 4);
@@ -244,10 +278,10 @@ export function renderIsharForestFrame(opts: ForestFrameOptions): FirstPersonFra
     placementCount += fondLeaves.length;
   }
 
-  const foretLeaves = computeScenePlacements(opts.foret, env, warnings);
-  foretLeaves.sort((a, b) => b.sortY - a.sortY); // far-to-near painter's algorithm
-  compositeFrame(foretLeaves, screen, canvas);
-  placementCount += foretLeaves.length;
+  const locationLeaves = computeScenePlacements(opts.location, env, warnings);
+  locationLeaves.sort((a, b) => b.sortY - a.sortY); // far-to-near painter's algorithm
+  compositeFrame(locationLeaves, screen, canvas);
+  placementCount += locationLeaves.length;
 
   return { width: screen.width, height: screen.height, rgba: canvas, placementCount, warnings };
 }

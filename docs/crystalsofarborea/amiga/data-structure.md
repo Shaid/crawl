@@ -367,7 +367,64 @@ browser session this pass (no amiberry/browser access used — static
 type-checked + hand-traced against the confirmed bytecode/UI-string
 evidence only).
 
-## 8. Open items
+## 8. Location scene scripts and `INIT.FIC` — STRUCTURAL, real render blocked on a genuine engine mechanism difference
+
+A follow-up session (2026-09-02, extending Ishar 1's first-person renderer —
+`docs/ishar-container-format.md` §8.2 — to a second title) confirmed Crystals
+ships the SAME engine-wide facing-switch + ring-loop scene-compositor shell
+as Ishar 1's `FORET.bin`/`VILLAGE.bin` in several of its own scripts:
+`ARBRE.CO` (351 instrs), `NPLAINE.CO` (314), `PLAGES.CO` (277), `CAVINT.CO`
+(439) — all disassemble with `tools/shared/alis-disasm.ts` with 0 errors and
+show the identical shell-instruction shape, using Crystals' own global
+offsets `0x2b38`/`0x2b39`/`0x2b3a` (party X/Y/facing) in place of Ishar 1's
+`0x137c`/`0x137d`/`0x137e`. `HABITAT.CO`/`GHABITAT.CO`/`TOUR.CO`/`PUIT.CO`
+also disassemble clean but are much shorter (single static-placement scripts,
+not full ring-loop scenes).
+
+**A real, previously-undocumented content-load mechanism**: `MAIN.CO`'s own
+bytecode (`cfopen("INIT.FIC", mode=2)` then a SINGLE `cfreadb(addr=0x7c,
+len=0x2a4e)`) loads the whole real `INIT.FIC` file (10,830 bytes — byte-exact
+against the `cfreadb` length) into `basemain+0x7c` in one shot, spanning many
+separately-`cdim`-declared arrays that follow it in vram (`off=0x7c count=2
+dims=[2,114]`, `off=0x2ace count=1 dims=[15]`, `off=0x2b42 count=1 dims=[15]`,
+...) — a real parallel to Ishar 1's `EN1.FIC` scatter-array convention
+(`docs/ishar-container-format.md` §9.3), done as one big block read instead
+of many small ones. This settles `crystals-carte-array-role`'s sibling
+question of "is there a Crystals equivalent of Ishar's world data" — yes,
+though it is NOT a `CONT*.FIC`-style spatial world grid (confirmed absent,
+§3 above); it's a smaller, still-undeciphered local/per-scene content table.
+
+**A genuinely different (and richer) indexing mechanism, traced to source but
+NOT resolved**: `ARBRE.CO`/`PLAGES.CO`/`NPLAINE.CO`/`CAVINT.CO`'s own
+`omaintc(0x7c)` reads push **two** values before the indexed read (`[odirb
+opushacc odirb opushacc omainb omaintc(0x7c)]`), not Ishar 1's one — because
+`basemain+0x7c` is declared `cdim count=2` (two dimensions), unlike Ishar 1's
+`count=1` world grids. Tracing the real VM's `tabchar()`
+(`github.com/maestun/alis`'s `alis.c:1431`) and `cdim`'s own runtime
+metadata-write algorithm (`opcodes.c:613`) shows `omaintc` is genuinely
+**N-ary**: `result = addr + varD7 + Σ dims[i] * pop()` for `i` in
+`0..count-1`, consuming `count` eval-stack values in LIFO order. This is a
+materially richer addressing scheme than Ishar 1 ever needed (`count=1`
+always). `tools/shared/alis-interp.ts`'s `SceneEnv.readGrid` was generalized
+to this real formula (a `pop()` closure, not a fixed `x,y` pair) — Ishar 1's
+own callers were updated to call `pop()` once, reproducing the previously-
+verified output exactly (regression-checked: VILLAGE.bin's placement count
+at a fixed test pose is unchanged). A best-effort Crystals formula
+(`address = direct + dims[0]*pop1 + dims[1]*pop2 = direct + 2*p1 + 114*p2`,
+fed real `INIT.FIC` bytes) was tried against `ARBRE.bin` — it produced a
+highly suspicious 600 placements (far beyond any Ishar script's observed
+9-116 range) with every placement landing off-screen, meaning the specific
+role assignment (which popped value pairs with which `dims` entry; what
+`omainb(0x2b3c)`'s real semantic role is) is **not correctly resolved**.
+**Honest status: NOT rendered, NOT wired into the walker.** The mechanism
+itself (real, N-ary, traced to source) is solid; only the final per-title
+constant assignment for Crystals remains open. See
+`crystals-local-scene-array-indexing` in `docs/ishar/TODO.md`, and
+`docs/ishar-container-format.md` §8.3 for the full account (shared write-up,
+since this is fundamentally the same engine mechanism as Ishar 1's already-
+documented `omaintc`/`tabchar`).
+
+## 9. Open items
 
 See `docs/ishar/TODO.md` (single status surface for the whole Ishar-engine
 family, covers this title too).

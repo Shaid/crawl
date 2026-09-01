@@ -2,7 +2,7 @@
  * Ishar 1/2/3 (Amiga AGA) walker views — `GameView` implementations for the
  * shared walker harness (`tools/walker/walker.ts`).
  *
- * PRIMARILY a TOP-DOWN world-region grid walker, with one narrow, honestly-
+ * PRIMARILY a TOP-DOWN world-region grid walker, with a narrow, honestly-
  * scoped first-person addition. Originally this view assumed Ishar's
  * first-person mode was a heightfield/voxel-column terrain raycaster (the
  * reference `alis` engine's `render3d.c`) and set out to locate an on-disk
@@ -16,11 +16,17 @@
  * an ALIS bytecode interpreter (`tools/shared/alis-interp.ts`) and executed
  * ONE such script end-to-end (`tools/shared/ishar-firstperson.ts`) —
  * Ishar 1's `FORET.bin` (forest) + `FOND.bin` (sky backdrop), verified
- * against region `CONT1`'s real grid data. That is the ONLY script pair
- * wired up here; every other region/game still renders top-down only —
- * see `renderCanvas()` below and §8's implementation section for the exact
- * scope boundary and what's honestly unverified (backdrop anchor/tiling
- * convention, no real palette).
+ * against region `CONT1`'s real grid data. A follow-up session generalized
+ * the renderer (`renderIsharLocationFrame()`, no longer FORET-specific) and
+ * got a SECOND location script rendering end-to-end against the same real
+ * `CONT1` grid data: `VILLAGE.bin` (a building/compound biome, verified
+ * against real cells in the `[-25,-1]` value range clustered at
+ * `x=52-56,y=14-20` — a real, recognizable timber-framed building render,
+ * see `docs/ishar-container-format.md` §8.2). Both scripts are wired up
+ * here, cycled with `KeyC` while in first-person mode; every other
+ * region/game still renders top-down only — see `renderCanvas()` below and
+ * §8.2 for the exact scope boundary and what's honestly unverified (backdrop
+ * anchor/tiling convention, no real palette).
  *
  * What IS confirmed (`docs/ishar-container-format.md` §9, independently
  * re-verified this session — an ASCII/pixel render of the decoded grid
@@ -43,7 +49,7 @@ import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/d
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import { ISHAR_REGION_LAYOUT, isBlocked, type IsharRegionLayout } from '../shared/ishar-regions.ts';
-import { renderIsharForestFrame, type RegionGridSource } from '../shared/ishar-firstperson.ts';
+import { renderIsharLocationFrame, type RegionGridSource } from '../shared/ishar-firstperson.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -64,19 +70,27 @@ interface IsharRegion {
   terrain: Uint8Array;
 }
 
+/** One first-person-renderable location script, verified end-to-end against real `CONT1` grid data (see module doc). */
+interface IsharLocation {
+  key: string;
+  label: string;
+  data: Uint8Array;
+}
+
 interface IsharData {
   game: IsharGameId;
   layout: IsharRegionLayout;
   regions: IsharRegion[];
   /**
-   * Ishar 1's `FORET.bin`/`FOND.bin` decompressed scripts, if fetched
-   * successfully — the ONLY first-person-renderable script pair this
-   * project has verified (see module doc). `undefined` for ishar2/ishar3
-   * (not attempted) or if the asset fetch failed (e.g. the export step,
+   * Ishar 1's `FOND.bin` (shared sky backdrop, every outdoor script uses the
+   * same one) plus every location script fetched successfully — currently
+   * `FORET.bin` and `VILLAGE.bin`, the two this project has verified
+   * end-to-end (see module doc). Empty `locations` for ishar2/ishar3 (not
+   * attempted) or if the asset fetch failed (e.g. the export step,
    * `tools/ishar/amigaaga/scripts.ts`, hasn't been run — it is NOT wired
    * into `npm run` since it isn't registered in package.json).
    */
-  forestScripts?: { foret: Uint8Array; fond: Uint8Array };
+  firstPerson?: { fond: Uint8Array; locations: IsharLocation[] };
 }
 
 const loadPromises = new Map<IsharGameId, Promise<IsharData>>();
@@ -87,15 +101,24 @@ function regionId(name: string): number {
   return m ? Number(m[1]) : 0;
 }
 
-async function tryLoadForestScripts(base: string): Promise<{ foret: Uint8Array; fond: Uint8Array } | undefined> {
+const LOCATION_SCRIPTS: Array<{ key: string; label: string }> = [
+  { key: 'foret', label: 'Forest (FORET.bin)' },
+  { key: 'village', label: 'Village (VILLAGE.bin)' },
+];
+
+async function tryLoadFirstPersonAssets(base: string): Promise<{ fond: Uint8Array; locations: IsharLocation[] } | undefined> {
   try {
-    const [foretRes, fondRes] = await Promise.all([
-      fetch(`${base}/scripts/foret.bin`),
-      fetch(`${base}/scripts/fond.bin`),
-    ]);
-    if (!foretRes.ok || !fondRes.ok) return undefined;
-    const [foretBuf, fondBuf] = await Promise.all([foretRes.arrayBuffer(), fondRes.arrayBuffer()]);
-    return { foret: new Uint8Array(foretBuf), fond: new Uint8Array(fondBuf) };
+    const fondRes = await fetch(`${base}/scripts/fond.bin`);
+    if (!fondRes.ok) return undefined;
+    const fond = new Uint8Array(await fondRes.arrayBuffer());
+    const locations: IsharLocation[] = [];
+    for (const { key, label } of LOCATION_SCRIPTS) {
+      const res = await fetch(`${base}/scripts/${key}.bin`);
+      if (!res.ok) continue;
+      locations.push({ key, label, data: new Uint8Array(await res.arrayBuffer()) });
+    }
+    if (locations.length === 0) return undefined;
+    return { fond, locations };
   } catch {
     return undefined;
   }
@@ -123,8 +146,8 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
       })
       .sort((a, b) => a.id - b.id);
     // First-person scripts are only wired up for Ishar 1 (see module doc).
-    const forestScripts = game === 'ishar' ? await tryLoadForestScripts(base) : undefined;
-    return { game, layout, regions, forestScripts };
+    const firstPerson = game === 'ishar' ? await tryLoadFirstPersonAssets(base) : undefined;
+    return { game, layout, regions, firstPerson };
   })();
   loadPromises.set(game, promise);
   return promise;
@@ -173,7 +196,9 @@ export class IsharView implements GameView {
   private stepCooldown = 0;
   private firstPerson = false;
   private toggleKeyWasDown = false;
-  private fpCache: { key: string; frame: ReturnType<typeof renderIsharForestFrame> } | null = null;
+  private cycleKeyWasDown = false;
+  private locationIndex = 0;
+  private fpCache: { key: string; frame: ReturnType<typeof renderIsharLocationFrame> } | null = null;
   private fpCanvas: HTMLCanvasElement | null = null;
 
   constructor(id: IsharGameId, gameLabel: string, data: IsharData, startLevel: number, startPose: Pose | null) {
@@ -208,9 +233,15 @@ export class IsharView implements GameView {
     return [];
   }
 
-  /** Ishar 1, region `CONT1`, with `FORET.bin`/`FOND.bin` fetched — the only first-person-renderable combination (see module doc). */
+  /** Ishar 1, region `CONT1`, with at least one location script fetched — the only first-person-renderable combination (see module doc). */
   get firstPersonAvailable(): boolean {
-    return this.id === 'ishar' && /^CONT1$/i.test(this.region.name) && !!this.data.forestScripts;
+    return this.id === 'ishar' && /^CONT1$/i.test(this.region.name) && !!this.data.firstPerson;
+  }
+
+  /** Currently-selected location script (cycled with `KeyC`), or `undefined` if none loaded. */
+  private get currentLocation(): IsharLocation | undefined {
+    const locations = this.data.firstPerson?.locations;
+    return locations?.[this.locationIndex % locations.length];
   }
 
   update(dtMs: number, keys: KeyStateLike): Pose | null {
@@ -222,6 +253,19 @@ export class IsharView implements GameView {
       this.firstPerson = !this.firstPerson;
     }
     this.toggleKeyWasDown = toggleDown;
+
+    // Cycle which VERIFIED location script renders this region's real grid
+    // data -- this is a manual test-bench selector, NOT the real (still
+    // undecoded, `ishar-cell-value-semantics`) region-to-scene dispatch. Any
+    // location script can run against any region's grid; only CONT1 has
+    // been checked for a real matching building compound (VILLAGE) as well
+    // as forest content (FORET) so far.
+    const cycleDown = keys.isDown('KeyC');
+    if (cycleDown && !this.cycleKeyWasDown && this.firstPerson && this.firstPersonAvailable) {
+      const count = this.data.firstPerson?.locations.length ?? 1;
+      this.locationIndex = (this.locationIndex + 1) % count;
+    }
+    this.cycleKeyWasDown = cycleDown;
 
     if (this.stepCooldown > 0) return null;
 
@@ -299,15 +343,18 @@ export class IsharView implements GameView {
 
   /**
    * Render one first-person frame (see `tools/shared/ishar-firstperson.ts`)
-   * by actually executing `FORET.bin`/`FOND.bin`'s bytecode against this
+   * by actually executing the currently-selected location script's (`KeyC`
+   * cycles it) bytecode, plus the shared `FOND.bin` backdrop, against this
    * region's real terrain layer for the current pose. Cached by
-   * `x,y,facing` so it's only recomputed when the party actually moves, not
-   * every animation-frame tick.
+   * `x,y,facing,location` so it's only recomputed when the party actually
+   * moves or the script is switched, not every animation-frame tick.
    */
   private renderFirstPerson(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    const scripts = this.data.forestScripts!;
+    const firstPerson = this.data.firstPerson!;
+    const location = this.currentLocation;
+    if (!location) return;
     const { x, y, facing } = this.pose_;
-    const key = `${this.region.id}:${x},${y},${facing}`;
+    const key = `${this.region.id}:${x},${y},${facing}:${location.key}`;
     if (!this.fpCache || this.fpCache.key !== key) {
       const region = this.region;
       const grid: RegionGridSource = {
@@ -319,9 +366,9 @@ export class IsharView implements GameView {
           return v >= 128 ? v - 256 : v; // sign-extend, per ishar-regions.ts's tabchar() convention
         },
       };
-      const frame = renderIsharForestFrame({
-        foret: scripts.foret,
-        fond: scripts.fond,
+      const frame = renderIsharLocationFrame({
+        location: location.data,
+        fond: firstPerson.fond,
         partyX: x,
         partyY: y,
         facing: (facing & 3) as 0 | 1 | 2 | 3,
@@ -350,13 +397,14 @@ export class IsharView implements GameView {
     ctx.fillStyle = '#ffe080';
     ctx.font = '10px monospace';
     ctx.fillText(
-      `${this.region.label} — first-person (RENDERED: real ALIS bytecode execution, placeholder sky/ground colour, no real palette — press F for top-down)`,
+      `${this.region.label} — first-person: ${location.label} (RENDERED: real ALIS bytecode execution, placeholder sky/ground colour, no real palette)`,
       4,
       12,
     );
+    ctx.fillText('F: top-down.  C: cycle location script (manual test-bench selector, not the real region-to-scene dispatch).', 4, 24);
     if (frame.placementCount === 0) {
       ctx.fillStyle = '#ff8080';
-      ctx.fillText('0 sprites placed at this position/facing', 4, 24);
+      ctx.fillText('0 sprites placed at this position/facing', 4, 36);
     }
   }
 
@@ -371,7 +419,7 @@ export class IsharView implements GameView {
     ctx.font = '10px monospace';
     ctx.fillStyle = '#ffe080';
     const fpNote = this.firstPersonAvailable
-      ? 'press F for first-person (Ishar 1 forest, RENDERED)'
+      ? 'press F for first-person (Ishar 1: forest/village scripts, RENDERED)'
       : 'first-person not decoded for this region';
     ctx.fillText(`${this.region.label} — top-down (CONFIRMED world geometry) — ${fpNote}`, 4, 12);
   }

@@ -52,20 +52,32 @@ export interface PlacementCommand {
   addr: number;
 }
 
-/** Read/write access to the two things a scene script's frame-render logic touches beyond its own local scratch: named "main" globals (party position, facing, location-type) and the two region-grid buffers (`omaintc` reads). */
+/** Read/write access to the two things a scene script's frame-render logic touches beyond its own local scratch: named "main" globals (party position, facing, location-type) and the region/scene-content array(s) (`omaintc` reads). */
 export interface SceneEnv {
   /** `omainb(addr)`/`omainw(addr)` reads. Return 0 (and it'll show up in `warnings`) for anything not modeled. */
   readMain(addr: number): number;
   /**
-   * `omaintc(addr)` 2D indexed read: `addr` is one of the two grid-buffer
-   * base offsets baked into the bytecode (`docs/ishar-container-format.md`
-   * §9's confirmed `basemain+0x80`/`+0x234a`); `x`/`y` are the two values
-   * combined by the EVAL step sequence, `x` pushed first (the pile), `y`
-   * the accumulator at the time `omaintc` executes — matches the confirmed
-   * `cell = grid[y*width + x]` formula (a hand-decoded `GERDEP.bin`
-   * statement, same doc section).
+   * `omaintc(addr)` indexed array read — a direct, byte-verified port of the
+   * real VM's `tabchar()` (`github.com/maestun/alis`'s `alis.c:1431`, traced
+   * this session): `result = addr + varD7 + Σ dims[i] * pop()` for `i` in
+   * `0..count-1`, where `count`/`dims` are the array's own `cdim`-declared
+   * dimensions (a length-prefixed stride table `cdim` writes into vram just
+   * before the array's base address, per `opcodes.c:613`'s real algorithm),
+   * `varD7` is the current accumulator (`direct`, below) at the time
+   * `omaintc` executes, and each `pop()` call consumes ONE eval-stack value
+   * in LIFO order (most-recently-`opushacc`'d value first) — NOT a fixed
+   * x/y pair. `addr` is the array's base offset baked into the bytecode.
+   * Ishar 1's world-grid arrays (`basemain+0x80`/`+0x234a`) are `count=1`
+   * (a single stride = row width), so a caller only ever needs to call
+   * `pop()` once — matches the originally-confirmed `cell = grid[y*width+x]`
+   * formula (a hand-decoded `GERDEP.bin` statement, `docs/ishar-container-
+   * format.md` §9) exactly, with `direct` playing the `y` role and one
+   * `pop()` playing the `x` role. Crystals of Arborea's own local
+   * scene-content array (`basemain+0x7c`, `cdim`-declared `count=2,
+   * dims=[2,114]`) needs `pop()` called TWICE — see
+   * `tools/shared/crystals-firstperson.ts`.
    */
-  readGrid(addr: number, x: number, y: number): number;
+  readGrid(addr: number, pop: () => number, direct: number): number;
 }
 
 const STEP_BUDGET = 200_000;
@@ -155,10 +167,10 @@ export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): R
           continue;
         }
         if (step.op === 'omaintc' || step.op === 'omainti' || step.op === 'odirtc' || step.op === 'odirti') {
-          // 2D indexed read: x was pushed earlier, y is the current acc.
-          const x = pile.pop() ?? 0;
-          const y = acc;
-          acc = env.readGrid(step.value, x, y);
+          // Real tabchar() semantics: the callback pops as many eval-stack
+          // values (LIFO) as its own array's cdim-declared `count` needs --
+          // see SceneEnv.readGrid's doc comment.
+          acc = env.readGrid(step.value, () => pile.pop() ?? 0, acc);
         } else {
           acc = readVar(step.op, step.value);
         }

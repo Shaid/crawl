@@ -715,14 +715,15 @@ interpreter's output:
 **NOT generalized this session** (deliberately, per the task's "don't force
 false generality" instruction):
 
-- `VILLAGE.bin` shares `FORET.bin`'s facing/ring-loop shell byte-for-byte
-  (including the whole per-ring elevation/scale constant table) but
-  dispatches its cell value via `cswitch2` rather than `cswitch1`; the
-  interpreter handles both dispatch shapes, but VILLAGE's specific
-  cell-value-to-content mapping was not resolved or tested end-to-end.
-- `TEMPLE.bin`/`RAMPART.bin`/`PLAINE.bin` and any cave/dungeon location
-  scripts (a materially different indoor shape) were not disassembled or
-  tested at all.
+> **Correction (2026-09-01/02 follow-up pass, §8.3)**: `VILLAGE.bin` is now
+> RENDERED end-to-end (its `cswitch2` cell-value-to-building-style mapping
+> resolved and verified against a real `CONT1.FIC` compound cluster) and
+> `TEMPLE.bin` was executed against real data with an inconclusive result
+> (small/invisible placements, not a confirmed render) — see §8.3 for the
+> full account. `RAMPART.bin`/`PLAINE.bin` were disassembled (clean, same
+> shell shape) but still not traced/tested end-to-end. The two bullets below
+> remain accurate as written.
+
 - `ORC.bin` (monster placement) was deliberately NOT wired into the
   renderer — there is no real on-disk encounter/instance-position data to
   drive it honestly for a specific frame; fabricating a monster placement
@@ -748,6 +749,116 @@ available this session and installing one would have required editing
 `package.json`, out of scope) — the plumbing (`fetch`, `ImageData`,
 `drawImage`) is thin, `tsc`/`eslint` clean, and wraps the Node-side-verified
 `renderIsharForestFrame()` unchanged.
+
+### 8.3 Generalization pass (2026-09-01/02) — a SECOND location script rendering (VILLAGE), a third attempted (TEMPLE, inconclusive), and a real N-ary indexing mechanism found in Crystals of Arborea
+
+Following on from §8.2's single-script proof of concept, this pass generalized
+the renderer and tried to extend it to more locations/titles per the task
+brief's priority order.
+
+**`renderIsharForestFrame()` renamed/generalized to `renderIsharLocationFrame()`**
+(`tools/shared/ishar-firstperson.ts`) — it always took an arbitrary location
+script, just under a FORET-specific name; the rename makes that explicit. No
+behavioral change (regression-checked: `VILLAGE` at a fixed test pose renders
+the identical 80 placements before and after).
+
+**`VILLAGE.bin` — RENDERED, a second confirmed end-to-end script.**
+Disassembled clean (241 instrs, 0 errors); shares `FORET.bin`'s exact
+facing-switch + ring-clamp-loop shell **byte-for-byte**, including the whole
+per-ring elevation/scale constant table (`-34,-23,-14,-8,-4,-1`), but
+dispatches its cell value via a DIFFERENT `cswitch2` (`base=0x19, count=0x18`
+— i.e. cell values `-25..-1` select one of 6 repeating sprite-index bases,
+`0x1a/0x20/0x26/0x2c/0x32/0x38`, decreasing by 6 per step through the range —
+a building-style selector, structurally the direct analogue of FORET's
+terrain-type `cswitch1`). Verified against **real** `CONT1.FIC` data: a scan
+for cells with sign-extended value in `[-25,-1]` found a real cluster at
+`x=52-56,y=14-20` (values `-25,-21,-20,-19,-17,-16,-15,-14,-11,-10,-9`) —
+independently matching this project's own earlier visual-inspection note (§9.3
+below / §9.1's table) that this exact area of `CONT1` shows "building/compound
+rectangles." Rendered 4 test poses near this cluster (facing each cardinal
+direction) — placement counts 30-80, all real, non-degenerate, varied-size
+(16×15 up to 80×40) decoded bitmaps, **visually confirmed via `Read`**: all
+four frames show a coherent, recognizable timber-framed building silhouette
+(large triangular roof trusses, repeated vertical support beams, small
+fence-post-like accent elements) — a substantially MORE legible result than
+FORET's abstract textured band, and unambiguously building-shaped, not
+foliage-shaped. Exported as a browser asset
+(`public/assets/ishar/amigaaga/scripts/village.bin`,
+`tools/ishar/amigaaga/scripts.ts`) and wired into the walker (see below).
+
+**`TEMPLE.bin` — attempted end-to-end, INCONCLUSIVE (not shipped).**
+Disassembles clean (252 instrs, 0 errors), same shell shape (elevation table
+byte-identical, ring cap 5 rather than 6), own cell dispatch `cswitch2
+base=-10 count=6` (values `[-10,-4]`). A scan of `CONT1-6.FIC` found only 4
+real cells in this range corpus-wide; the best (`CONT4.FIC` value `-8` at
+`(67,26)`) was used to drive a real render, producing only 7 script
+placements (19 with the `FOND` backdrop) — the composited frame shows no
+visible foreground structure (just backdrop + placeholder ground), unlike
+VILLAGE's clearly-legible result. Two candidate branches in TEMPLE's own cell
+dispatch place a large mirrored pillar-pair (facing N/S) vs. a single small
+facade sprite (facing E/W, `cjsr 0x5f3`) — the tested pose hit the small-sprite
+branch, which may simply be too small/distant to read at this ring depth
+rather than evidence of a decode error. **Not wired into the walker or
+counted as a confirmed render** — reported here as an honest partial result,
+not a success.
+
+**`RAMPART.bin`/`PLAINE.bin` — disassembled only.** Both disassemble clean
+(439 / 295 instrs, 0 errors) under the identical facing-switch + ring-loop
+shell (RAMPART's ring cap is 7, not 6/5 like the others). Neither script's own
+cell-dispatch table was traced, and neither was executed end-to-end, this
+session — pure time-budget triage, not a blocker found.
+
+**Ishar 2/3 — not attempted this session** (deferred; the task brief treated
+this as optional once items 1-3 consumed the available effort — see
+`docs/ishar/TODO.md`).
+
+**Crystals of Arborea — a genuinely different, richer indexing mechanism
+found; NOT solved.** Crystals ships several scripts sharing the IDENTICAL
+facing-switch + ring-loop shell as Ishar 1's outdoor scripts (`ARBRE.CO`
+351 instrs, `NPLAINE.CO` 314, `PLAGES.CO` 277, `CAVINT.CO` 439 — all 0
+disassembly errors, using Crystals' own global offsets `0x2b38/0x2b39/0x2b3a`
+for party X/Y/facing in place of Ishar 1's `0x137c/0x137d/0x137e`), confirming
+the engine-wide scene-compositor convention transfers across titles as
+expected. Also found a real, previously-undocumented content-loading
+mechanism: `MAIN.CO`'s own bytecode (`cfopen("INIT.FIC",2)` +
+`cfreadb(addr=0x7c, len=0x2a4e=10830)`, byte-exact against the real
+`INIT.FIC` file size) loads the WHOLE 10,830-byte file into
+`basemain+0x7c` in ONE read, spanning many separately-`cdim`-declared arrays
+(`off=0x7c count=2 dims=[2,114]`, `off=0x2ace count=1 dims=[15]`,
+`off=0x2b42 count=1 dims=[15]`, ...) — a genuine parallel to Ishar 1's
+`EN1.FIC` scatter-array convention (§9.3) done as one big block read instead
+of many small ones.
+
+However, ARBRE/PLAGES/NPLAINE/CAVINT's own `omaintc(0x7c)` reads push **TWO**
+values before the indexed read (`[odirb(0x24) opushacc odirb(0x25) opushacc
+omainb(0x2b3c) omaintc(0x7c)]`), not Ishar 1's one — because `basemain+0x7c`
+is `cdim`-declared with `count=2` (two dimensions), not Ishar 1's `count=1`.
+Tracing the real VM's `tabchar()` (`github.com/maestun/alis`'s `alis.c:1431`)
+and `cdim`'s own runtime write algorithm (`opcodes.c:613`) shows `omaintc` is
+genuinely **N-ary**, not a fixed 2-value `(x,y)` read as this project's
+interpreter previously hardcoded: `result = addr + varD7 + Σ dims[i] *
+pop()` for `i` in `0..count-1`, where `count`/`dims` are written into vram
+just before the array's base by `cdim`, and each `pop()` consumes one
+eval-stack value in LIFO order (most-recently-pushed first). Ishar 1's CONT
+grids are the `count=1` special case (matches the already-confirmed
+`cell = grid[y*width+x]` formula exactly). **`alis-interp.ts`'s `SceneEnv`
+was generalized to this real formula** (`readGrid(addr, pop, direct)` — a
+`pop()` closure instead of a fixed `(x,y)` pair; Ishar 1's own `SceneEnv` in
+`ishar-firstperson.ts` was updated to call `pop()` once, reproducing the old
+behavior exactly — regression-verified via VILLAGE's unchanged 80-placement
+count). A best-effort Crystals-specific formula (`address = direct +
+dims[0]*pop1 + dims[1]*pop2 = direct + 2*p1 + 114*p2`, using real `INIT.FIC`
+bytes) was tried against `ARBRE.bin` — it produced a highly-suspicious
+**600 placements** (far beyond any Ishar script's observed range of
+9-116) with the rendered frame showing nothing (all placements land
+off-screen), a strong signal that the specific role assignment (which popped
+value pairs with which `dims` entry, and what `omainb(0x2b3c)`'s real
+semantic meaning is) is **not yet correctly resolved**. This is reported
+honestly as an OPEN, NOT-shipped, NOT-wired finding — see
+`crystals-local-scene-array-indexing` in `docs/ishar/TODO.md`. The underlying
+discovery (the real mechanism is N-ary, traced to source, with a working
+generalized interpreter) is solid; only the final per-title constant
+assignment for Crystals remains unresolved.
 
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 
