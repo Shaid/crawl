@@ -147,12 +147,106 @@ name wilderness's real art source. Direct byte inspection of
 `GLIB` containers with `TILE`-tagged sub-blocks (3/34/6 blocks
 respectively) — the same shape as this title's own working
 `diska/Walls.tlb` — strong circumstantial evidence for a separate,
-non-WALLDEF overland sky/terrain/random-encounter renderer. But the actual
-code that reads these 3 files was not located this pass (no static string
-or table reference to chase) — this is now open at the "trace the real
-overland renderer" level, not "did we miss an executable table" (that
-question is closed: no table exists). See
-`docs/treasureofthesavagefrontier/TODO.md`.
+non-WALLDEF overland sky/terrain/random-encounter renderer.
+
+> **Correction (2026-09-02, `amiga-disasm` pass, independently re-verified
+> against real bytes this session): the real overland renderer's SELECTOR
+> mechanism is now CONFIRMED, and it fully explains why every prior static
+> search for a consumer of these 3 files came back empty.** There is a
+> FOURTH file in this family this doc hadn't previously named:
+> `diska/dungcom.tlb` (found this session, real, on disk, same GLIB shape
+> as the other three).
+>
+> **The executable is a 7-segment AmigaOS `HUNK_OVERLAY`-linked binary**
+> (1 resident root + 6 on-demand overlay segments) — confirmed by a raw
+> scan of the whole 319,476-byte (`0x4DFF4`) file for
+> `HUNK_HEADER`(`0x3F3`) magic at every overlay boundary: root header at
+> file `0x0`; overlay headers at file `0x39494`, `0x3A354`, `0x4281C`,
+> `0x45350`, `0x4ACD0`, `0x4DBCC` (independently re-verified this session —
+> every cited offset's leading longword is `0x3F3`, and the file size
+> matches exactly). **Every disassembly this project has done on this
+> executable, including the `getAreaWallsets`/`LoadWalldef` trace above,
+> covers only the resident root segment** (file `0x0`-`~0x393C8`) — this is
+> the root cause every prior static-string and call-graph search dead-
+> ended: the wilderness/overland loading code genuinely isn't THERE.
+>
+> The bare basenames `"Sky"` (no `.tlb` extension, file `0x3A042`, inside
+> overlay #1) and `"DungCom"`/`"WildCom"`/`"RandCom"` (file `0x3C416`/
+> `0x3C41E`/`0x3C426`, consecutive, inside overlay #2) are embedded as
+> literal strings — an exact 1:1 match (modulo the missing extension) to
+> the 4 real on-disk files `Sky.tlb`/`dungcom.tlb`/`wildcom.tlb`/
+> `randcom.tlb`. This is why the earlier "zero filename references
+> anywhere" finding, while an accurate description of the literal string
+> `"Sky.tlb"` (with extension), was incomplete: the extension is
+> synthesized at runtime by a confirmed generic resident helper
+> (`TlbOpener_guess`, flat `0x26D24`-`0x26F0E`, file offset `0x130A0`, root
+> CODE hunk 13 — builds names via `sprintf(buf,"%s.tlb",name)`, format
+> string at file `0x1329E`; 2 confirmed resident callers, `"BigPic1"` and
+> `"map"`, both unrelated to wilderness) — only the bare name is stored,
+> and for these 4 resources the bare name lives in a non-resident overlay
+> a plain whole-file string search still finds (strings don't care about
+> hunk boundaries) but a call-graph trace rooted in resident code cannot
+> reach.
+>
+> **The actual dungeon/wilderness SELECTOR, inside overlay #2 (file
+> `0x3C350`-`0x3C414`, runtime `0x51FE0`-`0x5204A`), is fully disassembled
+> and independently re-verified byte-exact against the raw file this
+> session:**
+>
+> ```
+> movea.l (-0x2a5a,A4),A0      ; the SAME "current area" global LoadWalldef_guess tests
+> tst.w   (0x80,A0)            ; dungeon/wilderness flag, offset 0x80 of the area descriptor
+> bne.b   ->WildCom-branch
+>   ; dungeon: push 0x19,0,1 ; pea "DungCom"(pc) ; jsr (-0x797a,A4)
+>   ; bra ->RandCom
+> WildCom-branch:
+>   ; push 0x21,0,1 ; pea "WildCom"(pc) ; jsr (-0x797a,A4)
+> RandCom: (unconditional, both paths)
+>   push 6,0x22,1 ; pea "RandCom"(pc) ; jsr (-0x797a,A4)
+> ```
+>
+> i.e. offset `0x80` of the current-area descriptor is a real, confirmed
+> dungeon(`0`)/wilderness(nonzero) flag, tested by BOTH the resident
+> `LoadWalldef_guess` and this overlay routine — this overlay registers
+> "DungCom" or "WildCom" as the active area-command resource name
+> depending on it, and ALWAYS additionally registers "RandCom" (random
+> encounters apply to both area types).
+>
+> **Where this goes cold, confirmed as a real dead end, not an
+> unfinished trace**: the shared registration call (`jsr (-0x797a,A4)`)
+> resolves through a small-data trampoline slot at DATA-hunk file offset
+> `0x9D8`, whose ON-DISK bytes are `4E F9 00 00 00 00` — an **unpatched
+> `JMP.L $0`** (independently re-verified byte-exact this session). This
+> proves the real callee — the function that would actually turn a
+> "DungCom"/"WildCom" registration into pixels — is ITSELF overlay-
+> resident code, patched into this trampoline slot only when AmigaOS's
+> overlay manager loads the relevant segment at runtime. It cannot be
+> named or its behavior determined by any further static analysis of the
+> flat executable file. The root's own `HUNK_OVERLAY` control table (file
+> `0x24D4`, 4148 bytes) was inspected — it's a monotonic sequence of small
+> ascending values consistent with an internal symbol-name-pool offset
+> table, but the `HUNK_OVERLAY` record format is linker-private with no
+> published spec (confirmed via `WebSearch` against the AmigaOS Hunk
+> format references), and no value in it could be correlated against any
+> of the known overlay file offsets, the trampoline's own address, or the
+> trampoline's displacement constant — a further overlay-manager-internals
+> reverse-engineering effort, not a data-format question this project's
+> usual toolkit can make progress on.
+>
+> **Net result**: the wilderness/overland renderer's SELECTION mechanism
+> (a per-area dungeon/wilderness flag gating which of 2 overlay-resident
+> "area-command" modules loads, with a 3rd always loading for random
+> encounters) is now CONFIRMED, and the reason it's unreachable from
+> resident code is now explained and confirmed, not just observed. What
+> remains genuinely open — and is NOT resolvable by further static
+> analysis of this flat file — is what the overlay-resident module
+> actually DOES with `Sky.tlb`/`dungcom.tlb`/`wildcom.tlb`/`randcom.tlb`
+> once loaded (first-person wall compositing like the dungeon renderer, a
+> scrolling top-down overworld map, or something else). Resolving that
+> would need either the AmigaOS overlay manager's private patch mechanism
+> (no public spec found) or a live emulator capture — the latter requires
+> explicit user permission per this project's standing amiberry policy and
+> was not attempted this session.
 
 ### Paths tried
 
@@ -165,6 +259,11 @@ question is closed: no table exists). See
 | Assume ECL bytecode operands ARE the wallset-binding authority once the opcode table is fixed | ECL-alone resolution (24/41 levels, 72 slots) leaves several dungeon levels with implausible/sentinel slot values | The Amiga port's `getAreaWallsets` unconditionally overwrites ECL's own slot bytes for geo ids 16-50 from a hardcoded executable table — confirmed via disassembly, not a decode bug. `wallsetOverride` (29/41 levels, 87 slots) is the real fix, independently re-verified 87/87 against `WallDef.glb`'s own directory |
 | Disassemble `getAreaWallsets` end-to-end (`amiga-disasm` pass, 2026-09-01) looking for a second table/branch covering wilderness geos 51-62 | **Definitively refuted, not just "not found"**: the function's own range check (`geoId-16 >= 35`) branches any `geoId >= 51` straight to the same no-op `rts` unused in-range ids (41-46) hit — no second table, no alternate code path, slot bytes simply left as the caller wrote them | Confirms wilderness IDs are outside this mechanism entirely, not merely outside one table's key range — see §4 correction above |
 | Full-executable ASCII string scan for `"Sky.tlb"`/`"wildcom"`/`"randcom"`/`"WALLDEF"`/filename literals, to find the real overland-renderer's resource load site | Zero hits anywhere in the binary | This engine resolves resources by numeric ECL-declared id through an external table, not embedded filename strings — the executable alone can't name the consumer. `Sky.tlb`/`wildcom.tlb`/`randcom.tlb` were independently confirmed (by direct byte inspection, not disassembly) to be real, well-formed GLIB/TILE containers — strong circumstantial evidence a separate overland renderer exists, but its actual code path is still unlocated |
+| Trace `LoadWalldef_guess`'s own callers exhaustively (small-data trampoline reloc walk) for a wilderness-reachable branch (`amiga-disasm` pass, 2026-09-02) | All 6 real callers are dungeon-only (2 ECL wallset-load opcode handlers + 1 wall-refresh loop) | `LoadWalldef`/`getAreaWallsets` live in the resident root segment and have no wilderness path at all — a real negative, not an incomplete trace |
+| Raw scan of the whole 319,476-byte file for `HUNK_HEADER`/`HUNK_OVERLAY`/`HUNK_BREAK` magic | **Found the real cause**: this executable is a 7-segment `HUNK_OVERLAY`-linked binary (1 resident root + 6 on-demand overlays) — every prior disassembly covered only the resident root | Explains every previous dead end at once: the wilderness renderer isn't missing from the trace, it's in a segment no trace so far ever loaded |
+| Bare-basename string search (no `.tlb` extension) across the WHOLE file, not just the resident root | `"Sky"`/`"DungCom"`/`"WildCom"`/`"RandCom"` each occur exactly once, all inside the 2 non-resident overlay segments; exact match to `Sky.tlb`/`dungcom.tlb` (a 4th real file, not previously catalogued)/`wildcom.tlb`/`randcom.tlb` | The earlier "zero filename references" search looked for the name WITH `.tlb` appended — the extension is synthesized at runtime by a confirmed generic `sprintf('%s.tlb',name)` helper (`TlbOpener_guess`), so only the bare name is ever stored |
+| Disassemble the selector routine around the `"DungCom"/"WildCom"/"RandCom"` string table (overlay #2, file `0x3C350`-`0x3C414`) | **SOLVED**: a `tst.w (0x80,A0)` on the same "current area" global `LoadWalldef_guess` reads selects DungCom (0) vs WildCom (nonzero); RandCom always registers too — independently re-verified byte-exact against raw file bytes this session | Real, confirmed dungeon/wilderness flag and selector mechanism — see correction above |
+| Resolve the shared registration call (`jsr (-0x797a,A4)`) and decode the root's `HUNK_OVERLAY` control table (file `0x24D4`) to pin the real consumer | Genuine dead end: the trampoline's on-disk bytes are an unpatched `4E F9 00 00 00 00` (confirmed byte-exact), and `HUNK_OVERLAY`'s record format has no public spec (confirmed via `WebSearch`) | The real callee is itself overlay-resident, patched in only at runtime by AmigaOS's overlay manager — not resolvable by further static analysis of the flat file; would need the private overlay-patch mechanism or a live capture |
 
 ## 5. Extractor and outputs
 

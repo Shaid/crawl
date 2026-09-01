@@ -240,21 +240,41 @@
  * all — do not add a `wallsetOverride` entry for them.
  *
  * A full-binary ASCII string scan of the executable found ZERO references
- * to any filename (no `"WALLDEF"`, `"Sky.tlb"`, `"wildcom"`, `"randcom"`,
- * `"AREA"` string anywhere) — this engine loads resources by numeric
- * ECL-declared id through an external table, not hardcoded name strings,
- * so the executable alone can't name wilderness's real art source. Direct
- * byte inspection (not disassembly) of `diska/Sky.tlb` (3,791 B, `GLIB`
- * magic, 3 `TILE` blocks), `diska/wildcom.tlb` (12,668 B, `GLIB`, 34
- * `TILE` blocks), and `diska/randcom.tlb` (2,684 B, `GLIB`, 6 `TILE`
- * blocks) confirms all three are real, structurally-valid GLIB/TILE
- * containers (same shape as this title's own `diska/Walls.tlb`) — strong
- * circumstantial evidence of a SEPARATE, non-WALLDEF overland
- * sky/terrain/random-encounter tile renderer, but the actual consuming
- * code path was not located this pass (no static reference to these 3
- * files exists to follow). Genuinely open at the "which code reads these"
- * level — see the per-title TODO — but the original open question ("is
- * there a missed executable table for ids 51-62?") is now closed: no.
+ * to any filename WITH its extension (no `"WALLDEF"`, `"Sky.tlb"`,
+ * `"wildcom"`, `"randcom"`, `"AREA"` string anywhere) — this engine loads
+ * resources by numeric ECL-declared id through an external table, not
+ * hardcoded name-plus-extension strings. Direct byte inspection (not
+ * disassembly) of `diska/Sky.tlb` (3,791 B, `GLIB` magic, 3 `TILE`
+ * blocks), `diska/wildcom.tlb` (12,668 B, `GLIB`, 34 `TILE` blocks), and
+ * `diska/randcom.tlb` (2,684 B, `GLIB`, 6 `TILE` blocks) confirmed all
+ * three are real, structurally-valid GLIB/TILE containers (same shape as
+ * this title's own `diska/Walls.tlb`).
+ *
+ * > **Correction (2026-09-02, `amiga-disasm` pass, independently
+ * > re-verified against real bytes this session): the wilderness
+ * > renderer's SELECTOR mechanism is now CONFIRMED — see
+ * > `docs/treasureofthesavagefrontier/amiga/data-structure.md` §4's
+ * > correction block for the full disassembly and evidence.** This
+ * > executable is a 7-segment `HUNK_OVERLAY`-linked binary; every
+ * > disassembly this project had done (including `getAreaWallsets`/
+ * > `LoadWalldef` above) covered only the resident root segment, which is
+ * > why the filename-string scan above (and every call-graph trace) came
+ * > up empty — the code isn't missing, it's in a non-resident overlay no
+ * > trace had reached. Bare basenames (no extension — synthesized at
+ * > runtime by a confirmed generic `sprintf('%s.tlb',name)` helper)
+ * > `"Sky"`/`"DungCom"`/`"WildCom"`/`"RandCom"` (a 4th real file,
+ * > `diska/dungcom.tlb`, was also found this session) are embedded as
+ * > literal strings inside 2 non-resident overlay segments, and a fully
+ * > disassembled selector routine there tests the SAME "current area"
+ * > global `LoadWalldef` reads (offset `0x80` of the area descriptor) to
+ * > choose "DungCom" vs "WildCom" (plus always "RandCom"). What remains
+ * > genuinely unresolvable by further static analysis: the actual
+ * > registration call resolves through a trampoline slot whose on-disk
+ * > bytes are an unpatched `JMP.L $0` — the real callee is itself
+ * > overlay-resident, patched in only by AmigaOS's overlay manager at
+ * > runtime, so what it actually renders (first-person walls vs. a
+ * > scrolling overworld vs. something else) needs either the (no public
+ * > spec found) overlay-patch mechanism or a live capture.
  */
 
 export interface EclOperand {

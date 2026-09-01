@@ -46,9 +46,36 @@ Azure Bonds / Secret of the Silver Blades / Pools of Darkness.
 See `amiga/data-structure.md` §4's table (kept there since it's evidence,
 not status, per this project's documentation convention).
 
+## 2026-09-02 — wilderness renderer's selector mechanism found (overlay-based, not resident)
+
+- The executable is a 7-segment `HUNK_OVERLAY`-linked binary (1 resident
+  root + 6 on-demand overlays) — every prior disassembly on this title
+  (including the confirmed `getAreaWallsets`/`LoadWalldef` trace) covered
+  only the resident root, which is why every earlier static search for a
+  wilderness resource consumer came back empty: the code genuinely isn't
+  there.
+- A 4th real file in this family was found: `diska/dungcom.tlb` (alongside
+  the already-known `Sky.tlb`/`wildcom.tlb`/`randcom.tlb`). All 4 bare
+  basenames (no `.tlb` extension — synthesized at runtime by a confirmed
+  generic `sprintf` helper) are embedded as literal strings inside the 2
+  non-resident overlay segments.
+- Found and disassembled the real dungeon/wilderness SELECTOR (overlay #2):
+  a flag at offset `0x80` of the current-area descriptor — the SAME field
+  `LoadWalldef_guess` tests — picks "DungCom" or "WildCom" as the active
+  area-command module name; "RandCom" always registers too. Independently
+  re-verified byte-exact against the raw file this session.
+- Genuine, confirmed dead end past that point: the shared registration
+  call resolves through a trampoline slot whose on-disk bytes are an
+  unpatched `JMP.L $0` — the real callee is itself overlay-resident,
+  patched in only by AmigaOS's overlay manager at runtime. Not resolvable
+  by further static analysis; would need the (undocumented, no public
+  spec) overlay-patch mechanism or a live capture.
+- See `amiga/data-structure.md` §4's correction block for full evidence
+  (addresses, disassembly, independent re-verification).
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| tsf-wilderness-renderer | open | Wilderness geos 51-62 have NO executable-hardcoded wallset table at all (confirmed via disassembly, not just "outside the table's key range") — `Sky.tlb`/`wildcom.tlb`/`randcom.tlb` are confirmed real GLIB/TILE containers, likely feeding a separate overland renderer, but the code that reads them hasn't been located | `amiga/data-structure.md` §4 correction block, `tools/shared/goldbox-ecl.ts` module doc | 2026-09-01 |
+| tsf-wilderness-render-technique | blocked:live-capture-or-overlay-manager-internals | Wilderness's dungeon/wilderness selector (a per-area flag choosing which of 2 overlay-resident "area-command" modules loads) is now fully confirmed, but what that overlay module actually renders (first-person walls, a scrolling overworld, or something else) can't be determined by further static analysis — the registration call resolves through an unpatched-at-rest trampoline only AmigaOS's overlay manager fills in at runtime | `amiga/data-structure.md` §4 correction block (2026-09-02) | 2026-09-02 game-re |
 | tsf-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content (items, monsters, sprites, portraits, dungeon commands, strings, sounds) not catalogued — only outer container structure validated | `amiga/data-structure.md` §6 | 2026-09-01 |
