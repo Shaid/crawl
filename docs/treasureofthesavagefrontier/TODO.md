@@ -50,5 +50,5 @@ not status, per this project's documentation convention).
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| tsf-wilderness-wallset | open | Wilderness geos 51-62 (type-1 walls only) fall outside the executable's per-geo wallset table entirely; real wall-art source (Sky.tlb? wildcom.tlb?) unresolved | `amiga/data-structure.md` §4 | 2026-09-01 |
+| tsf-wilderness-renderer | open | Wilderness geos 51-62 have NO executable-hardcoded wallset table at all (confirmed via disassembly, not just "outside the table's key range") — `Sky.tlb`/`wildcom.tlb`/`randcom.tlb` are confirmed real GLIB/TILE containers, likely feeding a separate overland renderer, but the code that reads them hasn't been located | `amiga/data-structure.md` §4 correction block, `tools/shared/goldbox-ecl.ts` module doc | 2026-09-01 |
 | tsf-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content (items, monsters, sprites, portraits, dungeon commands, strings, sounds) not catalogued — only outer container structure validated | `amiga/data-structure.md` §6 | 2026-09-01 |

@@ -11,7 +11,7 @@ Treasures of the Savage Frontier, extending the GLIB decoders first built
 for Curse of the Azure Bonds / Secret of the Silver Blades / Pools of
 Darkness.
 
-## 2026-09-01 — GLIB container confirmed; GEO's variable-size record shape cracked; wall-art status OVERTURNED on re-verification (was wrongly reported absent)
+## 2026-09-01 — GLIB container confirmed; GEO's variable-size record shape cracked; wall-art absence CONFIRMED via disassembly (after a brief false-positive detour)
 
 > **Correction (same day, personal re-verification before commit):** this
 > pass's "no wall-art format exists" conclusion below was WRONG — its
@@ -56,10 +56,13 @@ Darkness.
 |---|---|---|
 | Assume `GEO.GLB` uses the sibling titles' fixed 1024-byte/16x16 record shape | Every record's byte length disagreed with `1024*n` | Real format difference, not a bug — this title uses variable per-level dimensions (§2) |
 | Search for a `WALLDEF`/`WALLS`-named file under any disk/case variant | Zero hits, exhaustive `find` | Confirmed absent, not missed — this engine renders differently (§3) |
+| Run `findWallsetBindings()` (standard v1.1 3-operand table) against `ECL.GLB` | "Resolved" clean, non-degenerate opcode-`0x37` hits (441/458/492) | **Misparse, not a real finding** — disassembly later confirmed opcode `0x37` takes 2 operands in this engine revision, not 3; the clean 0-unknown-opcode walk was a coincidental re-sync, not evidence of a correct parse (§3's second correction) |
+| Check `Disk3/ECL.GLB`'s own directory for a hidden non-script/compositing block type | 47 data blocks, all ordinary script blocks (ids form a strict superset of `GEO.GLB`'s 20 level ids — same "extra blocks are non-dungeon scripts" pattern every sibling title shows) | No hidden table exists in this container |
+| Disassemble the executable's ECL opcode-dispatch tables + opcode `0x37`'s real handler (`amiga-disasm` pass) | Opcode `0x37` = 2-operand linked-list/flag-search routine, NOT `LOAD PIECES` | Confirms the ECL "hits" above were a misparse artifact |
+| Disassemble the one function that looked most like a 3-slot `LoadWalldef` equivalent (a `0xFF`-sentinel loader building `8x8d%c%d` filenames against the same `8X8DB`/`8X8DC` tile banks) | Its 3 inputs are the party's (facing, X, Y) map position, not wallset slot ids — confirmed via `MapDirectionXDelta`/`YDelta`-style tables and GEO's own `width`/`height` wraparound; the function is a topview map-glyph redraw. Its loader has exactly 3 callers, all internal to itself (exhaustive JSR/BSR/A4-trampoline scan) — a clean single-consumer negative | Definitively refutes this as the missing wallset loader; no second candidate found in the executable |
 
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
 | dqok-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content (items, monsters, PIC/FRAME/TOPVIEW picture banks, dungeon commands, strings) not catalogued — only outer container structure validated + GEO decoded | `amiga/data-structure.md` §5 | 2026-09-01 |
-| dqok-walldef-equivalent-table | open | `ECL.GLB` resolves real `LOAD PIECES` calls with static slot ids (441/458/492 confirmed) and `8X8DB.TLB`/`8X8DC.TLB` hold real nested-`TILE` tile-pixel data (block ids 1-17) — but no WALLDEF-shaped compositing table interpreting those slot ids was found under `CBODY`/`FRAME`/`GEN`/`FINAL.TLB` (all checked). Either a compositing table lives somewhere else uncatalogued (§5), or opcode `0x37` is repurposed in this engine revision for the PICTURE/portrait subsystem instead of wall art — genuinely open either way | `amiga/data-structure.md` §3 | 2026-09-01 |

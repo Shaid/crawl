@@ -13,15 +13,16 @@
  * variants per wall id, addressed by `wallsetIndex` (0/1/2) the same way
  * Curse/Secret's own multi-wallset ids work — NOT a missing-file gap.
  *
- * **Wall-art PIXEL data is NOT decoded this pass** — this title ships no
- * dos-dax-container 8x8-tile file (unlike Champions' `8X8D1.DAX`); its only
- * `8x8d1.daa` resists every container/codec hypothesis tried (see
- * docs/deathknightsofkrynn/amiga/data-structure.md's "8x8d1.daa" section
- * and docs/deathknightsofkrynn/TODO.md). Dungeon geometry (walls/doors) and
- * ECL wallset-slot bindings are still fully decoded and drive real
- * movement/collision in the walker; wall-facing cells fall back to the
- * walker's generic per-level placeholder texture (see
- * `tools/walker/games-goldbox.ts`'s `wallTextureFor`) rather than real art.
+ * **Wall-art PIXEL data**: `8x8d1.daa` — a BIG-ENDIAN sibling of the DOS
+ * DaxFile container (`readAmigaDaaDirectory`/`decodeAmigaDaaFile` in
+ * `tools/shared/goldbox-dosdax.ts`) — was cracked via a `re-oracle`
+ * escalation and independently re-verified this session (see
+ * docs/deathknightsofkrynn/amiga/data-structure.md §4). Each WALLDEF wall
+ * id (1-7) has 4 "quarter" `.DAA` entries (`W`, `W+20`, `W+40`, `W+60`, 64
+ * tiles each) selected by the raw view-cell byte's high 2 bits
+ * (`goldbox-daa-tiles.ts`'s "quarters" scheme) — colour comes from the
+ * universal entry (id 202)'s embedded palette, since every wall-specific
+ * entry's own embedded palette is all-zero.
  *
  * Level ids are namespaced `bank*1000 + geoId` (bank in {1,2,3}) so all
  * three banks coexist in one `dungeon/levels-index.json`.
@@ -29,6 +30,7 @@
  * Writes:
  *   public/assets/deathknightsofkrynn/amiga/data/container-directory.json
  *   public/assets/deathknightsofkrynn/amiga/data/walldef-geometry.json
+ *   public/assets/deathknightsofkrynn/amiga/textures/walldef-<id>-wall<n>-view6.png
  *   public/assets/deathknightsofkrynn/amiga/dungeon/level-<bank*1000+id>.json
  *
  * See docs/deathknightsofkrynn/amiga/data-structure.md for the full writeup
@@ -36,10 +38,11 @@
  */
 import { resolve } from 'node:path';
 import { mkdirSync, readdirSync } from 'node:fs';
-import { readBinary, writeJson } from '@seer-project/pipeline';
-import { readDosDaxDirectory, decompressDosDaxEntry, type DosDaxEntry } from '../../shared/goldbox-dosdax.ts';
+import { readBinary, writeJson, writePNG } from '@seer-project/pipeline';
+import { readDosDaxDirectory, decompressDosDaxEntry, readAmigaDaaDirectory, type DosDaxEntry } from '../../shared/goldbox-dosdax.ts';
 import { decodeWallSlices } from '../../shared/goldbox-walltiles.ts';
-import { assetDir, syncDataManifest } from '../../shared/asset-paths.ts';
+import { decodeDaaPalette, buildDkkWallColorBank, renderColorView } from '../../shared/goldbox-daa-tiles.ts';
+import { assetDir, syncDataManifest, manifestEntry, writeManifest } from '../../shared/asset-paths.ts';
 import { decodePorGeoEntry, type GeoLevel } from '../../shared/goldbox-geo.ts';
 import { exportGeoDungeon } from '../../shared/goldbox-dungeon-export.ts';
 import { findWallsetBindings, POR_ECL_PREFIX_LENGTH } from '../../shared/goldbox-ecl.ts';
@@ -48,6 +51,8 @@ const GAME = 'deathknightsofkrynn';
 const PLATFORM = 'amiga';
 const BANKS = [1, 2, 3] as const;
 const LEVEL_ID_MULTIPLIER = 1000;
+/** The universal palette-source entry in `8x8d1.daa` — see module doc. */
+const DAA_UNIVERSAL_PALETTE_ID = 202;
 
 function decodeAllEntries(data: Uint8Array): { dataOffset: number; entries: DosDaxEntry[]; byId: Map<number, Uint8Array> } {
   const { dataOffset, entries } = readDosDaxDirectory(data);
@@ -60,11 +65,7 @@ function decodeAllEntries(data: Uint8Array): { dataOffset: number; entries: DosD
 
 export async function exportDeathKnightsOfKrynnData(dataDir: string) {
   const dataOutDir = assetDir('data', GAME, PLATFORM);
-  // No confirmed wall-art pixel source exists for this title (see module
-  // doc) so nothing is ever written here, but `exportGeoDungeon`'s
-  // `scanWallTextures` step unconditionally reads this directory — it must
-  // exist (empty) rather than throw ENOENT.
-  assetDir('textures', GAME, PLATFORM);
+  const textureOutDir = assetDir('textures', GAME, PLATFORM);
 
   const daxFiles = readdirSync(dataDir).filter((f) => f.toUpperCase().endsWith('.DAX'));
 
@@ -96,8 +97,7 @@ export async function exportDeathKnightsOfKrynnData(dataDir: string) {
   });
   console.log(`container-directory.json: ${totalOk}/${totalEntries} entries verified (chain + exact decompressed length)`);
 
-  // 2. walldef1.dax geometry verification only — no confirmed 8x8-tile pixel
-  // source exists for this title (see module doc), so no PNG render step.
+  // 2. walldef1.dax geometry verification.
   const walldefPath = resolve(dataDir, 'walldef1.dax');
   const walldefData = readBinary(walldefPath);
   const { entries: wEntries, byId: wById } = decodeAllEntries(walldefData);
@@ -112,6 +112,49 @@ export async function exportDeathKnightsOfKrynnData(dataDir: string) {
   console.log(
     `walldef1.dax geometry: ${geometryReport.length} entries, all multiples of 156 bytes = ${allMultiple} (each entry bundles ${geometryReport[0]?.wallsetGroups ?? '?'} wallset group(s) of 5 slices — matches the 3-bank-sharing hypothesis)`,
   );
+
+  // 2b. Wall-art PNG renders from 8x8d1.daa (see module doc + goldbox-daa-tiles.ts).
+  const daaPath = resolve(dataDir, '8x8d1.daa');
+  const daaData = readBinary(daaPath);
+  const { dataOffset: daaDataOffset, entries: daaEntries } = readAmigaDaaDirectory(daaData);
+  const daaById = new Map<number, Uint8Array>();
+  for (const entry of daaEntries) daaById.set(entry.id, decompressDosDaxEntry(daaData, daaDataOffset, entry));
+  const universalRaw = daaById.get(DAA_UNIVERSAL_PALETTE_ID);
+  if (!universalRaw) throw new Error(`8x8d1.daa: missing universal palette-source entry id ${DAA_UNIVERSAL_PALETTE_ID}`);
+  const universalPalette = decodeDaaPalette(universalRaw);
+
+  const allRenderedFiles: string[] = [];
+  let rendered = 0;
+  let skippedNoQuarters = 0;
+  for (const entry of wEntries) {
+    const decoded = wById.get(entry.id)!;
+    if (decoded.length % 156 !== 0) continue;
+    let tileBank: Uint8Array[];
+    try {
+      tileBank = buildDkkWallColorBank(daaById, entry.id, universalPalette);
+    } catch {
+      skippedNoQuarters++;
+      continue;
+    }
+    const slices = decodeWallSlices(decoded);
+    for (const slice of slices) {
+      const view = slice.views[slice.views.length - 4]; // view index 6, "front face"
+      if (view.rows * view.cols <= 1) continue;
+      const { width, height, pixels } = renderColorView(view, tileBank);
+      const name = `walldef-${entry.id}-wall${slice.wallNumber}-view${view.view}`;
+      await writePNG(resolve(textureOutDir, `${name}.png`), pixels, width, height);
+      allRenderedFiles.push(`textures/${name}`);
+      rendered++;
+    }
+  }
+  console.log(`8x8d1.daa wall textures: ${rendered} PNGs written (${skippedNoQuarters} wall id(s) missing a full quarter set)`);
+  if (allRenderedFiles.length) {
+    writeManifest(
+      allRenderedFiles.map((n) => manifestEntry(n, 1)),
+      GAME,
+      PLATFORM,
+    );
+  }
 
   // 3. GEO + ECL wallset bindings, per bank. Confirmed default engine
   // config: base 0x8000, standard v1.1 opcode table, wallset load via

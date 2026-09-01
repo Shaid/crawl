@@ -120,12 +120,39 @@ index `0` -> `walldef2-9-wall0-view6.png` — visually inspected (4x
 nearest-neighbor upscale), a clean, structured, non-degenerate wall-panel
 render.
 
-**Open**: wilderness geos `51`-`62` (type-1 walls only) fall outside the
-executable's table entirely — hub block 51's own `LOAD FILES` passes the
-geo id itself through as a slot value, which `LoadWalldef` finds no match
-for (an engine fail path); their real wall-art source (`Sky.tlb`?
-`wildcom.tlb`?) is unresolved — genuinely open, not pursued further this
-pass (see `docs/treasureofthesavagefrontier/TODO.md`).
+**Wilderness geos `51`-`62` — CONFIRMED via disassembly (2026-09-01,
+`amiga-disasm` pass) that no executable-hardcoded wallset table exists for
+them at all**, not merely that they fall outside the 16-50 span. Tracing
+`getAreaWallsets` (flat/CODE address `0x28798`, file offset `0x14B24`, CODE
+hunk 15 hunk-relative `0xCD8`) end to end: its own range check
+(`subi.w #0x10,D0w` / `cmpi.w #0x23,D0w` / `bcc.b <noop>`, i.e.
+`geoId-16 >= 35`) sends any `geoId >= 51` straight past the 35-entry jump
+table to a shared `movem.l (SP)+,{A2} / rts` — the SAME no-op target the
+in-range-but-unused ids 41-46 hit. All 29 real jump-table entries were
+decoded and match `TREASURE_EXE_WALLSETS` byte-exact (0 deviations),
+confirming this is the routine's complete, literal behavior, not a partial
+reading. For geo ids 51-62 the 3 wallset-slot bytes are simply left as the
+caller last wrote them — hub block 51's own `LOAD FILES` passes the geo id
+itself through as a slot value, which `LoadWalldef` then fails to resolve
+against `WallDef.glb` (a real engine no-op path, confirmed, not a decode
+gap).
+
+A whole-executable ASCII string scan found zero filename references
+anywhere (no `"WALLDEF"`, `"Sky.tlb"`, `"wildcom"`, `"randcom"` string
+exists — this engine resolves resources by numeric ECL id through an
+external table, not embedded name strings), so the executable alone can't
+name wilderness's real art source. Direct byte inspection of
+`diska/Sky.tlb` (3,791 B), `diska/wildcom.tlb` (12,668 B), and
+`diska/randcom.tlb` (2,684 B) confirms all three ARE real, well-formed
+`GLIB` containers with `TILE`-tagged sub-blocks (3/34/6 blocks
+respectively) — the same shape as this title's own working
+`diska/Walls.tlb` — strong circumstantial evidence for a separate,
+non-WALLDEF overland sky/terrain/random-encounter renderer. But the actual
+code that reads these 3 files was not located this pass (no static string
+or table reference to chase) — this is now open at the "trace the real
+overland renderer" level, not "did we miss an executable table" (that
+question is closed: no table exists). See
+`docs/treasureofthesavagefrontier/TODO.md`.
 
 ### Paths tried
 
@@ -136,6 +163,8 @@ pass (see `docs/treasureofthesavagefrontier/TODO.md`).
 | Strip the prefix, apply the v1.3 table (`OPCODE_TABLE_POOLS_V13`) WITHOUT re-checking for title-specific opcode additions | (per the `re-oracle` escalation's own report) tried without the strip initially, isolating the residue to opcodes `0x42`/`0x43` only once combined with the strip | Two genuinely different hypotheses (table alone, prefix alone) had already failed by the time this was tried; escalating was the right call once both were exhausted |
 | Escalated to `re-oracle` (2026-09-01): 2 distinct failed hypotheses (table swap alone; prefix strip alone) met the escalation bar | **SOLVED** — prefix strip + `OPCODE_TABLE_TREASURE_V13X` (v1.3 + `0x42`/`0x43`/`0x44`, all 4-operand) gives 0 unknown/0 desync corpus-wide (30,338 instructions, 30 blocks); confirmed via headless-Ghidra disassembly of the real executable, not guessed | Independently re-verified this session against real bytes (identical numbers reproduced) |
 | Assume ECL bytecode operands ARE the wallset-binding authority once the opcode table is fixed | ECL-alone resolution (24/41 levels, 72 slots) leaves several dungeon levels with implausible/sentinel slot values | The Amiga port's `getAreaWallsets` unconditionally overwrites ECL's own slot bytes for geo ids 16-50 from a hardcoded executable table — confirmed via disassembly, not a decode bug. `wallsetOverride` (29/41 levels, 87 slots) is the real fix, independently re-verified 87/87 against `WallDef.glb`'s own directory |
+| Disassemble `getAreaWallsets` end-to-end (`amiga-disasm` pass, 2026-09-01) looking for a second table/branch covering wilderness geos 51-62 | **Definitively refuted, not just "not found"**: the function's own range check (`geoId-16 >= 35`) branches any `geoId >= 51` straight to the same no-op `rts` unused in-range ids (41-46) hit — no second table, no alternate code path, slot bytes simply left as the caller wrote them | Confirms wilderness IDs are outside this mechanism entirely, not merely outside one table's key range — see §4 correction above |
+| Full-executable ASCII string scan for `"Sky.tlb"`/`"wildcom"`/`"randcom"`/`"WALLDEF"`/filename literals, to find the real overland-renderer's resource load site | Zero hits anywhere in the binary | This engine resolves resources by numeric ECL-declared id through an external table, not embedded filename strings — the executable alone can't name the consumer. `Sky.tlb`/`wildcom.tlb`/`randcom.tlb` were independently confirmed (by direct byte inspection, not disassembly) to be real, well-formed GLIB/TILE containers — strong circumstantial evidence a separate overland renderer exists, but its actual code path is still unlocated |
 
 ## 5. Extractor and outputs
 

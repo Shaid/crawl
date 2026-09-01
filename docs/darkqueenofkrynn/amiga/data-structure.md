@@ -87,7 +87,7 @@ GEO_RECORD_SIZE` (1024) first, falling back to `decodeVariableGeoRecord()`
 otherwise — every sibling title's own extractor call is unaffected by this
 addition.
 
-## 3. `WALLDEF`/wall-art format — OPEN, NOT confirmed absent (correction below)
+## 3. `WALLDEF`/wall-art format — CONFIRMED ABSENT (see the two corrections below for the full history — an intermediate pass wrongly reopened this, then a disassembly pass closed it definitively)
 
 > **Correction (2026-09-01, personal re-verification before commit):** this
 > section originally claimed "CONFIRMED ABSENT" on the strength of a `find
@@ -129,6 +129,77 @@ addition.
 > that structural observation isn't retracted — but it no longer supports
 > "there is no wall-art format," since real tile-pixel data and real
 > resolved wallset-binding calls both exist.
+
+> **Second correction (2026-09-01, `amiga-disasm` pass against `data/ssi/
+> DarkQueenOfKrynn/data/The Dark Queen of Krynn`, the title's own executable
+> — this SUPERSEDES the previous correction's "genuinely open" framing with
+> a definitive negative):** the `findWallsetBindings()` hits cited above
+> (441/458/492) are **not real wallset bindings — they're a misparse**.
+> Direct disassembly of both this executable's ECL VM dispatch tables
+> (operand-count table at CODE+0x13e64/guard CODE+0x13ee8; the real
+> per-opcode handler table at CODE+0x25b34/guard CODE+0x25bb8, 66 opcodes
+> `0x00`-`0x41`) confirms **opcode `0x37` takes 2 operands in this engine
+> revision, not 3** — its handler (CODE+0x158f4) walks a linked list
+> testing a flag bit, then tail-calls a generic "set VM global by slot
+> number" dispatcher (CODE+0x13186). This is an NPC/location
+> search-and-flag opcode (structurally the same kind of correction Pools of
+> Darkness's own v1.3 table needed for its own opcode `0x37`), not `LOAD
+> PIECES` — so parsing this title's ECL bytecode with the standard v1.1
+> 3-operand table for opcode `0x37` silently over-reads one operand group
+> from the following instruction. That the resulting walk still reported
+> "0 unknown opcodes" was a coincidental clean re-sync, not evidence the
+> parse was correct — the 441/458/492 values are misparsed byte garbage,
+> not real slot ids. (No degenerate/repeated value tipped this off the way
+> `uniform-degenerate-hit-value-signals-wrong-decode-config.md` describes;
+> the wrong-table hits here were varied-but-wrong, a related but distinct
+> trap worth flagging for future passes.)
+>
+> A second, independent trace (of a 3-input `0xFF`-sentinel loader at
+> CODE+0x4206a that builds `"8x8d%c%d"` filenames — initially mistaken for
+> a real `LoadWalldef(slot,id)` equivalent, since it consumes the SAME
+> `8X8DB`/`8X8DC` tile banks and the same "don't touch this slot" sentinel
+> convention every sibling title's real wallset loader uses) was also
+> refuted: its 3 inputs are proven (via `MapDirectionXDelta`/`YDelta`-style
+> tables at CODE+0x3277e-0x32820, added with wraparound against the live
+> GEO record's own `width`/`height` header fields at `-0x108c(a4)`) to be
+> the party's **(facing direction, X, Y) map position**, not 3 wallset
+> slots — this function is a **topview/overhead map-glyph redraw around the
+> party's current position**, not a first-person wall-texture compositor.
+> Its loader (CODE+0x42a3c) has exactly 3 call sites, all from inside
+> CODE+0x4206a itself (exhaustive JSR/BSR/A4-trampoline scan) — a clean,
+> single-consumer negative, ruling out a second, still-undiscovered
+> first-person caller of the same tile banks.
+>
+> A third check this pass ran (per the original task brief, "check whether
+> `ECL.GLB`'s own directory has extra non-script blocks"): `Disk3/ECL.GLB`
+> has 47 data blocks (ids `1-67`, sparse) against `Disk3/GEO.GLB`'s 20
+> level ids (`2,4,10,14,18,22,26,30,34,38,42,46,47,50,54,58,62,63,66`) — a
+> superset, same "extra ECL blocks are non-dungeon (town/combat/story)
+> scripts" pattern every sibling title already shows, confirmed by id-set
+> containment alone (every GEO level id present in ECL's id list). No
+> separate non-script/compositing-table block type exists in this
+> container — the directory holds nothing but ordinary script blocks.
+>
+> **Final verdict**: no `WALLDEF`-equivalent (a real per-level 3-slot
+> first-person wall-texture binding, wherever it might live) was found
+> anywhere in this executable after tracing its ECL opcode dispatch tables,
+> the one function that looked most like a slot loader, and that function's
+> own complete caller list — nor in any of this title's data files (§0
+> "container" survey), nor as a hidden block type inside `ECL.GLB`. This
+> is now a well-evidenced (not merely un-searched-for) negative: **The Dark
+> Queen of Krynn's Amiga engine has no first-person wall-art compositing
+> mechanism**, and instead renders dungeon/location display through its
+> overhead/topview picture system (`TOPVIEW.TLB`, built from the same
+> `8X8DB`/`8X8DC` glyph banks) and its static `PICA`/`PICB`/`PICC`/
+> `BIGPIC` location-picture banks (via the `PICTURE` opcode `0x0e`) — the
+> original (pre-first-correction) structural hypothesis was right, just
+> under-evidenced at the time. Confidence: moderate-high (full coverage of
+> every function in a 343KB CODE hunk was not attempted, so a residual
+> chance of a not-yet-found third mechanism remains, but two independent,
+> plausible-looking candidates were both traced to conclusive negatives).
+> `walldefPath`/`eclPath` remain correctly omitted from this title's
+> extractor config — no code change needed. See
+> `docs/darkqueenofkrynn/TODO.md` (item closed this pass).
 
 The original (superseded) reasoning, kept for reference: this title ships
 `PICA.TLB`, `PICB.TLB`, `PICC.TLB`, `BIGPIC.TLB`, `FRAME.TLB`, `TOPVIEW.TLB`

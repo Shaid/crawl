@@ -204,3 +204,59 @@ export function decodeDosDaxFile(fileData: Uint8Array): Array<{ entry: DosDaxEnt
   const { dataOffset, entries } = readDosDaxDirectory(fileData);
   return entries.map((entry) => ({ entry, data: decompressDosDaxEntry(fileData, dataOffset, entry) }));
 }
+
+/**
+ * "Amiga DAA" container — a BIG-ENDIAN sibling of the DOS DaxFile container
+ * above, used by Champions of Krynn and Death Knights of Krynn's own
+ * `*.DAA`/`*.daa` files (e.g. `8X8D0/1/2.DAA`, `8x8d1.daa`, `BIGPIC1.DAA`,
+ * `SPRIT1.DAA`, `WILDCOM.daa`, ...) — a much larger family than just the
+ * 8x8-tile files, covering essentially every Amiga-native (non-legacy-DOS)
+ * resource in both titles.
+ *
+ * Cracked via a `re-oracle` escalation (2026-09-01) for `8x8d1.daa`/
+ * `8X8D0/1/2.DAA` specifically (see docs/deathknightsofkrynn/amiga/
+ * data-structure.md §4 and docs/championsofkrynn/amiga/data-structure.md
+ * §4), independently re-verified against real bytes in this session
+ * (byte-exact chain + decode-length for all 4 files tried). The prior
+ * DOS-side reading (LE fields, `dataOffset = headerLen16 + 2`) had been
+ * tried and refuted repeatedly against these files (5 distinct approaches,
+ * see the paths-tried tables above) — the fix was TWO simultaneous changes,
+ * not one: every directory field is BIG-endian (not LE), AND
+ * `dataOffset = headerLen` **exactly** (no `+2`), unlike the DOS variant.
+ * Everything else — the 9-byte entry shape, the PackBits-style codec, the
+ * chain-contiguity/EOF-exact verification oracle — is identical to
+ * `readDosDaxDirectory`/`decompressDosDaxEntry` above, which is why this is
+ * a small addition to this module rather than a new one: only the
+ * directory's own byte order and header-offset convention differ; the
+ * decompressor is reused completely unmodified.
+ *
+ * **Verified**: `8x8d1.daa` (Death Knights) — 31/31 entries, chain
+ * contiguous, ends exactly at EOF (63,376 B). `8X8D0.DAA`/`8X8D1.DAA`
+ * (Champions) — 12/13 entries decode (id 201's compressed block is
+ * genuinely all-zero bytes — a deliberately blanked/unused stub, not a
+ * decode failure); chain contiguous, EOF exact. `8X8D2.DAA` (Champions) —
+ * 13/13 entries, chain contiguous, EOF exact.
+ */
+export function readAmigaDaaDirectory(data: Uint8Array): { dataOffset: number; entries: DosDaxEntry[] } {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const headerLen = view.getUint16(0, false);
+  const dataOffset = headerLen;
+  const entryCount = Math.floor((headerLen - 2) / 9);
+  const entries: DosDaxEntry[] = [];
+  let off = 2;
+  for (let i = 0; i < entryCount; i++) {
+    const id = data[off];
+    const offset = view.getUint32(off + 1, false);
+    const rawSize = view.getUint16(off + 5, false);
+    const compressedSize = view.getUint16(off + 7, false);
+    entries.push({ id, offset, rawSize, compressedSize });
+    off += 9;
+  }
+  return { dataOffset, entries };
+}
+
+/** Decode every directory entry in an Amiga-native `.DAA` file's raw bytes. */
+export function decodeAmigaDaaFile(fileData: Uint8Array): Array<{ entry: DosDaxEntry; data: Uint8Array }> {
+  const { dataOffset, entries } = readAmigaDaaDirectory(fileData);
+  return entries.map((entry) => ({ entry, data: decompressDosDaxEntry(fileData, dataOffset, entry) }));
+}

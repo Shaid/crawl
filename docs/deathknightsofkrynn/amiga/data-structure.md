@@ -50,20 +50,81 @@ already use (`resolveCompositeWallId`, `Math.floor(wallNumber/SLICES_PER_WALLSET
 — not a missing-file gap. (HYPOTHESIS on the *reason* the file is shared;
 CONFIRMED that the byte structure is a clean 3x SLICES_PER_WALLSET multiple.)
 
-## 4. 8x8 tile pixel format — OPEN (undecoded)
+## 4. 8x8 tile pixel format — CONFIRMED (`8x8d1.daa`, an Amiga-native
+BIG-ENDIAN sibling of the DOS DaxFile container)
+
+> **Correction (2026-09-01, `re-oracle` escalation + independent
+> re-verification):** the earlier "OPEN, resists every hypothesis" verdict
+> below is superseded. `8x8d1.daa` is NOT the DOS DaxFile container
+> (`readDosDaxDirectory`) with a broken/missing field — it's a genuinely
+> different, previously-undocumented BIG-ENDIAN sibling container
+> (`readAmigaDaaDirectory`/`decodeAmigaDaaFile` in
+> `tools/shared/goldbox-dosdax.ts`), used for essentially every Amiga-native
+> resource in both this title and Champions of Krynn (`*.DAA`/`*.daa`
+> files: `8x8d1.daa`, `BIGPIC1.DAA`, `SPRIT1.DAA`, `WILDCOM.daa`, etc — a
+> much larger family than just the 8x8-tile files). The escalation found
+> this after 5 refuted approaches (see "Paths tried" below) by treating the
+> directory as **big-endian** with `dataOffset = headerLen` **exactly** (no
+> `+2`, unlike the DOS-side LE variant) — the earlier LE, `+2`-offset
+> reading had been misreading entry 0's own `rawSize` field as a spurious
+> "tag byte", which is why every prior pass's header/tag search came up
+> empty or inconsistent.
+>
+> **Independently re-verified this session** (fresh Python re-implementation,
+> not just trusting the escalation's own scripts): all 31 entries in
+> `8x8d1.daa` (63,376 B) decode byte-exact, chain is contiguous entry-to-
+> entry, and the last entry's end lands exactly at EOF.
+>
+> **Payload format** (see `tools/shared/goldbox-daa-tiles.ts`'s module doc
+> for the full byte table): 9-byte header (`height`, `tileCount`, `x`, `y`,
+> `itemCount`, all BE) + a 64-byte embedded palette (32 x u16 BE amiga12
+> colour words) + `planeCount * tileCount * 8` bytes of plane-consecutive
+> bitplane data (`planeCount = 5` for this title, giving 32-colour tiles).
+> Every wall-specific entry's own embedded palette is **all-zero** — the
+> real palette lives in the "universal" entry id 202, confirmed directly by
+> reading its raw bytes (non-zero amiga12 words, including a real
+> greyscale ramp and saturated red/green/blue/yellow/cyan/magenta
+> entries). One entry (id 202 itself) has a `tileCount` field
+> (45) that's off by exactly one relative to the value (46) that would
+> divide its own body length evenly — a real, minor authoring anomaly that
+> doesn't block anything, since the palette lives at a fixed 64-byte offset
+> regardless of the tile-count field, and id 202 is never treated as a tile
+> bank (only its palette is used).
+>
+> **"Quarters" addressing — CONFIRMED**: for `walldef1.dax` wall id `W`
+> (1-7), the raw WALLDEF view-cell byte (0-255) selects among FOUR `.DAA`
+> entries — `W`, `W+20`, `W+40`, `W+60` — each holding exactly 64 tiles:
+> `slot = idx >> 6` (0-3), `tile = idx & 63`. `8x8d1.daa`'s ids are exactly
+> this set for all 7 walls (`{1,21,41,61,2,22,42,62,...,7,27,47,67}`) plus
+> the 3 universal ids (202/203/204), which fall outside any single WALLDEF
+> byte's addressable range (256-301) and are not consumed by the per-cell
+> renderer.
+>
+> **Shipped**: `tools/deathknightsofkrynn/amiga/export-data.ts` renders
+> real colour wall-art PNGs for all 7 wall ids x 15 wallset-group slices
+> (105 PNGs total, 0 skipped — every wall id has a complete quarter set).
+> Visually confirmed (`Read`) on 3 samples: `walldef-2-wall2-view6.png`
+> (cobblestone/hedge wall with a wooden door), `walldef-5-wall0-view6.png`
+> (ornate red-brick archway), plus a corpus-wide brightness-variance sweep
+> (`pngjs`, std-dev per PNG) found 20/105 renders are flat/degenerate
+> (`std < 2`) — traced to real, literally-all-zero WALLDEF view-cell bytes
+> in the source data itself (verified directly, e.g. wall id 2's
+> wallNumbers 9-14), not a decode bug: this file bundles all 3 campaign
+> banks' own wall-art variants per id (§3), so a wall id genuinely unused
+> by one bank's dungeons has blank filler slices for that bank's wallset
+> group. 85/105 (81%) render real, structured, non-degenerate Gold Box
+> wall art.
+
+### Paths tried (superseded — kept for the record; see correction above)
 
 This title ships **no** DOS-DaxFile-container 8x8-tile file analogous to
-Champions' `8X8D1.DAX` — its only tile-bank candidate is `8x8d1.daa`
-(63,376 bytes), which resists every hypothesis tried (same paths-tried
-table as Champions of Krynn's `8X8D*.DAA` — see
+Champions' `8X8D1.DAX` — its only tile-bank candidate was `8x8d1.daa`
+(63,376 bytes), which resisted every hypothesis tried in an earlier pass
+(same paths-tried table as Champions of Krynn's `8X8D*.DAA` — see
 `docs/championsofkrynn/amiga/data-structure.md` §4's table; the two titles'
 `.DAA` files were investigated together since they're structurally the same
-open question). Practical impact: **no wall-art PNGs are rendered for this
-title at all** — `tools/deathknightsofkrynn/amiga/export-data.ts` verifies
-WALLDEF geometry only and writes zero textures; the walker's generic
-per-level placeholder texture (`tools/walker/games-goldbox.ts`'s
-`wallTextureFor`) renders instead, so movement/collision/minimap all still
-work correctly, just without real Gold Box wall imagery.
+container). That "practical impact: no wall-art PNGs" statement no longer
+applies — see the correction above.
 
 ## 5. ECL wallset-slot bindings — CONFIRMED, v1.1 engine revision (same as
 Champions of Krynn — an earlier v1.3 hypothesis was tested and refuted)
@@ -106,7 +167,7 @@ investigated further this pass.
 | Container/codec | CONFIRMED | 199/199 entries, chain + exact rawSize, corpus-wide |
 | GEO | CONFIRMED | Unchanged decoder; 19/19 levels decode; wall-adjacency oracle 98.8-100% agreement (non-constant prefix doesn't affect decoding) |
 | WALLDEF geometry | CONFIRMED | 7 entries, all exactly 2340 = 156*15 bytes (3 bundled wallsets/entry) |
-| 8x8 tiles | OPEN | No confirmed pixel source; see `docs/championsofkrynn/amiga/data-structure.md` §4's paths-tried table |
+| 8x8 tiles | CONFIRMED | `8x8d1.daa` (BE `.DAA` container), 31/31 entries byte-exact; 105 real wall-art PNGs shipped, 85/105 non-degenerate (the rest are genuinely-blank source filler for unused bank/wall combinations) |
 | ECL wallset bindings | CONFIRMED | 16/19 levels, base 0x8000, v1.1 table — v1.3 hypothesis tested and refuted by manual disassembly |
 
 See `docs/deathknightsofkrynn/TODO.md` for open items.

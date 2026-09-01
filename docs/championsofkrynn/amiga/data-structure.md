@@ -90,20 +90,56 @@ a clean composited wall view showing a crenellation-style top border and a
 door/torch-style feature, matching this corpus's own established Gold Box
 wall-art visual grammar.
 
-**`8X8D0.DAA`, `8X8D1.DAA` (byte-identical to each other), and `8X8D2.DAA`
-remain UNDECODED.** These are NOT DOS-DaxFile containers (directory parse
-fails outright), NOT Pool of Radiance's own `.dax` codec (garbage
-`dataOffset`/near-total decompress failure), and NOT a simple inline
-per-block header+PackBits chain (tested `{id:u8,rawSize:u16,compressedSize:u16}`
-and `{id:u16,...}` inline-chain hypotheses — both fail to decode even the
-first candidate block). Plain headerless 1bpp interpretation renders as
-uniform noise with no tile-shaped structure, at every header-skip amount
-0-16 tried. See `docs/championsofkrynn/TODO.md`. Practical impact: bank 2's
-own wall-specific tiles (its real source is presumably `8X8D2.DAA`) are not
-decoded — 10/65 of bank 2's wall views render, reusing bank 1's tile bank
-via coincidental id overlap (wall ids 11/23 happen to also exist in
-`8X8D1.DAX`); the other 55 skip with "no tile-bank entry" rather than
-rendering wrong art.
+> **Correction (2026-09-01, `re-oracle` escalation + independent
+> re-verification): the container is now CONFIRMED — the pixel payload
+> remains OPEN, and is a genuinely different, more complex shape than the
+> container-level fix might suggest.** The escalation found `8X8D0/1/2.DAA`
+> use the SAME big-endian DaxFile sibling container as Death Knights of
+> Krynn's `8x8d1.daa` (`readAmigaDaaDirectory`/`decodeAmigaDaaFile` in
+> `tools/shared/goldbox-dosdax.ts` — BE fields, `dataOffset = headerLen`
+> exactly). **Independently re-verified this session**: `8X8D0.DAA` and
+> `8X8D1.DAA` (byte-identical, 25,916 B each) — 12/13 entries decode
+> byte-exact (id 201's compressed block is genuinely all-zero bytes, a
+> deliberately blanked stub, not a decode failure); `8X8D2.DAA`
+> (28,734 B) — 13/13 entries decode byte-exact; both files' chains are
+> contiguous and end exactly at EOF.
+>
+> **However, the inner 8x8-tile PIXEL payload does NOT match Death
+> Knights' shape** (`tools/shared/goldbox-daa-tiles.ts`'s "9-byte header +
+> 64-byte palette + planeCount x tileCount x 8 bytes" model): every
+> Champions `.DAA` entry's own header `tileCount` field (offset 2, u16 BE)
+> reads a uniform, implausible `1` regardless of the entry's real
+> decompressed length (2249 B for most entries — far too large for "1
+> tile"), so `(bodyLen - 64) / (tileCount*8)` doesn't divide evenly
+> (272.0-ish, not an integer relationship that pins a plane count the way
+> it does for every Death Knights entry). Each entry's putative "palette"
+> region (bytes 9-73) IS non-zero for every entry here (unlike Death
+> Knights, where only the universal id has real colours) — but whether
+> that's really a palette, a different sub-header for a differently-shaped
+> payload, or something else entirely, is not established. **This is a
+> real but only PARTIAL advance**: the container/codec problem this title
+> shared with Death Knights is solved, but Champions' own pixel payload is
+> a distinct, still-open sub-problem — not a simple reapplication of the
+> Death Knights model. See `docs/championsofkrynn/TODO.md`.
+>
+> **A related, unrelated-format confusion to flag and correct**: an
+> earlier pass in this investigation chain characterized the *already-
+> shipped* `walldef-1001-*.png` renders (below) as "wrong — produced by a
+> 1bpp misreading of the `.DAA` files." That claim does not hold up: those
+> renders come from `8X8D1.DAX` (the LE, DOS-DaxFile-container, 1bpp-tile
+> format, confirmed independently of anything discussed in this section) —
+> `tools/championsofkrynn/amiga/export-data.ts` never reads any `.DAA` file
+> at all. The confusion was a same-basename collision (`8X8D1.DAX` vs.
+> `8X8D1.DAA`), not a real bug in the shipped renders; they stand as
+> originally confirmed below.
+
+**`8X8D0.DAA`, `8X8D1.DAA` (byte-identical to each other), and `8X8D2.DAA`'s
+PIXEL PAYLOAD remains UNDECODED** (container solved — see correction
+above). Practical impact unchanged: bank 2's own wall-specific tiles (its
+real source is presumably `8X8D2.DAA`) are not decoded — 10/65 of bank 2's
+wall views render, reusing bank 1's tile bank via coincidental id overlap
+(wall ids 11/23 happen to also exist in `8X8D1.DAX`); the other 55 skip
+with "no tile-bank entry" rather than rendering wrong art.
 
 **Paths tried on `8X8D*.DAA`** (all against `8X8D0.DAA`, 25916 bytes, and/or
 `8x8d1.daa` from the sibling Death Knights title, 63376 bytes):
@@ -116,13 +152,11 @@ rendering wrong art.
 | Headerless raw 1bpp tiles (GLIB `decode8x8Tiles` convention, H=0) | Renders as uniform noise | No tile-shaped structure at any scale; file size doesn't divide evenly by 8 for Champions' own `.DAA`s (remainder 4 or 6) though Death Knights' `8x8d1.daa` does divide evenly (7922 tiles) and STILL renders as pure noise |
 | PoR 4-byte-per-block header (H=4) | Renders as uniform noise | Same as above, no improvement |
 | Whole-file PackBits decode with no directory (apply this doc's own §1 codec starting at byte 0, no length cap) | Short (~30-40 tile) recognizable region at the very start, then degrades into noise | Consistent with a real per-block directory existing that this approach doesn't have, causing desync once decode runs into the next block's own header bytes misread as compressed data — but no directory shape tried so far (see above) reproduces this |
+| **`re-oracle` escalation: BE DaxFile sibling container** (`readAmigaDaaDirectory`, BE fields, `dataOffset = headerLen` exact) | **CONTAINER SOLVED** — 12/13 (`8X8D0/1.DAA`) and 13/13 (`8X8D2.DAA`) entries byte-exact, chain contiguous, EOF exact | This resolves the container/codec question (shared with Death Knights' `8x8d1.daa` — see correction above), but the inner 8x8-tile pixel payload does NOT match Death Knights' 9-byte-header+64-byte-palette+plane-data shape (`tileCount` field reads a uniform, implausible `1`) — genuinely still open, see correction above |
 
-Given two structurally distinct approaches (directory-based and inline-chain)
-failed with concrete, different reasons, plus the whole-file-decode partial
-success suggesting a real but differently-shaped container, this is a
-genuine candidate for `re-codebreaker`/`re-oracle` escalation if wall-art
-completeness for bank 2 (and Death Knights' title generally, which has no
-alternative tile source at all) becomes a priority — not yet escalated this
+The pixel-payload sub-problem (not the container, now solved) remains a
+candidate for a further `re-codebreaker`/`re-oracle` escalation if wall-art
+completeness for bank 2 becomes a priority — not escalated further this
 pass since the walker already has a working, honestly-labelled fallback.
 
 ## 5. ECL wallset-slot bindings — CONFIRMED, v1.1 engine revision (same as
@@ -157,7 +191,8 @@ errors).
 | GEO | CONFIRMED | Unchanged decoder; 15/15 levels decode, 1026-byte entries corpus-wide |
 | WALLDEF geometry | CONFIRMED | 15 entries, all exact multiples of 156 bytes |
 | 8x8 tiles (`8X8D1.DAX`) | CONFIRMED | Visual: recognizable crenellation/door composite render |
-| 8x8 tiles (`8X8D*.DAA`) | OPEN | 3 independent format hypotheses tried and refuted (see TODO) |
+| 8x8 tiles (`8X8D*.DAA`) container | CONFIRMED | BE DaxFile sibling container, 12/13 + 13/13 entries byte-exact (id 201 is a genuine all-zero stub) |
+| 8x8 tiles (`8X8D*.DAA`) pixel payload | OPEN | Container solved; inner tile/plane shape doesn't match Death Knights' sibling format (see §4 correction) |
 | ECL wallset bindings | CONFIRMED | 15/15 levels, base 0x8000, v1.1 table, real varied slot values |
 
 See `docs/championsofkrynn/TODO.md` for the open item.

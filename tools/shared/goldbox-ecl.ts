@@ -220,9 +220,41 @@
  * have resolved this title's real bindings from ECL bytecode alone** — see
  * `TREASURE_EXE_WALLSETS` below, the executable-derived per-geo lookup
  * table that is the actual authority for this title's dungeon geos.
- * Wilderness geos (`51`-`62`, type-1 walls only) fall outside the
- * executable's table and outside this whole mechanism — their wall-art
- * source is unresolved, a genuinely open item (see the per-title TODO).
+ *
+ * **Wilderness geos (`51`-`62`) — CONFIRMED via disassembly (2026-09-01,
+ * `amiga-disasm` pass) that `getAreaWallsets` does NOTHING for these ids,
+ * not just "falls outside the table."** The function's own range check
+ * (`subi.w #0x10,D0w` / `cmpi.w #0x23,D0w` / `bcc.b <noop>` — i.e.
+ * `geoId-16 >= 35`, so any `geoId >= 51` branches straight past the
+ * 35-entry jump table to a shared `movem.l (SP)+,{A2} / rts`) was traced
+ * byte-exact: ids 41-46 (unused slots inside the in-range 16-50 span) hit
+ * the SAME no-op target as ids >= 51, and every one of the 29 real
+ * in-range entries' decoded `move.b #s1,(A2)/#s2,(1,A2)/#s3,(2,A2)` triples
+ * matches `TREASURE_EXE_WALLSETS` exactly, 0 deviations — so this isn't a
+ * partial/approximate reading, it's the routine's literal, fully-decoded
+ * behavior. For geo ids 51-62 the 3 slot bytes are left exactly as
+ * whatever the caller already wrote (i.e. block 51's own `LOAD FILES`
+ * passing the geo id itself through, which `LoadWalldef` then fails to
+ * resolve against `WallDef.glb` — a real engine no-op path, not a decode
+ * gap). No wallset-binding data exists for these ids in this executable at
+ * all — do not add a `wallsetOverride` entry for them.
+ *
+ * A full-binary ASCII string scan of the executable found ZERO references
+ * to any filename (no `"WALLDEF"`, `"Sky.tlb"`, `"wildcom"`, `"randcom"`,
+ * `"AREA"` string anywhere) — this engine loads resources by numeric
+ * ECL-declared id through an external table, not hardcoded name strings,
+ * so the executable alone can't name wilderness's real art source. Direct
+ * byte inspection (not disassembly) of `diska/Sky.tlb` (3,791 B, `GLIB`
+ * magic, 3 `TILE` blocks), `diska/wildcom.tlb` (12,668 B, `GLIB`, 34
+ * `TILE` blocks), and `diska/randcom.tlb` (2,684 B, `GLIB`, 6 `TILE`
+ * blocks) confirms all three are real, structurally-valid GLIB/TILE
+ * containers (same shape as this title's own `diska/Walls.tlb`) — strong
+ * circumstantial evidence of a SEPARATE, non-WALLDEF overland
+ * sky/terrain/random-encounter tile renderer, but the actual consuming
+ * code path was not located this pass (no static reference to these 3
+ * files exists to follow). Genuinely open at the "which code reads these"
+ * level — see the per-title TODO — but the original open question ("is
+ * there a missed executable table for ids 51-62?") is now closed: no.
  */
 
 export interface EclOperand {
