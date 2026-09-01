@@ -100,6 +100,24 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga'],
   },
+  ishar: {
+    gameId: 'ishar',
+    name: GAME_DISPLAY_NAMES.ishar,
+    defaultPlatform: 'amigaaga',
+    supportedPlatforms: ['amigaaga'],
+  },
+  ishar2: {
+    gameId: 'ishar2',
+    name: GAME_DISPLAY_NAMES.ishar2,
+    defaultPlatform: 'amigaaga',
+    supportedPlatforms: ['amigaaga'],
+  },
+  ishar3: {
+    gameId: 'ishar3',
+    name: GAME_DISPLAY_NAMES.ishar3,
+    defaultPlatform: 'amigaaga',
+    supportedPlatforms: ['amigaaga'],
+  },
 };
 
 export function getViewerConfig(gameId: GameId): ViewerConfig {

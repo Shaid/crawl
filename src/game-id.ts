@@ -15,10 +15,14 @@ export const GAME_IDS = [
   'curseoftheazurebonds',
   'secretofthesilverblades',
   'poolsofdarkness',
+  'ishar',
+  'ishar2',
+  'ishar3',
 ] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
-export const PLATFORM_IDS = ['amiga', 'dosvga', 'dosega', 'snes'] as const;
+/** 'amigaaga' is the Ishar-trilogy Amiga AGA release specifically (see `docs/ishar-container-format.md`) — distinct from the plain OCS/ECS 'amiga' id used elsewhere in this corpus. */
+export const PLATFORM_IDS = ['amiga', 'dosvga', 'dosega', 'snes', 'amigaaga'] as const;
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 
 export const DEFAULT_GAME: GameId = 'blackcrypt';
@@ -45,6 +49,9 @@ export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   curseoftheazurebonds: 'Curse of the Azure Bonds',
   secretofthesilverblades: 'Secret of the Silver Blades',
   poolsofdarkness: 'Pools of Darkness',
+  ishar: 'Ishar: Legend of the Fortress',
+  ishar2: 'Ishar 2: Messengers of Doom',
+  ishar3: 'Ishar 3: The Seven Gates of Infinity',
 };
 
 export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
@@ -52,4 +59,5 @@ export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
   dosvga: 'DOS/VGA',
   dosega: 'DOS/EGA',
   snes: 'SNES',
+  amigaaga: 'Amiga AGA',
 };

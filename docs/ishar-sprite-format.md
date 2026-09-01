@@ -38,6 +38,16 @@ offset +0     s32 BE   slotDelta     -- self-relative delta FROM THE SLOT'S OWN
 2-level indirection (slot address -> stored delta -> real header address),
 not a flat pointer table — ported verbatim from `adresdes()`.
 
+**The directory header holds more than the bitmap table** (2026-09-01
+addition, from `alis.c`): `dirOff+0x00`/`+0x04` are the bitmap slot-array
+delta + count used here, but `dirOff+0x06` (u32 BE, self-relative from
+`dirOff`) + `dirOff+0x0a` (u16 BE count) are a second table of **"formes"**
+(`adresform()` — collision/test shapes used by `cforme`/`ctstmov`-family
+opcodes; a flat u16-offset array, one level of indirection, not two), and
+further tables (music via `adresmus()`, etc.) follow the same pattern. Not
+yet decoded for this corpus — noted so the "1144-byte gap" between the
+directory header and the slot array isn't mistaken for padding.
+
 **`baseDelta` corpus values**: observed as one of exactly two constants,
 1144 or 88, across all four titles — consistent with a real, engine-fixed
 directory-header size (not per-file tuning). `findIsharDirectory()` accepts
@@ -59,9 +69,20 @@ A resolved bitmap header:
 
 ```
 offset +0   u8       type          -- see table below
-offset +1   s16 BE   storedWidth   -- real width  = storedWidth + 1
-offset +3   s16 BE   storedHeight  -- real height = storedHeight + 1
+offset +1   u8       (pad/flags, not part of the dimensions)
+offset +2   s16 BE   storedWidth   -- real width  = storedWidth + 1
+offset +4   s16 BE   storedHeight  -- real height = storedHeight + 1
 ```
+
+> **Correction (2026-09-01):** this doc originally placed
+> `storedWidth`/`storedHeight` at header+1/+3. The reference source reads
+> them at **+2/+4** everywhere (`image.c:665-666` `read16(bitmap + 2)` /
+> `read16(bitmap + 4)`, `image.c:1908-1909`, `script.c`'s Atari conversion
+> loop), and the shipped decoder `tools/shared/ishar-sprites.ts` was
+> already correct (`i16(data, headerOffset + 2)` / `+ 4`) — the error was
+> prose-only. It bit for real once: a probe transcribed from this doc's
+> +1/+3 misparsed `MAP.bin`'s 320×126 map image as "w=2, h=16129" (see
+> `docs/ishar-container-format.md` §9.4).
 
 Six supported `type` values, all confirmed present in this corpus:
 

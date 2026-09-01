@@ -62,6 +62,7 @@ import {
   loadSecretOfTheSilverBladesView,
   loadPoolsOfDarknessView,
 } from './games-goldbox.ts';
+import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from './games-ishar.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 
 const statusEl = document.getElementById('status')!;
@@ -354,9 +355,23 @@ const GAMES = [
   { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'secretofthesilverblades', label: 'Secret of the Silver Blades', loader: loadSecretOfTheSilverBladesView, defaultLevel: 16, platform: 'amiga' as const },
   { id: 'poolsofdarkness', label: 'Pools of Darkness', loader: loadPoolsOfDarknessView, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'ishar', label: 'Ishar 1', loader: loadIshar1View, defaultLevel: 1, platform: 'amigaaga' as const },
+  { id: 'ishar2', label: 'Ishar 2', loader: loadIshar2View, defaultLevel: 1, platform: 'amigaaga' as const },
+  { id: 'ishar3', label: 'Ishar 3', loader: loadIshar3View, defaultLevel: 1, platform: 'amigaaga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
+
+/** Per-game override for the confidence banner's parenthetical note; falls back to the generic W6 string above when unset. */
+const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
+  poolofradiance: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (0/29 levels here), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
+  curseoftheazurebonds: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (10/16 levels), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
+  secretofthesilverblades: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (5/17 levels), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
+  poolsofdarkness: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (0/32 levels here), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
+  ishar: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
+  ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
+  ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded -- see tools/walker/games-ishar.ts',
+};
 
 /**
  * Wizardry 6 graphics-variant plumbing (the `#variant` selector, anticipated
@@ -385,6 +400,9 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'eotb') return eotbLevelList(assetBase);
   if (game === 'eotb2') return eotb2LevelList(assetBase);
   if (game === 'landsoflore') return landsofloreLevelList(assetBase);
+  if (game === 'ishar') return isharLevelLists.ishar();
+  if (game === 'ishar2') return isharLevelLists.ishar2();
+  if (game === 'ishar3') return isharLevelLists.ishar3();
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
@@ -445,7 +463,7 @@ async function main() {
     const confidenceNote =
       game === 'wizardry6' && w6Variant === 'snes'
         ? 'SNES: confirmed backdrop + door, approximate generic wall art -- see tools/wizardry6/snes/view-model.ts'
-        : 'W6 wall values are a rendered key';
+        : (CONFIDENCE_NOTES[game] ?? 'W6 wall values are a rendered key');
     setConfidenceBanner(view.id === 'blackcrypt' ? 'confirmed' : 'rendered', `${g.label} (${confidenceNote})`);
 
     variantSelect.style.display = game === 'wizardry6' ? '' : 'none';

@@ -44,6 +44,9 @@
     "ishar2:sprites": "npx tsx tools/ishar2/amigaaga/sprites.ts",
     "ishar3:sprites": "npx tsx tools/ishar3/amigaaga/sprites.ts",
     "crystalsofarborea:sprites": "npx tsx tools/crystalsofarborea/amiga/sprites.ts",
+    "ishar:regions": "npx tsx tools/ishar/amigaaga/regions.ts",
+    "ishar2:regions": "npx tsx tools/ishar2/amigaaga/regions.ts",
+    "ishar3:regions": "npx tsx tools/ishar3/amigaaga/regions.ts",
     "sync-data-manifests": "npx tsx tools/sync-data-manifests.ts"
   },
   "dependencies": {

@@ -446,6 +446,28 @@ brief's Priority 1.
 
 ## 8. First-person rendering mechanism — architecture identified (STRUCTURAL), exact on-disk geometry still open
 
+> **Correction (2026-09-01, `re-oracle` escalation): §8's central claim is
+> WRONG for Ishar — the heightfield/voxel raycaster is version-gated OFF
+> for every title in this corpus.** `render3d.c`'s entry point `openland()`
+> is called from exactly one place in the whole reference implementation:
+> `copensc` (opcode 0x4e, `opcodes.c:1401-1417`), inside
+> `if (alis.platform.version >= 31)`. The per-game ALIS version table
+> (`script.c:180-400`, set from the main script's own header fields) says:
+> Crystals of Arborea = **20**, Ishar 1 = **20**, Ishar 2 = **21**,
+> Transarctica = 22, **Ishar 3 = 30**, Robinson's Requiem = **31**. Only
+> Robinson's Requiem reaches `openland()`/`iniland()`/the whole `render3d*`
+> family — Ishar 1/2/3 and Crystals **never execute one line of it**. The
+> raycaster architecture described below is Robinson's Requiem's, present
+> in the shared reference codebase but dead code for this corpus. This also
+> dissolves §8.1's "gap in the oracle": `cdefmap`/`cwalkmap`/etc. being
+> unimplemented for Ishar is not a gap — Ishar's scripts never issue those
+> opcodes (which is exactly why `alis` is "Playable" for Ishar without
+> them). Ishar's first-person view is instead built from the **generic VM
+> sprite/scene system** (the §7 sprite format, composite records, and
+> per-location scripts' bytecode) — scaled/laid-out 2-D sprite compositing
+> driven by script logic, not any terrain raycast. The real on-disk world
+> geometry is the `.FIC` region-grid system, now solved — see §9.
+
 `alis`'s own `render3d.c`/`render3d_68k.c` contain a real, working
 implementation of Ishar/Crystals' first-person view: a **heightfield/voxel-
 column terrain raycaster** (Comanche-style column-span rendering, not a
@@ -497,3 +519,195 @@ Priority 3 (MAP.DO walkable grid geometry) and Priority 4 (a
 session: building a walker on this unconfirmed geometry would risk shipping
 a plausible-but-wrong "confirmed" walkable-maze claim, which this project's
 verification bar explicitly warns against. See `docs/ishar/TODO.md`.
+
+### 8.1 Fifth pass — the terrain-anchor mechanism traced to a bytecode wall; escalated to `re-oracle`
+
+Pushed on two concrete leads to locate real per-location terrain data:
+applying the sprite-directory decode technique to `MAIN.DO`'s own internal
+scene-table records, and tracing the `calloctab` (0xe9) opcode. Found the
+real mechanism, but it terminates at a genuine gap in the reference oracle:
+
+- **`copensc`** (opcode 0x4e, `opcodes.c:1401-1417`) reads its scene-id
+  (`scridx`) as a **literal 16-bit bytecode immediate** baked into the
+  calling script's own compiled bytecode — not a discoverable static data
+  pattern. This means the "screen object" struct's *instances* are not
+  laid out at fixed, guessable offsets in `MAIN.DO`'s decompressed bytes at
+  all — a static byte-pattern scan for plausible struct shapes (gate byte +
+  width/height sanity + frustum-field sanity, run corpus-wide across all
+  four titles' `MAIN.bin`) came back with only 1-8 weak, mutually
+  non-independent hits per title out of ~13,000-15,000 candidate offsets —
+  a real negative, not under-effort (adjacent "hits" 2-4 bytes apart shared
+  permuted field values, the signature of a sliding window re-reading the
+  same bytes, not distinct real records).
+- **`cdefmap`** (opcode 0xe3, `opcodes.c:4658-4783`) is the actual writer of
+  `scene_addr+0x40`/`+0x42` (the fields `render_context` is built from,
+  §8's `render_context = ... + xread32(alis.atent + xread16(scene_addr+0x40))`):
+  it reads a self-relative offset as a bytecode literal from the
+  **terrain-owning script's own bytecode** (not `MAIN.DO`'s), derives a
+  "mapram" anchor, and reads/writes several `mapram`-relative fields
+  including raw dimension bytes stored immediately before the anchor. This
+  is a strong, concrete, plausible mechanism for how a real terrain grid
+  would be discoverable — **but `opcodes.c`'s own dispatch table marks
+  opcode 0xe3 (and 0xe4/0xe5/0xe8/0xf7/0xf8/0xfd) as defaulting to a no-op
+  stub (`map_cnul`) for every game except Transarctica and Robinson's
+  Requiem** — two sibling Silmarils titles NOT in this project's corpus.
+  Ishar 1/2/3 and Crystals of Arborea all fall through to `cdefmap`'s own
+  `else { ALIS_DEBUG(EDebugWarning, "MISSING: %s", ...); }` branch
+  (`opcodes.c:4779-4782`). **The reference oracle's own authors have not
+  reverse-engineered how Ishar populates its terrain-scene fields.**
+
+This is a genuine gap in the ground-truth oracle, not a search failure —
+escalated to `re-oracle` (per this session's process update: escalate
+directly to `re-oracle`, skipping `re-codebreaker`) with a full
+self-contained brief covering all of the above plus the exact `render3d.c`
+field-offset evidence from §8. Result pending; see
+`docs/ishar/TODO.md`'s `ishar-firstperson-view-mechanism` row for status.
+
+> **Correction (2026-09-01, the `re-oracle` result): the escalation
+> succeeded by refuting the premise rather than crossing the wall.** The
+> "oracle gap" framing above was itself the error: `cdefmap` (0xe3) and its
+> siblings are Robinson's-Requiem-only opcodes, and Ishar (versions 20/21/
+> 30, all `< 31`) never calls them and never reaches `render3d.c` at all —
+> see the §8 correction block. One-line diagnosis of why the prior passes
+> walled: **all of them assumed the reference's `render3d.c` was Ishar's
+> renderer without checking the call site's version gate** (`opcodes.c:1409`
+> `if (alis.platform.version >= 31)`), so every search was for a data
+> structure (a heightfield anchored via `+0x40`/`+0x42`) that Ishar's data
+> genuinely does not contain. No ALIS bytecode disassembler was needed to
+> break the wall (though §9 shows a minimal hand-decode of a few opcode
+> streams, which proved cheap and decisive once aimed at the right target).
+
+## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
+
+Found by the 2026-09-01 `re-oracle` pass. The actual walkable-world data
+for all three Ishar titles lives in the **`.FIC` sidecar files** (previously
+the deprioritized `ishar-fic-files` row), loaded at runtime not through the
+container/codec layer at all but through the ALIS VM's raw file-I/O opcodes
+(`cfopen` 0x70 / `cfreadb` 0x77 / `cfwriteb` 0x78 / `cfclose` 0x71),
+whose call sites — with literal filenames, destination addresses and
+byte-exact lengths — sit in `MAIN.DO`'s own bytecode.
+
+### 9.1 The region grids: `CONT<n>.FIC`
+
+One file per world region ("contrée" — matching `MAIN.DO`'s own
+`NUMERO DE CONTREE ?` editor prompt). **No header, no compression: the
+whole file is one (or two) raw row-major byte grid(s), 1 byte per cell.**
+
+| Title | Files | File size | Layout | Row stride (game's own `cdim`) |
+|---|---|---|---|---|
+| Ishar 1 | `CONT1-6.FIC` | 4,860 B | one **90×54** grid | 90 |
+| Ishar 2 | `CONT1-7.FIC` | 10,800 B | two **60×90** layers (2×5,400) | 60 |
+| Ishar 3 | `CONT1-3..6-3.FIC` | 9,348 B | two **57×82** layers (2×4,674) | 57 |
+
+Three independent signals agree per title, meeting the CONFIRMED bar:
+
+1. **Byte-exact loader bytecode in `MAIN.bin`** (decompressed offsets,
+   hand-decoded against `alis`'s opcode/opername/storename tables):
+   - Ishar 1 `MAIN.bin+0x49d2`: `70 ff 0a 233a 00 02` =
+     `cfopen(strvar@vram+0x233a, mode 2)`; `77 0080 12fc` =
+     `cfreadb(vram+0x0080, len 4860)`; `71` = `cfclose`. A twin routine at
+     `+0x49e3` reads into `vram+0x234a`; matching `cfwriteb` routines at
+     `+0x4992`/`+0x49a4` (mode 0x0302) **write the 4,860 bytes back to
+     disk** — CONT files are mutable region state (live world persistence
+     onto the game disk), not static assets. The filename is set by a
+     region-number dispatch (`cswitch2` on byte var `vram+0x4251`) whose
+     6 arms each store the literal `"CONT<n>.FIC"` (inline `cstore oimmp`
+     strings at `MAIN.bin+0x4a16..0x4a87`).
+   - Ishar 2 `MAIN.bin+0x3cb7`: same shape, two reads
+     `cfreadb(+0x0080, 5400)` + `cfreadb(+0x159c, 5400)` = 10,800 exactly.
+   - Ishar 3 `MAIN.bin+0x4a25` (v30 form, u32 lengths):
+     `cfreadb(+0x0260, 4674)` + `cfreadb(+0x14ae, 4674)` = 9,348 exactly.
+2. **The game's own array declarations** (`cdim`, opcode 0x29, which writes
+   ALIS's self-describing array-dimension header just below the array):
+   Ishar 1 `MAIN.bin+0x60`: `29 0080 01 01 005a` = element size 1, one
+   stride word **90** for the array at `vram+0x80` (and `+0x191` declares
+   the `0x234a` twin, also stride 90; Ishar 2 declares stride **60** for
+   both buffers; Ishar 3's v30-form `cdim` declares stride **57** and total
+   size 0x1242=4,674). The stride word is what `tabchar()`
+   (`alis.c:1431`) multiplies the row index by: **cell address =
+   base + x + y*stride**.
+   (The two Ishar 2/3 layers are genuinely *layers*, not top/bottom map
+   halves: Ishar 2 `CONT1.FIC`'s second 5,400 bytes are 98% zero with a
+   tiny sparse alphabet ({1,2,3,4}, a couple of high-bit values) — a
+   sparse object/overlay layer over the dense terrain layer, and each
+   buffer gets its own separate `cdim` declaration.)
+3. **Whole-file autocorrelation** on the shipped `.FIC` bytes independently
+   peaks at exactly those strides (90 / 120=2×60 / 57), and an ASCII render
+   of Ishar 1's `CONT1.FIC` at 90×54 shows an unmistakable coherent region
+   map: a `0xCC/0xCD/0xCE`-walled coastline, road lines, enclosed
+   village/compound rectangles, terrain-type patches. (`CONT6` is nearly
+   empty — 138 non-zero cells — a special mini-region.)
+
+**Runtime anchor**: the active region grid lives at `basemain + 0x80`
+(Ishar 1/2; `+0x260` Ishar 3), i.e. inside MAIN's *runtime variable RAM* —
+which is why every prior static scan of MAIN's *file bytes* for the grid
+came back empty (vram is zero-initialized at load; the grid arrives via
+`cfreadb` afterward).
+
+**Consumers (byte-pattern census across all Ishar 1 decompressed
+scripts)**: indexed reads of the grid use opername `omaintc` (0x26 =
+`tabchar` on `basemain + offset`); the 3-byte pattern `26 00 80` appears in
+exactly the scripts you'd predict — `GERDEP.bin` ("gère déplacement", the
+movement handler, 6 sites), `RPLAINE.bin` (12), `ENCONT.bin` (encounters),
+`AFFOBJ.bin`, and every outdoor/location scene script (`VILLAGE`, `VILLE`,
+`TEMPLE`, `FORET`, `PLAINE`, `MCAVE`, `COLCAVE`, `INCAVE`, `ARBRE`,
+`LACUSTRE`, `STEL`, `FONTAINE`, ...) — each paired 1:1 with a read of the
+second buffer (`26 234a`). A decoded GERDEP statement
+(`GERDEP.bin+0x9a5`): `1e | 38 | 1e 3fd0 | 40 | 1e 137d | 26 0080 | 3a |
+12 13` = `cstore( oeval; omainb(0x3fd0); opushacc; omainb(0x137d);
+omaintc(0x0080); ofin ) -> sdirb(0x13)` (the `1e`/`0x1e` bytes are the
+`cstore` opcode and the `omainb` opername — same byte value, different
+dispatch tables) →
+**cell = grid[ byteVar(basemain+0x3fd0) × 90 + byteVar(basemain+0x137d) ]**
+— identifying the party-position globals (a second variable pair
+`0x137c`/`0x3fd1` appears in sibling expressions, likely the
+candidate/target cell of a movement test).
+
+### 9.2 Cell values (semantics partially open)
+
+Observed alphabet: `0x00` (dominant; void/outside-region — reads as sea in
+the render), low positive codes `0x01..~0x30` (terrain/feature types —
+roads render as long `0x03` lines, letters `0x13-0x1b` cluster around
+buildings), and high-bit values `0x9D`, `0xCC/0xCD/0xCE` (coastline/borders
+— the walls of the rendered map), `0xE1`, `0xE5/0xE6` (dense
+forest/mountain patches). `tabchar` reads cells **sign-extended**
+(`(s8)xread8`), so "cell < 0" is the natural blocked/special test —
+HYPOTHESIS: high-bit = impassable obstacle class, low positive = walkable
+terrain whose value selects the scene/location script. The value→scene
+dispatch (very likely the `cswitch` streams in `MAIN.bin+0x18e8..0x1c74`,
+where all the location `.AO` names sit) is not yet decoded — that, and the
+exact role split between the two grid buffers (`0x80` vs `0x234a`:
+adjacent-region staging for border crossing, or pristine-copy for
+change-detection — both fit the paired reads), are the remaining open
+items. See `docs/ishar/TODO.md`.
+
+### 9.3 The other `.FIC` files
+
+- **`EN1.FIC`** (3,640 B Ishar 1; 6,050 B Ishar 2/3) — the encounter/
+  monster table bank. Loaded by a scatter-read routine right after the
+  CONT dispatch (Ishar 1 `MAIN.bin+0x4a8a`): one `cfopen` + **28 separate
+  `cfreadb`s** into distinct `vram` arrays (5×140 B, 12×70 B, 2×210 B,
+  1×560 B, ...) summing to **exactly 3,640** — and 29 reads summing to
+  exactly 6,050 in both Ishar 2 (`+0x3e0e`) and Ishar 3 (`+0x4adc`,
+  write-twin at `+0x4ae4`). So EN1 is a concatenation of the game's
+  monster/encounter arrays in vram order, sizes byte-exact from the
+  bytecode.
+- **`TAB1.FIC`** (Ishar 1, 361 B) — loaded whole by
+  `MAIN.bin+0x4b2c`: `cfopen("TAB1.FIC", 2); cfreadb(vram+0x379c, 0x169);
+  cfclose` (0x169 = 361 exactly), and declared by `cdim` at `MAIN.bin+0x1bc`
+  with stride **19** → a 19×19 byte grid, values {1,2,3,4} only. Role open
+  (candidates: encounter-frequency/biome zone table; "EDITER TABLEAU ?"
+  suggests editor provenance).
+
+### 9.4 `MAP.DO` — resolved: it's the map *picture*, not a grid
+
+With the corrected bitmap-header offsets (§7 / `docs/ishar-sprite-format.md`
+correction: width at header+2, height at header+4 — the prose previously
+said +1/+3 while the shipped code correctly used +2/+4), `MAP.bin` parses
+completely: a 24-byte script header, an 8-byte bytecode stub, a 2-slot
+resource directory (slot 1 = a composite record `ff 01 | elem 0, dx=159,
+dz=137`; slot 0 = a **type 0x12 opaque banked-4-bit 320×126 bitmap**,
+pixel run `0x4b2..0x5372`, ending 6 bytes before EOF). The old
+"`0x88` is 21% of the payload" observation was simply this image's dominant
+pixel-pair value. `MAP.DO` is the auxiliary top-down map screen's
+*artwork*; the walkable world is §9.1's `CONT*.FIC`.
