@@ -99,12 +99,26 @@ rule silently treated ~75-87% of real solid walls as passable). See
 `docs/goldbox-glib-format.md` §7.2's correction block for the full source
 citation and file offsets.
 
+## 2026-09-01 — ECL wallset-slot binding SOLVED for 26/29 levels
+
+`por-wallset-ecl-binding` is CLOSED. The previous "0/29, genuine
+engine-revision difference" verdict was wrong — a `re-oracle` escalation
+found PoR's ECL blocks use address base `0x9900`, not the GLIB titles'
+`0x8000` (re-derived and confirmed this session: min header word across
+all 29 levels is exactly `0x9900+20=0x9914`; a base sweep shows `0x9900`
+is a unique unknown-opcode-count minimum). Combined with a corpus-wide
+IF-skip CFG fix and a new `NEWECL` cross-block-chaining mechanism in
+`findWallsetBindings` (both in `tools/shared/goldbox-ecl.ts`), 26 of PoR's
+29 GEO levels now resolve — every one of them fully (all 3 slots). The
+other 3 (`30`/`31`/`32`) simply have no matching ECL block at all (not a
+decode failure). Full writeup: `amiga/data-structure.md` §7.1,
+`docs/goldbox-glib-format.md` §7.4.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
 | por-pic-format | open | What do `pic.dax`/`cpic.dax` actually contain? Confirmed NOT any Gold Box Explorer DOS picture-block shape (0/59, 0/118 pass) | `amiga/data-structure.md` §4 | 2026-08-30 |
 | por-dungcom-semantics | open | `dungcom.dax` decompresses cleanly (~7.5 KB) but its content class is now RE-TARGETED to "likely combat-backdrop art" (not maze data — see `geo.dax`), still no confirmed sub-structure | `amiga/data-structure.md` §5 | 2026-08-31 |
-| por-wallset-ecl-binding | open | `ecl.dax` bytecode VM decoded + wired (`tools/shared/goldbox-ecl.ts`), but resolves 0/29 levels — PoR's header addresses land outside the ECL block and every reached `LOAD PIECES` call uses a dynamic operand (genuine engine-revision difference, confirmed not a decode bug) | `amiga/data-structure.md` §7.1, `docs/goldbox-glib-format.md` §7.4 | 2026-09-01 |
 | por-8x8d-header | open | `8x8d.dax`'s 4-byte per-tile-block leading header (meaning undecoded; tile pixel decode past it is only "rendered", not disassembly-confirmed) | `amiga/data-structure.md` §3 | 2026-08-30 |
 | por-full-catalog | open | Most `.dax` files' contents (sprites, bodies/heads, monsters, items, `ecl.dax`, `final.dax`, etc.) not catalogued this pass — explicitly deferred per task scope (container+codec+FPV question was the goal, not a full catalog) | `amiga/data-structure.md` (container/codec sections apply to all files; only walldef/8x8d/pic/cpic/dungcom/geo examined) | 2026-08-30 |

@@ -22,15 +22,18 @@
  * `wallsetBinding`, then `resolveFlatWalldefId` (goldbox-walltiles.ts)
  * turns that into a real WALLDEF entry id + wallset-within-entry, from
  * which the exact `(id, wallNumber)` texture is looked up in
- * `dungeon/wall-index.json`. This resolves well for Curse of the Azure
- * Bonds and Secret of the Silver Blades; Pool of Radiance (an earlier,
- * structurally different engine revision) and Pools of Darkness (whose
- * own LOAD PIECES operands are consistently runtime-computed, not
- * literal) do not statically resolve — for those, and for any cell whose
- * resolution fails for any other reason (no binding, flat id not found in
- * this title's own WALLDEF directory), this view falls back to the same
- * **single representative wall texture per level** it always used
- * (deterministically chosen from `dungeon/wall-index.json`) — a real,
+ * `dungeon/wall-index.json`. As of 2026-09-01 (a `re-oracle` escalation
+ * fixing a corpus-wide CFG-walk bug, Pool of Radiance's ECL address base,
+ * and Pools of Darkness's own opcode-table revision — see
+ * `goldbox-ecl.ts`'s module doc) this resolves ALL FOUR titles at or near
+ * full coverage: Curse 16/16 levels, Secret 17/17, Pools of Darkness
+ * 32/32 (all 3 slots each), Pool of Radiance 26/29 (the other 3 have no
+ * ECL script at all, not a resolution failure). For any cell whose
+ * resolution still fails (no binding, or a flat id not found in this
+ * title's own WALLDEF directory — e.g. the `0x7f`/`0xff` "don't
+ * touch"/"reset" sentinels some levels resolve to), this view falls back
+ * to the same **single representative wall texture per level** it always
+ * used (deterministically chosen from `dungeon/wall-index.json`) — a real,
  * render-confirmed Gold Box wall texture in the right *place*, just not
  * proven to be the *specific* texture the original game would draw there.
  * Locked doors (code 2/3) render with a distinct tint/colour from solid

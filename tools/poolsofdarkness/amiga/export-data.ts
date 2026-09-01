@@ -24,6 +24,7 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { exportGoldBoxGlibData } from '../../shared/goldbox-glib-export.ts';
+import { OPCODE_TABLE_POOLS_V13 } from '../../shared/goldbox-ecl.ts';
 
 const GAME = 'poolsofdarkness';
 const PLATFORM = 'amiga';
@@ -37,12 +38,17 @@ export async function exportPoolsOfDarknessData(dataDir: string) {
     specificTilesPath: 'Disk2/8X8D.TLB',
     // The 16x16 dungeon/city square grid — see tools/shared/goldbox-geo.ts.
     geoPath: 'Disk3/GEO.GLB',
-    // Level-scripting bytecode (tools/shared/goldbox-ecl.ts) — wired for
-    // completeness, but Pools of Darkness's own LOAD PIECES operands are
-    // consistently memory-dereferenced (runtime-computed), not literal, so
-    // this resolves 0 static slot bindings corpus-wide (confirmed, not a
-    // decode failure — see data-structure.md's wallset-binding section).
+    // Level-scripting bytecode (tools/shared/goldbox-ecl.ts). Pools of
+    // Darkness runs a v1.3 engine revision with a DIFFERENT opcode table
+    // and a wallset load moved to opcode 0x21 ("LOAD FILES") whose 2nd
+    // operand fills all 3 slots at once — see goldbox-ecl.ts's module doc
+    // (corrects an earlier "LOAD PIECES operands are memory-dereferenced"
+    // verdict, which was a misparse under the wrong (v1.1) opcode table).
     eclPath: 'Disk3/ECL.GLB',
+    eclOptions: {
+      opcodeTable: OPCODE_TABLE_POOLS_V13,
+      wallsetLoad: { opcode: 0x21, mode: 'fill-all-from-second-operand' },
+    },
   });
 }
 

@@ -81,6 +81,16 @@ per-level placeholder elsewhere. Full writeup:
 `docs/goldbox-glib-format.md` §7.4; per-title summary: `amiga/
 data-structure.md` §5.1.
 
+## 2026-09-01 — ECL wallset-slot binding improved to 17/17 levels (all slots)
+
+A `re-oracle` escalation found two bugs in the reachability walk above (a
+missing IF-false-path CFG edge, and — implemented this session as a real
+cross-block chaining mechanism — `NEWECL`-target following for levels that
+hand execution to a different block). Fixing both took Secret from 5/17
+levels (15 slots) to **17/17 levels, 51 slots** — every slot on every level
+now resolves. See `tools/shared/goldbox-ecl.ts`'s module doc and
+`docs/goldbox-glib-format.md` §7.4.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |

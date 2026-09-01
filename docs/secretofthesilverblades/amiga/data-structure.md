@@ -174,8 +174,8 @@ not catalogued.
 ## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
 
 **CONFIRMED for wall/door connectivity and wall-art TYPE selection; the
-final indirection to a real WALLDEF texture id is CONFIRMED for 5/17
-levels via ECL bytecode (see below), STRUCTURAL/placeholder for the rest.**
+final indirection to a real WALLDEF texture id is CONFIRMED for 17/17
+levels via ECL bytecode (see below).**
 17 levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
 Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
 verified via a cross-title shared-wall self-consistency oracle at
@@ -195,15 +195,15 @@ Planes 0/1 (candidate wall-art selectors) remain open, escalated to
 > `docs/goldbox-glib-format.md` §7.2's correction block for the full
 > source-cited derivation.
 
-### 5.1 Wallset-slot binding — CONFIRMED, 5/17 levels (15 slots)
+### 5.1 Wallset-slot binding — CONFIRMED, 17/17 levels (51 slots)
 
 `ECL.GLB` (`DISK2/ECL.GLB`, same GLIB container) statically names which
-real WALLDEF id occupies each of a level's 3 ECL-loaded wallset slots for 5
-of Secret's 17 levels (15 slots total), via the same `LOAD PIECES`
-(opcode `0x37`) reachability walk used for Curse. Full VM decode,
-verification oracle, and worked examples: `docs/goldbox-glib-format.md`
-§7.4. Implementation: `tools/shared/goldbox-ecl.ts`, wired via
-`eclPath: 'DISK2/ECL.GLB'` in
+real WALLDEF id occupies each of a level's 3 ECL-loaded wallset slots for
+ALL 17 of Secret's levels (51 slots total, i.e. every slot on every level),
+via the same `LOAD PIECES` (opcode `0x37`) reachability walk used for
+Curse. Full VM decode, verification oracle, and worked examples:
+`docs/goldbox-glib-format.md` §7.4. Implementation:
+`tools/shared/goldbox-ecl.ts`, wired via `eclPath: 'DISK2/ECL.GLB'` in
 `tools/secretofthesilverblades/amiga/export-data.ts` and consumed
 per-cell by `tools/walker/games-goldbox.ts`'s `wallTextureForCell`. The
 same `resolveFlatWalldefId` multi-wallset-span indirection §3b-old
@@ -211,10 +211,11 @@ documents for this title's WALLDEF ids (`7/10/1/15/13` at 2 wallsets,
 `21/3` at 3) applies to any resolved flat id that lands past a
 `wallsetCount>1` entry's own id.
 
-The other 12 levels don't resolve (no `LOAD PIECES` reached via
-reachability, or a reached call used a memory-dereferenced/dynamic
-operand) — those levels' cells fall back to `GoldBoxView`'s existing
-per-level placeholder texture.
+> **Update (2026-09-01, `re-oracle` escalation):** the original 5/17 count
+> above was an artifact of two missing CFG edges (a missing IF-false-path
+> skip edge, and no cross-block execution handoff via `NEWECL`), not a real
+> per-level engine limitation — see `docs/goldbox-glib-format.md` §7.4. With
+> both fixed, every one of Secret's 17 levels resolves all 3 slots.
 
 ## 6. Extractor and outputs
 

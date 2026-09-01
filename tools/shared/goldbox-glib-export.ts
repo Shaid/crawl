@@ -22,7 +22,7 @@ import {
 } from './goldbox-walltiles.ts';
 import { decodeGeoRecord, GEO_RECORD_SIZE } from './goldbox-geo.ts';
 import { exportGeoDungeon } from './goldbox-dungeon-export.ts';
-import { findWallsetBindings } from './goldbox-ecl.ts';
+import { findWallsetBindings, type EclDecodeOptions } from './goldbox-ecl.ts';
 
 function walk(dir: string, out: string[]) {
   for (const f of readdirSync(dir)) {
@@ -64,13 +64,21 @@ export interface WallRenderSource {
   /**
    * Path to this title's own `ECL.GLB` — the level-scripting bytecode that
    * resolves each level's 3 wallset slots (`goldbox-ecl.ts`). Optional —
-   * omit if not yet located, or when the title's own ECL scripts don't
-   * statically resolve slot bindings (Pools of Darkness's LOAD PIECES
-   * operands are consistently runtime-computed — see that module's doc).
-   * Same GLIB container/index convention as `geoPath`, same `id` space
-   * (one ECL block per level, matched to GEO's own level `id`).
+   * omit if not yet located. Same GLIB container/index convention as
+   * `geoPath`, same `id` space (one ECL block per level, matched to GEO's
+   * own level `id`).
    */
   eclPath?: string;
+  /**
+   * Engine-revision decode options for this title's ECL bytecode
+   * (`tools/shared/goldbox-ecl.ts`'s `EclDecodeOptions` — address base,
+   * opcode table, wallset-load opcode/shape). Omit for the v1.1 default
+   * (Curse of the Azure Bonds, Secret of the Silver Blades). Pools of
+   * Darkness needs `{ opcodeTable: OPCODE_TABLE_POOLS_V13, wallsetLoad: {
+   * opcode: 0x21, mode: 'fill-all-from-second-operand' } }` — see
+   * goldbox-ecl.ts's module doc.
+   */
+  eclOptions?: EclDecodeOptions;
 }
 
 export async function exportGoldBoxGlibData(
@@ -292,20 +300,29 @@ export async function exportGoldBoxGlibData(
     // 4b. Wallset-slot bindings (goldbox-ecl.ts) — attach each level's own
     // ECL-resolved {slot1,slot2,slot3} flat WALLDEF ids, when the title has
     // an ECL.GLB and this level's own script statically resolves them (see
-    // goldbox-ecl.ts's module doc — Curse/Secret resolve well, Pools of
-    // Darkness's operands are consistently runtime-computed and won't).
+    // goldbox-ecl.ts's module doc). `resolveBlock` lets findWallsetBindings
+    // chase a level's own NEWECL (opcode 0x20) targets into a DIFFERENT ECL
+    // block when this level's own reachable code has no wallset-load call
+    // of its own (see `ReachabilityResult.newEclTargets`'s doc — a level
+    // literally handing its script off to another block's own entry
+    // points, not a guess).
     if (wallRender.eclPath) {
       const edata = readFileSync(resolve(dataDir, wallRender.eclPath));
       const econ = parseGlibContainer(edata);
       const eindex = decodeGlibIndex(edata, econ);
       const eclById = new Map(eindex.map(({ id, blockIndex }) => [id, econ.blocks[blockIndex]] as const));
+      const resolveBlock = (id: number): Uint8Array | undefined => {
+        const block = eclById.get(id);
+        return block ? readBlock(edata, block) : undefined;
+      };
+      const eclOptions = { ...wallRender.eclOptions, resolveBlock };
       let resolvedSlots = 0;
       let levelsWithAnyBinding = 0;
       for (const level of levels) {
         const block = eclById.get(level.id);
         if (!block) continue;
         const raw = readBlock(edata, block);
-        const { binding } = findWallsetBindings(raw);
+        const { binding } = findWallsetBindings(raw, eclOptions);
         const n = (binding.slot1 !== undefined ? 1 : 0) + (binding.slot2 !== undefined ? 1 : 0) + (binding.slot3 !== undefined ? 1 : 0);
         if (n > 0) {
           level.wallsetBinding = binding;

@@ -581,7 +581,7 @@ the original game would draw there. Locked doors (code 2/3) get a distinct
 tint but are treated as passable (no key/lock mechanic implemented in the
 walker).
 
-### 7.4 Wallset-slot binding — ECL bytecode CONFIRMED for Curse/Secret, OPEN for PoR/Pools (2026-09-01)
+### 7.4 Wallset-slot binding — ECL bytecode CONFIRMED for all four titles (2026-09-01)
 
 §7.2 identified the missing indirection: a 1-15 wall-art TYPE names a
 level-scoped `(wallsetSlot 0-2, slice 0-4)` pair, and which WALLDEF
@@ -631,38 +631,109 @@ Full writeup, VM opcode table, and verification evidence:
 
   | Title | Levels with >=1 resolved slot | Total slots resolved |
   |---|---|---|
-  | Curse of the Azure Bonds | 10/16 | 30 |
-  | Secret of the Silver Blades | 5/17 | 15 |
-  | Pool of Radiance | 0/29 | 0 |
-  | Pools of Darkness | 0/32 | 0 |
+  | Curse of the Azure Bonds | 16/16 | 48 |
+  | Secret of the Silver Blades | 17/17 | 51 |
+  | Pool of Radiance | 26/29 | 78 |
+  | Pools of Darkness | 32/32 | 96 |
 
-  **Pool of Radiance** (an earlier, structurally different engine
-  revision — already documented for its `.dax` vs GLIB container and its
-  GEO 2-byte prefix): its header's `preCampCheckAddr`/
-  `campInterruptedAddr`/`eclInitialEntryPoint` fields routinely reference
-  addresses OUTSIDE that level's own ECL block (e.g. block 1: those 3
-  words are `0xb618/0xb653/0xb6a0`, all >13,800 bytes past the block's own
-  7,671-byte length, while `vmRunAddr1`/`searchLocationAddr` DO land
-  in-range and disassemble cleanly) — so 3 of the 5 usual entry points
-  are simply not addresses into this buffer for this engine revision, and
-  the ones that are in-range don't reach a `LOAD PIECES`/`SAVE`-to-0x322
-  call via reachability (the one hit found, block 13, is a
-  memory-dereferenced/dynamic operand). **Pools of Darkness** (the latest
-  title): entry points all resolve in-range and disassemble cleanly (0
-  unknown opcodes), and `LOAD PIECES` calls ARE found (5 blocks), but
-  every one of them uses a memory-dereferenced (dynamic) operand, not a
-  literal — this title's engine revision computes wallset ids at runtime
-  rather than hardcoding them per level.
-- **Paths tried for PoR/Pools** (before accepting these as genuine,
-  narrowed-down engine-revision differences rather than a decode bug):
-  linear (non-reachability) scan from each header address — found
-  spurious "hits" from misaligned/unreachable bytes, refuted by the
-  reachability walker finding 0 hits from the same start; scanning from
-  `headerEndPos` directly (bypassing header-word selection entirely) —
-  clean small graphs, no `0x37` opcode found for most PoR levels;
-  `SAVE`-to-`0x322/0x324/0x326` detection — implemented and wired, 0 hits
-  anywhere in the whole 4-title corpus (not PoR/Pools-specific — Curse and
-  Secret's resolved bindings all came from `0x37` directly too).
+  Every level that resolves at all resolves ALL 3 slots (this format never
+  produces a partial 1- or 2-slot binding in practice). PoR's 3 unresolved
+  levels (`30`/`31`/`32`) simply have no matching `ecl.dax` entry at all
+  (its `indexID` space tops out at `29`) — not a decode failure.
+
+> **Correction (2026-09-01, `re-oracle` escalation, THIS SECTION):** the
+> original pass above (10/16, 5/17, 0/29, 0/32) undercounted every title
+> for three DIFFERENT, now-fixed reasons — none of them the genuine
+> engine-revision dead ends first reported. The corrected verdicts:
+>
+> **1. A corpus-wide CFG-walk bug affected all four titles.**
+> `reachabilityScanWallsets`'s worklist walk was missing the IF-FALSE skip
+> edge: opcodes `0x16`-`0x1b` (IF =/<>/</>/<=/>=) consume exactly their own
+> 1-byte opcode, and the VM's `SkipNextCommand` skips the FOLLOWING command
+> entirely when the condition is false — but the old walk only ever visited
+> that following command's TRUE-path successors (parse it normally, follow
+> ITS jump target if it's a `GOTO`/etc). An unconditional `GOTO` immediately
+> after an `IF` has a real "condition false, goto never runs, execution
+> resumes right after it" successor at that `GOTO`'s own `nextPos`, which
+> was never pushed. Fixed by explicitly parsing the following instruction
+> when an `IF` is visited and pushing its `nextPos` too (see
+> `tools/shared/goldbox-ecl.ts`'s module doc for the exact mechanism).
+> Verified impact (re-derived this session): took Curse from 10/16 to
+> 16/16 levels and Secret from 5/17 to 17/17.
+>
+> **2. Pool of Radiance uses ECL address base `0x9900`, NOT `0x8000`** —
+> the "header fields point outside the block" / "operands are memory-
+> dereferenced" verdict was a wrong-base artifact, not a real
+> engine-revision difference. Re-derived this session: the minimum header
+> word across all 29 PoR levels is exactly `0x9914` (`= 0x9900 + 20`, the
+> 5-word header size) — impossible under base `0x8000` (would need an
+> in-header address) and exact under `0x9900`; a base sweep from `0x98fe`
+> to `0x9910` shows `0x9900` is a sharp, unique minimum for total
+> unknown-opcode count across all 29 levels' reachability walks (`4` at
+> `0x9900` vs `221` at the old `0x8000` guess and `196`-`681` at every
+> other base tried). `eclAddrToPos`/`reachabilityScanWallsets`/
+> `findWallsetBindings` now take `base` as a parameter (default `0x8000`)
+> instead of hardcoding it.
+>
+> **3. Pools of Darkness runs a v1.3 engine revision with a DIFFERENT
+> opcode table** — the "every LOAD PIECES operand is memory-dereferenced"
+> verdict was a misparse under the wrong (v1.1) table, not a genuine
+> runtime-computed-id design. `SetupCommandTable` registers several
+> opcodes with different operand counts in this revision
+> (`OPCODE_TABLE_POOLS_V13` in `goldbox-ecl.ts`), and critically, wallset
+> loading moved from opcode `0x37` (now an unrelated 2-operand NPC-by-name
+> query) to opcode `0x21` ("LOAD FILES"), which in this revision takes only
+> 2 operands `(geoId, walldefId)` — the 2nd operand IS the wallset id,
+> filling ALL 3 runtime slots at once (confirmed against this title's own
+> `WALLDEF.GLB`: its entries run 15 slices, a whole 3-slot x 5-slice
+> wallset per id). Parsing with the wrong table desyncs the byte stream
+> almost immediately, which is why every "hit" the old table found looked
+> dynamic — it was reading garbage operand bytes, not a real
+> memory-dereferenced operand. Re-derived this session directly from real
+> `Disk3/ECL.GLB` bytes (not copied from the escalation's report): with the
+> corrected table + `0x21` remap, resolved ids land in `{1-6}` — exactly
+> Pools' own `WALLDEF.GLB` id space — and cluster thematically by geo id
+> range (geo `1`/`16-22` -> walldef `1`, `32-38` -> `2`, `48-50`/`54` -> `3`,
+> `39`/`64-71`/`74` -> `4`, `69`/`81-84` -> `5`, `52-53` -> `6`).
+>
+> **A fourth mechanism, found this session (not in the original escalation
+> report), closed the remaining gaps for both Pools and PoR: `NEWECL`
+> (opcode `0x20`) cross-block chaining.** Several levels' own reachable
+> code has no wallset-load call at all, but DOES contain a `NEWECL`
+> instruction — which literally hands the running script to a DIFFERENT
+> ECL block's own entry points (this is a real VM mechanism, not a guess:
+> `CMD_NewEcl`-shaped "switch scripts" semantics). `findWallsetBindings`
+> now accepts a `resolveBlock(id)` callback and, when a block's own
+> reachable code resolves no slot, chases every `NEWECL` target it found
+> (cycle-guarded, first successful chase wins) — that target block's own
+> binding becomes this level's binding, since it's executing that block's
+> own code. On Pools of Darkness this resolved ALL 4 remaining GEO levels
+> (`17`/`49`/`71`/`84`, chaining to `33-or-36`/`48`/`68`/`82` respectively)
+> for a clean **32/32**, actually BETTER than the escalation's own reported
+> 31/32 (which proposed inferring geo `49`'s binding from its neighbors —
+> `NEWECL` chaining instead DERIVES it directly: `49` really does execute
+> `48`'s own script, and `48` resolves to walldef `3`, matching the
+> escalation's inference exactly, but as a measured fact rather than a
+> fallback guess). On Pool of Radiance this resolved geo ids `5` and `7`
+> (previously the only two of the 26 in-corpus levels with no direct hit)
+> — the escalation's reported "levels 5/7/19 have no reachable static hit"
+> was itself imprecise: `19` isn't even a GEO level id in this title (GEO's
+> id space and `ecl.dax`'s `indexID` space are NOT identical — GEO runs
+> `{0-7,9,10,13-18,20-32}`, `ecl.dax` runs `{0-11,13-29}` — so `19` never
+> counted against coverage at all), and `5`/`7` DO resolve once `NEWECL`
+> chaining is added, leaving only PoR's genuinely script-less
+> `30`/`31`/`32` unresolved.
+>
+> **Paths tried before finding fix #4** (documented since it's the one
+> mechanism not in the original escalation brief): a plain per-block
+> reachability walk alone (with fixes #1-3 applied) already leaves
+> Curse/Secret at their full 16/16 and 17/17, but only reaches PoR 24/29
+> (missing `5`/`7` in addition to the genuinely script-less `30`/`31`/`32`)
+> and Pools 28/32 (missing `17`/`49`/`71`/`84`) — tracing those 4 Pools
+> blocks' own diagnostics showed near-zero unknown-opcode/desync counts
+> (0-4) but genuinely zero wallset-load hits, which is what motivated
+> checking for a `NEWECL` call in their reachable code instead of assuming
+> they were truly script-less like PoR's `30`/`31`/`32`.
 - **Wired end-to-end**: `GeoLevel.wallsetBinding` (flat ids per slot,
   `goldbox-geo.ts`), `resolveWallFlatId` (cell+dir -> flat id + slice),
   `resolveFlatWalldefId` (flat id -> real WALLDEF id + wallset index,

@@ -72,10 +72,27 @@ table (plane 3's value labels were also corrected: 0=solid, 1=passable,
 games-goldbox.ts` corrected accordingly. See `docs/goldbox-glib-format.md`
 §7.2/§5.6.
 
+## 2026-09-01 — ECL wallset-slot binding SOLVED for 32/32 levels
+
+`pod-wallset-ecl-binding` is CLOSED. The previous "0/32, engine revision
+computes ids at runtime" verdict was wrong — a `re-oracle` escalation found
+Pools of Darkness runs a v1.3 opcode table where wallset loading moved to
+opcode `0x21` ("LOAD FILES", 2 operands, 2nd fills all 3 slots), not `0x37`
+(now an unrelated NPC-by-name query); the old table's misparse is what
+made every "hit" look memory-dereferenced. Re-derived directly from real
+`Disk3/ECL.GLB` bytes this session with the corrected table
+(`OPCODE_TABLE_POOLS_V13`, `tools/shared/goldbox-ecl.ts`): 28/32 levels
+resolve directly (ids in `{1-6}`, this title's own `WALLDEF.GLB` space,
+clustering thematically by geo id), and a new `NEWECL` cross-block-chaining
+mechanism (found this session, not in the escalation's original report)
+resolves the remaining 4 (`17`/`49`/`71`/`84`, each handing execution to a
+different block that resolves cleanly) for a clean **32/32, 96 slots** —
+full coverage. Full writeup: `amiga/data-structure.md` §5.1,
+`docs/goldbox-glib-format.md` §7.4.
+
 ## Open items
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| pod-wallset-ecl-binding | open | `ECL.GLB` bytecode VM decoded + wired (`tools/shared/goldbox-ecl.ts`), but resolves 0/32 levels — every reached `LOAD PIECES` call uses a dynamic (memory-dereferenced) operand, this title's engine revision computes wallset ids at runtime (genuine engine-revision difference, confirmed not a decode bug) | `amiga/data-structure.md` §5.1, `docs/goldbox-glib-format.md` §7.4 | 2026-09-01 |
 | pod-item-dat-vs-items-dat | open | Both `ITEM.DAT` and `ITEMS.DAT` are present; their relationship (which is real/active) not investigated | `amiga/data-structure.md` §0 | 2026-08-30 |
 | pod-full-catalog | open | Most `.GLB`/`.TLB` files' semantic content not catalogued — only outer container structure validated | `amiga/data-structure.md` §4 | 2026-08-30 |

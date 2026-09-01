@@ -382,36 +382,48 @@ documented there rather than four times). Implementation:
 > `docs/goldbox-glib-format.md` §7.2's correction block for the full
 > source-cited derivation.
 
-### 7.1 Wallset-slot binding — OPEN (0/29 levels, genuine engine-revision difference, not a decode bug)
+### 7.1 Wallset-slot binding — CONFIRMED, 26/29 levels (all 3 slots each where an ECL script exists)
 
 `ecl.dax` (same `.dax` directory/codec as `geo.dax`, same 2-byte constant
-prefix convention, `0x8813` here) was decoded down to a full bytecode VM
+prefix convention, `0x8813` here) is decoded by the same bytecode VM
 (`tools/shared/goldbox-ecl.ts`, shared with the three GLIB titles) and
-wired into this extractor (`eclPath` step 4b), but resolves **0 of 29**
-levels' wallset slots statically — confirmed as a real, narrowed-down
-engine-revision difference, not a gap in the decode:
+wired into this extractor (`eclPath` step 4b). **26 of PoR's 29 GEO levels
+resolve — every one of them fully (all 3 slots), not partially.**
 
-- Pool of Radiance's own header fields
-  (`preCampCheckAddr`/`campInterruptedAddr`/`eclInitialEntryPoint`)
-  routinely point OUTSIDE that level's own ECL block (e.g. block 1: those 3
-  words are `0xb618/0xb653/0xb6a0`, all >13,800 bytes past the block's
-  7,671-byte length) — 3 of the usual 5 entry points simply aren't
-  addresses into this buffer for this engine revision. The other 2
-  (`vmRunAddr1`/`searchLocationAddr`) DO land in-range and disassemble
-  cleanly (0 unknown opcodes).
-- Every `LOAD PIECES` (opcode `0x37`) call actually reached via a
-  worklist-based reachability walk from an in-range entry point uses a
-  memory-dereferenced (dynamic) operand, not a literal id — so even where
-  the call is reached, the id it would load isn't staticly knowable.
-- Paths tried: linear (non-reachability) scan from each header address
-  (found spurious hits refuted by 0 hits from a proper reachability walk);
-  scanning from `headerEndPos` directly, bypassing header-word selection
-  (clean small graphs, no `0x37` found); `SAVE`-to-`0x322/0x324/0x326`
-  detection (implemented, 0 hits anywhere in the whole 4-title corpus).
+> **Correction (2026-09-01, `re-oracle` escalation):** the "0/29, genuine
+> engine-revision difference" verdict this section previously carried was
+> wrong — it was an artifact of assuming the GLIB titles' `0x8000` address
+> base. Pool of Radiance's ECL blocks are based at **`0x9900`**, not
+> `0x8000`. Evidence: the minimum header word across all 29 levels is
+> exactly `0x9914` (= `0x9900 + 20`, the 5-word header size) — impossible
+> under base `0x8000` and exact under `0x9900`; a base sweep from `0x98fe`
+> to `0x9910` shows `0x9900` uniquely minimizes unknown-opcode count with
+> sharply worse neighbors on both sides (re-derived this session:
+> `totalUnknown` drops from hundreds at every neighboring base to exactly
+> `4` at `0x9900`, vs `221` at the old `0x8000` guess). With the correct
+> base AND the corpus-wide IF-skip CFG fix (see `goldbox-ecl.ts`'s module
+> doc), what were previously read as "operands pointing outside the block"
+> and "memory-dereferenced operands" were actually valid in-range static
+> reads under the right base — not a real engine-revision dead end.
+>
+> The remaining 3 unresolved GEO levels (`30`, `31`, `32`) are NOT "short
+> stub scripts with no reachable hit" as first reported by the escalation —
+> re-derivation this session found they simply have **no matching ECL
+> block at all** (`ecl.dax`'s own `indexID` space tops out at `29`; GEO's
+> own level-id space runs to `32`). Every one of the 26 GEO levels that DOES
+> have a matching ECL entry resolves all 3 slots, several of them (e.g.
+> ids `5`/`7`) only via the `NEWECL` cross-block-chaining mechanism
+> described in `docs/goldbox-glib-format.md` §7.4 — a plain single-block
+> reachability walk alone still leaves 3 levels (`5`, `7`, `19`) unresolved
+> (`19` isn't even a GEO level, so it never counted against coverage).
+> Resolved flat ids fall in `{1-9, 17-25}` plus the `127`/`255`
+> "don't-touch"/"reset" sentinels (level `0` resolves to
+> `{slot1:127,slot2:127,slot3:127}` — correctly falls back to the
+> per-level placeholder since no real WALLDEF id matches those sentinels).
 
 Full writeup and cross-title coverage table: `docs/goldbox-glib-format.md`
-§7.4. Tracked as `por-wallset-ecl-binding` in `docs/poolofradiance/TODO.md`.
-Levels fall back to `GoldBoxView`'s existing per-level placeholder texture.
+§7.4. Levels `30`/`31`/`32` (no ECL script) fall back to `GoldBoxView`'s
+existing per-level placeholder texture.
 
 ---
 

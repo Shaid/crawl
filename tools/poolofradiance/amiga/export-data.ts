@@ -143,27 +143,32 @@ export async function exportPoolOfRadianceData(dataDir: string) {
     // 4b. ecl.dax — wallset-slot bindings (tools/shared/goldbox-ecl.ts). Same
     // .dax directory/codec as geo.dax, one entry per level (indexID matches
     // GEO's own level id), same 2-byte constant-tag prefix convention.
-    // WIRED FOR COMPLETENESS, NOT CURRENTLY RESOLVING: Pool of Radiance is a
-    // genuinely earlier/different engine revision (already documented for
-    // its container/codec and GEO prefix) — its own header's
-    // preCampCheckAddr/campInterruptedAddr/eclInitialEntryPoint fields
-    // routinely point outside a level's own ECL block, and every reachable
-    // LOAD PIECES hit found in this corpus used memory-dereferenced
-    // (dynamic) operands, not literals. See
-    // docs/poolofradiance/amiga/data-structure.md's wallset-binding section
-    // for the concrete evidence and paths tried.
+    // Pool of Radiance's ECL blocks are based at 0x9900, NOT the GLIB
+    // titles' 0x8000 (see goldbox-ecl.ts's module doc for the derivation —
+    // corrects an earlier "header fields point outside the block" verdict,
+    // which was a wrong-base artifact, not a genuine engine-revision dead
+    // end).
+    const POR_ECL_ADDR_BASE = 0x9900;
     const eclPath = resolve(dataDir, 'ecl.dax');
     if (existsSync(eclPath)) {
       const eclData = readBinary(eclPath);
       const { entries: eclEntries } = readDaxDirectory(eclData);
       const eclById = new Map(eclEntries.map((e) => [e.indexID, e]));
+      // resolveBlock: lets findWallsetBindings chase a level's own NEWECL
+      // (opcode 0x20) targets into a DIFFERENT ECL block when this level's
+      // own reachable code has no wallset-load call of its own — see
+      // goldbox-ecl.ts's `ReachabilityResult.newEclTargets` doc.
+      const resolveBlock = (id: number): Uint8Array | undefined => {
+        const entry = eclById.get(id);
+        return entry ? decompressDaxEntry(eclData, entry).subarray(POR_ECL_PREFIX_LENGTH) : undefined;
+      };
       let levelsWithAnyBinding = 0;
       for (const level of levels) {
         const entry = eclById.get(level.id);
         if (!entry) continue;
         const decoded = decompressDaxEntry(eclData, entry);
         const buf = decoded.subarray(POR_ECL_PREFIX_LENGTH);
-        const { binding } = findWallsetBindings(buf);
+        const { binding } = findWallsetBindings(buf, { base: POR_ECL_ADDR_BASE, resolveBlock });
         const n = (binding.slot1 !== undefined ? 1 : 0) + (binding.slot2 !== undefined ? 1 : 0) + (binding.slot3 !== undefined ? 1 : 0);
         if (n > 0) {
           level.wallsetBinding = binding;

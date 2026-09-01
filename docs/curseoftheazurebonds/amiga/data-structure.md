@@ -241,8 +241,8 @@ NOT catalogued — only their outer GLIB container structure is validated
 ## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
 
 **CONFIRMED for wall/door connectivity and wall-art TYPE selection; the
-final indirection to a real WALLDEF texture id is CONFIRMED for 10/16
-levels via ECL bytecode (see below), STRUCTURAL/placeholder for the rest.**
+final indirection to a real WALLDEF texture id is CONFIRMED for 16/16
+levels via ECL bytecode (see below).**
 16 levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
 Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
 verified via a cross-title shared-wall self-consistency oracle at
@@ -264,16 +264,16 @@ Implementation: `tools/shared/goldbox-geo.ts`; extractor wiring:
 > `docs/goldbox-glib-format.md` §7.2's correction block for the full
 > source-cited derivation.
 
-### 5.1 Wallset-slot binding — CONFIRMED, 10/16 levels (30 slots)
+### 5.1 Wallset-slot binding — CONFIRMED, 16/16 levels (48 slots)
 
 `ECL.GLB` (this title's level-scripting bytecode, same GLIB container,
 `DISKB/ECL.GLB`) statically names which real WALLDEF id occupies each of a
-level's 3 ECL-loaded wallset slots for 10 of Curse's 16 levels (30 slots
-total), via a `LOAD PIECES` (opcode `0x37`) call reached by a worklist-based
-reachability walk from the block's own header addresses. Full VM decode,
-verification oracle, and worked examples (including Curse block 1's
-`{slot1:1, slot2:2, slot3:3}` and block 64's composite-id case):
-`docs/goldbox-glib-format.md` §7.4. Implementation:
+level's 3 ECL-loaded wallset slots for ALL 16 of Curse's levels (48 slots
+total, i.e. every slot on every level), via a `LOAD PIECES` (opcode `0x37`)
+call reached by a worklist-based reachability walk from the block's own
+header addresses. Full VM decode, verification oracle, and worked examples
+(including Curse block 1's `{slot1:1, slot2:2, slot3:3}` and block 64's
+composite-id case): `docs/goldbox-glib-format.md` §7.4. Implementation:
 `tools/shared/goldbox-ecl.ts`, wired via `eclPath: 'DISKB/ECL.GLB'` in
 `tools/curseoftheazurebonds/amiga/export-data.ts` and consumed per-cell by
 `tools/walker/games-goldbox.ts`'s `wallTextureForCell`.
@@ -286,12 +286,12 @@ the two `wallsetCount===2` entries (`14`, `17`), confirming
 multi-wallset entry's span" model from the ECL side, independently of the
 texture-render side that first established it (§3b).
 
-The other 6 levels don't resolve (no `LOAD PIECES` reached from any of the
-5 header addresses via reachability, or a reached call used a
-memory-dereferenced/dynamic operand) — those levels' cells fall back to
-`GoldBoxView`'s existing per-level placeholder texture. Not attempted:
-decoding those levels' full ECL scripts beyond the wallset-slot mechanism
-(explicitly out of scope per this session's brief).
+> **Update (2026-09-01, `re-oracle` escalation):** the original 10/16 count
+> above was an artifact of two missing CFG edges, not a real per-level
+> engine limitation — see `docs/goldbox-glib-format.md` §7.4's "corpus-wide
+> CFG fix" and "NEWECL chaining" entries for the mechanism (a missing
+> IF-false-path skip edge, and cross-block execution handoff via `NEWECL`).
+> With both fixed, every one of Curse's 16 levels resolves all 3 slots.
 
 ## 6. Extractor and outputs
 

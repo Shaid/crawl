@@ -184,21 +184,50 @@ Planes 0/1 (candidate wall-art selectors) remain open, escalated to
 > `docs/goldbox-glib-format.md` §7.2's correction block for the full
 > source-cited derivation.
 
-### 5.1 Wallset-slot binding — OPEN (0/32 levels, genuine engine-revision difference, not a decode bug)
+### 5.1 Wallset-slot binding — CONFIRMED, 32/32 levels (96 slots, full coverage)
 
 `Disk3/ECL.GLB` (same GLIB container, same bytecode VM,
-`tools/shared/goldbox-ecl.ts`) was wired into this extractor (`eclPath`)
-but resolves **0 of 32** levels' wallset slots statically — a real,
-confirmed engine-revision difference, not a gap in the decode. Every
-header entry point resolves in-range and disassembles cleanly (0 unknown
-opcodes), and `LOAD PIECES` (opcode `0x37`) calls ARE found (5 blocks) via
-the worklist-based reachability walk, but every one of them uses a
-memory-dereferenced (dynamic) operand rather than a literal id — Pools of
-Darkness's engine revision computes wallset ids at runtime rather than
-hardcoding them per level. Full writeup and cross-title coverage table:
-`docs/goldbox-glib-format.md` §7.4. Tracked as `pod-wallset-ecl-binding` in
-`docs/poolsofdarkness/TODO.md`. Levels fall back to `GoldBoxView`'s
-existing per-level placeholder texture.
+`tools/shared/goldbox-ecl.ts`) is wired into this extractor (`eclPath`) and
+resolves **all 32 of 32** GEO levels' wallset slots statically (96 slots
+total — every slot on every level).
+
+> **Correction (2026-09-01, `re-oracle` escalation):** the "0/32, genuine
+> engine-revision difference (runtime-computed ids)" verdict this section
+> previously carried was wrong — it was a misparse under the WRONG opcode
+> table. Pools of Darkness runs a v1.3 engine revision whose
+> `SetupCommandTable` registers several opcodes (including the one that
+> matters here) with DIFFERENT operand counts than the other three titles'
+> table. Critically, **wallset loading moved from opcode `0x37` to opcode
+> `0x21`** ("LOAD FILES", 2 operands `(geoId, walldefId)` in this revision
+> — the 2nd operand IS the wallset id, filling ALL 3 runtime slots at once,
+> confirmed against this title's own `WALLDEF.GLB` entries running 15
+> slices, a whole 3-slot x 5-slice wallset per id). Opcode `0x37` in this
+> revision is an unrelated 2-operand NPC-by-name query, not `LOAD PIECES`
+> at all. Parsing with the old (v1.1) table desyncs the byte stream almost
+> immediately, which is why every "hit" it found looked
+> memory-dereferenced — it was reading garbage operand bytes, not a real
+> dynamic operand.
+>
+> Re-derived this session directly from real `Disk3/ECL.GLB` bytes with
+> `OPCODE_TABLE_POOLS_V13` (`tools/shared/goldbox-ecl.ts`) and the `0x21`
+> wallset-load remap: 28/32 GEO levels resolve directly, with resolved ids
+> landing exactly in `{1-6}` (this title's own `WALLDEF.GLB` id space) and
+> clustering thematically by geo id (geo `1`/`16-22` -> walldef `1`,
+> `32-38` -> `2`, `48-50`/`54` -> `3`, `39`/`64-71`/`74` -> `4`,
+> `69`/`81-84` -> `5`, `52-53` -> `6`). The remaining 4 levels (`17`, `49`,
+> `71`, `84`) resolve via a new `NEWECL` (opcode `0x20`) cross-block
+> chaining mechanism in `findWallsetBindings` — each of these levels' own
+> reachable code has no wallset-load call, but DOES contain a `NEWECL`
+> ("switch scripts") instruction targeting a DIFFERENT block that itself
+> resolves cleanly (`17` -> `33`-or-`36`, `49` -> `48`, `71` -> `68`,
+> `84` -> `82`) — that target's own binding becomes the level's real
+> binding, since it's executing that block's own code. This is stronger
+> than a guess: geo `49`'s resolved binding (walldef `3`, inherited from
+> `48`) matches exactly what geo-id-proximity would suggest, but here it's
+> DERIVED from a real VM mechanism rather than inferred from neighbors.
+>
+> Full writeup and cross-title coverage table: `docs/goldbox-glib-format.md`
+> §7.4.
 
 ## 6. Extractor and outputs
 
