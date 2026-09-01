@@ -18,15 +18,66 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | ishar-main-manifest-structure | open | `MAIN.DO`'s content is now fully readable in all 3 Ishar titles (resource manifest + monster roster + level-editor strings — the earlier "Ishar 2/3 don't show readable strings" note was a false negative from checking pre-decompression bytes, corrected this session), but its *binary record structure* (per-scene resource lists as actual records with offsets/counts, not just repeated substrings found via `strings`) is still not decoded | `docs/ishar-container-format.md` §3, `docs/ishar/amigaaga/data-structure.md` §4, `docs/ishar2/amigaaga/data-structure.md` §3, `docs/ishar3/amigaaga/data-structure.md` §2 | 2026-08-30 |
 | ishar-cell-value-semantics | open | The region-grid cell-value alphabet (§9.2: `0x00` void, low codes = terrain/feature, high-bit `0x9D`/`0xCC-0xCE`/`0xE1`/`0xE5-0xE6` = obstacle classes; cells read sign-extended so `< 0` is the natural blocked test — HYPOTHESIS) needs its value→walkability and value→scene-script dispatch decoded (very likely the `cswitch` streams around `MAIN.bin+0x18e8..0x1c74` where all the location `.AO` names sit) | `docs/ishar-container-format.md` §9.2 | 2026-09-01 re-oracle |
 | ishar-fic-semantics | open | Remaining `.FIC` semantics now that the format layer is solved (§9): the role split between the two region-grid buffers (`basemain+0x80` vs `+0x234a` — adjacent-region staging vs pristine-copy both fit the paired reads); `EN1.FIC`'s 28/29 per-array record layouts (sizes byte-exact from bytecode, content undecoded); `TAB1.FIC`'s 19×19 {1..4} grid's role; Ishar 2/3's second grid layer's meaning | `docs/ishar-container-format.md` §9.1-9.3 | 2026-09-01 re-oracle |
-| ishar-alis-bytecode-disassembler | open | Build a real ALIS bytecode disassembler as a committed tool (`tools/shared/alis-disasm.ts`): the full operand grammar is mechanically derivable from `maestun/alis`'s `opcodes.c`/`opernames.c`/`storenames.c`/`addnames.c` (one 256-entry opcode table, version differences inside handlers; expression streams self-delimiting via `oeval`/`ofin`). Hand-decoding small windows was enough for §9, but the cell-value dispatch, scene compositor logic, and sprite-palette selection all want proper stream walking | `docs/ishar-container-format.md` §9.1 (worked hand-decode examples) | 2026-09-01 re-oracle |
 | ishar-sprite-palette | open | The real AGA colour palette for decoded sprites (§7/`docs/ishar-sprite-format.md`) is not yet recovered — `topalette()` resolves a palette resource via the same `adresdes()` directory mechanism as bitmaps, but the specific directory INDEX that is "the palette for this scene" is chosen by VM bytecode at runtime, not by any static marker. All shipped sprite renders are greyscale (RENDERED, not CONFIRMED colour) | `docs/ishar-sprite-format.md` §5 | 2026-08-31 |
 | ishar-scene-header-subtype-byte | open | The shared 16-byte scene header (§6's evidence) has a varying byte at offset 21 (`0x0a` graphics/Ishar-1 caves, `0x47` Ishar-2 dungeon files, `0x1e` a third subgroup) that looks like a content-subtype discriminator — not traced to any consumer code. (Note: this header is the ALIS *script* header — `id@0`, `code_loc@+4`→bytecode entry, `dirOff@+0x0e` — per §9's `script.c` layout, so the "subtype byte" is a script-header field, likely `vram_alloc`-adjacent) | `docs/ishar-container-format.md` §6, §9 | 2026-09-01 re-oracle |
-| ishar-walker-topdown-only | open | `tools/walker/games-ishar.ts` (built this session) renders the CONFIRMED top-down `CONT*.FIC` region grid for Ishar 1/2/3, NOT a first-person view — the actual first-person mechanism (generic VM sprite/scene compositing keyed by cell value, §9's premise-correction finding) is not decoded to the point of rendering a frame. Walkability is the HYPOTHESIS-level `isBlocked()` rule (see `ishar-cell-value-semantics`), independently re-verified this session only as "produces a coherent, non-random render" — not as a traced collision-check opcode | `docs/ishar-container-format.md` §9, `tools/walker/games-ishar.ts` module doc | 2026-09-01 |
+| ishar-firstperson-generalize | open | The first-person renderer (§8.2) only executes ONE script pair (`FORET.bin`+`FOND.bin`, Ishar 1 `CONT1`) — `VILLAGE.bin` shares the identical facing/ring-loop shell but its `cswitch2` cell-value dispatch wasn't resolved/tested; `TEMPLE`/`RAMPART`/`PLAINE` and cave/dungeon scripts weren't attempted; Ishar 2/3 global offsets weren't re-derived; `ORC.bin` (monster placement) deliberately not wired (no real per-frame encounter data to drive it honestly) | `docs/ishar-container-format.md` §8.2 "Not generalized this session" | 2026-09-01 |
+| ishar-firstperson-backdrop-anchor | open | `FOND.bin`'s backdrop-panel anchor/tiling/parallax convention is UNVERIFIED against any real screenshot — panels resolve to large (up to 96×85px) composites anchored base-at-horizon, plausible as "distant hill/cloud silhouette" but two panels don't tile to cover the full 255px screen width, leaving flat placeholder sky visible at the frame edges (may be correct, may indicate a missing repeat rule) | `docs/ishar-container-format.md` §8.2 | 2026-09-01 |
+| ishar-greyscale-atlas-normalize | open | The already-shipped sprite atlas (`ishar-sprite-atlas.ts`) still uses the fixed-0-255-scale `isharBitmapToGreyscaleRGBA()`, which silently renders any bitmap with `palOffset` above ~40 as a near-flat block even though the real decoded indices vary normally (confirmed via a histogram on two `FOND.bin` sprites this session). A per-bitmap-normalized version now exists (`isharBitmapToNormalizedGreyscaleRGBA()`) and is used by the first-person renderer, but the corpus-wide atlas pipeline was not re-run with it | `tools/shared/ishar-sprites.ts` module doc | 2026-09-01 |
 | ishar-t3-crystals-executable-trace | deferred | Ishar 3's `START` and Crystals' `T.X` were not disassembled this pass (only Ishar 1's `T.X` was traced) — the `0xA1`/`0x81` codec port is now verified corpus-wide by output self-consistency + readable content instead, which is strong enough evidence to not require this, but a direct trace on a second title's executable would still strengthen the "one shared codec" claim further | `docs/ishar-container-format.md` §1, §2.5 | 2026-08-30 |
 | crystals-carte-array-role | open | `CARTE.CO`'s two confirmed 8-element scratch arrays (`0x3c`/`0x46`) match the 8 confirmed UI strings `JON/ZACH/IRVAN/AKEER/OLBAR/THORM/ALL/NONE` in count+order (STRUCTURAL), but which array means "currently selected" vs. some other axis, and what index 0's un-written default value really is, is not decoded | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
 | crystals-carte-destination-mechanism | open | The real "travel to a location" mechanism: a confirmed consumer region hit-tests the 8 checklist rows (`cftstset`+"forme" collision test) and calls `clive` (load-and-run-another-script-by-id) on confirmation, but the literal script id(s) `clive` loads, and any per-location map hotspot/placement table (for "click a place on the map"), were not found this session | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
 
 ## Session log
+
+- **2026-09-01 (ninth pass — first-person renderer implemented: ONE Ishar 1
+  location working end-to-end, real ALIS bytecode executed)**: Following
+  §8/§8.1's finding that a location script's own compiled bytecode IS the
+  first-person renderer, built the minimum tooling to actually run one and
+  produce real frames. New: `tools/shared/alis-disasm.ts` (a real, general
+  ALIS bytecode disassembler — closes `ishar-alis-bytecode-disassembler`,
+  verified 256/256 instructions against a prior session's hand-checked
+  `foret.dis` reference disassembly, 0 diffs), `tools/shared/alis-interp.ts`
+  (a scoped interpreter that executes a script's placement logic against
+  real region-grid + party-pose inputs), `tools/shared/ishar-firstperson.ts`
+  (orchestration: runs `FOND.bin`+`FORET.bin`, resolves placements through
+  the already-confirmed sprite directory, composites a frame), and
+  `tools/shared/ishar-script-export.ts` + `tools/ishar/amigaaga/scripts.ts`
+  (ships the two scripts' decompressed bytes as browser-fetchable binary
+  assets, sidestepping `silmarils-unpack.ts`'s Node-`Buffer` dependency in
+  the browser). Found and fixed 3 real bugs while diffing against the
+  reference disassembly (`cswitch1`/`cswitch2` target address off by 2,
+  their "no-match" fallthrough address captured before vs. after the jump
+  table, `oimmb`/`oimmw` needing sign-extension unlike structurally similar
+  address-operand tokens) plus one empirically-derived finding (the raw
+  facing byte is `compassIndex + 1`, not `compassIndex`) and one corrected
+  byte-offset transcription from the original `re-oracle` brief (Ishar 1's
+  `cscreen 0x000e` field offsets — values were right, positions were off by
+  a constant 5). Also found and fixed a real VISUALIZATION bug (not a
+  decode bug) in the already-shipped `isharBitmapToGreyscaleRGBA()`: its
+  fixed 0-255 grey scale silently renders any `palOffset`-shifted bitmap as
+  a near-flat block; added `isharBitmapToNormalizedGreyscaleRGBA()`
+  (per-bitmap min-max stretch) and used it in the new renderer (new open
+  row `ishar-greyscale-atlas-normalize` for applying it corpus-wide).
+  Verified: disassembly match (above); numeric sanity (depth/elevation/LOD
+  values all in-range and matching independently-derived formulas); real
+  position-and-facing-responsive behaviour (9-21 placements varying across
+  4 test poses, and a closer-vs-farther pose pair showing the expected
+  taller/more-prominent near silhouette); visual inspection via `Read`
+  (greyscale, no palette) shows a coherent three-band outdoor scene —
+  honestly characterized as stylized/textured bands, not individually
+  legible tree sprites. Wired into `tools/walker/games-ishar.ts`: a `KeyF`
+  toggle switches Ishar 1's `CONT1` region between the existing top-down
+  view (unchanged default, and still the ONLY view for every other
+  region/game) and the new first-person render, cached by pose and
+  recomputed only on movement. `npx tsc --noEmit -p .`/`npx eslint` clean
+  on all new/changed files; `npm test` (370 tests) unaffected; a live
+  browser check was NOT performed (no Playwright install available, and
+  installing one was out of scope — package.json edits were disallowed
+  this session). Closed `ishar-alis-bytecode-disassembler` and
+  `ishar-walker-topdown-only` (superseded by the two new, narrower rows
+  below). New rows: `ishar-firstperson-generalize`,
+  `ishar-firstperson-backdrop-anchor`, `ishar-greyscale-atlas-normalize`.
+  Full evidence: `docs/ishar-container-format.md` §8.2.
 
 - **2026-09-01 (eighth pass — Crystals of Arborea's `CARTE.CO` overworld
   cracked: no region grid, no destination graph — a party-roster bytecode

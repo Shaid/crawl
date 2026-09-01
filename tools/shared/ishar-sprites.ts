@@ -69,6 +69,17 @@
  * palette resource itself — see the doc's "Open" section). Every render
  * this module produces is therefore RENDERED/greyscale, not CONFIRMED
  * colour.
+ *
+ * Visualization caveat found this session: `isharBitmapToGreyscaleRGBA()`'s
+ * fixed 0-255 scale silently renders any bitmap whose real index range sits
+ * in a narrow `palOffset`-shifted band (common for `palOffset` > ~40) as a
+ * near-flat block, even though the underlying decode is fine and the real
+ * indices vary normally — see `isharBitmapToNormalizedGreyscaleRGBA()`'s doc
+ * comment for the confirming histogram. The already-shipped sprite atlas
+ * (`ishar-sprite-atlas.ts`) still uses the fixed-scale function and was NOT
+ * re-rendered this session (out of scope for the first-person-view task that
+ * found this) — a corpus-wide re-check of the atlas with the normalized
+ * function is a plausible, undone follow-up.
  */
 
 export type IsharBitmapType = 0x00 | 0x02 | 0x10 | 0x12 | 0x14 | 0x16;
@@ -228,6 +239,49 @@ export function isharBitmapToGreyscaleRGBA(bmp: IsharBitmap): Uint8Array {
     const idx = bmp.indices[i];
     const transparent = bmp.masked && idx === 0;
     const grey = idx === 0 ? 0 : Math.min(255, 40 + Math.round((idx / 255) * 200));
+    rgba[i * 4] = grey;
+    rgba[i * 4 + 1] = grey;
+    rgba[i * 4 + 2] = grey;
+    rgba[i * 4 + 3] = transparent ? 0 : 255;
+  }
+  return rgba;
+}
+
+/**
+ * Same as `isharBitmapToGreyscaleRGBA()`, but min-max-stretches the grey
+ * value against the bitmap's OWN observed non-transparent index range
+ * instead of a fixed 0-255 scale. `isharBitmapToGreyscaleRGBA()`'s fixed
+ * scale assumes the raw index spans close to the full 0-255 range; for a
+ * 4-bit bitmap with a non-zero `palOffset` bank (`palOffset + nibble`,
+ * nibble 1-15), the real value range is a ~15-wide band positioned
+ * anywhere in 0-255 (e.g. `palOffset=86` -> indices 87-101), which the
+ * fixed scale compresses into a handful of adjacent grey levels -- real
+ * internal structure becomes visually indistinguishable from a flat block
+ * even though the underlying decoded indices vary normally (confirmed via
+ * a raw index histogram on two `FOND.bin` backdrop sprites this session:
+ * 9 distinct values, well-distributed, silently rendered near-flat by the
+ * fixed-scale function). Use this whenever a render needs to be visually
+ * legible for verification purposes (Method §3); use the fixed-scale
+ * version when comparing greyscale levels ACROSS different bitmaps needs
+ * to stay meaningful (e.g. the shared sprite atlas, unchanged here to avoid
+ * altering its already-shipped output as a side effect of an unrelated
+ * task -- see `docs/ishar-sprite-format.md`'s Open section for the
+ * generalized version of this finding).
+ */
+export function isharBitmapToNormalizedGreyscaleRGBA(bmp: IsharBitmap): Uint8Array {
+  let min = 255;
+  let max = 0;
+  for (const idx of bmp.indices) {
+    if (bmp.masked && idx === 0) continue;
+    if (idx < min) min = idx;
+    if (idx > max) max = idx;
+  }
+  const span = Math.max(1, max - min);
+  const rgba = new Uint8Array(bmp.width * bmp.height * 4);
+  for (let i = 0; i < bmp.indices.length; i++) {
+    const idx = bmp.indices[i];
+    const transparent = bmp.masked && idx === 0;
+    const grey = transparent ? 0 : Math.round(30 + ((idx - min) / span) * 210);
     rgba[i * 4] = grey;
     rgba[i * 4 + 1] = grey;
     rgba[i * 4 + 2] = grey;

@@ -577,6 +577,178 @@ field-offset evidence from §8. Result pending; see
 > break the wall (though §9 shows a minimal hand-decode of a few opcode
 > streams, which proved cheap and decisive once aimed at the right target).
 
+### 8.2 Implementation pass (2026-09-01) — ONE location script executed end-to-end, real first-person frames produced
+
+Following §8/§8.1's finding that each location script's own compiled ALIS
+bytecode IS the first-person renderer, this pass built the minimum tooling
+to actually execute one and render a frame, and wired it into
+`tools/walker/games-ishar.ts` behind a toggle. Honest scope: this is **one
+script pair, one region, Ishar 1 only** — see the "Not generalized" list
+below.
+
+**New tooling** (all `tools/shared/`):
+
+- `alis-disasm.ts` — a structured ALIS bytecode disassembler (CFG worklist,
+  mirroring `goldbox-ecl.ts`'s pattern). Decodes the full OPERNAMES/
+  STORENAMES/ADDNAMES token space and ~150 opcodes from `opcodes.c`.
+  **CONFIRMED**: disassembling `FORET.bin` reproduces a prior session's
+  hand-verified reference disassembly (`foret.dis`, from the `re-oracle`
+  escalation) **256/256 instructions, 0 diffs, 0 missing**.
+- `alis-interp.ts` — a SCOPED interpreter (not general-purpose — control
+  flow, EVAL-step arithmetic/comparison, `cswitch1`/`cswitch2` dispatch, and
+  the three placement opcodes `cput`/`cputnat`/`cxputat` only; every other
+  opcode is an explicit no-op) that actually *executes* a script's
+  per-frame placement logic against real inputs (region-grid cells, party
+  globals) via a small `SceneEnv` callback interface. Also ports
+  `putin()`'s composite-sprite-record recursion (`resolveIsharComposite()`):
+  a bitmap-header type byte `> 0x80` (except `0xfe` = palette install)
+  means `count = byte[1]` followed by `count` × 8-byte
+  `[elem:u16 BE (bit15 = horizontal-mirror), dx:s16, dy:s16, dz:s16]`
+  records, resolved recursively.
+- `ishar-firstperson.ts` — orchestration: builds a `SceneEnv` over Ishar 1's
+  confirmed globals, runs `FOND.bin` (backdrop) then `FORET.bin` (forest)
+  through the interpreter, resolves every placement's `idx` through the
+  script's own resource directory (`ishar-sprites.ts`, already CONFIRMED),
+  sorts far-to-near, and composites a flat RGBA frame.
+- `ishar-script-export.ts` + `tools/ishar/amigaaga/scripts.ts` — ships
+  `FORET.bin`/`FOND.bin`'s DECOMPRESSED bytes as
+  `public/assets/ishar/amigaaga/scripts/{foret,fond}.bin`, so the browser
+  walker can `fetch()` already-decoded bytes rather than run
+  `silmarils-unpack.ts` client-side (that module uses Node's `Buffer`
+  internally, unpolyfilled in this project's `vite.config.ts`). **Not**
+  wired into `package.json` (out of scope this session) — run directly via
+  `npx tsx tools/ishar/amigaaga/scripts.ts`. Verified byte-identical to the
+  already-decompressed `build/cache/ishar/amigaaga/decompressed/*.bin`
+  copies produced by the existing `ishar:decompress` step.
+
+**Findings that corrected/refined the original `re-oracle` brief**, each
+found by diffing against `foret.dis` or by numeric sanity-checking the
+interpreter's output:
+
+1. **`cswitch1`/`cswitch2` jump-table entries decode with the target
+   computed as `here + 2 + rel`, not `here + rel`** (`here` = the address
+   *after* reading the 16-bit relative field). Missing the `+2` shifted
+   every dispatch target by exactly 2 bytes low.
+2. **A cswitch's own "no-match" fallthrough address must be captured AFTER
+   decoding the whole entry table, not before.** Capturing it first points
+   into the middle of the raw jump-table bytes (interpreted as bogus
+   opcodes downstream) rather than past the table's end.
+3. **The raw party-facing byte at `basemain+0x137e` is `compassIndex + 1`,
+   not `compassIndex` directly** — `FORET.bin`'s own `cswitch2` dispatch
+   uses `index = value + base` with `base = -1`, so `value=0` (a naive
+   "north=0" encoding) resolves to `index=-1` (out of range, silently no
+   match) while `value=1` correctly lands on slot 0. Empirically derived
+   by noticing `facing=0` produced zero placements.
+4. **`oimmb`/`oimmw` operand tokens hold SIGNED literal values (sign-extend
+   on decode); structurally identical-shaped tokens for other opnames
+   (`odirb`, `omainb`, etc.) are UNSIGNED address/offset operands and must
+   NOT be sign-extended.** Missing this made a `-1` loop-decrement literal
+   read as `+255`, breaking the ring/lateral clamp loop's termination
+   (interpreter hit its step budget with zero placements). Fixing it also
+   retroactively corrected the per-ring elevation constants: the real
+   values are `-34, -23, -14, -8, -4, -1` for rings 1-6 (monotonically
+   converging toward the horizon with distance), not large positive values
+   as an unsigned reading would suggest.
+5. **Ishar 1's game-screen (`cscreen 0x000e`) field offsets, re-derived
+   directly from `MAIN.bin`'s own `cdefsc` bytecode**: `xCenter=127`,
+   `horizonY=86`, `width=255`, `height=125` at config-block offsets
+   `+4:6`/`+6:8`/`+0xc:0xe`/`+0xe:0x10` respectively. This corrects the
+   originating `re-oracle` brief's cited offsets (`+0xa`/`+0xc`/`+0x12`/
+   `+0x14`), which were off by a constant 5 against the same 32-byte
+   block — the VALUES the brief cited (127/86/255/125) were already
+   correct, only the byte positions were wrong.
+6. **A real visualization bug, not a decode bug, in the already-shipped
+   `isharBitmapToGreyscaleRGBA()`** (`ishar-sprites.ts`): its fixed
+   0-255 grey scale silently renders any bitmap whose real palette-index
+   range sits in a narrow `palOffset`-shifted band (common for `palOffset`
+   above ~40) as a near-flat block. Confirmed via a raw index histogram on two
+   `FOND.bin` sprites: 9 distinct values, well-distributed, rendered
+   visually flat by the fixed-scale function. Added
+   `isharBitmapToNormalizedGreyscaleRGBA()` (per-bitmap min-max stretch)
+   and used it in the first-person renderer; the existing sprite-atlas
+   pipeline (`ishar-sprite-atlas.ts`) still uses the fixed-scale function
+   unchanged (a corpus-wide re-check with the normalized version is a
+   plausible, undone follow-up — see `docs/ishar/TODO.md`).
+
+**Verification (this session)**:
+
+- Disassembly: 256/256 instruction match against `foret.dis` (see above).
+- Numeric sanity: for a real `CONT1` position/facing, the interpreter
+  produces 9-21 placements (varies by pose) with depth values matching
+  `ring * 99` for rings 3-6, elevation matching the corrected per-ring
+  table, and LOD sprite indices matching the confirmed `baseSlot + (ring-1)`
+  convention — all non-degenerate, in-range values.
+- Behavioral: placement count varies across 4 different party
+  positions/facings (21/12/16/19), and between two positions at the same
+  facing but different depth (15 far vs. 19 near, with the near render's
+  foreground silhouette visibly taller/more prominent) — a real, position-
+  and-facing-responsive render, not a static image.
+- Visual (via `Read`, greyscale, no palette): frames show a coherent
+  three-band composition — flat placeholder sky, a textured backdrop layer
+  (real decoded `FOND.bin` content, once the greyscale bug above was fixed)
+  sitting at the horizon, and a dense foliage/tree-line texture band along
+  a flat placeholder ground colour. This reads as an **abstract, stylized
+  outdoor scene** (recognizable sky/ground/foliage-texture bands that
+  respond correctly to movement) rather than crisp, individually-legible
+  tree sprites — an honest characterization, not "confirmed photorealistic
+  trees." The backdrop layer's real anchor/tiling convention against a real
+  screenshot is UNVERIFIED (see below).
+
+**RENDERED / HYPOTHESIS, not CONFIRMED**:
+
+- The placeholder sky (flat blue) / ground (flat green) fill colours — no
+  real AGA palette has been recovered for this engine (see `ishar-sprite-
+  format.md`'s open item); these are arbitrary, clearly-labelled-as-such
+  placeholder colours chosen for visual legibility during verification.
+- The sprite anchor convention (`pixelX` = sprite horizontal centre,
+  `pixelY` = sprite BASE/bottom edge — "billboard standing on the ground").
+  Plausible and used consistently, but never checked against a real
+  screenshot or emulator capture.
+- `FOND.bin`'s real tiling/parallax/anchor behaviour. Its composite
+  placements resolve to large panels (up to 96x85px against a 255x125px
+  screen) anchored at the horizon extending upward — visually plausible as
+  "cloud/hill silhouette above the treeline" but not confirmed; two panels
+  don't tile to cover the full screen width, leaving flat sky visible at
+  the frame edges (may be correct — genuinely open sky in those
+  directions — or may indicate a missing tiling/repeat rule).
+
+**NOT generalized this session** (deliberately, per the task's "don't force
+false generality" instruction):
+
+- `VILLAGE.bin` shares `FORET.bin`'s facing/ring-loop shell byte-for-byte
+  (including the whole per-ring elevation/scale constant table) but
+  dispatches its cell value via `cswitch2` rather than `cswitch1`; the
+  interpreter handles both dispatch shapes, but VILLAGE's specific
+  cell-value-to-content mapping was not resolved or tested end-to-end.
+- `TEMPLE.bin`/`RAMPART.bin`/`PLAINE.bin` and any cave/dungeon location
+  scripts (a materially different indoor shape) were not disassembled or
+  tested at all.
+- `ORC.bin` (monster placement) was deliberately NOT wired into the
+  renderer — there is no real on-disk encounter/instance-position data to
+  drive it honestly for a specific frame; fabricating a monster placement
+  would violate this project's no-fabrication rule.
+- Ishar 2/3: their `cscreen 0x000e` constants were opportunistically noted
+  from `main2.dis`/`main3.dis` (`xCenter=127, horizonY=78, width=255,
+  height=112` for both) but their global-variable offsets (party
+  position/facing, location type) were not re-derived, and no script was
+  tested.
+
+**Walker integration**: `tools/walker/games-ishar.ts`'s `IsharView` gained
+a `firstPersonAvailable` getter (true only for `game==='ishar'` and region
+`CONT1`, with `FORET.bin`/`FOND.bin` fetched successfully) and a `KeyF`
+toggle between the existing top-down view (default, all other
+games/regions) and the new first-person render. The first-person frame is
+cached by `(x, y, facing)` and only recomputed when the party actually
+moves. Existing WASD movement is unchanged (grid-quantized, absolute
+N/E/S/W) — pressing a direction key both turns to face it and steps, which
+already satisfies "turning changes the view" / "walking changes depth"
+without inventing a separate first-person control scheme. **Not
+independently verified in a live browser** (no Playwright install was
+available this session and installing one would have required editing
+`package.json`, out of scope) — the plumbing (`fetch`, `ImageData`,
+`drawImage`) is thin, `tsc`/`eslint` clean, and wraps the Node-side-verified
+`renderIsharForestFrame()` unchanged.
+
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 
 Found by the 2026-09-01 `re-oracle` pass. The actual walkable-world data
