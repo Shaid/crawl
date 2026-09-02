@@ -42,6 +42,7 @@ from kyralib.items import parse_item_dat, parse_itemtype_dat, item_dat_to_json, 
 from kyralib.decorations import parse_dec, dec_to_json
 from kyralib.dcr import parse_dcr, dcr_to_json
 from kyralib.textdat import parse_text_dat
+from kyralib.inf import parse_inf2_sublevels
 
 GAME = 'eotb2'
 PLATFORM = 'dosvga'
@@ -50,11 +51,74 @@ WALL_SETS = ['AZURE', 'CRIMSON', 'DUNG', 'FOREST', 'MEZZ', 'SILVER']
 
 # No CPS in this corpus names its own default UI/menu palette identically;
 # PALETTE0.PAL was found empirically to render DARKMOON.CPS (the "Legend of
-# Darkmoon" title screen) and other non-wall-set screens correctly.
+# Darkmoon" title screen) and other non-wall-set screens correctly. Still
+# the right fallback for genuine UI/menu/item CPS files -- but was
+# previously (wrongly) also the fallback for every monster CPS with no
+# name-matched .PAL, which produced garish, level-palette-mismatched
+# colours (confirmed visually: ant.png, basilisk.png, beholder.png all
+# rendered with electric-blue/purple/red colours before this fix). See
+# `build_monster_wallset_palette` and docs/eotb2/dosvga/data-structure.md
+# § "Palette resolution (per-CPS)".
 DEFAULT_PALETTE = 'PALETTE0.PAL'
 
+NUM_LEVELS = 16
 
-def find_palette_for(base: Path, stem: str) -> bytes | None:
+
+def build_monster_wallset_palette(base: Path) -> dict[str, str]:
+    """{MONSTER_CPS_STEM (uppercase): PALETTE_STEM (uppercase, no ext)} --
+    EOB2 port of EOB1's `build_monster_wallset_palette`
+    (`extract_eotb_dosvga.py`): a monster CPS is composited over the
+    already-loaded dungeon view, so its real in-game palette is whatever
+    wall-set `.PAL` is active for the level it appears on, not a name
+    match on the monster's own stem (none of these files have one) or the
+    game-wide UI fallback.
+
+    Reads every `LEVELn.INF`'s **full sub-level chain**
+    (`kyralib.inf.parse_inf2_sublevels` -- EOB2-specific: different header
+    offsets from EOB1, plus a sub-level chaining mechanism this session
+    found is genuinely used -- several real monster CPS stems, including
+    `ant`, only appear in a level's *second* sub-level block, which a
+    naive sub==0-only header parse misses entirely). For each sub-level,
+    the palette a monster resolves to is `secondWallSetStem` when present
+    (the LEVEL10-14 AZURE override -- see "INF -- Level configuration"),
+    else `wallSetStem`.
+
+    Verified against all 16 real `LEVELn.INF` files: 29 distinct monster
+    stems resolve (up from 24 using sub==0 alone), each to exactly one
+    palette stem, **except `cleric1`** which appears on both LEVEL5
+    (`mezz`) and LEVEL8's second sub-level (`silver`) -- the one case
+    where EOB2 breaks EOB1's "no monster reused across two wall sets"
+    invariant. First-occurrence-wins (level order, then sub-level order)
+    is used as the tie-break, so `cleric1` resolves to `mezz`; documented
+    here as an acknowledged, deliberate choice rather than silently
+    picking one."""
+    mapping: dict[str, str] = {}
+    for level in range(1, NUM_LEVELS + 1):
+        inf_path = base / f'LEVEL{level}.INF'
+        if not inf_path.exists():
+            continue
+        try:
+            sublevels = parse_inf2_sublevels(inf_path.read_bytes())
+        except Exception:
+            continue
+        for sub in sublevels:
+            palette_stem = (sub.second_wall_set_stem or sub.wall_set_stem).upper()
+            for stem in sub.monster_stems:
+                key = stem.upper()
+                mapping.setdefault(key, palette_stem)  # first occurrence wins
+    return mapping
+
+
+def find_palette_for(base: Path, stem: str, monster_wallset: dict[str, str] | None = None) -> bytes | None:
+    monster_wallset = monster_wallset or {}
+    if stem.upper() in monster_wallset:
+        pal_name = f'{monster_wallset[stem.upper()]}.PAL'
+        cand = base / pal_name
+        if cand.exists():
+            return cand.read_bytes()
+        # Fall through to the ordinary lookup if the mapped wall-set
+        # somehow has no .PAL on disk (shouldn't happen in this corpus --
+        # all 6 wall-set stems the mapping can produce have one).
     for ext in ('PAL',):
         cand = base / f'{stem}.{ext}'
         if cand.exists():
@@ -77,7 +141,8 @@ def extract_palettes(base: Path):
     return written
 
 
-def extract_cps_screens(base: Path):
+def extract_cps_screens(base: Path, monster_wallset: dict[str, str] | None = None):
+    monster_wallset = monster_wallset or {}
     written = 0
     skipped = []
     for path in sorted(base.glob('*.CPS')):
@@ -94,7 +159,7 @@ def extract_cps_screens(base: Path):
         if header.pal_size:
             rgb = vga_palette_to_rgb(header.palette)
         else:
-            pal_bytes = find_palette_for(base, path.stem)
+            pal_bytes = find_palette_for(base, path.stem, monster_wallset)
             if pal_bytes is None:
                 skipped.append((path.name, 'no palette found'))
                 continue
@@ -237,7 +302,10 @@ def main():
     n_pal = extract_palettes(base)
     print(f'Palettes: {n_pal}')
 
-    n_cps, skipped = extract_cps_screens(base)
+    monster_wallset = build_monster_wallset_palette(base)
+    print(f'Monster CPS -> wall-set palette mappings: {len(monster_wallset)}')
+
+    n_cps, skipped = extract_cps_screens(base, monster_wallset)
     print(f'CPS screens: {n_cps} (skipped {len(skipped)})')
     for name, reason in skipped[:20]:
         print(f'  skip {name}: {reason}')

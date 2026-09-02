@@ -356,6 +356,7 @@ const GAMES = [
   { id: 'mm3', label: 'Might & Magic III', loader: loadMM3View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'eotb', label: 'Eye of the Beholder', loader: loadEotb1View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
+  { id: 'eotb2amiga', label: 'Eye of the Beholder II (Amiga)', loader: loadEotb2View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'poolofradiance', label: 'Pool of Radiance', loader: loadPoolOfRadianceView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
@@ -389,6 +390,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
+  eotb2amiga:
+    "same game as 'eotb2' (DOS/VGA), a genuinely different Amiga port -- .VCN/.CPS are LCW-compressed Amiga 5-bitplane graphics (EOB1-Amiga's own encoding) wrapped in EOB2's own container/.INF header shape; .VMP/.MAZ/.INF record layout and .DEC/.DCR are confirmed byte-identical (or byte-identical container) to the DOS port, so this reuses the DOS walker's renderer/loader code unmodified against Amiga-decoded JSON assets -- see docs/eotb2/amiga/data-structure.md. All 16 levels export and render (wall geometry, decorations, and the LEVEL10-14 mezz+azure palette-override bundle all confirmed); item/monster stat tables (ITEM.DAT/ITEMTYPE.DAT) not yet decoded for this platform.",
 };
 
 /**
@@ -416,7 +419,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'mm2') return mmLevelLists.mm2();
   if (game === 'mm3') return mm3LevelList();
   if (game === 'eotb') return eotbLevelList(assetBase);
-  if (game === 'eotb2') return eotb2LevelList(assetBase);
+  if (game === 'eotb2' || game === 'eotb2amiga') return eotb2LevelList(assetBase);
   if (game === 'landsoflore') return landsofloreLevelList(assetBase);
   if (game === 'ishar') return isharLevelLists.ishar();
   if (game === 'ishar2') return isharLevelLists.ishar2();

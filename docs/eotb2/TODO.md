@@ -5,13 +5,118 @@ Single status surface for EOB2. See `docs/eotb2/dosvga/data-structure.md`
 (internet research — superseded wherever the two differ) for full
 evidence. This file is pointers only.
 
-Note: `data/eotb2/amiga/` (with `Manual/`, `Maps/`, `Solution/` reference
-material) was not touched this session — DOS/VGA was the priority per the
-task brief. An Amiga EOB2 doc/extractor is future work, not yet started.
+See `docs/eotb2/amiga/data-structure.md` for the Amiga port (solved
+2026-09-02 — container/VCN/CPS/VMP/MAZ/PAL/INF/DEC/DCR/ITEM.DAT/
+ITEMTYPE.DAT/TEXT.CPS all confirmed, 16/16 levels walkable in the browser
+walker as `eotb2amiga`).
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| eotb2-amiga-not-started | deferred:out-of-scope | `data/eotb2/amiga/` (incl. Manual/Maps/Solution reference material) not yet reverse-engineered — DOS/VGA was this session's priority | (no doc yet) | 2026-08-02 game-re |
+| eotb2-amiga-finale-pal | open | `FINALE.PAL` (384B = 6x64B palettes) not wired up — format obvious from the single-palette `.PAL` reader, just not decoded | `amiga/data-structure.md` § "Not extracted this session" | 2026-09-02 game-re |
+| eotb2-amiga-levelstmp | open | `LEVELS.TMP` (36,210B, same size as DOS's own but not byte-identical) — likely a savegame/scratch buffer, format not decoded | `amiga/data-structure.md` § "Not extracted this session" | 2026-09-02 game-re |
+| eotb2-amiga-exe-disasm | deferred:not-needed | `EOBII` executable never disassembled — every finding this session came from corpus byte inspection + ScummVM source, not runtime tracing; only matters if a future item needs a runtime oracle | `amiga/data-structure.md` § "Not extracted this session" | 2026-09-02 game-re |
+| eotb2-dos-monster-cps-palette-remaining | open | 7 of 36 monster-shaped CPS files (`MMOUTH1`/`2`, `STONEGIA`, `TANGLOR`, `AIRSEAL`, `BADMOOD`, `CRIMRING`) aren't referenced by any `LEVELn.INF` monster-shape slot on any sub-level — still use the `PALETTE0.PAL` fallback, not confirmed correct | `dosvga/data-structure.md` § "Palette resolution (per-CPS)" → Correction block | 2026-09-02 game-re |
+| eotb2-dos-inf-sublevel-decoration-coverage | open | `.INF` sub-level chaining (found this session, `scripts/kyralib/inf.py::parse_inf2_sublevels`) is only ported far enough to reach monster-shape slots; `tools/eotb2/decode-inf.ts`'s wall-decoration renderer (`resolveWallDecorationAssignments`) stays sub==0-scoped, so it's unknown whether real decoration assignments exist only in a level's later sub-levels | `dosvga/data-structure.md` § "INF — Level configuration" → "Sub-level chaining" | 2026-09-02 game-re |
+
+## Closed this session (2026-09-02, EOB2 DOS/VGA — monster CPS palette fix)
+
+Closed `eotb2-dos-cps-palette-heuristic`'s remaining monster-art gap
+(previously narrowed but not closed — see that item below). A confirmed,
+real colour bug: monster CPS screens (`ant.png`, `basilisk.png`,
+`beholder.png`, etc.) rendered with garish, level-palette-mismatched
+colours under the `PALETTE0.PAL` (menu/UI) fallback. Ported EOB1's
+`build_monster_wallset_palette` pattern
+(`scripts/extract_eotb_dosvga.py`) to EOB2: a monster CPS is composited
+over the already-loaded dungeon view, so its real palette is whatever
+wall-set `.PAL` is active for the level it appears on. Found and used a
+genuinely new mechanism along the way — EOB2 `.INF` files chain to a
+second (sometimes third+) "sub-level" block-properties record, which
+`tools/eotb2/decode-inf.ts`'s existing parser explicitly scopes out
+(sub==0 only); several real monster stems (`ant` among them) live only in
+a level's second sub-level. New `scripts/kyralib/inf.py::
+parse_inf2_sublevels` walks the full chain. **Verified**: 29/36
+monster-shaped CPS files now resolve to a real, INF-derived wall-set
+palette (up from 0); `ant.png`/`basilisk.png`/`beholder.png` and 5 more
+spot-checked by `Read`-ing the regenerated PNGs directly, all now
+coherent (dark-red ants, tan basilisk, brown beholder, blue-grey spider,
+a red dragon with a fire-breath frame, grey wolf, a silver-armoured
+guard). One conflict found and documented (`cleric1` appears on two
+different wall sets; resolved first-occurrence-wins). Also fixed an
+unrelated pre-existing `ImportError` (`kyralib.items` was missing
+`item_dat_to_json`/`itemtype_dat_to_json`, which `extract_eotb2_dosvga.py`
+already imported — blocked the extractor from running at all) by adding
+the two small JSON-shape adapters. See `dosvga/data-structure.md` §
+"Palette resolution (per-CPS)" → Correction block and § "INF — Level
+configuration" → "Sub-level chaining".
+
+## Closed this session (2026-09-02, EOB2 Amiga — full container/format survey + walkable levels)
+
+Closed `eotb2-amiga-not-started`. First real pass at `data/eotb2/amiga/`
+(previously untouched, `deferred:out-of-scope`). Confirmed the predicted
+"EOB1-Amiga encoding x EOB2-DOS mechanism" hybrid holds for `.VCN`/`.CPS`/
+`ITEM.DAT`/`ITEMTYPE.DAT`, but **not uniformly**: `.VMP` matches EOB2 DOS's
+encoding too (little-endian, contradicting EOB1 Amiga's own big-endian
+`.VMP`), and `.DEC`/`.DCR`/`TEXT*.CPS` turned out to be literally
+md5-byte-identical to EOB2 DOS's own files, not just structurally similar.
+Full evidence and byte-level tables: `docs/eotb2/amiga/data-structure.md`.
+
+- **Container + `.VCN`/`.CPS`/`.INF`**: all LCW-compressed behind the
+  shared 10-byte Kyra-bitmap header (`compType=4` in every real file) —
+  a real structural departure from EOB1 Amiga's own uncompressed `.VCN`.
+  Decompressed `.VCN` payload is byte-for-byte EOB1 Amiga's own raw
+  layout (verified 0 residue, all 5 wall sets); `.CPS` is Amiga 5bpp
+  planar pixels (EOB1-style) with EOB2's header-embedded-palette
+  convention (EOB2-style) — a genuine per-format hybrid.
+- **`.VMP` genuinely matches EOB2 DOS, not EOB1 Amiga**: confirmed
+  little-endian + the `330+N*431` derivation, contradicting EOB1 Amiga's
+  documented big-endian convention — see the doc's "VMP" section for the
+  full ascending-run-vs-multiples-of-256 evidence.
+- **`.INF`**: byte-identical header+record-stream shape to EOB2 DOS.
+  16/16 real `LEVELn.INF` files parse with 0 errors, 308/308
+  wall-decoration assignments resolve in-range (same total as DOS). One
+  new maze-reuse pair found, not in DOS's list: `LEVEL15.INF` ->
+  `level14.maz` (Amiga-only; DOS's own LEVEL15 uses `level15.maz`).
+- **`.PAL`**: standalone 64-byte/32-colour Amiga-native file (EOB1-Amiga
+  encoding) delivered via EOB2's own standalone-per-wall-set-file
+  mechanism.
+- **`.DEC`/`.DCR`**: confirmed **md5-byte-identical** to EOB2 DOS's own
+  files.
+- **`ITEM.DAT`/`ITEMTYPE.DAT`**: same size and same record layout/counts
+  as DOS (434 items/123 names/64 types, all landing exactly on EOF) but
+  **big-endian fields**, not little-endian — a genuine, resolved
+  byte-order finding (not identical files, unlike `.DEC`/`.DCR`). New
+  module `tools/eotb2/amiga/decode-items.ts`.
+- **`TEXT.CPS`/`TEXT2.CPS`/`TEXT4.CPS`**: despite the `.CPS` extension,
+  these are NOT images — no `TEXT.DAT` exists in this corpus at all. All
+  three LCW-decompress to bytes **md5-identical to EOB2 DOS's own
+  `TEXT.DAT`** (122 dialogue strings, byte-exact). New module
+  `tools/eotb2/amiga/decode-text.ts`.
+- **Wall-decoration overlay rendering** (front/"Down" role) and the
+  **LEVEL10-14 mezz+azure palette-override mechanism** both confirmed
+  working end-to-end, reusing DOS's `renderer.ts`/DSC tables unmodified —
+  visually confirmed via 6 real rendered poses across 5 wall sets
+  (`tools/eotb2/amiga/render-through-dungeon.ts`).
+- **Browser walker**: new `GameId` `eotb2amiga` registered
+  (`src/game-id.ts`, `tools/walker/walker.ts`, `tools/shared/
+  viewer-config.ts`), reusing `loadEotb2View`/`eotb2LevelList`
+  (`tools/walker/games-eotb2.ts`) and `renderView`
+  (`tools/eotb2/renderer.ts`) **completely unmodified** — every
+  platform-specific decode lives in `tools/eotb2/amiga/`'s new modules,
+  none in the walker/render chain, confirming that layer really is
+  platform-agnostic once assets are exported to flat JSON.
+- 16 new unit tests (`tools/eotb2/amiga/__tests__/eotb2-amiga.test.ts`),
+  all passing against real corpus data. Full repo `vitest` (383/383),
+  `tsc --noEmit`, and `lint` all clean with this in the tree. No existing
+  `tools/eotb/` or `tools/eotb2/` DOS file was modified — only additive
+  registration edits to the 3 shared config files above.
+- **Left open** (all low-priority/out-of-scope, see rows above):
+  `FINALE.PAL` (6-palette variant, structure obvious, not wired up),
+  `LEVELS.TMP` (savegame/scratch buffer, not decoded), `EOBII` executable
+  (never disassembled — nothing needed it), `.OUT`/`.SAM` audio (IFF
+  FORM/SMUS, identified by magic bytes, not decoded), fonts/CREDITS.TXT
+  (identified, out of scope). Side-role wall decorations and per-CPS
+  palette selection for non-wall-set screens are inherited gaps already
+  open for DOS/EOB1, not new to this platform.
 
 ## Closed this session (2026-08-29b, wall-decoration overlay port from EOB1 + INF record-stream decode)
 
@@ -132,6 +237,12 @@ task brief. An Amiga EOB2 doc/extractor is future work, not yet started.
   EOB1's for wall-set/dungeon screens (shared `initLevelData` code,
   `setLevelPalettes` is a no-op for DOS). Narrowed rather than fully
   closed — see `eotb2-dos-cps-palette-second-field` above for what's left.
+  > **Correction (2026-09-02):** the monster-art portion of this gap was
+  > confirmed as a real, garish colour bug (not just "unverified"), and
+  > closed for 29/36 monster CPS files — see "Closed this session
+  > (2026-09-02, EOB2 DOS/VGA — monster CPS palette fix)" above and the
+  > new `eotb2-dos-monster-cps-palette-remaining` row for the 7 that
+  > still aren't resolved.
 
 ## EOB2 (DOS/VGA) walker — closed this session (2026-08-16, game-re)
 

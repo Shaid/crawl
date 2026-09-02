@@ -97,10 +97,19 @@ right.
   title screen, fully legible gold-on-stone text.
 - `screens/darkmoon.png` (`PALETTE0.PAL` fallback) is a coherent
   castle-exterior cutscene image.
-- `screens/beholder.png` (`PALETTE0.PAL` fallback) shows a recognisable
-  purple/red beholder-monster sprite sheet (7 animation frames) plus a
-  small humanoid sprite.
-- `screens/skelwar.png` (`PALETTE0.PAL` fallback) — see above.
+- `screens/skelwar.png` — see the compType-3/RLE verification above (this
+  bullet was originally about the decode, not the palette).
+
+> **Correction (2026-09-02):** `screens/beholder.png` and
+> `screens/skelwar.png` are both monster CPS files and **no longer use
+> `PALETTE0.PAL`** — see the Correction block below for the fix. The
+> claim two paragraphs down ("All 4 spot-checked files above happened to
+> render correctly... reasonably strong evidence the heuristic
+> generalizes") did not hold for `beholder.png` specifically: it looked
+> plausible at a glance under `PALETTE0.PAL` but was later confirmed
+> wrong by direct comparison against its now-correct `SILVER.PAL`
+> rendering. Casual visual plausibility was not a strong enough check —
+> see the Correction block below for what replaced it.
 
 As with EOB1, per-screen palette selection for the `PALETTE0.PAL`-fallback
 majority (110 of 116 files) is **rendered, not confirmed** — the actual
@@ -109,7 +118,9 @@ game may switch in a different active palette for some of these
 name-matching heuristic can't discover without tracing the `.INF`
 level-load code. All 4 spot-checked files above happened to render
 correctly, which is reasonably strong evidence the heuristic generalizes,
-but it is not a per-file guarantee.
+but it is not a per-file guarantee. (Superseded for monster CPS files
+specifically — see the Correction block below; still accurate for the
+remaining genuine UI/wall-set fallback screens.)
 
 **Confirmed mechanism (2026-08-02, ScummVM source) for wall-set/dungeon
 screens** — same trace as EOB1 (`docs/eotb/dosvga/data-structure.md` §
@@ -163,6 +174,91 @@ Monster/UI CPS files without a matching `.PAL` still face the same
 "likely wrong, should use the owning level's active palette rather than a
 fixed fallback" caveat noted for EOB1 — that narrower, still-open
 question is unaffected by this finding.
+
+> **Correction (2026-09-02): the monster-CPS `PALETTE0.PAL` fallback was
+> confirmed wrong, not just "unverified", and is now fixed for 29 of 36
+> monster CPS files.** The "reasonably strong evidence the heuristic
+> generalizes" claim two paragraphs up did not hold for monster art — a
+> direct visual check of `screens/ant.png`, `screens/basilisk.png`, and
+> `screens/beholder.png` under the old `PALETTE0.PAL` fallback showed
+> garish, level-palette-mismatched colours (electric-blue ants, a
+> blue/purple "dragon", a jarring red/blue/purple beholder) — `PALETTE0`
+> is a real, correctly-decoded palette, just the wrong *content* for
+> composited-over-the-dungeon-view creature art (it's the menu/UI
+> palette, name-matched empirically against `DARKMOON.CPS`, a title
+> screen — see the paragraph above). The `screens/beholder.png`
+> spot-check cited above ("a recognisable purple/red beholder-monster
+> sprite sheet") was a real render but not a *correct* one; it happened
+> to look plausible enough at a glance to pass casual inspection, which
+> is exactly the "unverified" gap this correction closes.
+>
+> **Fix, following EOB1's `build_monster_wallset_palette` pattern**
+> (`scripts/extract_eotb_dosvga.py`): a monster CPS is composited over the
+> already-loaded dungeon view, so its real palette is whatever wall-set
+> `.PAL` is active for the level it appears on. `scripts/kyralib/inf.py`
+> gained `parse_inf2_sublevels`, an EOB2-specific `.INF` reader (EOB2's
+> header preamble differs from EOB1's — see "INF — Level configuration"
+> below) that walks each level's **full sub-level chain** — a mechanism
+> found fresh this session (see that function's module doc for the
+> byte-level derivation) that `tools/eotb2/decode-inf.ts`'s existing
+> `parseInfLevelData` explicitly does not cover (its own doc comment:
+> "sub-level chaining loop skipped here for sub == 0, the only case this
+> module handles"). Several real monster stems — including `ant`, one of
+> the confirmed-bug examples — only appear in a level's *second*
+> sub-level block; a sub==0-only parse misses them entirely.
+>
+> `scripts/extract_eotb2_dosvga.py::build_monster_wallset_palette` reads
+> all 16 `LEVELn.INF` files' full sub-level chains and maps each monster
+> stem to `secondWallSetStem ?? wallSetStem` (respecting the LEVEL10-14
+> AZURE override documented above), first-occurrence-wins (level order,
+> then sub-level order) on conflict. **Verified**: 29 distinct monster
+> stems resolve (vs. 24 using sub==0 alone) — `ant`→`DUNG`,
+> `basilisk`→`AZURE`, `beholder`→`SILVER`, `spider`→`DUNG`, `wasp`→
+> `SILVER`, `dragon`/`dran`→`CRIMSON`, `guard1`/`guard2`→`DUNG`, etc. —
+> each stem is a real, on-disk `<STEM>.CPS` filename with zero exceptions
+> (36 monster-shaped CPS files in the corpus total; 7 more are covered
+> by no INF slot — see below). One conflict found:
+> **`cleric1` appears on both LEVEL5 (`mezz`) and LEVEL8's second
+> sub-level (`silver`)** — the one case where EOB2 breaks EOB1's "no
+> monster reused across two wall sets" invariant; resolved to `mezz`
+> (first occurrence) and documented rather than silently picked.
+>
+> **Re-rendered and visually confirmed** (`Read` on the regenerated
+> PNGs, not just re-running the pipeline): `ant.png` now shows dark-red
+> silhouette ant/spider-shaped creatures on black (a plausible DUNG-
+> palette render — the uniform red tone is a property of the source
+> art's own palette-index usage, not a decode artifact: `DUNG.VCN`
+> itself renders as ordinary brown masonry, so DUNG.PAL is not
+> generically red-biased); `basilisk.png` now shows a coherent
+> brown/tan reptilian creature (was blue/purple); `beholder.png` now
+> shows a coherent brown beholder with green/blue eyestalks (was
+> red/blue/purple); `spider.png` (dark blue-grey, `dung`), `dragon.png`
+> (a legible red dragon **with a fire-breath animation frame**,
+> `crimson`), `wolf.png` (grey/white, `forest`), and `guard1.png` (a
+> silver-armoured knight, `dung`) were also spot-checked and all render
+> coherently.
+>
+> **Still open (7 of 36 monster-shaped CPS files, no INF-slot data
+> found)**: `MMOUTH1`/`MMOUTH2`, `STONEGIA`, `TANGLOR` (a real display
+> name — "Tanglor" — found via `strings` on `START.EXE`, but with no
+> level/wall-set context recovered), plus `AIRSEAL`, `BADMOOD`,
+> `CRIMRING` (these three may not be creature portraits at all — likely
+> spell-effect/item art, not checked further). These 7 aren't referenced
+> by any `LEVELn.INF`'s 2-slot wandering-monster table on any sub-level
+> — consistent with being unique/scripted "special encounter" monsters
+> placed by hardcoded executable logic rather than level data, which
+> this session did not trace. They still use the `PALETTE0.PAL`
+> fallback; `stonegia.png`/`tanglor.png` render with plausible-but-
+> unconfirmed colouring (light-blue skin tone, orange-red skin tone —
+> neither obviously garish, but neither confirmed against an active-
+> palette oracle either) and a white background (a `PALETTE0` UI-palette
+> tell, not present on any INF-resolved monster render).
+>
+> A quick sample of genuine **UI** CPS files (not creature art) —
+> `menu.png` (title screen), `khelban1.png` (an NPC portrait), and
+> `crystal.png` (a 4-panel vision/cutscene montage) — all render
+> coherently under the existing `PALETTE0.PAL` fallback; no second
+> widespread palette bug was found in that category this session.
 
 ---
 
@@ -236,6 +332,44 @@ previous token-scan only if a future/malformed file fails the fixed-offset
 sanity checks (tag byte, cstring printability, known wall-set name).
 **Closes `eotb2-dos-inf-header-offsets-dont-match` and
 `eotb2-dos-cps-palette-second-field`.**
+
+### Sub-level chaining (found 2026-09-02, not covered by `decode-inf.ts`)
+
+`.INF` files chain to one or more further block-properties records —
+ScummVM's own `sub`-loop argument in `initLevelData`, which
+`tools/eotb2/decode-inf.ts` explicitly scopes out (its own doc comment:
+"sub-level chaining loop skipped here for sub == 0, the only case this
+module handles"). Derived directly from real bytes this session (source
+only sketches the loop in a comment, doesn't give the exact arithmetic):
+a fixed reference point `data = payload[2:]` (absolute offset 2, right
+after the file's own leading 2-byte field); each block's own leading u16
+LE value, read *before* that block's tag byte, gives `next_tag_offset =
+data_base(2) + that_value + 2`. A chain value of `0`/`0xFFFF`, or one that
+doesn't resolve to another valid `0xEC`-tagged/`.maz`-suffixed/known-
+wall-set block, ends the walk.
+
+**Verified against all 16 real `LEVELn.INF` files** (`scripts/kyralib/
+inf.py::parse_inf2_sublevels` + its use in `scripts/extract_eotb2_dosvga
+.py::build_monster_wallset_palette` — see "Palette resolution" above's
+Correction block for the full monster-CPS-palette result this enabled):
+every file has exactly 1 or 2 sub-level blocks (max chain depth observed:
+2). All sub-levels found for a given level share that level's
+`wallSetStem`/`secondWallSetStem` in every case checked. The extra
+sub-level blocks are where several real monster stems live that a
+sub==0-only parse misses entirely — `LEVEL1` sub1 → `spider`, `LEVEL3`
+sub1 → `ant`, `LEVEL7` sub1 → `wasp`, `LEVEL8` sub1 → `cleric1`,
+`LEVEL11` sub1 → `guardian`, `LEVEL16` sub1 → `dran`/`dragon` — raising
+the total resolved monster-stem count from 24 (sub==0 only) to 29.
+
+**Not (yet) ported to `tools/eotb2/decode-inf.ts`/the wall-decoration
+renderer.** This session's Python port only reads the sub-level chain far
+enough to reach each block's monster-shape slots (needed for the palette
+fix); it does not walk each sub-level's own wall-mapping/decoration-load
+record stream. Whether the TS wall-decoration renderer (`resolveWall
+DecorationAssignments`, sub==0-scoped) is missing real decoration
+assignments that live only in a level's later sub-levels is now an open
+question this finding raises but does not answer — see
+`docs/eotb2/TODO.md`.
 
 ---
 
@@ -584,7 +718,7 @@ three files now byte-exact confirmed). **Wired into the extractor
 | Item | Notes |
 |------|-------|
 | `.SND` / `.ADL` (10 each) | Audio (digitized + AdLib music) — out of scope for this pass. |
-| Per-CPS palette selection for the 110 `PALETTE0.PAL`-fallback screens | Mechanism confirmed (see "Palette resolution" above — same wall-set-stem match as EOB1, plus the now-fully-decoded and now-traced-to-a-runtime-effect second wall-set field); which specific non-wall-set CPS files (monster/UI) actually need a level-specific palette vs. the game-wide fallback not individually traced. |
+| Palette for 7 remaining monster-shaped CPS files (`MMOUTH1`/`2`, `STONEGIA`, `TANGLOR`, `AIRSEAL`, `BADMOOD`, `CRIMRING`) | **Narrowed from "110 fallback screens, none individually traced" (2026-08-29) to this specific 7-file list (2026-09-02)** — see the "Correction" block under "Palette resolution (per-CPS)" above. 29/36 monster CPS files now resolve to a confirmed, INF-derived wall-set palette; these 7 aren't referenced by any `LEVELn.INF` monster-shape slot on any sub-level and still use the `PALETTE0.PAL` fallback (not confirmed correct or incorrect). Genuine UI CPS files (menu/portrait/cutscene) were spot-checked and found fine under `PALETTE0.PAL` — this row is monster-art-only. |
 | Wall-decoration side roles (`-east`/`-west` slots) | Front/"Down" role only is implemented (see "Wall decoration overlay rendering" above), matching EOB1's own current scope — an already-acknowledged EOB1 gap, not a new EOB2-specific one. |
 
 **Extractor pipeline wiring is now complete (2026-08-29)** — all 6

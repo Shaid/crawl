@@ -11,7 +11,7 @@ size exactly, zero residue).
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 
 @dataclass
@@ -51,6 +51,18 @@ def parse_item_dat(data: bytes) -> tuple[list[EobItem], list[str]]:
     return items, names
 
 
+def item_dat_to_json(item_dat: tuple[list[EobItem], list[str]]) -> dict:
+    """JSON-shape adapter for `parse_item_dat`'s `(items, names)` tuple --
+    added this session to fix a pre-existing `ImportError` in
+    `extract_eotb2_dosvga.py` (it already imported this name, which didn't
+    exist here yet; unrelated to this session's palette-resolution fix, but
+    blocked the extractor from running at all). Same JSON shape EOB1's own
+    `extract_eotb_dosvga.py::extract_item_data` already produces inline
+    (`{'items': [...], 'names': [...]}`), for consistency."""
+    items, names = item_dat
+    return {'items': [asdict(it) for it in items], 'names': names}
+
+
 @dataclass
 class EobItemType:
     inv_flags: int
@@ -79,3 +91,9 @@ def parse_itemtype_dat(data: bytes) -> list[EobItemType]:
     if off != len(data):
         raise ValueError(f'ITEMTYPE.DAT: expected to land exactly on EOF ({len(data)}), stopped at {off}')
     return types
+
+
+def itemtype_dat_to_json(types: list[EobItemType]) -> dict:
+    """JSON-shape adapter for `parse_itemtype_dat` -- see `item_dat_to_json`
+    doc for why this was added this session."""
+    return {'types': [asdict(t) for t in types]}
