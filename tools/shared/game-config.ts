@@ -288,6 +288,47 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'dungeonmaster',
+    displayName: 'Dungeon Master',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['dungeonmaster/amiga'],
+      executable: undefined,
+      expectedFiles: ['Graphics.DAT'],
+      // Extraction is a bespoke script (npm run dungeonmaster:export),
+      // not wired into the shared runPipeline/buildAssets mechanism.
+      supported: false,
+      assetDir: 'dungeonmaster',
+      features: {},
+    }],
+  },
+  {
+    id: 'chaosstrikesback',
+    displayName: 'Chaos Strikes Back',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['chaosstrikesback/amiga'],
+      executable: undefined,
+      expectedFiles: ['disk1/Graphics.DAT'],
+      supported: false,
+      assetDir: 'chaosstrikesback',
+      features: {},
+    }],
+  },
+  {
+    id: 'dungeonmaster2',
+    displayName: 'Dungeon Master II: Skullkeep',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['dungeonmaster2/amiga'],
+      executable: undefined,
+      expectedFiles: ['GRAPHICS.DAT'],
+      supported: false,
+      assetDir: 'dungeonmaster2',
+      features: {},
+    }],
+  },
+  {
     id: 'mm3',
     displayName: 'Might & Magic III: Isles of Terra',
     platforms: [{
