@@ -7,6 +7,7 @@ export const GAME_IDS = [
   'wizardry6',
   'eotb',
   'eotb2',
+  'eotb2amiga',
   'landsoflore',
   'mm1',
   'mm2',
@@ -24,6 +25,15 @@ export const GAME_IDS = [
   'ishar2',
   'ishar3',
   'crystalsofarborea',
+  'elvira',
+  'elvira2',
+  'waxworks',
+  'dungeonmaster',
+  'dungeonmaster2',
+  'chaosstrikesback',
+  'bardstale1',
+  'bardstale2',
+  'bardstale3',
 ] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
@@ -47,6 +57,7 @@ export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   wizardry6: 'Wizardry 6',
   eotb: 'Eye of the Beholder',
   eotb2: 'Eye of the Beholder II',
+  eotb2amiga: 'Eye of the Beholder II (Amiga)',
   landsoflore: 'Lands of Lore: The Throne of Chaos',
   mm1: 'Might & Magic: The Secret of the Inner Sanctum',
   mm2: 'Might & Magic II: Gates to Another World',
@@ -64,6 +75,15 @@ export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   ishar2: 'Ishar 2: Messengers of Doom',
   ishar3: 'Ishar 3: The Seven Gates of Infinity',
   crystalsofarborea: 'Crystals of Arborea',
+  elvira: 'Elvira: Mistress of the Dark',
+  elvira2: 'Elvira II: The Jaws of Cerberus',
+  waxworks: 'Waxworks',
+  dungeonmaster: 'Dungeon Master',
+  dungeonmaster2: 'Dungeon Master II: Skullkeep',
+  chaosstrikesback: 'Chaos Strikes Back',
+  bardstale1: "The Bard's Tale: Tales of the Unknown",
+  bardstale2: "Bard's Tale II: The Destiny Knight",
+  bardstale3: "Bard's Tale III: Thief of Fate",
 };
 
 export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {

@@ -52,6 +52,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'dosvga',
     supportedPlatforms: ['dosvga'],
   },
+  eotb2amiga: {
+    gameId: 'eotb2amiga',
+    name: GAME_DISPLAY_NAMES.eotb2amiga,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
   landsoflore: {
     gameId: 'landsoflore',
     name: GAME_DISPLAY_NAMES.landsoflore,
@@ -151,6 +157,60 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
   crystalsofarborea: {
     gameId: 'crystalsofarborea',
     name: GAME_DISPLAY_NAMES.crystalsofarborea,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  elvira: {
+    gameId: 'elvira',
+    name: GAME_DISPLAY_NAMES.elvira,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  elvira2: {
+    gameId: 'elvira2',
+    name: GAME_DISPLAY_NAMES.elvira2,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  waxworks: {
+    gameId: 'waxworks',
+    name: GAME_DISPLAY_NAMES.waxworks,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  dungeonmaster: {
+    gameId: 'dungeonmaster',
+    name: GAME_DISPLAY_NAMES.dungeonmaster,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  dungeonmaster2: {
+    gameId: 'dungeonmaster2',
+    name: GAME_DISPLAY_NAMES.dungeonmaster2,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  chaosstrikesback: {
+    gameId: 'chaosstrikesback',
+    name: GAME_DISPLAY_NAMES.chaosstrikesback,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  bardstale1: {
+    gameId: 'bardstale1',
+    name: GAME_DISPLAY_NAMES.bardstale1,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  bardstale2: {
+    gameId: 'bardstale2',
+    name: GAME_DISPLAY_NAMES.bardstale2,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  bardstale3: {
+    gameId: 'bardstale3',
+    name: GAME_DISPLAY_NAMES.bardstale3,
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga'],
   },
