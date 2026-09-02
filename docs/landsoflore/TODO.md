@@ -7,11 +7,46 @@ evidence and paths-tried detail. This file is pointers only.
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| lol-shp-recolor-render | open | SHP monster/UI sprite atlases still render in greyscale. **Narrowed this session (real ScummVM source, `LoLEngine::loadMonsterShapes`, `engine/sprites_lol.cpp:27-108`)**: the original "needs a monster→level→VCN-palette mapping" framing is **refuted** — each monster's own `.SHP` bundle is self-contained. Shape index 16 in every monster `.SHP` (confirmed against real `LIZARD.SHP`: 17 shapes total, shape 16 is a distinct 5×20 "palette strip" image, shapes 0-15 are the 82×86 animation frames) is drawn onto a screen page and its pixels sampled to build a 64-entry base colour table (`tmpPal1`), then each animation frame's own embedded colour table (already decoded by `tools/landsoflore/`'s existing `parse_shp_container`/`ShpShape.color_table`) is remapped through it across **8 brightness levels** into `_monsterPalettes[]` — the same 8-level brightness-ramp shape as `lol-vcn-shift-semantics` below, a real cross-confirming pattern, not a coincidence. **Not implemented**: the remap depends on `Screen::getCPagePtr`/`drawShape`/`clearPage`'s page-buffer semantics (which page number holds what, and why `clearPage(3)` precedes a `drawShape(2, ...)`), not fully traced from `engines/kyra/graphics/screen.cpp` this session — shipping a guess here risks the exact "plausible but wrong colour" failure this project explicitly guards against, so this stays greyscale rather than risk it | `engine/sprites_lol.cpp:27-108` (`LoLEngine::loadMonsterShapes`); `dosvga/data-structure.md` § "SHP — Multi-frame creature/UI shapes" | 2026-08-16 game-re |
 | lol-iso-remaining-paks | open | Only a representative subset of the 209-file ISO was extracted (breadth-first) — `L02-L29`, `O00A-O29A`, most named wall-set/language/audio `.PAK`s, 29 of 30 `.TLK` files not pulled through the pipeline. **Not attempted this session** (explicitly lower priority than the other rows here — mechanical extraction breadth, not a research question) | `dosvga/data-structure.md` § "Not extracted this session" | 2026-08-02 game-re |
 | lol-text-script-data | narrowed | `.TLC`/`.LM` text tables and EMC2 bytecode *execution* remain out of scope. **This session: real EMC2 bytecode *disassembly* shipped** (`tools/landsoflore/decode-emc.ts`), ported directly from `engines/kyra/script/script.cpp`'s `EMCInterpreter::run` (the exact per-instruction bit-packing: `opcode=(code>>8)&0x1F`, then `code&0x8000`→forced `jmp`+15-bit param, `code&0x4000`→sign-extended int8 param, `code&0x2000`→next word as a wide immediate) and `script_lol.cpp:2682-2875`'s `LoLEngine::setupOpcodeTable` (the real, complete 190-entry `sysCall` id→`olol_*` name table, extracted verbatim including its real `OpcodeUnImpl()` reserved gaps). Verified against real `LEVEL1.INI`: all 259 `DATA`-chunk words decode to valid opcodes with zero truncation, and sysCall names resolve to a coherent level-init script (`olol_loadLevelGraphics`, `olol_loadMonsterShapes`, `olol_makeItem`, `olol_rollDice`, `olol_setGameFlag`, ...) — caught and fixed one real bug in the process (`sysCall`'s id must be reinterpreted as an unsigned byte, `const uint8 id = _parameter` in the real engine, not kept signed like every other opcode's param). This decodes control flow and named engine calls; it does not *execute* scripts (no stack/register simulation) — a real interpreter is separate follow-on work if ever wanted | `engine/script.cpp:29-56,187-219`; `script/script_lol.cpp:2682-2875`; `tools/landsoflore/decode-emc.ts`; `tools/landsoflore/decode-ini.ts` | 2026-08-16 game-re |
 | lol-vcn-shift-semantics | open | `vcnColTable`'s 8 selectable 16-entry sub-tables are confirmed addressed by `vcnShift[tileIndex]` as a byte offset; *why* a tile picks a given sub-table is still not confirmed. **Narrowed this session**: found `_blockBrightness` (`engine/scene_lol.cpp`, consumed in `use16ColorMode`'s decoration-overlay index adjustment, `bb = _blockBrightness >> 4`) as a real, sourced signal supporting the "brightness ramp" hypothesis, reinforced by `lol-shp-recolor-render`'s independent finding of the *same* 8-brightness-level remap shape in the monster-palette mechanism. But the actual wall-tile consumer — `generateBlockDrawingBuffer()`, declared in `engine/kyra_rpg.h:310` and called from both `scene_lol.cpp:1221` and `scene_eob.cpp:574` — is not implemented in any of the ~20 `engines/kyra/{engine,graphics,script}/*.cpp` files fetched this session (checked `screen.cpp`, `screen_lol.cpp`, `kyra_rpg.cpp`, every `scene_*.cpp`/`sprites_*.cpp`); GitHub's code-search API requires authentication this session doesn't have, so its body couldn't be located. Two consistent, real 8-level-brightness findings, but the exact per-tile selection formula remains unconfirmed | `engine/scene_lol.cpp` (`_blockBrightness`); `engine/kyra_rpg.h:310` (`generateBlockDrawingBuffer` declaration, body not found); `tools/landsoflore/decode-vcn.ts` module doc | 2026-08-16 game-re |
 | lol-wll-mapping-fallback | closed | `buildWllLookup`'s dictionary covers every raw byte `LEVEL1.CMZ` uses (zero misses) — is the clamp-to-generic-wall fallback for an uncovered value correct? **Confirmed this session, real ScummVM source (`LoLEngine::loadLevelWallData`, `engine/scene_lol.cpp:142-179`; `_wllVmpMap`'s allocation, `engine/kyra_rpg.cpp:191`)**: the real engine has **no fallback mechanism at all** for this case. `_wllVmpMap` is one 256-byte array, zero-initialized once (`new uint8[256]()`) at startup, and is **never reset between level loads** — `loadLevelWallData` just overwrites whatever entries its own 12-byte `.WLL` records cover, on top of whatever was left from the *previous* level. A raw `.CMZ` byte with no entry in the current level's own `.WLL` table isn't handled by a designed clamp; it silently reads stale data from a prior level (or 0 at first boot) — undefined by design, not a documented safety net. Each level's `.WLL` table is simply expected to be complete for that level's own `.CMZ` usage by authoring convention. This port's clamp-to-generic-wall fallback is therefore a **defensive choice stricter than the original** (which has no real fallback to match), not a divergence from confirmed behavior — safe to keep as-is | `engine/scene_lol.cpp:142-179` (`loadLevelWallData`); `engine/kyra_rpg.cpp:191` (`_wllVmpMap` allocation); `tools/landsoflore/view-model.ts` (`resolveRawWallType`) | 2026-08-16 game-re |
+
+## Closed this session (2026-09-02, ScummVM source + real-colour render)
+
+- **`lol-shp-recolor-render`** — the SHP monster/UI sprite colour question,
+  fully resolved. Fetched and traced `LoLEngine::loadMonsterShapes` +
+  `drawMonster` in full (`engine/sprites_lol.cpp:27-113,593-612`) along
+  with the `Screen::getCPagePtr`/`clearPage`/`drawShape` page-buffer
+  helpers a prior session (2026-08-16) had flagged as un-traced. Headline
+  finding: `loadMonsterShapes`'s `tmpPal1`/8-brightness-level colour-remap
+  mechanism (page 2 and page 3 alias one physical buffer in VGA mode,
+  `Screen::_pageMapping[i] = i & ~1`) is real, and is now fully
+  reconstructed + implemented (`kyralib.shp.decode_palette_strip_base_table`/
+  `compute_monster_brightness_palettes`, hand-verified against real
+  `LIZARD.SHP` bytes) — but `LoLEngine::drawMonster` shows it's only
+  consulted for `d = m->flags & 7` in `1..7` (a rarer per-instance
+  status-flag draw variant). **The default pose (`d==0`, the common case)
+  draws with the shape's own embedded `colourTable` completely unmodified
+  — no remap needed at all.** So the actual remaining blocker was always
+  just the RGB palette source, not the remap mechanism: SHP files carry no
+  RGB, only indices into `_screen->getPalette(0)`, which — per the
+  already-closed VCN finding below — is populated once per level from
+  that level's own `.VCN`-embedded palette. New finding this session:
+  `MONSTER.PAK`'s 4 creatures (`LIZARD/ORC/TREZ/CABAL.SHP`) are confirmed
+  NOT level 1/`CATWALK`'s own monster — `L01.PAK` ships a separate
+  `GUARD.SHP` — so they're a shared/global creature pool with no single
+  canonical palette recoverable from static data alone. **Fix applied**:
+  `extract_shp_sprites` now renders all 4 atlases against
+  `CATWALK.VCN`'s already-confirmed palette as a representative (labelled
+  `rendered`, not `confirmed`) stand-in. Visual check: all 4 render as
+  coherent, correctly-shaded creatures — a golden-tan scaled lizardman
+  (dark-green eyes, red mouth/tongue on attack frames), a maroon/tan
+  hulking orc carrying visible weapons, a gold/blue/red banded insectoid,
+  and a silver/blue armoured knight-like figure with a sword — no neon
+  noise, hue/value coherent across every frame of each creature. See
+  `dosvga/data-structure.md` § "SHP — Multi-frame creature/UI shapes"
+  § "Colour — closed, 2026-09-02".
 
 ## Closed this session (2026-08-02, ScummVM source + byte-exact verification)
 

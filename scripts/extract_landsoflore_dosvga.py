@@ -26,12 +26,27 @@ Screen_v2::getPtrToShape + Screen::drawShape's scanline decoder.
 real 128-colour palette is embedded in the .VCN file itself, past a
 per-tile shift table and a 128-byte col_table this extractor previously
 stopped short of (see kyralib.vcn.parse_vcn_lol and the doc's "VCN — Wall
-tileset" section) — CATWALK now renders in real colour. SHP monster/UI
-sprite colour is still open: SHP files don't carry their own palette (they
-render against whichever level's VCN-embedded palette was active when
-they were drawn in-game), and this extractor doesn't yet have a
-monster-to-level mapping to pick the right one, so SHP sprites are still
-rendered in greyscale below.
+tileset" section) — CATWALK now renders in real colour.
+
+2026-09-02 update: SHP monster sprite colour is now resolved too, via real
+ScummVM source (LoLEngine::loadMonsterShapes/drawMonster,
+engine/sprites_lol.cpp) rather than the monster->level mapping this
+extractor was previously waiting on. A monster's DEFAULT rendered
+appearance (`m->flags & 7 == 0`, the common case) draws with the shape's
+own embedded `color_table[c]` values completely unmodified — no per-level
+remap is ever applied to the base pose; that only happens for a rarer
+"damage/status flag" 1-of-7 palette-shift variant this extractor does not
+attempt to reproduce (see kyralib.shp.compute_monster_brightness_palettes).
+What *is* still level-dependent is the RGB each palette index resolves to:
+SHP files carry no RGB of their own, only indices into whatever
+`_screen->getPalette(0)` currently holds, which VCN — Wall tileset — is a
+per-level embedded palette. MONSTER.PAK's four creatures (LIZARD/ORC/TREZ/
+CABAL) are confirmed NOT to be CATWALK/level 1's own monster (L01.PAK
+ships a separate GUARD.SHP for that) — a genuinely shared/global pool used
+across multiple levels with no single canonical palette recoverable from
+static data alone. This extractor renders them against CATWALK.VCN's
+already-confirmed palette as a representative stand-in (documented as
+such, not as ground truth) rather than continuing to withhold colour.
 """
 from __future__ import annotations
 
@@ -153,6 +168,23 @@ def extract_cps_screens(root: Path):
     return written, skipped
 
 
+def vcn_rgba_palette(root: Path, pak_rel: str, stem: str) -> np.ndarray | None:
+    """Load one level's .VCN-embedded 128-colour palette (padded to 256,
+    index 0 transparent) -- shared by extract_vcn_wallset and
+    extract_shp_sprites, since both wall tiles and monster sprites render
+    against the SAME active `_screen->getPalette(0)` (see module docstring,
+    2026-09-02 update). Returns None if the PAK/entry doesn't exist."""
+    data, entries = load_pak(root, pak_rel)
+    vcn_name = f'{stem}.VCN'
+    if vcn_name not in entries:
+        return None
+    vcn = parse_vcn_lol(read_entry(data, entries[vcn_name]))
+    rgb = vga_palette_to_rgb(vcn.palette)  # 128 x 3, 0-255
+    if rgb.shape[0] < 256:
+        rgb = np.concatenate([rgb, np.zeros((256 - rgb.shape[0], 3), dtype=np.uint8)])
+    return palette_to_rgba(rgb, transparent_index=0)
+
+
 def extract_vcn_wallset(root: Path, pak_rel: str, stem: str):
     data, entries = load_pak(root, pak_rel)
     vcn_name = f'{stem}.VCN'
@@ -168,10 +200,7 @@ def extract_vcn_wallset(root: Path, pak_rel: str, stem: str):
     vcn = parse_vcn_lol(read_entry(data, entries[vcn_name]))
     tiles = decode_all_tiles_lol(vcn)
 
-    rgb = vga_palette_to_rgb(vcn.palette)  # 128 x 3, 0-255
-    if rgb.shape[0] < 256:
-        rgb = np.concatenate([rgb, np.zeros((256 - rgb.shape[0], 3), dtype=np.uint8)])
-    rgba_pal = palette_to_rgba(rgb, transparent_index=0)
+    rgba_pal = vcn_rgba_palette(root, pak_rel, stem)
     cols = 32
     rows = (vcn.num_tiles + cols - 1) // cols
     sheet_idx = np.zeros((rows * 8, cols * 8), dtype=np.uint8)
@@ -186,7 +215,7 @@ def extract_vcn_wallset(root: Path, pak_rel: str, stem: str):
     return True
 
 
-def extract_shp_sprites(root: Path, pak_rel: str, stem: str):
+def extract_shp_sprites(root: Path, pak_rel: str, stem: str, rgba_pal: np.ndarray):
     data, entries = load_pak(root, pak_rel)
     shp_name = f'{stem}.SHP'
     if shp_name not in entries:
@@ -195,11 +224,18 @@ def extract_shp_sprites(root: Path, pak_rel: str, stem: str):
     if not shapes:
         return False
 
-    # Greyscale, not colour -- see extract_vcn_wallset's comment and the
-    # module docstring. Shape/silhouette decode is confirmed byte-exact
+    # Real colour, not greyscale, as of 2026-09-02 -- see module docstring.
+    # `rgba_pal` is a representative level palette (CATWALK's, passed in by
+    # main()), not a canonical per-monster palette -- see
+    # docs/landsoflore/dosvga/data-structure.md "SHP" for why no single
+    # canonical palette exists for MONSTER.PAK's shared creature pool.
+    # Shape/silhouette decode itself was already confirmed byte-exact
     # (every shape's scanline stream consumes exactly its declared
-    # frame_size); the colour-table remap's target palette is not.
-    rgba_pal = greyscale_ramp_rgba()
+    # frame_size) before this session; only the missing palette source
+    # changed here. Decoded VGA index values used directly, with NO
+    # per-monster brightness remap (that mechanism -- now implemented in
+    # kyralib.shp.compute_monster_brightness_palettes -- only applies to a
+    # rarer damage/status-flag draw variant, not the default pose).
     sprites = []
     for i, s in enumerate(shapes):
         idx = decode_shape_indices(s)
@@ -248,10 +284,16 @@ def main():
     ok = extract_vcn_wallset(root, 'DATA/CATWALK.PAK', 'CATWALK')
     print(f'CATWALK VCN wall tileset: {"ok" if ok else "missing"} (rendered in real colour from the VCN-embedded palette)')
 
-    ok = extract_shp_sprites(root, 'DATA/MONSTER.PAK', 'LIZARD')
-    print(f'LIZARD SHP creature sprite: {"ok" if ok else "missing"} (rendered greyscale, see docs)')
+    # MONSTER.PAK's creatures aren't CATWALK/level 1's own monster (that's
+    # GUARD.SHP, shipped inside L01.PAK itself) -- no canonical per-monster
+    # palette is recoverable from static data, so CATWALK's is reused as a
+    # representative stand-in. See the module docstring and
+    # docs/landsoflore/dosvga/data-structure.md "SHP".
+    monster_pal = vcn_rgba_palette(root, 'DATA/CATWALK.PAK', 'CATWALK')
+    ok = extract_shp_sprites(root, 'DATA/MONSTER.PAK', 'LIZARD', monster_pal)
+    print(f'LIZARD SHP creature sprite: {"ok" if ok else "missing"} (rendered in real colour, representative CATWALK palette, see docs)')
     for stem in ['ORC', 'TREZ', 'CABAL']:
-        extract_shp_sprites(root, 'DATA/MONSTER.PAK', stem)
+        extract_shp_sprites(root, 'DATA/MONSTER.PAK', stem, monster_pal)
 
     n_cmz = extract_cmz_level(root, 'DATA/L01.PAK', 'level1')
     print(f'CMZ level grids (L01.PAK): {n_cmz}')

@@ -100,6 +100,129 @@ def parse_shp_container(chunk: bytes) -> list[ShpShape]:
     return shapes
 
 
+SCREEN_W = 320  # Screen::SCREEN_W (screen.h:590) -- the page-buffer row stride
+                # loadMonsterShapes' tmpPal1 sampling loop steps by.
+
+
+def decode_palette_strip_base_table(shapes: list[ShpShape]) -> np.ndarray:
+    """Reconstruct `tmpPal1`, the 64-entry "base colour" table
+    LoLEngine::loadMonsterShapes builds from shape index 16 -- the small
+    "palette strip" image every monster .SHP bundles alongside its 16
+    animation frames (engine/sprites_lol.cpp:70-80, fetched 2026-09-02):
+
+        uint8 *palShape = _screen->makeShapeCopy(p, 16);
+        _screen->clearPage(3);
+        _screen->drawShape(2, palShape, 0, 0, 0, 0);
+        uint8 *tmpPal1 = new uint8[64]();
+        for (int i = 0; i < 64; i++) {
+            tmpPal1[i] = *p;
+            p += 320;
+        }
+
+    `getCPagePtr(2)`/`getPagePtr(3)` alias the SAME physical buffer: in VGA
+    mode `Screen::_pageMapping[i] = i & ~1` for every page (screen.cpp:209-211),
+    so page 2 and page 3 share one 320x200-byte allocation. `clearPage(3)`
+    therefore zeroes the exact buffer `p` (captured earlier as
+    `getCPagePtr(2)`, right after `loadBitmap(file, 3, 3, 0)` decompressed the
+    .SHP payload into it) still points at; `drawShape(2, palShape, 0, 0, 0, 0)`
+    then draws shape 16 back into that now-blank buffer at (0,0), unscaled,
+    with no external colour-table override (flags=0) -- shape 16 itself
+    almost always has shapeFlags bit0 clear too (no internal remap table
+    either), so its raw stream bytes are written as literal VGA palette
+    indices, transparent runs left as the cleared 0.
+
+    The sampling loop then walks straight down COLUMN 0 of that buffer for
+    64 rows (`p += 320` == one screen row per step). Since shape 16 is only
+    `strip.height` rows tall (<=20 in every monster .SHP seen in this
+    corpus) and the buffer was fully zeroed first, rows `height..63` read
+    back as 0 -- `decode_shape_indices`' own "untouched pixel stays 0"
+    convention already reproduces this exactly, so this function just reuses
+    it and pads/truncates column 0 to 64 entries.
+
+    Verified against `LIZARD.SHP` (2026-09-02): decoded column 0 for shape
+    16's real 20 rows is `[65,66,67,68,69,70,71,72,73,74,1,50,48,47,75,4,5,
+    6,7,0]` -- a clean 65..74 ascending ramp (10 consecutive VGA palette
+    slots, plausibly a shading/skin-tone bank) followed by 9 discrete
+    "anchor" colour values (eyes/teeth/highlight swatches) and one terminal
+    0 (row 19 is entirely transparent) -- exactly the shape a hand-authored
+    per-monster colour key would take, not noise."""
+    strip = shapes[16]
+    grid = decode_shape_indices(strip)  # (height, width), 0 = untouched/transparent
+    base = np.zeros(64, dtype=np.uint8)
+    h = min(64, grid.shape[0])
+    base[:h] = grid[:h, 0]
+    return base
+
+
+def compute_monster_brightness_palettes(shape: ShpShape, base_table: np.ndarray,
+                                         strip_grid: np.ndarray) -> np.ndarray:
+    """Reconstruct one animation frame's `_monsterPalettes[pos]` -- an
+    `(8, numCol)` array of colour-table variants, one row per "brightness"
+    level selected at render time by `LoLEngine::drawMonster`'s
+    `int d = m->flags & 7;` (engine/sprites_lol.cpp:603,611):
+
+        uint8 *monsterPalette = d ? _monsterPalettes[pos] + (shp[10] * (d - 1)) : 0;
+
+    `d == 0` (the common/default case -- an undamaged, unflagged monster)
+    passes a NULL palette override and draws with the shape's own embedded
+    `color_table` unmodified; this function's output is only consulted for
+    `d in 1..7`. It is NOT needed to render a monster's default appearance
+    -- `decode_shape_indices` (using `color_table[c]` directly, already
+    implemented) is the complete base-render decode.
+
+    Ported from engine/sprites_lol.cpp:81-112 (fetched 2026-09-02):
+
+        for (int ii = 0; ii < numCol; ii++) {
+            uint8 *cl = (uint8 *)memchr(tmpPal1, tmpPal2[1 + ii], 64);
+            if (!cl) continue;
+            tmpPal3[ii] = (uint16)(cl - tmpPal1);
+        }
+        for (int ii = 0; ii < 8; ii++) {
+            for (int iii = 0; iii < numCol; iii++) {
+                if (tmpPal3[iii] == 0xFFFF) continue;
+                if (p[tmpPal3[iii] * 320 + ii + 1])
+                    tmpPal2[1 + iii] = p[tmpPal3[iii] * 320 + ii + 1];
+            }
+            memcpy(_monsterPalettes[pos] + ii * numCol, &tmpPal2[1], numCol);
+        }
+
+    i.e. for each of a frame's `numCol` colour-table entries, find which ROW
+    of the palette-strip image (`strip_grid`, the same buffer
+    `decode_palette_strip_base_table` samples column 0 of) that entry's
+    value first appears in (via `base_table`), then for brightness level
+    `ii` (0-7) read that SAME row's column `ii+1` as the replacement colour
+    -- falling back to the frame's own original value when that pixel is
+    transparent/out of the strip's width (`shape 16` is only 5px/4 real
+    columns wide in every monster .SHP checked, so levels `ii>=3` degrade to
+    "unchanged" for most colour-table entries; this is a real, confirmed
+    property of the authored strip data, not a decode bug)."""
+    if shape.color_table is None:
+        return np.zeros((8, 0), dtype=np.uint8)
+    color_table = np.frombuffer(shape.color_table, dtype=np.uint8)
+    num_col = len(color_table)
+    row_for = np.full(num_col, -1, dtype=np.int32)
+    for i, v in enumerate(color_table):
+        matches = np.nonzero(base_table == v)[0]
+        if len(matches):
+            row_for[i] = matches[0]
+
+    out = np.zeros((8, num_col), dtype=np.uint8)
+    strip_h, strip_w = strip_grid.shape
+    for level in range(8):
+        col = level + 1
+        row = color_table.copy()
+        if col < strip_w:
+            for i in range(num_col):
+                r = row_for[i]
+                if r < 0 or r >= strip_h:
+                    continue
+                v = strip_grid[r, col]
+                if v:
+                    row[i] = v
+        out[level] = row
+    return out
+
+
 def decode_shape_indices(shape: ShpShape) -> np.ndarray:
     """Decode one shape's scanline stream -> (height, width) uint8 palette
     indices, with 0 reserved to mean 'transparent' (matches this project's

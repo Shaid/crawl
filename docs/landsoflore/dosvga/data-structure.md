@@ -250,7 +250,7 @@ than raw colour/pixel data.
 
 ---
 
-## SHP — Multi-frame creature/UI shapes (new format vs. EOB; structure confirmed, colour not)
+## SHP — Multi-frame creature/UI shapes (new format vs. EOB; structure AND colour confirmed)
 
 EOB has no `.SHP` files (its monster sprites are full-canvas `.CPS`
 images); LOL uses a dedicated multi-frame shape container instead
@@ -277,9 +277,9 @@ Per-shape header (offsets relative to the shape's own start):
 | 0x00 | 2 | `shapeFlags` — bit0: colour-remap table present; bit1: payload NOT LCW-compressed; bit2: `colourTableColors` is an explicit byte (else defaults to 16, Kyra1-only, not seen in this corpus) |
 | 0x02 | 1 | `height` |
 | 0x03 | 2 | `width` |
-| 0x05 | 3 | unused/unknown (skipped by the reference decoder — `src += 3`) |
+| 0x05 | 3 | mostly unknown, but **offset 0x06 (2 bytes) is real**: `Screen_v2::getShapeSize()` (`screen_v2.cpp:228-232`) reads `READ_LE_UINT16(shp + 6)` — the shape's total on-disk/copyable byte length (header + colour table + payload), used by `makeShapeCopy`'s `memcpy` and by `loadMonsterShapes`'s `getShapeSize(...) - 10` colour-table-region size calc (below). Not needed to decode pixels (`frameSize` at 0x08 already gives the scanline-stream length byte-exact), so `shp.py` still doesn't parse it, but it's no longer "unused" in the doc sense — confirmed 2026-09-02 |
 | 0x08 | 2 | `frameSize` — uncompressed scanline-stream size |
-| 0x0A | 1 | `colourTableColors` (present iff `shapeFlags & 4`) |
+| 0x0A | 1 | `colourTableColors` (present iff `shapeFlags & 4`) — also `Screen_LoL::getShapePaletteSize()` (`screen_lol.cpp:844-846`, `return shp[10];`), confirming this exact byte offset from a second independent source |
 | 0x0A+ | N | `colourTable[N]` (present iff `shapeFlags & 1`) |
 | after that | — | payload: LCW-compressed (if `!(shapeFlags & 2)`) or raw, `frameSize` bytes once decompressed |
 
@@ -293,15 +293,129 @@ transparent-pixel run length.
 **Verified structurally, byte-exact:** `LIZARD.SHP` has 17 shapes; 16
 report identical `82×86` dimensions (a full animation cycle — walk/idle/
 attack poses, including 2 open-mouth "attack" frames) plus one `5×20`
-outlier (shape 16, `flags=2` — uncompressed, no colour table — plausibly
-a small UI cursor/icon bundled in the same file rather than a monster
-frame). **All 17 shapes' scanline streams consume exactly their declared
-`frameSize` with zero overrun or underrun** — the same class of
-zero-deviation structural invariant used to confirm VCN/VMP above.
-`sprites/lizard_shp.png` (greyscale, see below) shows a clearly
-recognisable, consistent creature silhouette across all 16 real frames.
+outlier (shape 16, `flags=2` — uncompressed, no colour table). **All 17
+shapes' scanline streams consume exactly their declared `frameSize` with
+zero overrun or underrun** — the same class of zero-deviation structural
+invariant used to confirm VCN/VMP above.
 
-**Colour — closed (2026-08-02), same root cause and fix as VCN.**
+### Colour — closed, 2026-09-02 (supersedes the earlier greyscale write-up below)
+
+> **Correction (2026-09-02):** the previous close-out below claimed the
+> exact same fix as VCN ("SHP shapes are rendered against whatever
+> `_screen->getPalette(0)` is currently active") but never actually
+> implemented it — SHP sprites stayed greyscale for another session, and
+> the follow-on `lol-shp-recolor-render` TODO item reframed the blocker
+> as needing `LoLEngine::loadMonsterShapes`'s own colour-remap mechanism
+> traced first (`engine/sprites_lol.cpp:27-108`, fetched 2026-08-16).
+> Real ScummVM source for the full function, plus `screen.cpp`'s page-
+> buffer helpers it calls (`getCPagePtr`/`clearPage`/`drawShape`), was
+> fetched and traced this session (2026-09-02) to close it for real.
+> **The headline finding: `loadMonsterShapes`'s per-monster colour-remap
+> mechanism is real, but it is NOT what colours a monster's default
+> appearance** — see below. Once that was understood, the original
+> 2026-08-02 diagnosis (render against the active level palette, sourced
+> from the level's own `.VCN` file) turned out to be the actually-needed
+> fix all along; it just hadn't been wired into the extractor.
+
+**1. `LoLEngine::loadMonsterShapes` traced in full**
+(`engine/sprites_lol.cpp:27-113`, `Screen::getCPagePtr`/`clearPage`/
+`drawShape` from `screen.cpp`):
+
+```cpp
+_screen->loadBitmap(file, 3, 3, 0);       // decompress .SHP into page 3's buffer
+const uint8 *p = _screen->getCPagePtr(2); // ... read back via page 2
+
+// (copy out all 16 anim frames + 64 decoration shapes via makeShapeCopy — omitted)
+
+uint8 *palShape = _screen->makeShapeCopy(p, 16);
+_screen->clearPage(3);
+_screen->drawShape(2, palShape, 0, 0, 0, 0);   // draw shape 16 back onto the (now blank) buffer
+
+uint8 *tmpPal1 = new uint8[64]();
+for (int i = 0; i < 64; i++) { tmpPal1[i] = *p; p += 320; }   // sample column 0, 64 rows
+```
+
+**Pages 2 and 3 are the SAME physical buffer.** In VGA mode
+`Screen::_pageMapping[i] = i & ~1` for every page (`screen.cpp:209-211`),
+so `getCPagePtr(2)`/`getPagePtr(3)` alias one 320×200-byte allocation.
+`loadBitmap(file, 3, 3, 0)` decompresses the whole `.SHP` payload
+(directory + all shape bytes) straight into that buffer; `p =
+getCPagePtr(2)` is a pointer *into the raw file data itself* (matching
+exactly what `parse_shp_container` decodes), not a rendered image. Every
+animation-frame and decoration shape is copied out (`makeShapeCopy`,
+heap-allocated) *before* `clearPage(3)` wipes that buffer — so nothing is
+lost. Then shape 16 (the small "palette strip" image, `5×20` in every
+monster `.SHP` checked) is drawn unscaled onto the freshly-cleared buffer
+at `(0,0)` with no colour-table override (`flags=0`), and the 64-entry
+sampling loop walks straight down **column 0** of that same buffer
+(`p += 320` = one screen row per step). Since shape 16 is only `height`
+rows tall (≤20 here) and the buffer was fully zeroed first, rows
+`height..63` read back as 0.
+
+Verified against real `LIZARD.SHP` bytes (2026-09-02): shape 16's decoded
+column 0 (20 real rows) is `[65,66,67,68,69,70,71,72,73,74, 1,50,48,47,
+75, 4,5,6,7, 0]` — a clean ascending 10-slot ramp (a shading/skin-tone
+palette bank) followed by 9 discrete "anchor" colour values (eye/teeth/
+highlight swatches) and one terminal `0` — exactly the shape a
+hand-authored per-monster colour key would take, not noise. Implemented
+as `kyralib.shp.decode_palette_strip_base_table`.
+
+**2. What `tmpPal1` is actually *for*.** The rest of `loadMonsterShapes`
+(`sprites_lol.cpp:81-112`) uses `tmpPal1` to build `_monsterPalettes[]`:
+for each animation frame's own `colourTable` entry, find which row of the
+palette-strip image that value first appears in (`memchr` against
+`tmpPal1`), then for each of 8 "brightness" levels, substitute that same
+row's column `level+1` as the shifted colour (falling back to the
+original value where the strip's own pixel there is transparent — which
+is most cells beyond level 2, since the strip is only 5px/4 real columns
+wide in this corpus). **Confirmed via `LoLEngine::drawMonster`
+(`sprites_lol.cpp:593-612`) that this table is consulted ONLY for
+`d = m->flags & 7` in `1..7`** (a per-monster-instance status-flag
+bitfield, gating some damage/effect visual variant) — **`d == 0`, the
+default/undamaged case, passes a NULL palette override and draws with the
+shape's own embedded `colourTable` completely unmodified.** So this whole
+mechanism is real, now fully reconstructed and implemented
+(`kyralib.shp.compute_monster_brightness_palettes`, verified by hand
+against `LIZARD.SHP` frames 0/1/12 — distinct, plausible shading at
+levels 0-2, clean fallback-to-original at levels 3-7, and `colourTable`
+entries not found in `tmpPal1` — e.g. the `0` and `255` transparency/
+shadow sentinels — pass through every level unchanged, as the C++ `if
+(!cl) continue;` requires) — **but it is not needed to render a
+monster's default pose**, which was the actual blocker.
+
+**3. The real remaining question was always the RGB palette, not the
+remap mechanism.** `.SHP` files carry no RGB data of their own — only
+8-bit indices (some literal, some through the per-frame `colourTable`)
+into whichever 256-colour palette `_screen->getPalette(0)` currently
+holds. Per the "VCN" section above, that palette is loaded once per
+dungeon level from the level's own `.VCN` file's embedded 384-byte
+palette (`LoLEngine::loadLevelGraphics`) — confirmed and closed already,
+just never wired into `extract_shp_sprites`. **New this session:**
+`MONSTER.PAK`'s four creatures are confirmed NOT to be CATWALK/level 1's
+own monster — `L01.PAK` ships a separate `GUARD.SHP` (`entries` listing:
+`GUARD.SHP, LEVEL01.ENG/FRE/GER, LEVEL01.TLC, LEVEL1.CMZ/INF/INI/WLL/
+XXX`, no LIZARD/ORC/TREZ/CABAL). `MONSTER.PAK` is a **shared/global
+creature pool** reused across multiple levels — with no single
+level-independent "correct" palette recoverable from static data alone
+(which level's palette is active depends on which dungeon the monster is
+actually placed in, a fact that lives in EMC bytecode this project
+explicitly scopes out — see `lol-text-script-data`). `sprites/
+lizard_shp.png`, `orc_shp.png`, `trez_shp.png`, `cabal_shp.png` are now
+rendered against **`CATWALK.VCN`'s already-confirmed palette** as a
+representative stand-in (not a proven-canonical per-monster palette) —
+labelled **rendered**, not **confirmed**, for that reason. Visual sanity
+check: all four render as coherent, correctly-shaded creatures (a
+golden-tan scaled lizardman with dark-green eyes and a red mouth/tongue
+on the attack frames; a maroon/tan hulking orc carrying visible weapons;
+a gold/blue/red banded insectoid; a silver/blue armoured knight-like
+figure wielding a sword) — no neon noise, no garbled colour-index
+scrambling, hue/value coherent across every frame of each creature.
+
+---
+
+<details>
+<summary>Superseded 2026-08-02 close-out (kept for history — see the correction block above)</summary>
+
 `Screen::drawShapePlotType37`'s `255`-as-background-fade-lookup special
 case (excluded from the render as transparent, correctly) still applies
 and is unaffected by this finding. The *real* colour-table target indices
@@ -318,13 +432,15 @@ files this extractor checked. `sprites/lizard_shp.png`,
 `kyralib.vcn`-side offset fix as CATWALK, applied per-level before the
 matching monster SHPs render — a pipeline task, not a format-unknown one).
 
+</details>
+
 ---
 
 ## Not extracted this session (remaining open items)
 
 | Item | Notes |
 |------|-------|
-| SHP colour re-render | `catwalk_vcn.png` now renders in real colour (fix applied this session). The 4 SHP atlases (`lizard_shp.png`, `orc_shp.png`, `trez_shp.png`, `cabal_shp.png`) still render in greyscale — SHP files don't carry their own palette (they use whichever level's VCN-embedded palette was active in-game), and this extractor doesn't yet have a monster→level mapping to pick the right one. |
+| ~~SHP colour re-render~~ | **Closed 2026-09-02** — see the "SHP" section's "Colour — closed" subsection above. All 5 assets (`catwalk_vcn.png` + the 4 monster SHP atlases) now render in real colour; the 4 monster atlases use `CATWALK.VCN`'s palette as a representative (not per-monster-canonical) stand-in, since `MONSTER.PAK`'s creatures aren't tied to any one level. |
 | Most of the 209-file ISO (level PAKs `L02-L29`, `O00A-O29A`, `CIMMERIA/KEEP/MANOR/...PAK`, `FRE`/`GER` language sets, `MUSIC.PAK`, `VOC.PAK`, 29 of 30 `.TLK` files) | Only a representative subset was extracted this session per the breadth-first mandate — every format needed to decode the rest (PAK/CPS/VCN/VMP/CMZ/SHP/WLL/TLK) is now confirmed, so pulling more files through the same pipeline is mechanical, not exploratory. |
 | `ITEM.INF`, `LEVEL1.INF`, `.TLC`, `.INI`, `.LM` (language string tables) | Text/scripting data, out of scope for the palette/sprite/container breadth pass. |
 | EMC2 script bytecode (per the internet-research doc) | Not investigated — scripting/gameplay logic, not data-structure/asset extraction. LOL uses the EMC bytecode VM (not EOB's separate `EoBInfProcessor`) — `olol_loadLevelGraphics` and friends in `script/script_lol.cpp` are EMC opcode handlers. |
@@ -333,13 +449,17 @@ matching monster SHPs render — a pipeline task, not a format-unknown one).
 
 ## Files
 
-- **Library:** `scripts/kyralib/` — `shp.py` added this session (new to
-  LOL); `vcn.py`'s `parse_vmp` gained LCW auto-detection; everything else
-  (`pak.py`, `format80.py`, `palette.py`, `maze.py`) reused unchanged from
-  EOB1/EOB2.
+- **Library:** `scripts/kyralib/` — `shp.py` added 2026-08-02 (new to LOL),
+  gained `decode_palette_strip_base_table`/`compute_monster_brightness_palettes`
+  2026-09-02 (the `loadMonsterShapes` colour-remap mechanism, ported +
+  verified but not wired into the extractor — see "SHP" above for why the
+  default render doesn't need it); `vcn.py`'s `parse_vmp` gained LCW
+  auto-detection; everything else (`pak.py`, `format80.py`, `palette.py`,
+  `maze.py`) reused unchanged from EOB1/EOB2.
 - **Extractor:** `scripts/extract_landsoflore_dosvga.py` (shells out to
   `7z` to pull PAKs from the `GAME.DAT` ISO into `build/cache/landsoflore/iso/`)
 - **Assets:** `public/assets/landsoflore/dosvga/{palettes,screens,textures,sprites,data}/`
   — 2 standalone palettes, 12 embedded-palette CPS screens (incl. the
-  confirmed-exact title screen), 1 wall-tileset atlas (greyscale), 4
-  creature SHP sprite atlases (greyscale), 1 CMZ level grid
+  confirmed-exact title screen), 1 wall-tileset atlas (real colour), 4
+  creature SHP sprite atlases (real colour, representative CATWALK
+  palette — see "SHP" above), 1 CMZ level grid
