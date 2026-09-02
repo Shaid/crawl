@@ -43,7 +43,7 @@ by eye — not gameplay-verified.
 | DungeonMaster | 17 | 0.7 | `.ftl`/`.dat` — the extensively community-documented DM format |
 | DungeonMaster2 | 44 | 5.5 | `.dat`/`.ftl` + P41A music + IFF palette |
 | Elvira | 161 | 3.4 | 130 × `.pkd`; header shape `8009 0600 …` |
-| Elvira2 | 244 | 5.0 | 200 × `.pkd` (different header than Elvira 1) + plain-ILBM `Pics/` |
+| Elvira2 | 244 | 5.0 | 200 × `.pkd` (different header than Elvira 1) + plain-ILBM `Pics/` — **correction below** |
 | EvilsDoomAGA | 394 | 11.2 | extensionless + `.bin`/`.dat`; 3 plain ILBMs |
 | HiredGuns | 184 | 3.2 | `.gfx` ×38 + character ILBMs |
 | LiberationCD32 | 174 | 15.4 | `AmSp` walls, `O3DG` vectors, `.sam` PCM, `.sty` packed |
@@ -57,6 +57,19 @@ by eye — not gameplay-verified.
    header shape; both Horrorsoft, same era). Crack once, unlock ~430
    files across two games. Elvira 2's `.pkd` differs — likely a later
    revision of the same packer.
+
+   > **Correction (2026-09-02 game-re):** cracked. All three games share
+   > the exact SAME container/codec — AGOS engine's `simon_decr`
+   > backward-reading bit-oriented LZ77 (ScummVM `extract_agos.cpp`), not
+   > two schemes. Elvira 2's apparent "different header" was normal
+   > compressed-content variance (the first few bytes of any LZ77 stream
+   > vary with content), not a different container. 628/628 real `.pkd`
+   > files across all three games decode with zero errors under one
+   > shared decoder. Same VC10 planar picture codec and Amiga-palette load
+   > formula also confirmed shared across all three. 5,745 pictures
+   > rendered total. See `docs/agos-pkd-format.md` (the shared spec) and
+   > `docs/elvira/amiga/data-structure.md` / `docs/elvira2/amiga/data-structure.md`
+   > / `docs/waxworks/amiga/data-structure.md`.
 2. **DM / CSB / DM2** need no discovery pass at all — the Dungeon
    Master formats are among the best-documented on the platform; go
    straight to a decoder against the published specs. CSB + Abandoned
