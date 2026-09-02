@@ -459,6 +459,24 @@ a hypothesis to test against real decode work, not yet a finding).
 
 ### Dungeon Master, Chaos Strikes Back, Dungeon Master II — external prior art, likely a third wall model
 
+> **Correction (2026-09-02, game-re):** the map format described below is
+> now **repo-verified**, not just recalled prior art. A real `game-re` pass
+> decoded `DUNGEON.DAT`/`Dungeon.DAT`/`DungeonF.DAT`/`DungeonG.DAT` for all
+> three games (DM1, CSB — including its dungeon embedded in a saved-game
+> file, DM2) against the actual Dungeon Master Encyclopaedia community docs,
+> byte-exact-verified (0 residue on the compression layer, coherent
+> rendered top-down mazes for every map in the corpus — 14+14+14+2+11+44
+> maps). The **type-derived** wall model described below is confirmed
+> exactly as hypothesized: each square stores one `type` byte
+> (wall/floor/pit/stairs/door/teleporter/trickwall/[DM2-only]empty), with
+> no separate per-face/per-edge wall byte anywhere in the format. See
+> `docs/dungeonmaster-format.md` and `docs/dungeonmaster/amiga/
+> data-structure.md` (+ `chaosstrikesback`/`dungeonmaster2` siblings) for
+> full evidence. The **rendering-engine** hypothesis below (slot-table
+> family) remains untested — no walker was built this pass, only the map
+> data and a sample of wall/UI bitmap art (`IMG1`/`IMG4` pixel codecs,
+> also newly confirmed) were decoded.
+
 **Not decoded in this repo** (`data/_unexplored_/DungeonMaster{,2}`,
 `ChaosStrikesBack` — Amiga WHDLoad dumps, `Dungeon.DAT`/`DungeonF.DAT`/
 `DungeonG.DAT` headers spot-checked, not parsed). The map format itself is
@@ -469,7 +487,8 @@ spec, distinct from ScummVM (DM was never a ScummVM target — it's not a
 SCUMM-family adventure game). Recalled from that public prior art, **not yet
 cross-checked against this repo's own dump**, so treat the specifics below as
 a hypothesis to verify, not a citation-grade fact the way the EOB/LoL section
-above is:
+above is — **now superseded for the map-format half by the correction box
+above.**
 
 - DM's dungeon grid doesn't store per-face wall bytes **at all** — each
   square has a *type* (Wall, Open/Corridor/Room, Diagonal corner (4
@@ -555,8 +574,8 @@ silently unconsidered.
 | EOB1 | Per-cell redundant (existing category) | **Tested and refuted (2026-08-16)**: the low-level `IndexedSurface`/`blend:'mask'` primitives generalise fine, but the high-level `SlotTableFile` schema does not — EOB's `.VMP` is a per-8x8-tile mosaic (each of 25 screen positions is a small tile grid, not one placeable compose-list piece the way BC/W6 pieces are). A real walker shipped anyway, as a bespoke `IndexedSurface` compositor (`tools/eotb/renderer.ts`) via `GameView.renderCanvas` — see `docs/eotb/TODO.md`'s "EOB1 (Amiga) walker" closed block | This repo (format + renderer, EOB1 only) |
 | EOB2 | Per-cell redundant (existing category) | **Confirmed (2026-08-16)**: EOB1's per-tile-mosaic finding applies unchanged — same bespoke `IndexedSurface` compositor via `GameView.renderCanvas`, `tools/eotb2/renderer.ts`. A real DOS/VGA walker shipped (5 of 6 wall sets; FOREST's non-standard VMP layout and wall-set-less AZURE both documented gaps, not silent misrenders) — see `docs/eotb2/TODO.md`'s "EOB2 (DOS/VGA) walker" closed block | This repo (format + renderer) |
 | Lands of Lore | Per-cell redundant, byte-identical to EOB's | **Confirmed (2026-08-16)**: same per-tile-mosaic finding as EOB1/EOB2, same bespoke `IndexedSurface` compositor. A real DOS/VGA walker shipped (11 levels, 6 wall sets, 2-6 wall-types-per-set — a genuine format variance EOB never showed) — plus a real fidelity win the EOB games don't have: LOL's `.WLL` table turned out to be a decoded, working `rawByte -> realWallArt` dictionary, so the per-cell dispatch uses real wall-type resolution instead of EOB's cruder clamp-to-generic-wall fallback. See `docs/landsoflore/TODO.md`'s "Lands of Lore walker" closed block | This repo (format + renderer) |
-| Dungeon Master, Chaos Strikes Back | New category: **type-derived** (wall existence comes from cell type, stored on neither adjacent cell) | Slot-table family suspected (Black Crypt likely descends from this engine's design) | External prior art, not repo-verified |
-| Dungeon Master II | Probably type-derived like DM1/CSB, format likely diverges in specifics | Probably slot-table family, less certain than DM1/CSB | External prior art, lower confidence |
+| Dungeon Master, Chaos Strikes Back | New category: **type-derived** (wall existence comes from cell type, stored on neither adjacent cell) — **confirmed 2026-09-02**, see correction box above | Slot-table family suspected (Black Crypt likely descends from this engine's design) — still untested, no walker built | Map format: this repo, byte-exact. Renderer: external prior art, not repo-verified |
+| Dungeon Master II | Type-derived like DM1/CSB — **confirmed 2026-09-02**, same square-type byte layout (plus a DM2-only `empty` type) | Probably slot-table family, less certain than DM1/CSB | Map format: this repo, byte-exact. Renderer: external prior art, lower confidence |
 | Elvira, Elvira II, Waxworks | Unknown | Unknown | Needs a real `game-re` pass against ScummVM's AGOS source before any claim |
 
 ---
