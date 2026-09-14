@@ -67,9 +67,10 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
-import { decodePlanarPlaneMajor, indicesToPaletteRGBA } from '../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
+import { indicesToPaletteRGBA } from '../shared/amiga-planar.ts';
 import { PIC_PALETTE } from './pic-format.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const HEADER_SIZE = 4;
 const DIR_RECORD_SIZE = 6;
@@ -155,14 +156,13 @@ export function dirRecordByteLength(rec: MazeDirRecord): number {
 
 /** Decode one directory record to an 8-bit chunky index buffer. */
 export function decodeDirRecord(data: Uint8Array, rec: MazeDirRecord): Uint8Array {
-  const { indices } = decodePlanarPlaneMajor(
-    data,
-    rec.offset,
-    rec.widthPx,
-    rec.heightPx,
-    PLANES,
-  );
-  return indices;
+  return decodePlanar(data, {
+    width: rec.widthPx,
+    height: rec.heightPx,
+    planes: PLANES,
+    layout: 'plane-major',
+    offset: rec.offset,
+  });
 }
 
 /** Screen geometry the renderer at `CODE+0x3d72` assumes (320x200, 4 planes). */
@@ -238,7 +238,7 @@ function buildAtlas(
   data: Uint8Array,
   records: MazeDirRecord[],
 ): { rgba: Uint8Array; width: number; height: number; frames: AtlasFrame[] } {
-  const packInputs: PackInput[] = records.map((r) => ({
+  const packInputs: ShelfPackInput[] = records.map((r) => ({
     name: `mazedata_dir${String(r.index).padStart(3, '0')}`,
     width: r.widthPx,
     height: r.heightPx,
@@ -266,7 +266,7 @@ function buildAtlas(
       const dstRowOff = ((frame.y + y) * packed.width + frame.x) * 4;
       atlas.set(rgba.subarray(srcRowOff, srcRowOff + rec.widthPx * 4), dstRowOff);
     }
-    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.width, h: frame.height });
+    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.w, h: frame.h });
   }
   return { rgba: atlas, width: packed.width, height: packed.height, frames };
 }

@@ -22,7 +22,7 @@ import { mkdirSync, readdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { decodePicCel, celIndicesToRGBA, PIC_PALETTE } from './pic-format.ts';
 import { readDosPic } from './pic-format-dos.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const ATLAS_MAX_WIDTH = 1024;
 
@@ -63,7 +63,7 @@ interface Atlas {
 }
 
 function buildAtlas(sources: FrameSource[]): Atlas {
-  const packInputs: PackInput[] = sources.map((s) => ({ name: s.name, width: s.width, height: s.height }));
+  const packInputs: ShelfPackInput[] = sources.map((s) => ({ name: s.name, width: s.width, height: s.height }));
   const packed = shelfPack(packInputs, ATLAS_MAX_WIDTH);
   const atlas = new Uint8Array(packed.width * packed.height * 4);
   const byName = new Map(sources.map((s) => [s.name, s]));
@@ -75,7 +75,7 @@ function buildAtlas(sources: FrameSource[]): Atlas {
       const dstRowOff = ((frame.y + y) * packed.width + frame.x) * 4;
       atlas.set(src.rgba.subarray(srcRowOff, srcRowOff + src.width * 4), dstRowOff);
     }
-    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.width, h: frame.height });
+    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.w, h: frame.h });
   }
   return { rgba: atlas, width: packed.width, height: packed.height, frames };
 }

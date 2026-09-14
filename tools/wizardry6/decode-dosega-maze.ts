@@ -59,12 +59,11 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
-import { decodePlanarPlaneMajor, indicesToPaletteRGBA, type PlanarImage, type RGB } from '../shared/amiga-planar.ts';
-import { decodePackedPixelLinear } from '../shared/packed-pixel.ts';
+import { indicesToPaletteRGBA, type PlanarImage, type RGB } from '../shared/amiga-planar.ts';
+import { decodePackedPixelLinear, decodePlanar } from '@seer-project/gfx';
 import { PIC_PALETTE } from './pic-format.ts';
 import { CGA_PALETTE } from './dosega-cga-palette.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
-import { r16 } from '@seer-project/core';
+import { r16, shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const HEADER_SIZE = 4;
 const DIR_RECORD_SIZE = 5;
@@ -137,8 +136,11 @@ export function dirRecordByteLength(rec: MazeDirRecord, bpp = 4): number {
 export function decodeDirRecord(
   data: Uint8Array,
   rec: MazeDirRecord,
-  decode: (d: Uint8Array, o: number, w: number, h: number) => PlanarImage = (d, o, w, h) =>
-    decodePlanarPlaneMajor(d, o, w, h, 4),
+  decode: (d: Uint8Array, o: number, w: number, h: number) => PlanarImage = (d, o, w, h) => ({
+    indices: decodePlanar(d, { width: w, height: h, planes: 4, layout: 'plane-major', offset: o }),
+    width: w,
+    height: h,
+  }),
 ): Uint8Array {
   return decode(data, rec.offset, rec.widthPx, rec.heightPx).indices;
 }
@@ -168,7 +170,7 @@ function buildAtlas(
   palette: RGB[],
   namePrefix: string,
 ): { rgba: Uint8Array; width: number; height: number; frames: AtlasFrame[] } {
-  const packInputs: PackInput[] = records.map((r) => ({
+  const packInputs: ShelfPackInput[] = records.map((r) => ({
     name: `${namePrefix}_dir${String(r.index).padStart(3, '0')}`,
     width: r.widthPx,
     height: r.heightPx,
@@ -192,7 +194,7 @@ function buildAtlas(
       const dstRowOff = ((frame.y + y) * packed.width + frame.x) * 4;
       atlas.set(rgba.subarray(srcRowOff, srcRowOff + rec.widthPx * 4), dstRowOff);
     }
-    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.width, h: frame.height });
+    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.w, h: frame.h });
   }
   return { rgba: atlas, width: packed.width, height: packed.height, frames };
 }
@@ -211,7 +213,11 @@ const MODES: MazeMode[] = [
     ext: 'ega',
     suffix: '',
     bpp: 4,
-    decode: (d, o, w, h) => decodePlanarPlaneMajor(d, o, w, h, 4),
+    decode: (d, o, w, h) => ({
+      indices: decodePlanar(d, { width: w, height: h, planes: 4, layout: 'plane-major', offset: o }),
+      width: w,
+      height: h,
+    }),
     palette: PIC_PALETTE,
     paletteName: 'PIC_PALETTE',
   },
@@ -219,7 +225,7 @@ const MODES: MazeMode[] = [
     ext: 'cga',
     suffix: '_cga',
     bpp: 2,
-    decode: (d, o, w, h) => decodePackedPixelLinear(d, o, w, h, 2),
+    decode: (d, o, w, h) => ({ indices: decodePackedPixelLinear(d, o, w, h, 2), width: w, height: h }),
     palette: CGA_PALETTE,
     paletteName: 'CGA_PALETTE',
   },
@@ -227,7 +233,7 @@ const MODES: MazeMode[] = [
     ext: 't16',
     suffix: '_t16',
     bpp: 4,
-    decode: (d, o, w, h) => decodePackedPixelLinear(d, o, w, h, 4),
+    decode: (d, o, w, h) => ({ indices: decodePackedPixelLinear(d, o, w, h, 4), width: w, height: h }),
     palette: PIC_PALETTE,
     paletteName: 'PIC_PALETTE',
   },

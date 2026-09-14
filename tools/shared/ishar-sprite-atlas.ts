@@ -7,18 +7,39 @@
  * bank), matching this project's "pack into a few semantic atlases, not one
  * file per sprite" convention.
  *
- * Every render here is GREYSCALE (Method §3) -- no real AGA colour palette
- * has been recovered for this engine yet, see `docs/ishar-sprite-format.md`
- * "Open". Output: `public/assets/<game>/<platform>/sprites/<NAME>.{png,json}`,
- * `manifest.json` upserted (this project's merged, upsert-by-name convention).
+ * Colour (2026-09-01 addition, `ishar-palette.ts`): a file's own directory is
+ * scanned for a dedicated `0xFE`-marked palette resource first (e.g. every
+ * monster/portrait script -- `DRAGON.DO`, `GEANT.DO`, ...); if none is found,
+ * the shared world palette resolved from a sibling `FOND.DO`/`FOND.CO` in the
+ * same `dataDir` is used as a fallback (own palette entries still win where
+ * both cover the same slot -- see `mergeIsharPalettes()`). Only when NEITHER
+ * resolves does this fall back to the original `isharBitmapToNormalizedGrey
+ * scaleRGBA()` render, so a file this can't colour-resolve renders EXACTLY
+ * as before (no regression). `manifest.json`'s `hasPalette` field now
+ * reflects which path was actually used, per atlas.
  */
 import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { writePNG } from '@seer-project/pipeline';
 import { assetDir, writeJson, writeManifest, type ManifestEntry } from './asset-paths.js';
 import { unpackSilmarilsScript } from './silmarils-unpack.js';
-import { decodeIsharDirectory, isharBitmapToGreyscaleRGBA, type IsharBitmap } from './ishar-sprites.js';
-import { shelfPack, type PackInput } from './atlas-pack.js';
+import { decodeIsharDirectory, isharBitmapToNormalizedGreyscaleRGBA, type IsharBitmap } from './ishar-sprites.js';
+import { resolveIsharOwnPalette, mergeIsharPalettes, isharBitmapToPaletteRGBA, type IsharPalette } from './ishar-palette.js';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
+
+/** Resolve `FOND.DO`/`FOND.CO`'s own dedicated palette resource, if a sibling file exists in `dataDir` -- Ishar 1-3's shared outdoor/world palette (see `ishar-palette.ts` module doc). Returns `null` if no `FOND.*` file exists or it has no resolvable palette (e.g. Crystals of Arborea, which has no `FOND` file at all). */
+function resolveWorldPalette(dataDir: string, files: string[]): IsharPalette | null {
+  const fondName = files.find((f) => /^FOND\.(DO|CO)$/i.test(f));
+  if (!fondName) return null;
+  try {
+    const buf = readFileSync(join(dataDir, fondName));
+    const unpacked = unpackSilmarilsScript(buf);
+    if (!unpacked) return null;
+    return resolveIsharOwnPalette(unpacked.data);
+  } catch {
+    return null;
+  }
+}
 
 export interface SpriteAtlasReportEntry {
   name: string;
@@ -35,8 +56,10 @@ export async function extractSpriteAtlases(
   const outDir = assetDir('sprites', game, platform);
   const report: SpriteAtlasReportEntry[] = [];
   const manifestEntries: ManifestEntry[] = [];
+  const allFiles = readdirSync(dataDir);
+  const worldPalette = resolveWorldPalette(dataDir, allFiles);
 
-  for (const name of readdirSync(dataDir).sort()) {
+  for (const name of allFiles.sort()) {
     const ext = extname(name).toUpperCase();
     if (ext !== '.DO' && ext !== '.CO') continue;
     const path = join(dataDir, name);
@@ -58,7 +81,7 @@ export async function extractSpriteAtlases(
       continue;
     }
 
-    const packInputs: PackInput[] = bitmaps.map((b) => ({
+    const packInputs: ShelfPackInput[] = bitmaps.map((b) => ({
       name: `${baseName}_${b.index.toString().padStart(3, '0')}`,
       width: b.width,
       height: b.height,
@@ -66,9 +89,12 @@ export async function extractSpriteAtlases(
     const packed = shelfPack(packInputs, 1024);
     const atlas = new Uint8Array(packed.width * packed.height * 4);
 
+    const ownPalette = resolveIsharOwnPalette(unpacked.data);
+    const palette = mergeIsharPalettes(ownPalette, worldPalette);
+
     bitmaps.forEach((b: IsharBitmap, i: number) => {
       const frame = packed.frames[i];
-      const rgba = isharBitmapToGreyscaleRGBA(b);
+      const rgba = palette ? isharBitmapToPaletteRGBA(b, palette) : isharBitmapToNormalizedGreyscaleRGBA(b);
       for (let y = 0; y < b.height; y++) {
         const srcOff = y * b.width * 4;
         const dstOff = ((frame.y + y) * packed.width + frame.x) * 4;
@@ -79,13 +105,13 @@ export async function extractSpriteAtlases(
     const pngPath = resolve(outDir, `${baseName}.png`);
     await writePNG(pngPath, atlas, packed.width, packed.height);
 
-    const frames = packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.width, h: f.height }));
+    const frames = packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.w, h: f.h }));
     writeJson(resolve(outDir, `${baseName}.json`), { frames, width: packed.width, height: packed.height });
 
     manifestEntries.push({
       name: `sprites/${baseName}`,
       sprites: bitmaps.length,
-      hasPalette: false,
+      hasPalette: palette !== null,
       png: `sprites/${baseName}.png`,
       kind: 'atlas',
     });

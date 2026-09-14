@@ -86,13 +86,8 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG } from '@seer-project/pipeline';
-import {
-  decodePlanarPlaneMajor,
-  indicesToPaletteRGBA,
-  type PlanarImage,
-  type RGB,
-} from '../shared/amiga-planar.ts';
-import { decodeCgaBanked, decodePackedPixelLinear } from '../shared/packed-pixel.ts';
+import { indicesToPaletteRGBA, type PlanarImage, type RGB } from '../shared/amiga-planar.ts';
+import { decodeCgaBanked, decodePackedPixelLinear, decodePlanar } from '@seer-project/gfx';
 import { PIC_PALETTE } from './pic-format.ts';
 import { CGA_PALETTE } from './dosega-cga-palette.ts';
 
@@ -117,7 +112,11 @@ const MODES: ScreenMode[] = [
     ext: 'ega',
     bpp: 4,
     fileSize: 32768,
-    decode: (d, o, w, h) => decodePlanarPlaneMajor(d, o, w, h, 4, EGA_PLANE_STRIDE),
+    decode: (d, o, w, h) => ({
+      indices: decodePlanar(d, { width: w, height: h, planes: 4, layout: 'plane-major', offset: o, planeStride: EGA_PLANE_STRIDE }),
+      width: w,
+      height: h,
+    }),
     palette: PIC_PALETTE,
     paletteName: 'PIC_PALETTE',
   },
@@ -126,7 +125,7 @@ const MODES: ScreenMode[] = [
     ext: 'cga',
     bpp: 2,
     fileSize: 16384,
-    decode: (d, o, w, h) => decodeCgaBanked(d, o, w, h, 2),
+    decode: (d, o, w, h) => ({ indices: decodeCgaBanked(d, o, w, h, 2), width: w, height: h }),
     palette: CGA_PALETTE,
     paletteName: 'CGA_PALETTE',
   },
@@ -135,7 +134,7 @@ const MODES: ScreenMode[] = [
     ext: 't16',
     bpp: 4,
     fileSize: 32768,
-    decode: (d, o, w, h) => decodePackedPixelLinear(d, o, w, h, 4),
+    decode: (d, o, w, h) => ({ indices: decodePackedPixelLinear(d, o, w, h, 4), width: w, height: h }),
     palette: PIC_PALETTE,
     paletteName: 'PIC_PALETTE',
   },

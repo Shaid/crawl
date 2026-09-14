@@ -59,6 +59,7 @@
     "@seer-project/core": "file:../seer/packages/core",
     "@seer-project/dungeon": "file:../seer/packages/dungeon",
     "@seer-project/engine-2d": "file:../seer/packages/engine-2d",
+    "@seer-project/gfx": "file:../seer/packages/gfx",
     "@seer-project/iff": "file:../seer/packages/iff",
     "@seer-project/pipeline": "file:../seer/packages/pipeline",
     "@seer-project/retro-display": "file:../seer/packages/retro-display",

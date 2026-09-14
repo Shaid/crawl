@@ -20,7 +20,7 @@
  * in row-major tile order. Colour index 15 (all 4 planes set) is the
  * transparent/background key.
  */
-import { decodePlanarPlaneMajor } from '../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
 import type { RGB } from '../shared/amiga-planar.ts';
 
 export interface PicCel {
@@ -81,10 +81,10 @@ export function decodePicCel(data: Uint8Array, cel: PicCel): Uint8Array {
   for (let ty = 0; ty < tilesHigh; ty++) {
     for (let tx = 0; tx < tilesWide; tx++) {
       if (maskBit(mask, tileIndex)) {
-        const tile = decodePlanarPlaneMajor(data, src, 8, 8, 4);
+        const tile = decodePlanar(data, { width: 8, height: 8, planes: 4, layout: 'plane-major', offset: src });
         for (let y = 0; y < 8; y++) {
           for (let x = 0; x < 8; x++) {
-            indices[(ty * 8 + y) * widthPx + (tx * 8 + x)] = tile.indices[y * 8 + x];
+            indices[(ty * 8 + y) * widthPx + (tx * 8 + x)] = tile[y * 8 + x];
           }
         }
         src += TILE_SIZE;

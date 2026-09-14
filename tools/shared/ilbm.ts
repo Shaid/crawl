@@ -9,9 +9,14 @@
  * ILBM level-map pictures — see `docs/elvira2/amiga/data-structure.md`).
  * Reuse for any future Amiga ILBM/PBM asset rather than re-deriving BMHD/
  * CMAP/BODY parsing inline.
+ *
+ * Row-interleaved plane decode is `@seer-project/gfx`'s `decodePlanar`,
+ * which requires `width % 8 === 0` (real Elvira 2 `Pics/` widths are all
+ * 640, so this holds for every asset in this corpus).
  */
 import { parseIff, findChunk, decodeByteRun1, type IffForm } from '@seer-project/iff';
-import { decodePlanarRowInterleaved, indicesToPaletteRGBA, type RGB } from './amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
+import { indicesToPaletteRGBA, type RGB } from './amiga-planar.ts';
 
 export interface IlbmBitmap {
   width: number;
@@ -62,7 +67,7 @@ export function decodeIlbmForm(form: IffForm): IlbmBitmap | null {
   } else {
     const planeSize = rowBytes * height * planes;
     const raw = compression === 1 ? decodeByteRun1(body.data, planeSize) : body.data.subarray(0, planeSize);
-    indices = decodePlanarRowInterleaved(raw, 0, width, height, planes).indices;
+    indices = decodePlanar(raw, { width, height, planes, layout: 'row-interleaved' });
   }
 
   return { width, height, planes, compression, masking, palette, indices };

@@ -76,7 +76,7 @@ import {
   TILE_BYTES_4BPP,
   TILE_SIZE_PX,
 } from '../../shared/snes-ppu';
-import { shelfPack, type PackInput } from '../../shared/atlas-pack';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const BANK_START = 0x2ad57; // file offset -- confirmed byte immediately after portrait pool A
 const BANK_END = 0x2e000; // file offset -- confirmed start of portrait pool B
@@ -133,7 +133,7 @@ function main() {
     `Bank size 0x${size.toString(16)} (${size} bytes) -> ${tileCount} whole 4bpp tiles, ${leftover} trailing bytes not decoded.`,
   );
 
-  const packItems: PackInput[] = [];
+  const packItems: ShelfPackInput[] = [];
   for (let t = 0; t < tileCount; t++) {
     packItems.push({
       name: `ui_icon_${String(t).padStart(3, '0')}`,
@@ -171,8 +171,8 @@ function main() {
       name: f.name,
       x: f.x,
       y: f.y,
-      w: f.width,
-      h: f.height,
+      w: f.w,
+      h: f.h,
       tileIndex: i,
       fileOffset: BANK_START + i * TILE_BYTES_4BPP,
     })),

@@ -87,7 +87,7 @@ import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { readBinary, writeJson, writePNG } from '@seer-project/pipeline';
 import { decodeTile2bpp, decodeTile4bpp, TILE_SIZE_PX } from '../../shared/snes-ppu';
 import { decodeLzss } from '../../shared/snes-lzss';
-import { shelfPack, type PackInput } from '../../shared/atlas-pack';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const DIRECTORY_OFFSET = 0x190000; // file offset -- confirmed master directory (CPU $32:8000)
 const BOOT_CGRAM_SHADOW = 0x127e4; // the $7E:3800 CGRAM shadow's ROM initialiser (docs 3.5/3.14.10)
@@ -218,7 +218,7 @@ function main() {
 
   // Pack every record's tiles into one shared atlas, 32 tiles/row.
   const ATLAS_MAX_WIDTH = 32 * TILE_SIZE_PX;
-  const packItems: PackInput[] = allTiles.map((_, i) => ({
+  const packItems: ShelfPackInput[] = allTiles.map((_, i) => ({
     name: `spellanim_tile_${String(i).padStart(4, '0')}`,
     width: TILE_SIZE_PX,
     height: TILE_SIZE_PX,

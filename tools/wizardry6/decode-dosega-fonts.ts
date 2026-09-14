@@ -50,17 +50,11 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
-import {
-  decodeMonoGlyphSheet,
-  decodePlanarPlaneMajor,
-  indicesToPaletteRGBA,
-  type PlanarImage,
-  type RGB,
-} from '../shared/amiga-planar.ts';
-import { decodePackedPixelLinear, indicesToRGBAWithTransparency } from '../shared/packed-pixel.ts';
+import { decodeMonoGlyphSheet, indicesToPaletteRGBA, type PlanarImage, type RGB } from '../shared/amiga-planar.ts';
+import { decodePackedPixelLinear, decodePlanar, indicesToRGBAWithTransparency } from '@seer-project/gfx';
 import { PIC_PALETTE } from './pic-format.ts';
 import { CGA_PALETTE } from './dosega-cga-palette.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const OUT_DIR = 'public/assets/wizardry6/dosega/sprites';
 
@@ -105,7 +99,11 @@ const MODES: TileMode[] = [
     suffix: '',
     bpp: 4,
     tileBytes: 32,
-    decode: (d, o, w, h) => decodePlanarPlaneMajor(d, o, w, h, 4),
+    decode: (d, o, w, h) => ({
+      indices: decodePlanar(d, { width: w, height: h, planes: 4, layout: 'plane-major', offset: o }),
+      width: w,
+      height: h,
+    }),
     palette: PIC_PALETTE,
     transparentIndex: 15,
     wfontFiles: ['wfont1', 'wfont2', 'wfont3', 'wfont4'], // wfont0.ega is the special mono case, handled separately
@@ -115,7 +113,7 @@ const MODES: TileMode[] = [
     suffix: '_cga',
     bpp: 2,
     tileBytes: 16,
-    decode: (d, o, w, h) => decodePackedPixelLinear(d, o, w, h, 2),
+    decode: (d, o, w, h) => ({ indices: decodePackedPixelLinear(d, o, w, h, 2), width: w, height: h }),
     palette: CGA_PALETTE,
     transparentIndex: 3,
     wfontFiles: ['wfont0', 'wfont1', 'wfont2', 'wfont3', 'wfont4'],
@@ -125,7 +123,7 @@ const MODES: TileMode[] = [
     suffix: '_t16',
     bpp: 4,
     tileBytes: 32,
-    decode: (d, o, w, h) => decodePackedPixelLinear(d, o, w, h, 4),
+    decode: (d, o, w, h) => ({ indices: decodePackedPixelLinear(d, o, w, h, 4), width: w, height: h }),
     palette: PIC_PALETTE,
     transparentIndex: 15,
     wfontFiles: ['wfont0', 'wfont1', 'wfont2', 'wfont3', 'wfont4'],
@@ -162,7 +160,7 @@ function decodeTileSheet(
   mode: TileMode,
 ): { rgba: Uint8Array; width: number; height: number; frames: AtlasFrame[]; tileCount: number } {
   const tileCount = Math.floor(data.length / mode.tileBytes);
-  const packInputs: PackInput[] = [];
+  const packInputs: ShelfPackInput[] = [];
   for (let t = 0; t < tileCount; t++) {
     packInputs.push({ name: `${baseName}_tile${String(t).padStart(3, '0')}`, width: TILE_PX, height: TILE_PX });
   }
@@ -186,7 +184,7 @@ function decodeTileSheet(
     rgba: atlas,
     width: packed.width,
     height: packed.height,
-    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.width, h: f.height })),
+    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.w, h: f.h })),
     tileCount,
   };
 }
@@ -230,7 +228,7 @@ function decodePortrait(data: Uint8Array, recordOffset: number, mode: TileMode):
 function decodeWportFile(data: Uint8Array, baseName: string, mode: TileMode) {
   const portraitBytes = TILES_PER_PORTRAIT * mode.tileBytes;
   const recordCount = Math.min(RECORDS_PER_FILE, Math.floor(data.length / portraitBytes));
-  const packInputs: PackInput[] = [];
+  const packInputs: ShelfPackInput[] = [];
   for (let i = 0; i < recordCount; i++) {
     packInputs.push({
       name: `${baseName}_portrait${String(i).padStart(2, '0')}`,
@@ -243,11 +241,7 @@ function decodeWportFile(data: Uint8Array, baseName: string, mode: TileMode) {
   for (let i = 0; i < recordCount; i++) {
     const frame = packed.frames[i];
     const indices = decodePortrait(data, i * portraitBytes, mode);
-    const rgba = indicesToRGBAWithTransparency(
-      { indices, width: PORTRAIT_PX, height: PORTRAIT_PX },
-      mode.palette,
-      mode.transparentIndex,
-    );
+    const rgba = indicesToRGBAWithTransparency(indices, mode.palette, mode.transparentIndex);
     for (let y = 0; y < PORTRAIT_PX; y++) {
       const srcRowOff = y * PORTRAIT_PX * 4;
       const dstRowOff = ((frame.y + y) * packed.width + frame.x) * 4;
@@ -258,7 +252,7 @@ function decodeWportFile(data: Uint8Array, baseName: string, mode: TileMode) {
     rgba: atlas,
     width: packed.width,
     height: packed.height,
-    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.width, h: f.height })),
+    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.w, h: f.h })),
     recordCount,
   };
 }

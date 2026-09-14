@@ -53,7 +53,7 @@ import { resolve } from 'node:path';
 import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { readBinary, writeJson, writePNG } from '@seer-project/pipeline';
 import { composeTileGrid, decodeCgramPalette } from '../../shared/snes-ppu';
-import { shelfPack, type PackInput } from '../../shared/atlas-pack';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const DIRECTORY_OFFSET = 0x105d1; // file offset of the 2-byte-per-entry pointer table (bank 2)
 const DIRECTORY_ENTRY_COUNT = 36; // indices 0-35 -- the confirmed-address portion of the nominal 60-slot table
@@ -116,7 +116,7 @@ function main() {
 
   // Decode all 36 in directory-index order (not sorted-by-address order) --
   // this is the natural "resource ID" order a future consumer would use.
-  const packItems: PackInput[] = entries.map((e) => ({
+  const packItems: ShelfPackInput[] = entries.map((e) => ({
     name: `portrait_${String(e.index).padStart(2, '0')}`,
     width: PORTRAIT_PX,
     height: PORTRAIT_PX,
@@ -167,8 +167,8 @@ function main() {
       name: f.name,
       x: f.x,
       y: f.y,
-      w: f.width,
-      h: f.height,
+      w: f.w,
+      h: f.h,
       directoryIndex: entries[i].index,
       fileOffset: entries[i].fileOffset,
       paletteGroup: paletteGroupOf(entries[i].index),

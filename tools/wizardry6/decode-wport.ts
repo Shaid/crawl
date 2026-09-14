@@ -50,9 +50,9 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
-import { decodePlanarPlaneMajor } from '../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
 import { celIndicesToRGBA } from './pic-format.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const TILE_SIZE = 32; // 4 planes * 8 rows * 1 byte/row
 const TILES_WIDE = 3;
@@ -70,10 +70,16 @@ function decodePortrait(data: Uint8Array, recordOffset: number): Uint8Array {
   for (let ty = 0; ty < TILES_HIGH; ty++) {
     for (let tx = 0; tx < TILES_WIDE; tx++) {
       const t = ty * TILES_WIDE + tx;
-      const tile = decodePlanarPlaneMajor(data, recordOffset + t * TILE_SIZE, 8, 8, 4);
+      const tile = decodePlanar(data, {
+        width: 8,
+        height: 8,
+        planes: 4,
+        layout: 'plane-major',
+        offset: recordOffset + t * TILE_SIZE,
+      });
       for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
-          indices[(ty * 8 + y) * PORTRAIT_PX + (tx * 8 + x)] = tile.indices[y * 8 + x];
+          indices[(ty * 8 + y) * PORTRAIT_PX + (tx * 8 + x)] = tile[y * 8 + x];
         }
       }
     }
@@ -87,7 +93,7 @@ function decodeFile(data: Uint8Array, baseName: string) {
   }
   const recordCount = Math.min(RECORDS_PER_FILE, Math.floor(data.length / PORTRAIT_BYTES));
 
-  const packInputs: PackInput[] = [];
+  const packInputs: ShelfPackInput[] = [];
   for (let i = 0; i < recordCount; i++) {
     packInputs.push({
       name: `${baseName}_portrait${String(i).padStart(2, '0')}`,
@@ -113,7 +119,7 @@ function decodeFile(data: Uint8Array, baseName: string) {
     rgba: atlas,
     width: packed.width,
     height: packed.height,
-    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.width, h: f.height })),
+    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.w, h: f.h })),
     recordCount,
   };
 }

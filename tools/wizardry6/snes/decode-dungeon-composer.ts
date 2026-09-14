@@ -109,7 +109,7 @@ import { resolve } from 'node:path';
 import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { readBinary, writeJson, writePNG } from '@seer-project/pipeline';
 import { decodeTile4bpp, TILE_BYTES_4BPP, TILE_SIZE_PX, decodeCgramPalette } from '../../shared/snes-ppu';
-import { shelfPack, type PackInput } from '../../shared/atlas-pack';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 // Confirmed dungeon-region CGRAM palette groups (docs section 3.14.10),
 // file 0x10764 + group*32, 16 BGR555 colours/group. $094c value -> group.
@@ -333,7 +333,7 @@ function main() {
   const palette = loadPaletteRGB(data, DEFAULT_PALETTE_SELECTOR);
 
   // Render each piece as its own sprite.
-  const packItems: PackInput[] = records.map((r) => ({
+  const packItems: ShelfPackInput[] = records.map((r) => ({
     name: `${r.table}_${String(r.index).padStart(4, '0')}`,
     width: Math.max(1, r.w) * TILE_SIZE_PX,
     height: Math.max(1, r.h) * TILE_SIZE_PX,
@@ -374,8 +374,8 @@ function main() {
       name: f.name,
       x: f.x,
       y: f.y,
-      w: f.width,
-      h: f.height,
+      w: f.w,
+      h: f.h,
       table: records[i].table,
       tableIndex: records[i].index,
       viewportX: records[i].x,

@@ -22,7 +22,7 @@ import {
   type MonsterAtlas,
   type MonsterFrame,
 } from './pc-gfx.ts';
-import { shelfPack } from '../shared/atlas-pack.ts';
+import { shelfPack } from '@seer-project/core';
 import { manifestEntry, writeManifest, type ManifestEntry } from '../shared/asset-paths.ts';
 
 export interface PcGraphicsExportResult {

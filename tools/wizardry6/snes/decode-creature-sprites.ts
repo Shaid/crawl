@@ -71,7 +71,7 @@ import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { readBinary, writeJson, writePNG } from '@seer-project/pipeline';
 import { decodeTile4bpp, bgr555ToRGB } from '../../shared/snes-ppu';
 import { decodeLzss } from '../../shared/snes-lzss';
-import { shelfPack, type PackInput } from '../../shared/atlas-pack';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const TABLE_OFFSET = 0x200000; // file offset, CPU $C0:8000
 const TABLE_ENTRIES = 251;
@@ -336,7 +336,7 @@ function main() {
   console.log(`Composed ${composed.length} frames across ${recordsComposed}/${recordCount} records (full animation chains, primary palette).`);
 
   const frameName = (c: Composed) => `creature_${String(c.index).padStart(3, '0')}_f${String(c.frame).padStart(2, '0')}`;
-  const packItems: PackInput[] = composed.map((c) => ({ name: frameName(c), width: c.width, height: c.height }));
+  const packItems: ShelfPackInput[] = composed.map((c) => ({ name: frameName(c), width: c.width, height: c.height }));
   const packed = shelfPack(packItems, ATLAS_MAX_WIDTH, 2);
   const frameByName = new Map(packed.frames.map((f) => [f.name, f]));
 
@@ -380,8 +380,8 @@ function main() {
         name: f.name,
         x: f.x,
         y: f.y,
-        w: f.width,
-        h: f.height,
+        w: f.w,
+        h: f.h,
         recordIndex: r.index,
         frameIndex: Number(f.name.slice(-2)),
         ptrA: `0x${r.ptrA.toString(16)}`,

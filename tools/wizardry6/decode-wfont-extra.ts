@@ -49,9 +49,10 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
-import { decodePlanarPlaneMajor, indicesToPaletteRGBA } from '../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
+import { indicesToPaletteRGBA } from '../shared/amiga-planar.ts';
 import { PIC_PALETTE } from './pic-format.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const TILE_SIZE = 32; // 4 planes * 8 rows * 1 byte/row
 const TILE_PX = 8;
@@ -68,7 +69,7 @@ function decodeFile(data: Uint8Array, baseName: string) {
     );
   }
 
-  const packInputs: PackInput[] = [];
+  const packInputs: ShelfPackInput[] = [];
   for (let t = 0; t < tileCount; t++) {
     packInputs.push({ name: `${baseName}_tile${String(t).padStart(3, '0')}`, width: TILE_PX, height: TILE_PX });
   }
@@ -77,8 +78,8 @@ function decodeFile(data: Uint8Array, baseName: string) {
 
   for (let t = 0; t < tileCount; t++) {
     const frame = packed.frames[t];
-    const img = decodePlanarPlaneMajor(data, t * TILE_SIZE, TILE_PX, TILE_PX, 4);
-    const rgba = indicesToPaletteRGBA(img, PIC_PALETTE);
+    const indices = decodePlanar(data, { width: TILE_PX, height: TILE_PX, planes: 4, layout: 'plane-major', offset: t * TILE_SIZE });
+    const rgba = indicesToPaletteRGBA({ indices, width: TILE_PX, height: TILE_PX }, PIC_PALETTE);
     for (let y = 0; y < TILE_PX; y++) {
       const srcRowOff = y * TILE_PX * 4;
       const dstRowOff = ((frame.y + y) * packed.width + frame.x) * 4;
@@ -90,7 +91,7 @@ function decodeFile(data: Uint8Array, baseName: string) {
     rgba: atlas,
     width: packed.width,
     height: packed.height,
-    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.width, h: f.height })),
+    frames: packed.frames.map((f) => ({ name: f.name, x: f.x, y: f.y, w: f.w, h: f.h })),
     tileCount,
   };
 }

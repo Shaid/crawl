@@ -35,7 +35,7 @@
 import { resolve } from 'node:path';
 import { readBinary, writePNG } from '@seer-project/pipeline';
 import { loadBard3Picture, BARDSTALE_PICTURE_WIDTH as W, BARDSTALE_PICTURE_HEIGHT as H } from '../../shared/bardstale-codecs.ts';
-import { decodePackedPixelLinear } from '../../shared/packed-pixel.ts';
+import { decodePackedPixelLinear } from '@seer-project/gfx';
 import { blitRGBA, amiga12ToRGB, indicesToRGBA } from '../../shared/amiga-planar.ts';
 import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex } from '../../shared/asset-paths.ts';
 
@@ -68,7 +68,7 @@ export async function exportBardsTale3Data(dataDir: string) {
     const usedPalette = rgb.length ? rgb : DEFAULT_PALETTE;
     for (let f = 0; f < SUBFRAMES; f++) {
       const sub = picture.subFrames.subarray(f * SUBFRAME_BYTES, (f + 1) * SUBFRAME_BYTES);
-      const { indices } = decodePackedPixelLinear(sub, 0, W, H, 4);
+      const indices = decodePackedPixelLinear(sub, 0, W, H, 4);
       const rgba = indicesToRGBA(indices, usedPalette, { transparentIndex0: false });
       cells.push({ picIndex: i, frame: f, rgba });
     }

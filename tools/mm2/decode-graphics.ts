@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { decodeImage32, paletteWordsToRGB, frameToRGBA, type Image32File } from './image32.ts';
 import { parseAnm, composeAnmFrame, anmFrameCount, type AnmParsed } from './anm.ts';
-import { shelfPack } from '../shared/atlas-pack.ts';
+import { shelfPack } from '@seer-project/core';
 import { manifestEntry, writeManifest, syncDataManifest, type ManifestEntry } from '../shared/asset-paths.ts';
 
 export interface GraphicsExportResult {

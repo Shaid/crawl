@@ -19,11 +19,11 @@
  * Row-interleaved (row0's 5 planes together, then row1's, ...) -- tried
  * next because it's the more common convention for small Amiga
  * sprite/tile graphics -- produces a decisive, legible brick-coursing
- * stone texture instead. `tools/shared/amiga-planar.ts`'s
- * `decodePlanarRowInterleaved` already implements this (built for a
+ * stone texture instead. `@seer-project/gfx`'s `decodePlanar`
+ * (`row-interleaved` layout) already implements this (built for a
  * different game); reused directly rather than re-implementing.
  */
-import { decodePlanarRowInterleaved } from '../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
 import { eobAmigaWordToRGB, readBEWords } from './palette.ts';
 
 const TILE_SIZE = 8;
@@ -52,7 +52,15 @@ export function decodeVcn(data: Uint8Array): VcnData {
 
   const tiles: Uint8Array[] = [];
   for (let i = 0; i < numTiles; i++) {
-    tiles.push(decodePlanarRowInterleaved(data, 0x22 + i * TILE_BYTES, TILE_SIZE, TILE_SIZE, TILE_PLANES).indices);
+    tiles.push(
+      decodePlanar(data, {
+        width: TILE_SIZE,
+        height: TILE_SIZE,
+        planes: TILE_PLANES,
+        layout: 'row-interleaved',
+        offset: 0x22 + i * TILE_BYTES,
+      }),
+    );
   }
 
   return { numTiles, patchColors, tiles };

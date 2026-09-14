@@ -157,12 +157,15 @@ export function blitRGBA(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Generic planar decoders (Wizardry 6 / sorcery import) — container-agnostic,
-// with plane-major and row-interleaved layouts plus palette/greyscale renders
-// and a monochrome glyph-sheet decoder. Same-named concepts as the
-// Black Crypt helpers above but with a different (offset-taking) signature and
-// a `PlanarImage` return shape; kept separate rather than refactored so neither
-// game's verified pipeline is disturbed by the other's callers.
+// Generic planar-image helpers (Wizardry 6 / sorcery import) — container-
+// agnostic palette/greyscale renders and a monochrome glyph-sheet decoder,
+// consuming the `PlanarImage` shape. The actual plane-major/row-interleaved
+// decode is now `@seer-project/gfx`'s config-driven `decodePlanar`
+// (`docs/common-tooling-candidates.md` §1); this local `PlanarImage` type
+// stays because these renderers (and several callers) key off a
+// bundled {indices, width, height} record, a shape gfx's own leaner
+// `decodePlanar` (which returns bare indices; width/height live in the
+// caller's config) doesn't provide directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface PlanarImage {
@@ -170,56 +173,6 @@ export interface PlanarImage {
   indices: Uint8Array;
   width: number;
   height: number;
-}
-
-export function decodePlanarPlaneMajor(
-  data: Uint8Array,
-  offset: number,
-  width: number,
-  height: number,
-  planes: number,
-  planeStride?: number,
-): PlanarImage {
-  const rowBytes = Math.ceil(width / 8);
-  const planeSize = rowBytes * height;
-  const stride = planeStride ?? planeSize;
-  const indices = new Uint8Array(width * height);
-  for (let p = 0; p < planes; p++) {
-    const planeOffset = offset + p * stride;
-    for (let y = 0; y < height; y++) {
-      const rowOffset = planeOffset + y * rowBytes;
-      for (let x = 0; x < width; x++) {
-        const byte = data[rowOffset + (x >> 3)] ?? 0;
-        const bit = (byte >> (7 - (x & 7))) & 1;
-        if (bit) indices[y * width + x] |= 1 << p;
-      }
-    }
-  }
-  return { indices, width, height };
-}
-
-export function decodePlanarRowInterleaved(
-  data: Uint8Array,
-  offset: number,
-  width: number,
-  height: number,
-  planes: number,
-): PlanarImage {
-  const rowBytes = Math.ceil(width / 8);
-  const indices = new Uint8Array(width * height);
-  let cursor = offset;
-  for (let y = 0; y < height; y++) {
-    for (let p = 0; p < planes; p++) {
-      const rowOffset = cursor;
-      cursor += rowBytes;
-      for (let x = 0; x < width; x++) {
-        const byte = data[rowOffset + (x >> 3)] ?? 0;
-        const bit = (byte >> (7 - (x & 7))) & 1;
-        if (bit) indices[y * width + x] |= 1 << p;
-      }
-    }
-  }
-  return { indices, width, height };
 }
 
 export function indicesToGreyscaleRGBA(img: PlanarImage, planes: number): Uint8Array {

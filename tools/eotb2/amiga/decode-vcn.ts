@@ -31,15 +31,15 @@
  * all-zero patch it is a no-op against the real corpus and callers should
  * simply use the wall set's own `.PAL` directly.
  *
- * Tile pixel decode reuses `decodePlanarRowInterleaved` (`tools/shared/
- * amiga-planar.ts`) unmodified -- the same row-interleaved 8x8x5bpp
- * convention already confirmed for EOB1 Amiga's `.VCN` tiles. Visually
- * confirmed this session: a rendered 32-tiles-wide atlas of every
+ * Tile pixel decode reuses `@seer-project/gfx`'s `decodePlanar`
+ * (`row-interleaved` layout) unmodified -- the same row-interleaved
+ * 8x8x5bpp convention already confirmed for EOB1 Amiga's `.VCN` tiles.
+ * Visually confirmed this session: a rendered 32-tiles-wide atlas of every
  * `CRIMSON.VCN` tile through `CRIMSON.PAL` shows a coherent, legible
  * red/brown brick-masonry texture sheet, not noise.
  */
 import { decompressLCW } from '../../eotb/lcw.ts';
-import { decodePlanarRowInterleaved } from '../../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
 import { eobAmigaWordToRGB, readBEWords } from '../../eotb/palette.ts';
 
 const TILE_SIZE = 8;
@@ -88,7 +88,15 @@ export function decodeVcn(data: Uint8Array): VcnData {
 
   const tiles: Uint8Array[] = [];
   for (let i = 0; i < numTiles; i++) {
-    tiles.push(decodePlanarRowInterleaved(dec, HEADER_SIZE + i * TILE_BYTES, TILE_SIZE, TILE_SIZE, TILE_PLANES).indices);
+    tiles.push(
+      decodePlanar(dec, {
+        width: TILE_SIZE,
+        height: TILE_SIZE,
+        planes: TILE_PLANES,
+        layout: 'row-interleaved',
+        offset: HEADER_SIZE + i * TILE_BYTES,
+      }),
+    );
   }
 
   return { numTiles, patchColors, tiles };

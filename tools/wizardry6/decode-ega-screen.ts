@@ -46,7 +46,8 @@
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG } from '@seer-project/pipeline';
-import { decodePlanarPlaneMajor, indicesToPaletteRGBA } from '../shared/amiga-planar.ts';
+import { decodePlanar } from '@seer-project/gfx';
+import { indicesToPaletteRGBA } from '../shared/amiga-planar.ts';
 import { PIC_PALETTE } from './pic-format.ts';
 
 const SCREENS = ['DRAGONSC.EGA', 'GRAVEYRD.EGA', 'TITLEPAG.EGA'];
@@ -72,8 +73,8 @@ function main() {
       console.warn(`${name}: expected 32768 bytes, got ${data.length} -- skipping`);
       continue;
     }
-    const img = decodePlanarPlaneMajor(data, 0, WIDTH, HEIGHT, PLANES, PLANE_STRIDE);
-    const rgba = indicesToPaletteRGBA(img, PIC_PALETTE);
+    const indices = decodePlanar(data, { width: WIDTH, height: HEIGHT, planes: PLANES, layout: 'plane-major', planeStride: PLANE_STRIDE });
+    const rgba = indicesToPaletteRGBA({ indices, width: WIDTH, height: HEIGHT }, PIC_PALETTE);
     const outName = name.replace(/\.EGA$/i, '').toLowerCase() + '.png';
     writePNG(resolve(outDir, outName), rgba, WIDTH, HEIGHT);
     console.log(`Wrote ${outName} (${WIDTH}x${HEIGHT}, PIC_PALETTE -- confirmed sole palette in Bane)`);

@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { readdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { assetDir, manifestEntry, writeManifest, type ManifestEntry } from './asset-paths.ts';
-import { shelfPack } from './atlas-pack.ts';
+import { shelfPack } from '@seer-project/core';
 import {
   simonDecr,
   loadPalette,

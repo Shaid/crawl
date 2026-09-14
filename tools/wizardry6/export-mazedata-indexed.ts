@@ -27,7 +27,7 @@ import { mkdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { decodeDirRecord, parseMazeData, type MazeDirRecord } from './decode-maze.ts';
 import { PIC_PALETTE } from './pic-format.ts';
-import { shelfPack, type PackInput } from '../shared/atlas-pack.ts';
+import { shelfPack, type ShelfPackInput } from '@seer-project/core';
 
 const PLANES = 4;
 const ATLAS_MAX_WIDTH = 1024;
@@ -51,7 +51,7 @@ function buildIndexedAtlas(
   height: number;
   frames: AtlasFrame[];
 } {
-  const packInputs: PackInput[] = records.map((r) => ({
+  const packInputs: ShelfPackInput[] = records.map((r) => ({
     name: `mazedata_dir${String(r.index).padStart(3, '0')}`,
     width: r.widthPx,
     height: r.heightPx,
@@ -81,7 +81,7 @@ function buildIndexedAtlas(
         maskRgba[dstIdx + 3] = 255;
       }
     }
-    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.width, h: frame.height });
+    frames.push({ name: frame.name, x: frame.x, y: frame.y, w: frame.w, h: frame.h });
   }
   return { rgba, maskRgba, width: packed.width, height: packed.height, frames };
 }
