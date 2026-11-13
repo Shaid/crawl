@@ -22,6 +22,109 @@ byte-exact structural invariant holding across the whole corpus),
 independently cross-checked), **hypothesis** (structurally motivated guess,
 not yet verified).
 
+## Review — 2026-11-13 `re-codebreaker` gap audit (read first)
+
+An adversarial pass over this doc, `TODO.md` and `tools/wizardry6/`, prompted
+by the project owner's play-testing report that the maze walker is "very
+inaccurate still". Addresses below are **`Bane.asm` file offsets**
+(`CODE+` = file − `0x28`). Probes were scratch-only. Each finding is also
+applied inline where it contradicts an earlier claim (search "2026-11-13").
+
+1. **HIGH — the walker's movement rule was never traced and contradicts the
+   game.** `view-model.ts` `canStepDir` allows a step only when the *render*
+   evaluator `evalCellFace(...) === 0`. The real move path is `LAB_07C0`
+   (TryMove, file `0x116ac`) → `LAB_0792` (file `0x11152`), which reads the
+   **raw** wall planes only, ignoring features: with per-direction state
+   `-18146(A4)[dir] == 0` the step proceeds when wall code `< 2` (0 open **and
+   1 doorway passable**); **code 3 (closed door) is passable moving forward**
+   (door sound + redraw at `0x11736`–`0x11772`, then the step); code 2 bumps
+   (message `0x7e4`). Stairs cells are walkable: `LAB_07AB` (file `0x1142c`)
+   just clears redraw flag `-10892` when stepping in a stairs cell's facing.
+   Measured over the 14 levels' active regions, the walker wrongly blocks
+   **1,267 edges** (754 doorways, 309 closed doors, 204 feature-gated raw-open
+   edges, mostly stairs) and makes 410 edges one-way; largest walkable
+   component walker-vs-game: level 9 56 vs 132, level 4 412 vs 553, level 12
+   428 vs 550. Stepping into a flagP cell runs a per-level handler (jump
+   table at file `0x1163c`): levels 0/2/3/4/6/11 show message `0x2710` and run
+   a party-wide loop (`LAB_078E`, effect untraced — hazard/damage?); levels
+   8/10, and 12 outside regions 0–8, restore the previous position
+   (`LAB_07AA`) unless runtime flag `-18136` is set (raft/swim state —
+   hypothesis); level 1 has a region-10 warp at `0x11566`; a level-2 flagQ cell
+   also blocks. TODO: `w6-walker-movement-rule`.
+2. **HIGH — features 1/2 are stairs up/down, and level linkage is
+   unmodelled.** Rendering level 0 at (19,14) f2 toward a feature-1 edge and
+   (4,11) f0 toward a feature-2 edge shows **stairs rising into darkness with
+   red handrails** (feature 1) and **stairs going down** (feature 2) — not a
+   "closed door"/"curtained arch"/"cave-mouth arch". Both sit only on open
+   edges and are drawn one-sided (102/102 and 103/103 have feature 0 on the
+   neighbour). The stairs level-change mechanism is **untraced** (no
+   teleporter entity on any stairs cell; position-matching stairs across
+   levels works for only 13/102). The 262 kind-1 teleporters are decoded
+   (handler file `0xbcca`; `+0x240` packs local x bits 0–2, y 3–5, region
+   6–9, facing 10–11; `+0x630` = destination level, 99 = same level) but not
+   wired. Levels 0/1/6/7 have a second disjoint cluster near (10,10), ~110
+   cells from the main one, reached by teleporters; `w6EntrancePose` just
+   picks the first open cell scanning from y=0. TODO: `w6-stairs-transition`,
+   `w6-teleport-wiring`.
+3. **MEDIUM — the "known approximation" for perpendicular overlays is
+   answerable statically, and the port differs.** The left perpendicular
+   evaluator `0x969a` (file `0x96c2`–`0x9872`) tests only flagP, never
+   flagQ; on fog levels (0/4/5, 12 outside regions 0–8) it **returns 0 with
+   no writes**, elsewhere ignores flagP. `view-model.ts` ORs the perpendicular
+   `evalOverlay` into the side gates — clearing side lanes for fog, skipping
+   side ceilings for flagQ, and skipping/alt-flooring side floors whenever the
+   party-column cell is a pit/water cell, none of which the game does. Minor:
+   `0x969a`'s feature table covers 0–12 only and maps feature 5 to
+   "unchanged".
+4. **MEDIUM — levels 10 and 12 are open at the map edge.** At the evaluator's
+   off-map path (file `0x9248`–`0x9256`) **both** levels branch to `LAB_0478`,
+   writing skip-ceiling (`-11354`) and alt-floor (`-11330`) and returning 0;
+   the neighbour helpers (file `0x90b4`, `0x911e`) also return 0 off-map for
+   10/12. §4.7.9's "level 10 returns 2/solid" is wrong. The port returns 2
+   off-map and fills gap cells with wall 2: 27 wrongly-walled edges on level
+   10, 17 on level 12, plus level 12's 96 gap cells. TODO:
+   `w6-offmap-levels-10-12`.
+5. **Process — the walker "verification" is self-referential.** "0/64,000
+   differing pixels" (§4.7.1) compares `view-model` against this project's own
+   earlier `render-corridor-frame.ts`; the tests' "real-data oracles" are the
+   project's own §4.4 formula; "298,744-pose sweep = 0 exceptions" only shows
+   no crash, and includes gap cells (only 37,888 real cell × facing poses
+   exist). Apart from the static-corridor sequence, no pose has been compared
+   to a real game image.
+6. **Section-2 tail fields re-read.** `+0x4fa`/`+0x512` are **3-bit fields
+   indexed `region*5+slot`** (file `0x1023e`–`0x102ca`; `+0x4fa` = local X,
+   `+0x512` = local Y), cleared alongside the per-cell bitset `-18018` — not
+   "(Y,X) word pairs, 12 × 5" (that would need 120 B in 24 B) and not
+   feature-1 stamps. `+0x52a` is two 12-byte arrays read by `LAB_0732`
+   (file `0x1017a`): `rand(100)` vs `+0x536[region]` selects one of two 4-bit
+   nibbles at `+0x52a[region*2+choice]`, called after the `-18018` bit test on
+   each step (file `0x13cd0`) — **per-region random-encounter group table
+   (hypothesis)**, not texture/palette. The Amiga palette is fixed (one
+   `LoadRGB4` at file `0x19be` + three `SetRGB4` sprite pens), so per-region
+   recolouring is not a cause of inaccuracy.
+7. **Low — stale/contradictory statements.** §4.7.5's session note still
+   says planeDirs `[0,3]`/compass deferred (code and TODO use `[0,1]`);
+   `export-dungeon-levels.ts`'s header still says "3=secret"; §4.7.9 gives
+   two flagP/flagQ counts — recount 2,286/2,124 over active regions
+   (2,340/2,197 over all 768 cells), "2,634/1,903" is stale; the 20
+   origin-(0,0) "padding" regions — 19 hold non-zero cells (levels 10/11/13),
+   and the region resolver (`LAB_045D`/`LAB_045A`) does search them, but 0
+   teleporter targets and 0 entities point into them; `dosega` §6.4a's
+   "door-popup" for feature 1 is most likely the stairs prompt.
+
+**Checked and correct:** lateral +1 = facing+1 (`LAB_0471`, file `0x9188`
+— view not mirrored); move deltas (`LAB_07A3`, file `0x11304`); `0x969a`
+reads the left face with its feature gate at orient = facing−1. 78/78
+`evaluate-cell`/`render-through-dungeon` tests pass but cover none of the
+above. Monster stat blocks and pcfile fields were not audited in depth.
+
+**Owner play-checks** (walker coords; facing 0=+Y, 1=+X, 2=−Y, 3=−X):
+level 0 (19,14) f2 — stairs up? where to?; level 0 (4,11) f0 — stairs down?;
+any doorway — walk straight through; any closed door — forward opens and
+passes, back/strafe bumps; levels 8/10/12 water — bounced unless raft/swim?;
+levels 10/12 map edge — open sky/ground, not walls; a level-1/3 pit viewed
+from one cell away — only the pit cell's floor vanishes.
+
 ## Prior art check
 
 Searched for: GitHub extractors/unpackers, romhacking.net entries, the
@@ -1460,7 +1563,9 @@ loop (`CODE+0xaa4a`–`0xaaf4`) at the same call depth as `9b58`, not from
 >   (front `0`, left1 `3`, left2 `6`, right1 `9`, right2 `0xc`, door `0xb2`)
 >   — no upper strips, no mirrored (src,dst) pairs — and that render is
 >   **pixel-exact** against the reference (0/64,000 differing pixels across
->   multiple real poses). The `18-24(A5)` arg blocks and `48-55` dir runs are
+>   multiple real poses). **2026-11-13: "the reference" here is this
+>   project's own earlier `render-corridor-frame.ts`, not a game capture —
+>   self-consistency, not ground truth** (review finding 5). The `18-24(A5)` arg blocks and `48-55` dir runs are
 >   real, but their role in the shipped walk view is gated/optional; the
 >   walker's slots + view model now reproduce the reference exactly.
 > - The 5 cited "push" address pairs don't all actually reach `9b58`.
@@ -1602,7 +1707,7 @@ EvalCellFace(x@8, y@0xa, locX@0xc, locY@0xe, region@0x10, lateral@0x12):
 > | feature | Returns | Notes |
 > |---|---|---|
 > | 0 | wall value (unchanged) | jumps straight to the same shared return the "skip dispatch" path uses — confirmed pass-through |
-> | 1 | **5** | cross-platform confirmed as "closed door" (`maze-plane-semantics` TODO row) — `5` isn't one of `9b58`'s 4 `CMPI` values (`2`/`7`/`3`/`4`), so it must route through `9b58`'s separate, still-untraced `EXT.L`-then-dispatch mechanism |
+> | 1 | **5** | **2026-11-13: stairs going UP** (rendered, see the review at the top; the earlier "closed door" label below is superseded) — was: cross-platform confirmed as "closed door" (`maze-plane-semantics` TODO row) — `5` isn't one of `9b58`'s 4 `CMPI` values (`2`/`7`/`3`/`4`), so it must route through `9b58`'s separate, still-untraced `EXT.L`-then-dispatch mechanism |
 > | 2 | 6 | |
 > | 3 | 8 | |
 > | 4 | 9 | |
@@ -1702,7 +1807,7 @@ table rather than being one flat grid:
 | `+0x49a` | 96 B | scripted-overlay flag Q (second per-level 14-way dispatch) | 1 | confirmed |
 | `+0x4fa` | 24 B | per-region Y-coordinate list (5 slots x 12 regions), feature-code-1 stamp source | — | confirmed (cross-platform, see below) |
 | `+0x512` | 24 B | per-region X-coordinate list (5 slots x 12 regions), paired with `+0x4fa` | — | confirmed (cross-platform, see below) |
-| `+0x52a` | 24 B | per-region word array | — | hypothesis (still unlocated) |
+| `+0x52a` | 24 B | per-region word array | — | hypothesis (still unlocated) — **2026-11-13: two 12-B arrays, per-region random-encounter group nibbles selected by `rand(100)` vs `+0x536[region]` (`LAB_0732`), hypothesis; `+0x4fa`/`+0x512` are 3-bit X/Y fields, not word pairs — review finding 6** |
 
 > **Cross-platform relay (from `dosega/data-structure.md` §6.4a, a
 > different session working the DOS/EGA port in parallel — not
@@ -2708,6 +2813,9 @@ corrections fall out first:
 > **10** returns 2/solid while level **12** writes the skip-ceiling +
 > alt-floor gates and returns 0/open — the two levels differ, unlike the
 > `LAB_055A` boundary case which treats 10 and 12 alike.)
+> **2026-11-13 correction: wrong — both levels 10 and 12 branch to
+> `LAB_0478` (file `0x9248`–`0x9256`) and return 0/open off-map.** See the
+> review at the top of this doc, finding 4.
 
 **flagP (`levelBuf+0x43A`, §4.7.3) per-level semantics** (dispatch
 `CODE+0x9434`; the corpus has flagP bits set on 12 of 14 levels, so
