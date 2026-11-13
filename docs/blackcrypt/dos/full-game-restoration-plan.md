@@ -173,6 +173,39 @@ finding-2 ramp-set to `patch_crypt_exe.py`'s thunk in the same pass.
    display.
 4. *After the ramp fix:* stairs map 4 → 5; walls should turn violet.
 
+### Review follow-up — 2026-11-13 implementation pass
+
+Status of each finding after the follow-up `game-re` pass (static
+verification only; nothing was run under Wine or an emulator):
+
+| Finding | Status | Where |
+|---|---|---|
+| 1 `orig<N>.gam` header | **fixed in tooling** — `scripts/build_dos_testpkg.py` builds the package; `orig<N>.gam` only on `--orig-slot N`, as `maindung[52:]` (170,953 B) | § "Live-test package" below |
+| 2 map-switch ramp | **patched, statically verified** — 34-B tail at `0x42df2e`; needs the owner's stairs 4→5 test | § "Phase 4" → "2026-11-13 addendum" |
+| 7 stairs redraw tail | **investigated, deliberately not patched** — see the addendum | same |
+| 9 VirtualSize | **fixed** — `.text` → `0x2d000` (`patch_crypt_exe.py`), `.rdata` → `0x2000` (Phase 5/7 patchers, idempotent) | same |
+| 3–6 Phase 3 | see § "Phase 3 injector — 2026-11-13" | |
+
+#### Live-test package
+
+`python3 scripts/build_dos_testpkg.py [--orig-slot N]... [--clipper PATH]
+[--no-credits] --force` writes `build/blackcrypt/dos-testpkg/` (gitignored
+via `build/`): `crypt.exe` with all four patchers applied (each one's own
+`patch()` + `_self_check()`), the converted 171,005-B `maindung.gam`
+(re-checked against the shipped demo through `maindung.to_demo`), stock or
+supplied `clipper.clp`, stock `Config.dat`, and optional `orig<N>.gam`. It
+refuses output paths under `data/`, starts from an empty directory, and
+never copies a `tempdung.gam` or `char*.dat`.
+
+Oracle for the 52-B rule: the demo folder's game-written `orig1.gam` and
+`tempdung.gam` are both exactly 15,047 B = `maindung.gam` − 52 and agree
+with `maindung[52:]` on 14,821/15,047 B, vs 7,874/15,047 unshifted (null
+control). They are **not** byte-identical: the remaining 226 B are runtime
+square state from the live session that wrote them (e.g. body `+0x0`
+`00`→`22`, `+0x8b` `01`→`15`), so the script checks length plus alignment,
+not identity.
+
+
 ---
 
 ## §0. What the planning pass already established
@@ -1614,6 +1647,58 @@ original assumption.
 > success. Never touches `data/blackcrypt/dosvga/crypt.exe`, and no
 > patched binary is committed anywhere in this repo (verified: `git
 > status` after this session shows only the new script as untracked).
+
+
+> **2026-11-13 addendum — the destination map's accent ramp (review
+> finding 2, TODO `blackcrypt-mapswitch-ramp`).** Addresses re-checked by
+> disassembly (`objdump -M intel`; radare2 was not on PATH):
+> `SwitchMap` (`0x426880`) stores `toMap` in `word[0x47481a]` at
+> `0x42689c` before `LoadDungeon`, and has no palette step;
+> `fcn.0040aaa0(ramp)` = `0x403220(&ramp_table[ramp*12], 26, 6, …)` and
+> `(…, 58, 6, …)` (entries 26–31 and 58–63); the per-map table at
+> `0x434f22` is 14 LE words indexed by the **1-based** map
+> (`0,0,0,0,0,1,2,2,2,2,2,2,3,3` — entry 0 unused, maps 1–4 → 0, 5 → 1,
+> 6–11 → 2, 12–13 → 3, = Amiga S_2 `+0x39E`), read only at `0x40f8d0`
+> inside `fcn.0040f830`'s dark-flip branch; `0x46f820` is the active ramp
+> that the save writer reads (`0x401df0`) and the loader restores
+> (`0x4266c7`, re-applied at `0x426990`).
+>
+> The thunk's `add esp,8; ret` (`0x42dec5`) is now `jmp short 0x42df2e`
+> + 2×`int3`, and a 34-B tail at `0x42df2e` (just past Phase 7's slice)
+> does `add esp,8; movzx eax,word[0x47481a]; mov ax,[eax*2+0x434f22];
+> mov [0x46f820],ax; push eax; call 0x40aaa0; add esp,4; ret`. Assembled
+> with GNU `as`/`ld -Ttext=0x42deb3` as one unit (`THUNK_SOURCE` in the
+> script; new shared helper `scripts/bclib/x86patch.py`); the self-check
+> re-assembles it byte-exact and disassembles all three windows back to
+> the intended instruction lists on every run. The thunk's first 18 B
+> re-assemble identical to the 2026-08-04 `rasm2` bytes. Null controls:
+> one flipped ramp byte and one flipped unrelated byte each fail the
+> self-check. All four patchers applied in four different orders give the
+> same output (md5 `9c99d21d…`), changing bytes only inside 9 windows
+> (the 7 known + the two VirtualSize dwords).
+>
+> **Known limit:** the tail applies the map's default ramp
+> unconditionally. If the arrival square is dark/water (bit 31), the next
+> `fcn.0040f830` call (first step) flips to ramp 4 as usual; if the party
+> left a dark square, `0x46f86c` stays 1 until the first step onto a
+> non-dark square flips it back. Both self-correct within one step.
+>
+> **Finding 7 — not patched, on purpose.** Both cross-map callers skip
+> their same-map tails: stairs `0x423cf9 jmp 0x423e00` skips
+> `0x40aa20`/`0x403d20`/`0x410d00` (only on a dark flip) and always
+> `0x4070b0`, `0x40f830(1)`, `0x40a600`, `0x4039a0`; teleport `0x41b3bb`
+> skips `0x4070b0`, `0x40f830(1)`, `0x408310(0)` but still runs
+> `0x416f30`/`0x4102c0`. `0x4070b0` is a walk-bob toggle;
+> `0x403d20` toggles the double-buffer index (page flip); `0x40f830` is
+> the square-entry handler (dark flip, events). Calling a page flip or
+> the square-entry handler blind from the thunk isn't clearly safe, so
+> the stale-view question stays a live-test item.
+>
+> **Finding 9.** `patch_crypt_exe.py` sets `.text` VirtualSize
+> `0x2ceb4` → `0x2d000`. The Phase 5/7 patchers set `.rdata` `0x12da` →
+> `0x2000`, accepting either value so they compose. Every patcher's
+> pre-flight now checks only the bytes it writes (Phase 5 used to demand
+> its whole 311-B remainder be zero), so **application order is free**.
 
 ---
 

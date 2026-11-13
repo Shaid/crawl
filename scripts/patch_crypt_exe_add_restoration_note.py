@@ -60,15 +60,13 @@ No inserted bytes, no shifted offsets — same technique as Phase 4:
    `0x42DEC9`-`0x42E000` (311 B free). This patch only ever touches
    `0x42DEC9` onward, and its own byte ranges never overlap Phase 4's
    (hook site, cave bytes, and string bytes are all disjoint from Phase 4's
-   two windows) — but **application order is not actually free**, checked
-   empirically, not just reasoned about: `patch_crypt_exe.py`'s own
-   pre-flight guard checks that the *entire* 333-byte cave is zero (a
-   stricter check than the 22 bytes it actually writes), so it refuses to
-   run against a `crypt.exe` this script has already patched (the guard
-   sees this script's bytes at `0x2dec9` onward and — correctly, if overly
-   broadly — refuses to overwrite non-zero cave bytes it doesn't recognize).
-   **Apply `patch_crypt_exe.py` first if you want both patches; this script
-   works against either a stock or an already-Phase-4-patched `crypt.exe`.**
+   windows). > **2026-11-13:** application order is now free. The old
+   constraint (each guard checked the *whole* remaining cave was zero, so
+   Phase 4 had to run first and Phase 5 before Phase 7) is gone: every
+   patcher now checks only the bytes it writes, because Phase 4 also owns
+   `0x42DF2E`-`0x42DF50` (the map-switch accent-ramp tail) past this
+   patch's and Phase 7's slices. This patch also sets `.rdata`'s
+   VirtualSize to its raw size `0x2000` (review finding 9).
 2. The new page's text goes in **`.rdata`'s own unused tail**,
    `0x42F2D9`-`0x430000` (3,367 B) — the zero padding after the PE import
    name table (the last real content there, `"SetEnvironmentVariableA\0"`,
@@ -114,6 +112,9 @@ an existing output without `--force`, and no patched binary is committed.
 import argparse
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bclib import x86patch  # noqa: E402
 
 # --- Addresses (all vaddr, PE image base 0x400000; every section here is
 # raw-identity-mapped, so file_offset = vaddr - 0x400000) -------------------
@@ -290,12 +291,15 @@ def patch(data: bytes) -> bytes:
             f'may not be the expected crypt.exe build (1995 demo, '
             f'253,952 B).')
 
-    cave_window = data[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET + CAVE_CHECK_LEN]
+    # Only the slice this patch writes must be free (2026-11-13: narrowed
+    # from the whole 311-B remainder, because patch_crypt_exe.py now also
+    # owns 0x42df2e-0x42df50 -- application order is free).
+    cave_window = data[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET + len(CAVE_PAYLOAD)]
     if any(cave_window):
         raise ValueError(
             f'.text code cave remainder at file+{CAVE_FILE_OFFSET:#x} is '
             f'not all-zero ({sum(1 for b in cave_window if b)} nonzero '
-            f'bytes out of {CAVE_CHECK_LEN}) -- refusing to overwrite what '
+            f'bytes out of {len(CAVE_PAYLOAD)}) -- refusing to overwrite what '
             f'might be real code/data, or an already-applied copy of this '
             f'same patch, in a different crypt.exe build.')
 
@@ -311,6 +315,8 @@ def patch(data: bytes) -> bytes:
     out[STRING_FILE_OFFSET:STRING_FILE_OFFSET + len(NEW_PAGE_BYTES)] = NEW_PAGE_BYTES
     out[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET + len(CAVE_PAYLOAD)] = CAVE_PAYLOAD
     out[HOOK_FILE_OFFSET:HOOK_FILE_OFFSET + len(JMP_BYTES)] = JMP_BYTES
+    # Review finding 9: declare the .rdata tail the patch strings live in.
+    x86patch.fix_virtual_size(out, '.rdata')
     return bytes(out)
 
 
@@ -336,6 +342,9 @@ def _self_check(original: bytes, patched: bytes) -> None:
             f'length {len(original)}')
 
     ranges = [(off, off + len(expected)) for _, off, expected in windows]
+    vs_off = x86patch.VIRTUAL_SIZE_FIX['.rdata'][0]
+    ranges.append((vs_off, vs_off + 4))
+    x86patch.check_virtual_size(patched, '.rdata')
     changed = [
         i for i in range(len(original))
         if original[i] != patched[i]
@@ -356,16 +365,12 @@ def main() -> int:
                     'docs/blackcrypt/dos/full-game-restoration-plan.md). '
                     'Never modifies the input file; writes a patched copy '
                     'to --out. Works against a stock crypt.exe or one '
-                    'already patched by patch_crypt_exe.py -- but if you '
-                    'want both, run patch_crypt_exe.py FIRST (its own '
-                    'pre-flight check is stricter than what it writes and '
-                    'will reject a crypt.exe this script has already '
-                    'touched).')
+                    'already patched by patch_crypt_exe.py and/or '
+                    'patch_crypt_exe_add_title_credit.py, in any order.')
     ap.add_argument('input', type=Path,
                      help='Path to your own crypt.exe (1995 demo build, '
-                          'stock, or already patched by patch_crypt_exe.py '
-                          '-- apply patch_crypt_exe.py first if you want '
-                          'both patches)')
+                          'stock, or already patched by the other '
+                          'patch_crypt_exe*.py scripts)')
     ap.add_argument('output', type=Path,
                      help='Path to write the patched copy to (must differ '
                           'from input; not overwritten if it already '

@@ -157,14 +157,12 @@ cave and string windows are fully disjoint from both `patch_crypt_exe.py`
 `patch_crypt_exe_add_restoration_note.py` (Phase 5, patches `0x41361B` +
 `0x2DEC9`-`0x2DF13` + `0x2F2D9`-`0x42F590`), so this patch applies cleanly
 to a stock `crypt.exe`, or one already patched by Phase 4, or one already
-patched by both Phase 4 and Phase 5, in any combination. **One real
-ordering constraint exists, inherited from Phase 5's own precondition, not
-introduced by this patch:** Phase 5's pre-flight check requires its *entire
-311-byte cave remainder* (`0x2DEC9`-`0x2E000`) to read all-zero, which
-includes the bytes this patch writes. So if this patch is applied
-*before* Phase 5, Phase 5 can never be applied afterward (its own guard
-will correctly refuse). **Apply Phase 5 before this patch if you want
-both.** This patch itself does not require Phase 4 or Phase 5 -- it can be
+patched by both Phase 4 and Phase 5, in any combination and any order
+(2026-11-13: the old "apply Phase 5 first" constraint came from Phase 5's
+guard checking its whole 311-B cave remainder; every guard now checks only
+its own slice, since Phase 4 also owns `0x2DF2E`-`0x2DF50`). It also sets
+`.rdata`'s VirtualSize to `0x2000` (review finding 9), idempotently.
+This patch itself does not require Phase 4 or Phase 5 -- it can be
 applied to a stock `crypt.exe` on its own. Composability with Phase 6's
 copy-failure guard (`patch_crypt_exe_guard_copy_failure.py`, hook at
 `fcn.00423b50`'s own body / `"9"` in the plan doc) was also re-checked this
@@ -213,6 +211,9 @@ same input/output path, refuses to overwrite an existing output without
 import argparse
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bclib import x86patch  # noqa: E402
 
 # --- Addresses (all vaddr, PE image base 0x400000; every section here is
 # raw-identity-mapped, so file_offset = vaddr - 0x400000) -------------------
@@ -340,10 +341,7 @@ def patch(data: bytes) -> bytes:
             f'all-zero ({sum(1 for b in cave_window if b)} nonzero bytes '
             f'out of {len(CAVE_PAYLOAD)}) -- refusing to overwrite what '
             f'might be real code/data, or an already-applied copy of this '
-            f'same patch, in a different crypt.exe build. (If you also '
-            f'want patch_crypt_exe_add_restoration_note.py\'s Phase 5 '
-            f'patch, apply it BEFORE this one -- see this script\'s '
-            f'docstring for why the order matters.)')
+            f'same patch, in a different crypt.exe build.')
 
     string_window = data[STRING_FILE_OFFSET:STRING_FILE_OFFSET + len(NEW_CREDIT_BYTES)]
     if any(string_window):
@@ -357,6 +355,8 @@ def patch(data: bytes) -> bytes:
     out[STRING_FILE_OFFSET:STRING_FILE_OFFSET + len(NEW_CREDIT_BYTES)] = NEW_CREDIT_BYTES
     out[CAVE_FILE_OFFSET:CAVE_FILE_OFFSET + len(CAVE_PAYLOAD)] = CAVE_PAYLOAD
     out[HOOK_FILE_OFFSET:HOOK_FILE_OFFSET + len(JMP_BYTES)] = JMP_BYTES
+    # Review finding 9: declare the .rdata tail the patch strings live in.
+    x86patch.fix_virtual_size(out, '.rdata')
     return bytes(out)
 
 
@@ -382,6 +382,9 @@ def _self_check(original: bytes, patched: bytes) -> None:
             f'length {len(original)}')
 
     ranges = [(off, off + len(expected)) for _, off, expected in windows]
+    vs_off = x86patch.VIRTUAL_SIZE_FIX['.rdata'][0]
+    ranges.append((vs_off, vs_off + 4))
+    x86patch.check_virtual_size(patched, '.rdata')
     changed = [
         i for i in range(len(original))
         if original[i] != patched[i]
@@ -404,11 +407,8 @@ def main() -> int:
                     'to --out. Works against a stock crypt.exe, one '
                     'already patched by patch_crypt_exe.py (Phase 4), or '
                     'one already patched by both that and '
-                    'patch_crypt_exe_add_restoration_note.py (Phase 5) -- '
-                    'but if you want Phase 5 too, apply it BEFORE this '
-                    'script (Phase 5\'s own pre-flight check is stricter '
-                    'than what it writes and will reject a crypt.exe this '
-                    'script has already touched).')
+                    'patch_crypt_exe_add_restoration_note.py (Phase 5), '
+                    'in any order.')
     ap.add_argument('input', type=Path,
                      help='Path to your own crypt.exe (1995 demo build, '
                           'stock or already patched by patch_crypt_exe.py '
