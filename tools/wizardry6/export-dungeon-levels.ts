@@ -19,10 +19,10 @@
  * (`localX`/`localY` 0..7) are placed at `(originX-minX+localX,
  * originY-minY+localY)` in the level's own flat grid.
  *
- * Cells inside the bounding box that no real region covers get a
- * defensive fill (`wallA=2, wallB=2` -- "wall" under the rendered, not
- * disassembly-confirmed, value key `decode-scenario-maze.ts` documents:
- * 0=open/1=door/2=wall/3=secret) -- not game data, the same
+ * Cells inside the bounding box that no real region covers are off-map
+ * (`region = -1`) and get a fill (`wallA=wallB=2`, or 0 on levels 10/12,
+ * whose off-map space is open -- data-structure.md §4.7.10; wall values are
+ * confirmed 0=open/1=doorway/2=wall/3=closed door) -- not game data, the same
  * rendering-safety convention Black Crypt's own exporter uses for its
  * densified gaps (`scripts/export_dungeon_levels.py`'s `FILL_WALL_FLAGS`).
  *
@@ -44,9 +44,9 @@
  *
  * ## Not yet exported
  *
- * `scenario.dbs` section 3 (the per-level entity table) has confirmed
- * structure but unconfirmed field semantics (`data-structure.md` §4.7), so
- * `entities`/`entityHandlePlane` are omitted entirely -- per the schema,
+ * `scenario.dbs` section 3 is exported only as the W6 extension
+ * `w6.links` (movement.ts: teleports, door states, trigger bits; §4.7.10),
+ * not as schema `entities`, so `entities`/`entityHandlePlane` are omitted -- per the schema,
  * that's a valid "wall geometry only" level file (`CellQuery.entitiesAt`
  * then always returns `[]`). The `feature`/`orient` planes decode-
  * scenario-maze.ts already extracts (doors, etc.) are carried through as
@@ -63,12 +63,14 @@ import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writeJson } from '@seer-project/pipeline';
 import { parseMazeLevels, type MazeLevel } from './decode-scenario-maze.ts';
+import { canStepStatic, parseEntityTable, offMapIsOpen, W6_NEW_GAME_START, type W6LevelLinks } from './movement.ts';
 
 const REGION_COUNT = 12;
 const REGION_SIZE = 8;
 
-/** Wall/gap fill value: 2 = "wall" under the rendered (not disassembly-confirmed) colour key. */
+/** Wall/gap fill value: 2 = solid wall. Levels 10/12 use 0 instead -- their off-map space is open (movement.ts `offMapIsOpen`, data-structure.md §4.7.10). */
 const FILL_WALL = 2;
+const fillFor = (level: number) => (offMapIsOpen(level) ? 0 : FILL_WALL);
 
 interface DenseLevel {
   id: number;
@@ -86,7 +88,14 @@ interface DenseLevel {
   region: number[];
 }
 
-/** Bounding box of a level's active (non-`(0,0)`-origin) regions, in maze coordinates. */
+/**
+ * Bounding box of a level's active (non-`(0,0)`-origin) regions, in maze coordinates.
+ * Origin-(0,0) regions are not empty padding: 19 of the 20 hold non-zero cells
+ * (levels 10/11/13), and the resolver (`LAB_045D`) does search them. They are
+ * excluded because nothing reaches them: 0 of 262 teleporter targets and
+ * 0 entities point into them (2026-11-13 census, data-structure.md review
+ * finding 7).
+ */
 function activeBounds(lvl: MazeLevel): { minX: number; minY: number; maxX: number; maxY: number; regions: number[] } {
   const active = Array.from({ length: REGION_COUNT }, (_, r) => r).filter(
     (r) => !(lvl.originX[r] === 0 && lvl.originY[r] === 0),
@@ -106,8 +115,8 @@ function densifyLevel(lvl: MazeLevel): DenseLevel {
   const height = Math.max(1, maxY - minY);
   const cellCount = width * height;
 
-  const wallA = new Array<number>(cellCount).fill(FILL_WALL);
-  const wallB = new Array<number>(cellCount).fill(FILL_WALL);
+  const wallA = new Array<number>(cellCount).fill(fillFor(lvl.level));
+  const wallB = new Array<number>(cellCount).fill(fillFor(lvl.level));
   const feature = new Array<number>(cellCount).fill(0);
   const orient = new Array<number>(cellCount).fill(0);
   const flagP = new Array<number>(cellCount).fill(0);
@@ -143,6 +152,10 @@ export function exportDungeonLevels(dataDir: string): void {
   const data = readBinary(resolve(dataDir, 'scenario.dbs'));
   const levels = parseMazeLevels(data);
   const dense = levels.map(densifyLevel);
+  // SCENARIO.HDR's first 140 bytes = the initial `-30310(A4)` per-level
+  // 80-bit entity-trigger tables (LAB_02C5, CODE+0x4878; movement.ts).
+  const scenarioHdr = readBinary(resolve(dataDir, 'scenario.hdr'));
+  const links = levels.map((lvl, l) => buildLinks(lvl, dense[l]!, levels, dense, data, scenarioHdr));
 
   // `DungeonLevelFile.cellSpace` is one shared grid for every unit in the
   // file, but each W6 level densifies to its own, differently-sized
@@ -155,8 +168,8 @@ export function exportDungeonLevels(dataDir: string): void {
     source: 'scenario.dbs section 2 (file offset 0x9408, 1346 bytes/level, 14 levels)',
     wallValues: 'CONFIRMED cross-platform (snes/data-structure.md 3.14.12): 0=open, 1=open doorway, 2=solid wall, 3=closed door',
     sharedEdgeMapping: 'CONFIRMED: CODE+0x908c/0x90f6 -- facing 0 reads own wallA, facing 1 reads own wallB, facing 2/3 read the neighbour cell\'s wallA/wallB',
-    fill: 'cells inside a level\'s bounding box not covered by any real 8x8 region are filled wallA=wallB=2 (wall) -- a rendering-safety default, not game data',
-    notExported: 'scenario.dbs section 3 (per-level entity table) -- structure confirmed, field semantics open, see docs/wizardry6/amiga/data-structure.md section 4.7',
+    fill: 'cells inside a level\'s bounding box not covered by any real 8x8 region are off-map (region=-1); their wall planes are filled 2 (wall), or 0 on levels 10/12 whose off-map space is open (data-structure.md 4.7.10) -- consumers should test region<0, not the fill',
+    w6: 'w6.links = scenario.dbs section 3 entity tables + pre-resolved kind-1 teleport targets + SCENARIO.HDR initial trigger bits, consumed by tools/wizardry6/movement.ts (data-structure.md 4.7.10)',
   };
 
   const outDir = resolve('public/assets/wizardry6/amiga/dungeon');
@@ -175,7 +188,7 @@ export function exportDungeonLevels(dataDir: string): void {
         kind: 'shared-edge',
         planes: ['wallA', 'wallB'],
         planeDirs: [0, 1],
-        offMapValue: FILL_WALL,
+        offMapValue: fillFor(lvl.id),
       },
       yAxisDown: false,
       units: [{
@@ -191,6 +204,13 @@ export function exportDungeonLevels(dataDir: string): void {
         },
       }],
       provenance,
+      // W6-specific extension (not part of the shared schema): the move
+      // port's entity/teleport/trigger data, and -- level 12 only -- the
+      // game's own new-party start pose (CODE+0x4212a).
+      w6: {
+        links: links[lvl.id],
+        entrance: entranceFor(lvl, levels, links),
+      },
     };
     writeJson(resolve(outDir, `level${String(lvl.id).padStart(2, '0')}.json`), perUnitFile);
   }
@@ -203,6 +223,59 @@ export function exportDungeonLevels(dataDir: string): void {
   });
 
   console.log(`Wrote ${dense.length} per-level DungeonLevelFile JSON files (level00.json .. level${String(dense.length - 1).padStart(2, '0')}.json) and levels-index.json to ${outDir}`);
+}
+
+function denseRegionOrigin(lvl: MazeLevel, d: DenseLevel, r: number): { x: number; y: number } | null {
+  if (lvl.originX[r] === 0 && lvl.originY[r] === 0) return null;
+  return { x: lvl.originX[r]! - d.originX, y: lvl.originY[r]! - d.originY };
+}
+
+function buildLinks(lvl: MazeLevel, d: DenseLevel, levels: MazeLevel[], dense: DenseLevel[], scenario: Uint8Array, hdr: Uint8Array): W6LevelLinks {
+  const entities = parseEntityTable(scenario, lvl.level);
+  const regionOrigin = Array.from({ length: REGION_COUNT }, (_, r) => denseRegionOrigin(lvl, d, r));
+  const teleportDest = entities.kind.map((kind, k) => {
+    if (kind !== 1) return null;
+    const w = entities.w240[k]!;
+    const destLevel = entities.b630[k]!;
+    if (destLevel >= levels.length) return null; // 99 -> leave the maze; none shipped
+    const o = denseRegionOrigin(levels[destLevel]!, dense[destLevel]!, (w >> 6) & 15);
+    if (!o) return null;
+    return { level: destLevel, x: o.x + (w & 7), y: o.y + ((w >> 3) & 7) };
+  });
+  const initialFlags = Array.from(hdr.subarray(lvl.level * 10, lvl.level * 10 + 10));
+  return { level: lvl.level, regionOrigin, entities, teleportDest, initialFlags };
+}
+
+function newGameStart(lvl: MazeLevel, d: DenseLevel): { x: number; y: number; facing: number } {
+  const s = W6_NEW_GAME_START;
+  const o = denseRegionOrigin(lvl, d, s.region)!;
+  return { x: o.x + s.localX, y: o.y + s.localY, facing: s.facing };
+}
+
+/**
+ * A level's default walker entrance: level 12 = the game's own new-party
+ * start (CODE+0x4212a); any other level = the first teleport arrival from a
+ * different level that is enabled at new game (lowest source level, then
+ * entity index), facing the
+ * first direction the move port lets the party step. `null` if no level
+ * links into it (the walker then falls back to a plane scan).
+ */
+function entranceFor(d: DenseLevel, levels: MazeLevel[], links: W6LevelLinks[]): { x: number; y: number; facing: number; source: string } | null {
+  if (d.id === W6_NEW_GAME_START.level) return { ...newGameStart(levels[d.id]!, d), source: 'new-game start pose (CODE+0x4212a)' };
+  for (const src of links) {
+    if (src.level === d.id) continue;
+    for (let k = 0; k < src.teleportDest.length; k++) {
+      const t = src.teleportDest[k];
+      if (!t || t.level !== d.id) continue;
+      const bit = src.entities.flagBit[k]!;
+      if ((((src.initialFlags[bit >> 3] ?? 0) >> (bit & 7)) & 1) === 1) continue; // disabled at new game
+      const planes = { width: d.width, height: d.height, wallA: d.wallA, wallB: d.wallB, flagP: d.flagP, flagQ: d.flagQ, region: d.region, level: d.id };
+      let facing = 0;
+      for (let f = 0; f < 4; f++) if (canStepStatic(planes, links[d.id], t.x, t.y, f)) { facing = f; break; }
+      return { x: t.x, y: t.y, facing, source: `teleport arrival from level ${src.level} entity ${k}` };
+    }
+  }
+  return null;
 }
 
 function main() {

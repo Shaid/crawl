@@ -89,7 +89,8 @@
  */
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { DrawItem, DrawItemKind } from '@seer-project/dungeon';
-import { evalCellFace, evalOverlay, stepForward, type CellPlanes, type OverlayEffect } from './evaluate-cell.ts';
+import { evalCellFace, evalOverlay, evalPerpFace, stepForward, type CellPlanes, type OverlayEffect } from './evaluate-cell.ts';
+import { canStepStatic, type W6LevelLinks } from './movement.ts';
 
 /** The three per-(depth,side) overlay effects that matter for one lane's ceiling/floor draw — `evalOverlay`'s `fog` is handled separately (it also forces the wall code and forces occlusion, see `buildViewItems`). */
 interface SideGate {
@@ -98,13 +99,9 @@ interface SideGate {
   altFloor: boolean;
 }
 
-/** OR two evaluators' overlay effects into one gate — §4.7.9's per-lane approximation documented on `evalOverlay` (a lane fed by two evaluator calls, e.g. the perpendicular side wall and the lateral column sharing one "left"/"right" gate slot, is gated if EITHER fired). */
-function combineGate(a: OverlayEffect, b: OverlayEffect): SideGate {
-  return {
-    skipCeiling: a.skipCeiling || b.skipCeiling,
-    skipFloor: a.skipFloor || b.skipFloor,
-    altFloor: a.altFloor || b.altFloor,
-  };
+/** One evaluator's overlay effects as a lane gate. Each gate slot has exactly one writer (§4.7.10): front = the straight-ahead `0x9202` call, left/right = the lateral-column calls; the perpendicular evaluators never write the gates. */
+function toGate(a: OverlayEffect): SideGate {
+  return { skipCeiling: a.skipCeiling, skipFloor: a.skipFloor, altFloor: a.altFloor };
 }
 
 /** Lanes are 8 bytes but only depths 0-3 are initialised (`CODE+0xa86a`, `CMP.W #4,D4`). */
@@ -451,13 +448,10 @@ export function buildViewItems(
     const frontOverlay = evalOverlay(planes, level, cell.x, cell.y, facing, 0);
     const front = frontOverlay.fog ? 0 : rawFront;
 
-    const rawPerpL = evalCellFace(planes, cell.x, cell.y, (facing + 3) % 4, 0);
-    const perpLOverlay = evalOverlay(planes, level, cell.x, cell.y, (facing + 3) % 4, 0);
-    const perpL = perpLOverlay.fog ? 0 : rawPerpL;
-
-    const rawPerpR = evalCellFace(planes, cell.x, cell.y, (facing + 1) % 4, 0);
-    const perpROverlay = evalOverlay(planes, level, cell.x, cell.y, (facing + 1) % 4, 0);
-    const perpR = perpROverlay.fog ? 0 : rawPerpR;
+    // Perpendicular faces (`0x969a`/`0x9876`): their own flagP early-return
+    // only, never a gate or lane write (§4.7.10).
+    const perpL = evalPerpFace(planes, cell.x, cell.y, facing, -1);
+    const perpR = evalPerpFace(planes, cell.x, cell.y, facing, 1);
 
     const rawLatL = evalCellFace(planes, cell.x, cell.y, facing, -1);
     const latLOverlay = evalOverlay(planes, level, cell.x, cell.y, facing, -1);
@@ -467,27 +461,25 @@ export function buildViewItems(
     const latROverlay = evalOverlay(planes, level, cell.x, cell.y, facing, 1);
     const latR = latROverlay.fog ? 0 : rawLatR;
 
-    // Three per-side ceiling/floor gates (§4.7.9): front is its own
-    // evaluator; left/right each OR together the perpendicular-face and
-    // lateral-column evaluators that share that side, per `evalOverlay`'s
-    // documented approximation (its own doc comment explains why: only 3
-    // gate slots exist for 7 lanes, and which of the two left/right
-    // evaluators writes which wasn't independently traced).
-    const frontGate = combineGate(frontOverlay, frontOverlay);
-    const leftGate = combineGate(perpLOverlay, latLOverlay);
-    const rightGate = combineGate(perpROverlay, latROverlay);
+    // Three per-side ceiling/floor gates (§4.7.9/§4.7.10): the `0x9202`
+    // handlers write slot `lateral + 1`, so front = the straight-ahead call
+    // and left/right = the lateral-column calls alone.
+    const frontGate = toGate(frontOverlay);
+    const leftGate = toGate(latLOverlay);
+    const rightGate = toGate(latROverlay);
 
-    // The fog handler's third effect — "clears that side's visibility
-    // lanes at this depth" (§4.7.9) — applies immediately, before this
-    // depth's own visibility checks below (distinct from the occlusion-
-    // override, which affects *future* depths via blockFront/blockPerp*).
+    // The fog handler's third effect — clear the lanes of ITS OWN side at
+    // this depth (CODE+0x932c-0x9384: lateral -1 -> the three left lanes,
+    // 0 -> front, +1 -> the three right lanes) — applies immediately, before
+    // this depth's own visibility checks below (distinct from the
+    // occlusion-override, which affects *future* depths).
     if (frontOverlay.fog) hide(v.front, depth);
-    if (perpLOverlay.fog || latLOverlay.fog) {
+    if (latLOverlay.fog) {
       hide(v.sideL, depth);
       hide(v.left1, depth);
       hide(v.left2, depth);
     }
-    if (perpROverlay.fog || latROverlay.fog) {
+    if (latROverlay.fog) {
       hide(v.sideR, depth);
       hide(v.right1, depth);
       hide(v.right2, depth);
@@ -517,14 +509,14 @@ export function buildViewItems(
         const [base, suffix] = k.endsWith(':alt') ? [k.slice(0, -4), ':alt'] : [k, ''];
         emit(`${base}:L:${depth}${suffix}`, 'side', depth, -1, 'L', cell);
       }
-    blockPerpLeft(v, depth, perpL, perpLOverlay.fog);
+    blockPerpLeft(v, depth, perpL, frontOverlay.fog); // LAB_053B reads override slot 1 (-11365), written by the front call
 
     if (v.front[depth])
       for (const k of sideKeys(perpR, depth, altPose)) {
         const [base, suffix] = k.endsWith(':alt') ? [k.slice(0, -4), ':alt'] : [k, ''];
         emit(`${base}:R:${depth}${suffix}`, 'side', depth, 1, 'R', cell);
       }
-    blockPerpRight(v, depth, perpR, perpROverlay.fog);
+    blockPerpRight(v, depth, perpR, frontOverlay.fog); // LAB_053E, same slot
 
     // `LAB_0528` left (`0x0aca2`, lane `-11392`) — ceiling/floor only.
     if (v.sideL[depth]) emitLane('side:L', depth, -1, 'L', cell, leftGate);
@@ -573,10 +565,12 @@ export function buildViewItems(
 
 /**
  * Whether the party can step one cell in compass direction `dir` from
- * `(x, y)` (the W6 movement rule: the approach cell must be open, and the
- * destination in-bounds). A flagP fog cell (§4.7.9) evaluates as open here
- * too, matching `buildViewItems`'s wall-code override — the same
- * `EvalCellFace` return value both consumers read.
+ * `(x, y)` — the game's own move path (`TryMove` CODE+0x116ac -> raw walls
+ * `LAB_0792` -> `LAB_07AB`'s off-map / flagP / flagQ step handlers), ported
+ * in `movement.ts`. Static: no kind-7 door states (unlocked) and no
+ * levitation; `facing` defaults to `dir` (a forward step, which is what lets
+ * a closed door open). The live walker uses `movement.ts` directly so it can
+ * also apply door locks, teleports and the level-1 warp.
  */
 export function canStepDir(
   planes: CellPlanes,
@@ -585,10 +579,13 @@ export function canStepDir(
   dir: number,
   levelWidth: number,
   levelHeight: number,
+  facing: number = dir,
+  links?: Pick<W6LevelLinks, 'regionOrigin'>,
 ): boolean {
   const dest = stepForward(x, y, dir, 1);
-  if (dest.x < 0 || dest.y < 0 || dest.x >= levelWidth || dest.y >= levelHeight) return false;
-  const overlay = evalOverlay(planes, planes.level ?? -1, x, y, dir, 0);
-  const code = overlay.fog ? 0 : evalCellFace(planes, x, y, dir, 0);
-  return code === 0;
+  if (dest.x < 0 || dest.y < 0 || dest.x >= levelWidth || dest.y >= levelHeight) {
+    // still run the port: an off-grid step is off-map (bounce / death), never a move
+    return false;
+  }
+  return canStepStatic(planes, links, x, y, dir, facing);
 }

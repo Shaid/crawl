@@ -1069,6 +1069,14 @@ exactly `1`** (the same code the state-6 loop stamps), it transitions to
 per §6.4's content map (a door-interaction popup), though this specific
 mapping (state 10 -> `wpops.ovr`) was not independently re-confirmed
 against `wroot.exe`'s jump table this pass.
+> **Correction (2026-11-13, cross-port):** this is most likely the
+> **random-encounter** check, not a door popup (and not a stairs prompt).
+> The Amiga's identical post-move code (`CODE+0x13cd0`–`0x13d1c`) tests the
+> per-cell bitset `-18018(A4)` (stamped from section-2 `+0x4fa`/`+0x512`,
+> `region*5+slot`), rolls the region's encounter group (`LAB_0732`), and
+> sets game state 10. Stairs are kind-1 teleporters; see
+> `amiga/data-structure.md` §4.7.10. This is a hypothesis for the DOS side
+> (same structure, not traced in `wroot.exe`).
 
 **Not traced further this pass** (reasonable stopping point for "one
 layer down", not a dead end): the resident helpers at call targets

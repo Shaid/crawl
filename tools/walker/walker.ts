@@ -70,6 +70,7 @@ import {
 import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from './games-ishar.ts';
 import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
+import { W6TriggerState, type W6LevelLinks } from '../wizardry6/movement.ts';
 
 const statusEl = document.getElementById('status')!;
 const confidenceEl = document.getElementById('confidence')!;
@@ -288,7 +289,10 @@ async function loadBlackCrypt(assetBase: string, unitId: number, startPose: Pose
 }
 
 /** Wizardry 6: one per-level `DungeonLevelFile` + the compose-list `slots.json` + the true-indexed atlas. `startPose` may be `null` to use the level's data-derived entrance tile. */
-async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose | null): Promise<GameView> {
+/** Session-wide W6 entity trigger tables (`-30310`/`-18290(A4)`), shared across level loads so spent one-shot teleports stay spent. */
+const w6Triggers = new W6TriggerState();
+
+async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose | null, arrival = false): Promise<GameView> {
   const rawLevel = await fetchJSON<unknown>(`${assetBase}/dungeon/level${String(levelId).padStart(2, '0')}.json`);
   const levelFile: DungeonLevelFile = validateDungeonLevelFile(rawLevel);
   const unit = levelFile.units[0]!;
@@ -296,6 +300,9 @@ async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose
   // (0,0)) feeding the checkerboard parities (§4.7.8); not part of the
   // shared DungeonLevelFile schema, so read off the raw JSON.
   const origin = (rawLevel as { origin?: { x: number; y: number } }).origin ?? { x: 0, y: 0 };
+  // W6 extension: section-3 entity/teleport/trigger data + the level's
+  // entrance (level 12 = the game's new-party start), movement.ts.
+  const w6 = (rawLevel as { w6?: { links?: W6LevelLinks; entrance?: { x: number; y: number; facing: number } | null } }).w6;
   const planes: CellPlanes = {
     width: levelFile.cellSpace.kind === 'flat' ? levelFile.cellSpace.width : 16,
     height: levelFile.cellSpace.kind === 'flat' ? levelFile.cellSpace.height : 16,
@@ -337,10 +344,15 @@ async function loadWizardry6(assetBase: string, levelId: number, startPose: Pose
     bindings: DEFAULT_BINDINGS,
     levelId,
     levelLabel: `Level ${String(levelId).padStart(2, '0')}`,
-    startPose: startPose ?? w6EntrancePose(planes, levelId),
+    startPose:
+      startPose ??
+      (w6?.entrance ? { level: levelId, x: w6.entrance.x, y: w6.entrance.y, facing: w6.entrance.facing as Pose['facing'] } : w6EntrancePose(planes, levelId)),
     level,
     automapBank,
     origin,
+    links: w6?.links,
+    triggers: w6Triggers,
+    arrival,
   });
 }
 
@@ -473,7 +485,7 @@ async function main() {
   const minimap = new Minimap(minimapCanvas.getContext('2d')!, { radius: MINIMAP_RADIUS });
   const automapPresenter = new CanvasPresenter(automapCanvas.getContext('2d')!);
 
-  async function loadGame(game: GameId, levelId: number, pose: Pose | null): Promise<void> {
+  async function loadGame(game: GameId, levelId: number, pose: Pose | null, arrival = false): Promise<void> {
     const g = GAMES.find((x) => x.id === game)!;
     const assetBase = getAssetBasePath(game, platformFor(game));
     setStatus(`loading ${g.label}…`);
@@ -481,7 +493,9 @@ async function main() {
     view =
       game === 'wizardry6' && w6Variant === 'snes'
         ? await loadWizardry6Snes(assetBase, levelId, pose)
-        : await g.loader(assetBase, levelId, pose);
+        : game === 'wizardry6' && arrival
+          ? await loadWizardry6(assetBase, levelId, pose, true)
+          : await g.loader(assetBase, levelId, pose);
     const confidenceNote =
       game === 'wizardry6' && w6Variant === 'snes'
         ? 'SNES: confirmed backdrop + door, approximate generic wall art -- see tools/wizardry6/snes/view-model.ts'
@@ -649,6 +663,15 @@ async function main() {
     lastTime = now;
 
     const newPose = view.update(dtMs, keys);
+    const moveMsg = view.takeMessage?.();
+    if (moveMsg) setStatus(moveMsg);
+    const levelChange = view.takeLevelChange?.();
+    if (levelChange) {
+      // W6 teleport/stairs into another level: load it and continue the
+      // game's arrival scan there (movement.ts `arrive`).
+      loadGame(gameSelect.value as GameId, levelChange.level, levelChange, true).then(() => requestAnimationFrame(frame));
+      return;
+    }
 
     if (view.interactCodes().some((c) => keys.consumePress(c))) {
       setStatus('interact: use mouse click on a hotspot (alcove/plaque/door-switch/door-lock)');

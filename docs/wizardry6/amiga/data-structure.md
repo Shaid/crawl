@@ -112,6 +112,20 @@ applied inline where it contradicts an earlier claim (search "2026-11-13").
    teleporter targets and 0 entities point into them; `dosega` §6.4a's
    "door-popup" for feature 1 is most likely the stairs prompt.
 
+> **Follow-up (2026-11-13, same day):** findings 1–4 are closed and finding 7's
+> stale statements are fixed. See §4.7.10. Three corrections to this block:
+> - Every address above is a `CODE+` offset (= `Bane.asm` line comment),
+>   **not** a file offset. File = address + `0x28`.
+> - Finding 2's "+0x240 bits 10–11 = facing" is wrong: those bits are the
+>   trigger-mark mode, and facing is unchanged. "99 = same level" is also
+>   wrong: 99 means leave the maze, and no shipped teleporter uses it.
+> - Finding 1's level-2 flagQ "block" and the 0/2/3/4/6/11 "party loop"
+>   both kill the party (`LAB_078E`). Off-map moves on 10/12 bounce.
+> - Finding 7's "`dosega` §6.4a door-popup is most likely the stairs prompt"
+>   is also wrong. The DOS state-5 → state-10 path matches the Amiga
+>   random-encounter branch (`-18018`, `CODE+0x13cd0`–`0x13d1c`, game state 10).
+>   Stairs are teleporters (§4.7.10).
+
 **Checked and correct:** lateral +1 = facing+1 (`LAB_0471`, file `0x9188`
 — view not mirrored); move deltas (`LAB_07A3`, file `0x11304`); `0x969a`
 reads the left face with its feature gate at orient = facing−1. 78/78
@@ -2089,6 +2103,9 @@ walker's own empirical pass.
 > (`+0x000`, `+0x438`, `+0x52a`), so this item is left open with the
 > existing placeholder (`planeDirs: [0, 3]`) rather than forced to a
 > static resolution. Left for the walker's own M3 pass, as designed.
+> **Superseded:** `planeDirs` is `[0, 1]` (disassembly-confirmed,
+> `CODE+0x908c`/`0x90f6`; `export-dungeon-levels.ts`, `TODO.md`
+> `maze-plane-semantics`). The `[0, 3]` placeholder no longer exists anywhere.
 
 Verified extractor: `tools/wizardry6/decode-scenario-maze.ts` (writes
 `public/assets/wizardry6/amiga/maps/maze-level00.png`–`maze-level13.png`
@@ -2814,8 +2831,8 @@ corrections fall out first:
 > alt-floor gates and returns 0/open — the two levels differ, unlike the
 > `LAB_055A` boundary case which treats 10 and 12 alike.)
 > **2026-11-13 correction: wrong — both levels 10 and 12 branch to
-> `LAB_0478` (file `0x9248`–`0x9256`) and return 0/open off-map.** See the
-> review at the top of this doc, finding 4.
+> `LAB_0478` (`CODE+0x9248`–`0x9256`) and return 0/open off-map.** See the
+> review at the top of this doc, finding 4. Implemented in §4.7.10.
 
 **flagP (`levelBuf+0x43A`, §4.7.3) per-level semantics** (dispatch
 `CODE+0x9434`; the corpus has flagP bits set on 12 of 14 levels, so
@@ -2924,12 +2941,16 @@ A full-corpus sweep (all 14 real levels, every real cell, all 4 facings —
 flagP/flagQ/region planes and `CellPlanes.level` wired in produced
 **1,934,328 draw items, 0 exceptions, 0 non-finite `destX`/`destY`
 coordinates** — the overlay dispatch is exercised on every real flagged
-cell in the game (2,634 flagP + 1,903 flagQ cells across the 14 levels)
-with no crashes or malformed output (2,286 flagP + 2,124 flagQ cells set
-across the 14 levels, per-level counts from a direct census of the
-exported planes; scratch sweep script, not committed).
+cell in the game with no crashes or malformed output.
+> **Correction (2026-11-13):** the census is **2,286 flagP + 2,124 flagQ** over
+> active regions (2,340/2,197 over all 768 cells per level). The earlier
+> "2,634 / 1,903" was stale.
 
-**Still open**: the "known approximation" above (live-oracle-only); the 4
+> **Correction (2026-11-13):** the "known approximation" is resolved
+> statically in §4.7.10, and `canStepDir` is now the game's own move path
+> (§4.7.10), not the render evaluator.
+
+**Still open**: the 4
 flagQ levels (2/5/7/9) whose real handler is a facing-indexed dispatch not
 traced to closure (left unimplemented, not guessed); whether
 `canStepDir`'s newly-added fog override matches real movement rules (no
@@ -2937,6 +2958,152 @@ oracle beyond the render-side symmetry argument — the same `EvalCellFace`
 return value feeds both consumers in the original code).
 
 ---
+
+#### 4.7.10 Movement, entity triggers, teleports and stairs — the game's move path (2026-11-13)
+
+Closes `w6-walker-movement-rule`, `w6-offmap-levels-10-12`,
+`w6-teleport-wiring` and `w6-stairs-transition`. Port:
+`tools/wizardry6/movement.ts` (`tryMove`, `arrive`, `W6TriggerState`),
+wired into `tools/walker/games.ts` `Wizardry6View` and
+`view-model.ts` `canStepDir`; tests `tools/wizardry6/__tests__/movement.test.ts`.
+
+> **Address convention (correction to the 2026-11-13 review block).**
+> `Bane.asm`'s line-comment addresses are **`CODE`-hunk offsets**, not file
+> offsets: file `0x116d4` holds `4e55fffc`, the `LINK` that `Bane.asm` prints
+> at `;116ac` (file = address + `0x28`). The review block above calls them
+> "file offsets"; every address it cites is really `CODE+`. All addresses in
+> this section are `CODE+` (= `Bane.asm` line comments).
+
+**Move path — confirmed (disassembly, traced end to end):**
+
+| Step | Routine | Behaviour |
+|---|---|---|
+| `TryMove(rel)` | `LAB_07C0` `CODE+0x116ac` | `dir = (facing+rel) & 3`; `code = LAB_0792(dir)`; switch on `doorState[dir]` (`-18146(A4)`, jump table `CODE+0x11820`) |
+| raw wall | `LAB_0792` `CODE+0x11152` | dirs 0/1: own cell's `wallA`/`wallB`; dirs 2/3: neighbour helpers `LAB_0468`/`LAB_046D` (`CODE+0x908c`/`0x90f6`) — off-map → 2, **0 on levels 10/12** (`CODE+0x90b4`, `0x911e`). Features are never read |
+| state 0 | `CODE+0x11708` | `code < 2` → step; `code == 3 && dir == facing` → door sound/redraw (`CODE+0x11736`–`0x11772`) then step; else bump, msg `0x7e4` ("ouch") |
+| state 1/2 | `CODE+0x117ae` | `code == 3 && forward` → msg `0x7e5` (locked); else bump. Never moves |
+| state 3 | `CODE+0x117f0` | `code == 2` → step; else bump (an invisible-passage override) |
+| step | `LAB_07AB` `CODE+0x1142c` | save pose (`LAB_07A8`), `abs += delta` (`LAB_07A3`, also clears `-18146`), resolve region (`LAB_045D`) |
+| off-map | `CODE+0x114c2` | levels 10/12: restore pose (`LAB_07AA`), msg `0x805`; other levels: `LAB_078E(0x7e6)` |
+| flagP (new cell) | table `CODE+0x1163c` | 0/2/3/4/6/11: `LAB_078E(0x2710)` — msg 0x2710 decodes as "you fell to your death"; 1: region 10 → warp to region 4 (`x<4`: `x+4, y+3`) or 5 (`x-4, y+3`) (`CODE+0x11566`–`0x115fc`), other regions → death; 8/10, and 12 outside regions 9–11: bounce unless `-18136(A4)` ≠ 0; 5/7/9/13: nothing |
+| flagQ (new cell) | `CODE+0x11668` | level 2 only: `LAB_078E(0x7e6)`; nothing elsewhere |
+| post-move | `CODE+0x13c54`–`0x13d5e` | random-encounter test (`-18018`, `LAB_0732`, game state 10) then, if the cell's `-18114` entity bit is set, `LAB_06B6` (`CODE+0xe9be`) |
+
+`LAB_078E` (`CODE+0x11090`) prints the message, sets every party member's
+status byte (`-17505(A4)+n*0x1b0`, pcfile `+417`) to 3, clears two HP-ish
+words and sets game state `-18610 = 8`: **the whole party dies** (confirmed
+mechanism; "dead" as the meaning of status 3 is the natural reading). So the
+level 0/4 flagP cells that render as "fog" (§4.7.9) are chasms, and the
+walker refuses those steps with a message instead of killing the party.
+`-18136(A4)` is the value word of slot 0 of the six 4-byte party
+timed-effect records at `-18138(A4)` (the 6-icon status bar, `CODE+0xa7ca`;
+decremented by `LAB_07A0`, but slot 0's value is never cleared on expiry and
+is cleared when the party steps off a flagP cell, `CODE+0x1152c`). Its
+setter wasn't found by `d16(A4)` census. **Hypothesis:** a water-crossing state
+(Levitate or similar). The walker defaults it off.
+
+**Post-move entity dispatch — confirmed.** `LAB_06B6` loops
+`FindEntitySlot` (§4.7.4) from the region's `+0x6c0` start, dispatching on
+the kind byte (`CODE+0xeb30`, table `CODE+0xeafc`, base `CODE+0xeb40`).
+The scan skips an entity whose `+0x5a0` bit is set in `-18290(A4)+level*10`.
+`LAB_073F` (`CODE+0x103e8`, level entry) copies that 10-byte row from
+`-30310(A4)+level*10`, which is read from **`SCENARIO.HDR`** (`LAB_02C5`,
+`CODE+0x4878`, 414 bytes; the same bytes as `newgame.dbs[0:0x19e]`).
+`LAB_05CD(mode)` (`CODE+0xbc34`) marks a fired entity's bit: mode ≥ 1 sets it in
+the transient row, and mode ≥ 2 also sets it in the persistent row. Two kinds move the party:
+
+- **kind 1 — teleport** (`LAB_05D4` `CODE+0xbdce` → `LAB_05CF` `CODE+0xbcb8`).
+  The `+0x000` word is a **sub-type** here, not a message: 0/1 teleport,
+  2 prints `0x804` + sound then teleports, 3 no-op, 4–6 sound + teleport.
+  `+0x240`: x = bits 0–2, y = 3–5, region = 6–9, **bits 10–11 = the mark
+  mode passed to `LAB_05CD`**. Facing is never written, so the party keeps
+  its facing.
+  > **Correction (review finding 2):** bits 10–11 are not "facing", and
+  > `+0x630 == 99` is not "same level". 99 → −1 → `LAB_073F(-1)` → game
+  > state 7 (leave the maze), and no shipped kind-1 entity uses it. The
+  > census found 168 same-level and 94 cross-level teleports.
+  The abs position is recomputed from the destination level's origins by
+  `LAB_0726` (`CODE+0x1009c`). The teleport clears the scan-continue flag
+  `-10918`, so the scan restarts at the destination cell, which is how chains
+  fire. All 19 chained destinations are ping-pong pairs, and every pair has one
+  side disabled at new game by its `SCENARIO.HDR` bit, e.g. level 6 bits 3
+  and 33.
+- **kind 7 — per-direction movement override** (`LAB_05EA` `CODE+0xc0f8`):
+  `doorState[d] = (+0x240 >> 2d) & 3` (that is `-18146(A4)`), mark mode
+  `(+0x630 >> 5) & 3`. A census of all 64 entities found 29× state 1 and 9× state 2,
+  all on closed doors (locked), plus 4× state 3 on open edges and 2× on walls
+  (an invisible wall and an invisible passage). `LAB_06DB` (`CODE+0xf04c`)
+  clears `doorState[facing]` (unlock — not modelled).
+
+**Stairs — solved.** Features 1/2 (stairs up/down, §4.7.6 renders) carry
+no level-change logic: `LAB_07AB`'s feature test (`CODE+0x11468`) only clears
+redraw flag `-10892` when the step leaves through the stairs face. The level
+change is an ordinary **kind-1 teleporter on the cell beyond the stairs
+face**. Census over all 205 stairs faces:
+- 203 have a teleporter on that neighbour cell (81 cross-level). The other 2
+  do not.
+- Walking through each of the 203 with the port lands on a cell carrying the
+  **opposite** stairs feature in **203/203** cases (a stairs-up exit lands on a
+  stairs-down cell and vice versa). A null control that shuffles the arrival
+  cell gives 2/73.
+
+Example: level 0 (19,14) f2 → arrives at (4,11), and (4,11) f0 → arrives back
+at (19,14). These are the review's two "stairs" poses, and they are each other's
+partners. The review's "no teleporter on any stairs cell" was looking at the
+stairs cell itself, not the cell the stairs lead into.
+
+**New-party start — confirmed:** `CODE+0x4212a`–`0x4214e` (cases 0–2 of
+the switch at `CODE+0x421a4`) sets level 12, region 2, local (1,4), facing 2,
+abs (0x89, 0x97) = (137,151). This equals region 2's origin (136,147) + (1,4),
+which is a byte-exact check. Dense walker pose: level 12 (17,15) f2. The exporter writes it as
+`w6.entrance`. Every other level's entrance is the first teleport arrival
+from another level that is enabled at new game.
+
+**Off-map, levels 10/12, and the perpendicular overlay — confirmed (render side):**
+- The depth loop (`CODE+0xa9e8`–`0xaa42`) handles an off-map depth cell this way.
+  On levels 10/12 it sets skip-ceiling `-11353[d*3]` and alt-floor `-11328[d*6]`
+  (front slot) and gives front/perp-L/perp-R the code 0. Everywhere else all three are 2.
+- `0x9202` with lateral ≠ 0 does the same for its slot `lateral+1`
+  (`CODE+0x9248`–`0x9292`).
+- Movement into off-map space on 10/12 **bounces** (above). The edge is open to
+  the eye but not walkable.
+- `0x969a`/`0x9876` (perpendicular faces) test flagP only. On levels 0/4/5,
+  and on 12 when region > 8, a flagP cell returns 0 with **no gate, lane or
+  override writes**. Elsewhere flagP is ignored and flagQ is never read.
+  Their 13-entry feature tables (`CODE+0x9844`/`0x9a20`) leave feature 5
+  unchanged; `0x9202` maps it to 14.
+- Each `0x9202` handler writes gate slot `lateral+1`. Its fog lane-clear
+  (`CODE+0x932c`–`0x9384`) clears only its own side: −1 → the three left lanes,
+  0 → front, +1 → the three right lanes.
+- The perpendicular blockers `LAB_053B`/`LAB_053E` read occlusion-override
+  slot **1** (`-11365`, written by the *front* call). The lateral blockers read
+  slots 0/2. So `view-model.ts` no longer ORs perpendicular overlays into the
+  side gates or lane clears. This resolves §4.7.9's "known approximation"
+  statically.
+- The exporter fills gap cells on levels 10/12 with 0 (`offMapValue: 0`).
+  The evaluators test `region < 0`, not the fill.
+
+**Verification:**
+- Edge census: with flagP/flagQ handlers disabled, the port's step rule
+  reproduces the review's independent raw-wall rule exactly. All 14 levels'
+  component lists match (e.g. L9 132, L4 553, L12 550, L8 577), and the
+  moved-edge total is 23,812 = 23,812.
+- With the step handlers on (deaths/bounces refused), the largest
+  step-only components are: L0 179, L1 109, L2 180, L3 154, L4 113, L5 148,
+  L6 193, L7 532, L8 40, L9 132, L10 107, L11 40, L12 351, L13 94. Before this
+  change the walker's rule gave 378/183/100/536/433/128/527/532/56/56/207/40/434/94.
+- Teleports reconnect the levels.
+- Renders: the stairs poses are unchanged (0 px). The level 10/12 edge poses
+  lose their gap-fill walls and show open sky over alt-floor water.
+
+**Not modelled:**
+- runtime unlock (`LAB_06DB`) and the `-18136` water state
+- the other 18 entity kinds' effects (messages, encounters, shops)
+- random encounters
+- the trigger rows' runtime writers other than `LAB_05CD`
+
+`setPose` jumps (URL / minimap click) do not run the arrival scan.
+
 
 ## 5. Font/portrait `.EGA` files
 

@@ -31,6 +31,7 @@ import type {
 } from '@seer-project/dungeon/schema';
 import { type CellPlanes } from '../wizardry6/evaluate-cell.ts';
 import { buildViewItems, canStepDir } from '../wizardry6/view-model.ts';
+import { arrive, tryMove, W6TriggerState, type W6LevelLinks, type MoveResult } from '../wizardry6/movement.ts';
 
 /**
  * A data-derived "map entrance" start pose — the best available signal for
@@ -120,6 +121,10 @@ export interface GameView {
   /** Full-color minimap renderer (MM1/MM2). When present it replaces the package `Minimap`. */
   renderMinimap?(ctx: CanvasRenderingContext2D): void;
   update(dtMs: number, keys: KeyStateLike): Pose | null;
+  /** W6 only: a pending cross-level move (teleport/stairs) the harness must load; cleared on read. */
+  takeLevelChange?(): Pose | null;
+  /** W6 only: the last move-path message (bump, locked door, bounce, death, teleport); cleared on read. */
+  takeMessage?(): string | null;
   setPose(pose: Pose): void;
   setNoclip(on: boolean): void;
   interactCodes(): string[];
@@ -340,7 +345,22 @@ export interface Wizardry6ViewOptions {
   automapBank?: PieceBank;
   /** Absolute maze coordinate of grid (0,0) (level file `origin`) — phases the checkerboard parities (§4.7.8). */
   origin?: { x: number; y: number };
+  /** Section-3 entity/teleport/trigger data (`level file w6.links`). Without it the view uses the static move rule (no doors locks, teleports or warps). */
+  links?: W6LevelLinks;
+  /** Session-wide entity trigger tables; shared across level loads so one-shot teleports stay spent. */
+  triggers?: W6TriggerState;
+  /** True when the start pose is a teleport arrival: run the game's arrival scan there (chained teleports, door states). */
+  arrival?: boolean;
 }
+
+/** Human-readable text for the move path's message ids (`movement.ts` `W6_MSG`). */
+const W6_MOVE_TEXT: Record<MoveResult['kind'], string> = {
+  moved: '',
+  bump: 'ouch (wall) — msg 0x7e4',
+  locked: 'the door is locked — msg 0x7e5',
+  bounce: 'bounced back (water/edge; needs the -18136 timed effect) — msg 0x805',
+  death: 'the game kills the party here (pit/chasm/edge) — step refused by the walker',
+};
 
 export class Wizardry6View implements GameView {
   readonly id = 'wizardry6';
@@ -357,9 +377,20 @@ export class Wizardry6View implements GameView {
   private items_: DrawItem[] = [];
   private tick = 0;
   private readonly origin: { x: number; y: number };
+  private readonly links: W6LevelLinks | undefined;
+  private readonly triggers: W6TriggerState;
+  /** `-18146(A4)`: per-direction door states set by the last arrival scan. */
+  private doorState: number[] = [0, 0, 0, 0];
+  /** Relocation (teleport / level-1 warp) to apply after the controller's plain step. */
+  private pendingRelocation: Pose | null = null;
+  private levelChange: Pose | null = null;
+  private message: string | null = null;
 
   constructor(opts: Wizardry6ViewOptions) {
     this.origin = opts.origin ?? { x: 0, y: 0 };
+    this.links = opts.links;
+    this.triggers = opts.triggers ?? new W6TriggerState();
+    if (this.links) this.triggers.enterLevel(opts.levelId, this.links.initialFlags);
     this.planes = opts.planes;
     this.palette_ = opts.palette;
     this.levelId_ = opts.levelId;
@@ -377,11 +408,58 @@ export class Wizardry6View implements GameView {
       this.automap = undefined;
     }
     this.controller = new WalkerController(opts.startPose, opts.bindings, {
-      canStep: (pose, dir) =>
-        this.noclip ||
-        canStepDir(this.planes, pose.x, pose.y, dir, this.planes.width, this.planes.height),
+      canStep: (pose, dir) => this.noclip || this.attemptStep(pose, dir),
     });
-    this.items_ = buildViewItems(this.planes, opts.startPose.x, opts.startPose.y, opts.startPose.facing, this.slots, this.origin);
+    let start = opts.startPose;
+    if (opts.arrival && this.links) {
+      const a = arrive(this.planes, this.links, this.triggers, start.x, start.y);
+      this.doorState = a.doorState;
+      if (a.levelChange) this.levelChange = { level: a.pose.level, x: a.pose.x, y: a.pose.y, facing: start.facing };
+      else if (a.teleported) {
+        start = { ...start, x: a.pose.x, y: a.pose.y };
+        this.controller.setPose(start);
+      }
+    }
+    this.items_ = buildViewItems(this.planes, start.x, start.y, start.facing, this.slots, this.origin);
+  }
+
+  /** The game's move path (`movement.ts`): returns true for a plain one-cell step; relocations are queued for `update`. */
+  private attemptStep(pose: Pose, dir: number): boolean {
+    if (!this.links) {
+      const ok = canStepDir(this.planes, pose.x, pose.y, dir, this.planes.width, this.planes.height, pose.facing);
+      if (!ok) this.message = W6_MOVE_TEXT.bump;
+      return ok;
+    }
+    const r = tryMove(this.planes, this.links, pose.x, pose.y, dir, pose.facing, this.doorState);
+    if (r.kind !== 'moved') {
+      this.message = W6_MOVE_TEXT[r.kind];
+      return false;
+    }
+    if (r.doorOpened) this.message = 'door opens (forward through a closed door)';
+    this.doorState = [0, 0, 0, 0]; // LAB_07A3 clears -18146 on every step
+    const a = arrive(this.planes, this.links, this.triggers, r.x, r.y);
+    this.doorState = a.doorState;
+    if (a.levelChange) {
+      this.levelChange = { level: a.pose.level, x: a.pose.x, y: a.pose.y, facing: pose.facing };
+      this.message = `teleport -> level ${a.pose.level} (${a.pose.x},${a.pose.y})`;
+    } else if (a.teleported || r.warped) {
+      this.pendingRelocation = { ...pose, x: a.pose.x, y: a.pose.y };
+      this.message = a.teleported ? `teleport -> (${a.pose.x},${a.pose.y})` : `fell through to (${a.pose.x},${a.pose.y})`;
+    }
+    return true;
+  }
+
+  /** A pending cross-level move (teleport/stairs) for the harness to load; cleared on read. */
+  takeLevelChange(): Pose | null {
+    const p = this.levelChange;
+    this.levelChange = null;
+    return p;
+  }
+  /** The last move-path message (bump/locked/bounce/death/teleport); cleared on read. */
+  takeMessage(): string | null {
+    const m = this.message;
+    this.message = null;
+    return m;
   }
 
   get levelId(): number {
@@ -404,8 +482,13 @@ export class Wizardry6View implements GameView {
   }
 
   update(dtMs: number, keys: KeyStateLike): Pose | null {
-    const newPose = this.controller.update(dtMs, keys);
+    let newPose = this.controller.update(dtMs, keys);
     this.tick += dtMs;
+    if (newPose && this.pendingRelocation) {
+      newPose = { ...this.pendingRelocation, facing: newPose.facing };
+      this.pendingRelocation = null;
+      this.controller.setPose(newPose);
+    }
     if (newPose) {
       this.items_ = buildViewItems(this.planes, newPose.x, newPose.y, newPose.facing, this.slots, this.origin);
     }
@@ -413,6 +496,7 @@ export class Wizardry6View implements GameView {
   }
   setPose(pose: Pose): void {
     this.controller.setPose(pose);
+    this.doorState = [0, 0, 0, 0]; // a harness jump is not a game move: no arrival scan
     this.items_ = buildViewItems(this.planes, pose.x, pose.y, pose.facing, this.slots, this.origin);
   }
   setNoclip(on: boolean): void {

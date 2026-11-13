@@ -22,6 +22,8 @@
  * is why `export-dungeon-levels.ts` declares `yAxisDown: false`.
  */
 
+import { isOffMap, offMapIsOpen, rawWall } from './movement.ts';
+
 export interface CellPlanes {
   width: number;
   height: number;
@@ -85,10 +87,6 @@ export function stepForward(x: number, y: number, facing: number, depth: number)
   return { x: x + d.dx * depth, y: y + d.dy * depth };
 }
 
-function inBounds(planes: CellPlanes, x: number, y: number): boolean {
-  return x >= 0 && x < planes.width && y >= 0 && y < planes.height;
-}
-
 function index(planes: CellPlanes, x: number, y: number): number {
   return y * planes.width + x;
 }
@@ -117,49 +115,27 @@ function index(planes: CellPlanes, x: number, y: number): number {
  * doc comment for the one case where it does: the fog handler).
  */
 export function evalCellFace(planes: CellPlanes, x: number, y: number, facing: number, lateral: number): number {
-  // The real EvalCellFace only checks bounds after a lateral step -- (x,y)
-  // itself is always valid there, since the game's own world is much
-  // larger than this exporter's per-level tight bounding box. A densified,
-  // cropped level (export-dungeon-levels.ts) can genuinely be asked about
-  // a position just past its own edge (e.g. depth-stepping near the crop
-  // boundary), which the real game would never encounter -- so this bound
-  // check is real, necessary defensive behaviour for this port specifically,
-  // not present in the original pseudocode. Same "off-map -> solid/wall"
-  // convention as the lateral-step check below and as export-dungeon-
-  // levels.ts's own offMapValue fill.
-  if (!inBounds(planes, x, y)) return 2;
-
+  // Off-map handling (data-structure.md §4.7.10): a cell no real region
+  // covers -- outside the densified grid OR a gap cell (`region < 0`) -- is
+  // what the game's resolver (`LAB_045D`) fails on. The depth loop
+  // (CODE+0xa9e8) then sets the front/perpendicular codes directly, and
+  // the lateral evaluator (CODE+0x9248) returns directly: 0 on levels 10/12
+  // (open sky/ground -- with skip-ceiling + alt-floor, see `evalOverlay`),
+  // 2 (solid) everywhere else. The lateral step is taken from the
+  // (possibly off-map) depth cell itself, as the game's abs-coordinate
+  // `LAB_0471` does.
+  const level = planes.level ?? -1;
   let cx = x;
   let cy = y;
   if (lateral !== 0) {
     const right = FACING_DELTAS[(facing + 1) % 4]!;
     cx += right.dx * lateral;
     cy += right.dy * lateral;
-    if (!inBounds(planes, cx, cy)) return 2; // off-map -> solid/wall, per EvalCellFace's own explicit early return
   }
+  if (isOffMap(planes, cx, cy)) return offMapIsOpen(level) ? 0 : 2;
 
   const cellIdx = index(planes, cx, cy);
-  let wall: number;
-  switch (facing) {
-    case 0:
-      wall = planes.wallA[cellIdx]!;
-      break;
-    case 1:
-      wall = planes.wallB[cellIdx]!;
-      break;
-    case 2: {
-      const ny = cy - 1;
-      wall = inBounds(planes, cx, ny) ? planes.wallA[index(planes, cx, ny)]! : 2;
-      break;
-    }
-    case 3: {
-      const nx = cx - 1;
-      wall = inBounds(planes, nx, cy) ? planes.wallB[index(planes, nx, cy)]! : 2;
-      break;
-    }
-    default:
-      throw new Error(`evalCellFace: bad facing ${facing}`);
-  }
+  const wall = rawWall(planes, cx, cy, facing);
 
   const feature = planes.feature[cellIdx]!;
   const orient = planes.orient[cellIdx]!;
@@ -169,6 +145,42 @@ export function evalCellFace(planes: CellPlanes, x: number, y: number, facing: n
 
   const result = FEATURE_DISPATCH[feature];
   return result === 'wall' || result === undefined ? wall : result;
+}
+
+/**
+ * `0x969a`/`0x9876`'s 13-entry feature table (features 0-12; >= 13 leave
+ * the wall value unchanged). Identical to `FEATURE_DISPATCH` except feature
+ * 5, which the perpendicular evaluators leave unchanged (`0x9202` maps it to
+ * 14). Read from the jump tables at CODE+0x9844 / CODE+0x9a20.
+ */
+const PERP_FEATURE_DISPATCH: Record<number, number> = { 1: 5, 2: 6, 3: 8, 4: 9, 7: 4, 8: 7, 9: 10, 10: 11, 11: 12, 12: 13 };
+
+/**
+ * The perpendicular side-wall evaluators: `0x969a` (`side = -1`, the face
+ * on the party's left, compass `facing-1`) and `0x9876` (`side = +1`,
+ * `facing+1`), always called with lateral 0 at the depth cell (§4.7.6).
+ * Differences from `evalCellFace` (data-structure.md §4.7.10):
+ * - flagP only (never flagQ), and only as an early return: on the fog
+ *   levels 0/4/5 -- and level 12 outside regions 0-8 -- a flagP cell returns
+ *   0 **with no gate/occlusion writes**; on every other level flagP is
+ *   ignored. So perpendicular faces never contribute to the ceiling/floor
+ *   gates or lane clearing.
+ * - the feature gate is the orientation test alone (`orient == facing∓1`;
+ *   no `feature == 6 || >= 13` override, which only matters for side
+ *   effects), and feature 5 leaves the wall unchanged.
+ */
+export function evalPerpFace(planes: CellPlanes, x: number, y: number, facing: number, side: -1 | 1): number {
+  const level = planes.level ?? -1;
+  if (isOffMap(planes, x, y)) return offMapIsOpen(level) ? 0 : 2; // depth loop's direct set, CODE+0xa9f4-0xaa42
+  const i = index(planes, x, y);
+  if ((planes.flagP?.[i] ?? 0) !== 0) {
+    if (level === 0 || level === 4 || level === 5) return 0;
+    if (level === 12 && (planes.region?.[i] ?? -1) > 8) return 0;
+  }
+  const dir = (facing + (side === -1 ? 3 : 1)) % 4;
+  const wall = rawWall(planes, x, y, dir);
+  if (planes.orient[i] !== dir) return wall;
+  return PERP_FEATURE_DISPATCH[planes.feature[i]!] ?? wall;
 }
 
 /**
@@ -216,17 +228,12 @@ const NO_OVERLAY: OverlayEffect = { fog: false, skipCeiling: false, skipFloor: f
  * pseudocode's two independent top-level `if`s, data-structure.md §4.7.2
  * line "if TestBit(P): ...; if TestBit(Q): ...").
  *
- * **Known approximation** (flagged, not silently assumed): the exact
- * per-evaluator-call "side" argument (0/1/2 = left/front/right) that the
- * real dispatch handlers pass into the shared `-11354`/`-11342`/`-11330`/
- * `-11364..66` gate arrays was not independently traced for the lateral
- * column calls (`facing, lateral=∓1`) versus the perpendicular calls
- * (`0x969a`/`0x9876`, `facing∓1, lateral=0`) -- both plausibly write the
- * same "left"/"right" slot. `view-model.ts` treats them as sharing one
- * slot (OR of both evaluators' effects), by analogy with the
- * already-confirmed ceiling/floor gate arrays' 3-slot/7-lane grouping
- * (§4.7.7.2); this is the one place a live oracle (not available to this
- * project, `game-re-tooling` amiberry gate) could tighten further.
+ * **Side slots (resolved 2026-11-13, §4.7.10):** each `0x9202` call writes
+ * the gate arrays at slot `lateral + 1` (0 = left, 1 = front, 2 = right) --
+ * the lateral-column calls own the left/right slots. The perpendicular
+ * evaluators `0x969a`/`0x9876` never write them (see `evalPerpFace`), so a
+ * side gate is this function's lateral result alone, not an OR with the
+ * perpendicular face.
  */
 export function evalOverlay(
   planes: CellPlanes,
@@ -236,7 +243,7 @@ export function evalOverlay(
   facing: number,
   lateral: number,
 ): OverlayEffect {
-  if (!planes.flagP && !planes.flagQ) return NO_OVERLAY;
+  if (!planes.flagP && !planes.flagQ && !offMapIsOpen(level)) return NO_OVERLAY;
 
   // Mirror evalCellFace's own cell resolution (bounds + lateral step) --
   // an off-map cell (either before or after the lateral step) has no
@@ -248,7 +255,12 @@ export function evalOverlay(
     cx += right.dx * lateral;
     cy += right.dy * lateral;
   }
-  if (!inBounds(planes, cx, cy) || !inBounds(planes, x, y)) return NO_OVERLAY;
+  // Off-map (§4.7.10): levels 10/12 write skip-ceiling (-11354) + alt-floor
+  // (-11330) for this evaluator's side slot (lateral+1) and return 0
+  // (CODE+0x9258 lateral, CODE+0xaa04 depth); other levels write nothing.
+  if (isOffMap(planes, cx, cy)) {
+    return offMapIsOpen(level) ? { fog: false, skipCeiling: true, skipFloor: false, altFloor: true } : NO_OVERLAY;
+  }
   const cellIdx = index(planes, cx, cy);
 
   let effect: OverlayEffect = NO_OVERLAY;
