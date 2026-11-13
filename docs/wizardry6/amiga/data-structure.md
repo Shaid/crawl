@@ -26,8 +26,9 @@ not yet verified).
 
 An adversarial pass over this doc, `TODO.md` and `tools/wizardry6/`, prompted
 by the project owner's play-testing report that the maze walker is "very
-inaccurate still". Addresses below are **`Bane.asm` file offsets**
-(`CODE+` = file − `0x28`). Probes were scratch-only. Each finding is also
+inaccurate still". Addresses below are **`Bane.asm` numbering**, i.e.
+CODE-segment offsets (file offset = address + `0x28`) — the audit originally
+labelled them "file offsets"; corrected per §4.7.10's address-convention note. Probes were scratch-only. Each finding is also
 applied inline where it contradicts an earlier claim (search "2026-11-13").
 
 1. **HIGH — the walker's movement rule was never traced and contradicts the
