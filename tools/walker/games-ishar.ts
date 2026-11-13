@@ -88,11 +88,16 @@
  * `isBlocked()` rule (sign-extended cell value < 0); everything else
  * (geometry, dimensions, coordinate order) is CONFIRMED.
  *
- * Convention: `pose.level` is the region's numeric id (parsed from
- * `CONT<n>...FIC`); `pose.x`/`pose.y` are grid cell coordinates
- * (`cell = grid[y*width+x]`, confirmed against a hand-decoded `GERDEP.bin`
- * movement statement — see the doc). `pose.facing` is cosmetic for every
- * region except the one first-person-enabled combination below.
+ * Convention (2026-11-13, `ishar-grid-index-transpose`): `pose.level` is
+ * the region's numeric id (parsed from `CONT<n>...FIC`); `pose.x` is the
+ * storage ROW index (east-west) and `pose.y` the storage COLUMN index
+ * (north-south, increasing south) -- the view shows the TRANSPOSE of the
+ * stored `row*stride + col` grid, which matches the games' own map
+ * pictures and the handedness of the first-person projection (drawn
+ * untransposed, the top-down map was a mirror image of the 3D view).
+ * N/E/S/W = -y/+x/+y/-x. The "residual quirk" described for Ishar 3 above
+ * was an interpreter operand-order bug, fixed in `alis-interp.ts`. See
+ * `docs/ishar-container-format.md` § "2026-11-13 follow-up".
  */
 import type { KeyStateLike } from '@seer-project/dungeon';
 import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/dungeon';
@@ -102,6 +107,7 @@ import { ISHAR_REGION_LAYOUT, isBlocked, type IsharRegionLayout } from '../share
 import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame } from '../shared/ishar-firstperson.ts';
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
+import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -112,13 +118,23 @@ interface RegionsJson {
   regions: Array<{ name: string; layers: number[][] }>;
 }
 
+/**
+ * One region, in the walker's GEOGRAPHIC frame: the TRANSPOSE of the
+ * `CONT*.FIC` storage layout (2026-11-13, `ishar-grid-index-transpose`).
+ * `tabchar()` addresses the grid as `row*stride + col` with the script's
+ * east-west coordinate as the ROW and north-south as the COLUMN, so drawing
+ * storage as-is (columns across) shows a mirror image of the first-person
+ * view; the transpose matches each title's own `MAP.DO` picture (Ishar 1/2
+ * checked). Display cell `(x, y)` = storage `(row = x, col = y)`; `width` =
+ * storage row count, `height` = storage stride.
+ */
 interface IsharRegion {
   id: number;
   name: string;
   label: string;
   width: number;
   height: number;
-  /** Layer 0 only (the dense terrain layer) — sufficient for a top-down walkability render; the sparse second layer (Ishar 2/3) is not yet decoded semantically, see the sprite-format doc's open items. */
+  /** Layer 0 only (the dense terrain layer), transposed: `terrain[y*width + x]` = storage `[x*stride + y]`. The sparse second layer (Ishar 2/3) is not yet decoded semantically, see the sprite-format doc's open items. */
   terrain: Uint8Array;
 }
 
@@ -175,6 +191,7 @@ type LocationFrameRenderer = (opts: {
   partyY: number;
   facing: 0 | 1 | 2 | 3;
   grid: RegionGridSource;
+  palette?: IsharPalette;
 }) => FirstPersonFrame;
 
 const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
@@ -251,17 +268,25 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
     const layout = ISHAR_REGION_LAYOUT[game];
     const base = `/assets/${game}/amigaaga`;
     const json = (await fetch(`${base}/data/regions.json`).then((r) => r.json())) as RegionsJson;
-    const cellCount = json.width * json.height;
+    const stride = json.width;
+    const rows = json.height;
     const regions: IsharRegion[] = json.regions
       .map((r) => {
         const id = regionId(r.name);
+        const stored = r.layers[0]!;
+        // Transpose storage (row-major, `stride` columns) into the
+        // geographic display frame: display x = storage row, y = column.
+        const terrain = new Uint8Array(rows * stride);
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < stride; col++) terrain[col * rows + row] = stored[row * stride + col] ?? 0;
+        }
         return {
           id,
           name: r.name,
           label: `${r.name} (region ${id})`,
-          width: json.width,
-          height: json.height,
-          terrain: Uint8Array.from(r.layers[0]!.slice(0, cellCount)),
+          width: rows,
+          height: stride,
+          terrain,
         };
       })
       .sort((a, b) => a.id - b.id);
@@ -489,19 +514,30 @@ export class IsharView implements GameView {
     const key = `${this.region.id}:${x},${y},${facing}:${location.key}`;
     if (!this.fpCache || this.fpCache.key !== key) {
       const region = this.region;
+      // The renderers address the grid in STORAGE terms (stride = region
+      // height here, row count = region width); storage (col, row) is
+      // display (x = row, y = col).
       const grid: RegionGridSource = {
-        width: region.width,
-        height: region.height,
-        read(_buf, gx, gy) {
-          if (gx < 0 || gy < 0 || gx >= region.width || gy >= region.height) return 0;
-          const v = region.terrain[gy * region.width + gx]!;
+        width: region.height,
+        height: region.width,
+        read(_buf, col, row) {
+          if (row < 0 || col < 0 || row >= region.width || col >= region.height) return 0;
+          const v = region.terrain[col * region.width + row]!;
           return v >= 128 ? v - 256 : v; // sign-extend, per ishar-regions.ts's tabchar() convention
         },
       };
       const renderFrame = RENDER_FRAME[this.id as IsharGameId];
+      const fond = location.fond ?? firstPerson.sharedFond;
+      // Every backdrop script (FOND/FTEMPLE/FOND1/FVILLE/FFORET/FJUNGLE)
+      // installs its own `0xFE` palette slot on its second tick (after its
+      // first `cstop` yield) -- see docs/ishar-sprite-format.md §5. Ishar 2's
+      // FOND1/FVILLE choose among three variants by a main global
+      // (0x519f, phase 1/2/3); the first slot is the phase-1 variant.
+      const palette = fond ? (resolveIsharOwnPalette(fond) ?? undefined) : undefined;
       const frame = renderFrame({
         location: location.data,
-        fond: location.fond ?? firstPerson.sharedFond,
+        fond,
+        palette,
         partyX: x,
         partyY: y,
         facing: (facing & 3) as 0 | 1 | 2 | 3,
@@ -530,7 +566,7 @@ export class IsharView implements GameView {
     ctx.fillStyle = '#ffe080';
     ctx.font = '10px monospace';
     ctx.fillText(
-      `${this.region.label} — first-person: ${location.label} (RENDERED: real ALIS bytecode execution, placeholder sky/ground colour, no real palette)`,
+      `${this.region.label} — first-person: ${location.label} (RENDERED: real ALIS bytecode execution + backdrop's own palette; flat placeholder behind the backdrop)`,
       4,
       12,
     );

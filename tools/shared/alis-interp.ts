@@ -69,10 +69,10 @@ export interface SceneEnv {
    * x/y pair. `addr` is the array's base offset baked into the bytecode.
    * Ishar 1's world-grid arrays (`basemain+0x80`/`+0x234a`) are `count=1`
    * (a single stride = row width), so a caller only ever needs to call
-   * `pop()` once — matches the originally-confirmed `cell = grid[y*width+x]`
-   * formula (a hand-decoded `GERDEP.bin` statement, `docs/ishar-container-
-   * format.md` §9) exactly, with `direct` playing the `y` role and one
-   * `pop()` playing the `x` role. Crystals of Arborea's own local
+   * `pop()` once: `cell = grid[pop*stride + direct]` -- the popped value is
+   * the ROW, `direct` the COLUMN (2026-11-13 correction: this comment and
+   * all three Ishar renderers previously had it the other way round; see
+   * `ishar-firstperson.ts`'s `RegionGridSource`). Crystals of Arborea's own local
    * scene-content array (`basemain+0x7c`, `cdim`-declared `count=2,
    * dims=[2,114]`) needs `pop()` called TWICE — see
    * `tools/shared/crystals-firstperson.ts`.
@@ -140,10 +140,8 @@ export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): R
         }
         warn(`unmodeled nullary opname ${tok.op}`);
         return 0;
-      case 'unary': {
-        const rhs = evalToken(tok.arg);
-        return applyBinary(tok.op, acc, rhs, warn);
-      }
+      case 'unary':
+        return applyUnaryStep(tok.op, tok.arg);
       case 'eval':
         return runSteps(tok.steps);
       case 'ref':
@@ -155,6 +153,29 @@ export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): R
       default:
         return 0;
     }
+  }
+
+  /**
+   * One binary opername step `acc OP arg`. Reference semantics
+   * (`maestun/alis` `opernames.c`): every binary opername first copies D7
+   * (the accumulator) into D6, then reads its operand into D7, then computes
+   * `D6 OP D7` -- i.e. `acc OP operand`. EXCEPT when the operand is `opile`
+   * (`opernames.c:617`): `opile` itself does `D7 = D6; D6 = *acc++`, so the
+   * popped value lands in D6 and the old accumulator in D7, and the
+   * operation becomes `popped OP acc`. Only matters for non-commutative ops;
+   * in the shipped Ishar/Crystals location scripts that is exactly the four
+   * `osup[opile]` view-edge clamps per script (2026-11-13 fix -- before it,
+   * every clamp tested the wrong way round and one lateral scan bound per
+   * facing got stuck at the full distance to the region edge, the "residual
+   * quirk" `ishar3-firstperson.ts` used to describe).
+   */
+  function applyUnaryStep(op: string, arg: AlisToken): number {
+    if (arg.t === 'nullary' && arg.op === 'opile') {
+      const popped = pile.pop() ?? 0;
+      return applyBinary(op, popped, acc, warn);
+    }
+    const rhs = evalToken(arg);
+    return applyBinary(op, acc, rhs, warn);
   }
 
   /** Run a flat EVAL step list against the shared `acc`/`pile` machine state, returning the final acc. */
@@ -181,8 +202,7 @@ export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): R
         else if (step.op === 'opile') acc = pile.pop() ?? 0;
         else warn(`unmodeled EVAL step opname ${step.op}`);
       } else if (step.t === 'unary') {
-        const rhs = evalToken(step.arg);
-        acc = applyBinary(step.op, acc, rhs, warn);
+        acc = applyUnaryStep(step.op, step.arg);
       } else {
         warn(`unmodeled EVAL step shape ${step.t}`);
       }

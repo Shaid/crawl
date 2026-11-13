@@ -28,7 +28,9 @@
  *   8-bit. Always written starting at palette slot 0 (no offset field).
  * - `colors !== 0`: AmigaAGA 24-bit RGB-triplet format (the code branch
  *   `topalette()` takes for every platform kind EXCEPT plain `EPlatformAmiga`
- *   -- Ishar 1-3/Crystals are `EPlatformAmigaAGA`). `paldata[2]` = starting
+ *   -- Ishar 1-3 are `EPlatformAmigaAGA`; Crystals (`.CO`) is plain
+ *   `EPlatformAmiga`, `platform.c:41`, but every Crystals palette is
+ *   `colors === 0` so it takes the 16-colour path either way). `paldata[2]` = starting
  *   slot `offset`, `count = colors + 1` entries of raw `(r,g,b)` bytes from
  *   `paldata[4]` onward, written to slots `offset .. offset+count-1`
  *   INCLUSIVE (`for (i = offset; i <= offset + colors; i++)` in the C
@@ -63,10 +65,11 @@
  * interior script ships at most one dedicated `0xFE` palette, confirmed by
  * corpus census) and is the mechanism this module relies on throughout.
  * Outdoor location scripts (`FORET.bin`, `VILLAGE.bin`, etc.) carry NO
- * dedicated palette resource of their own at all (confirmed: 0 `0xFE` slots
- * across FORET/VILLAGE/PLAINE/RAMPART/TEMPLE's own directories) -- they rely
- * entirely on `FOND.bin`'s shared world palette (see below), loaded once
- * elsewhere (not statically pinned this session, see the "Scope" note).
+ * palette load of their own -- the BACKDROP script does it: `FOND.bin`
+ * yields at `+0x64 cstop` and on its next tick runs `cselpalet(0);
+ * cpalette(8)` (`cstop` is a per-frame yield in the reference, not an end;
+ * 2026-11-13, `docs/ishar-sprite-format.md` §5 follow-up). Every backdrop
+ * in Ishar 1-3 does the same with its own `0xFE` slot.
  */
 import { findIsharDirectory, resolveIsharSlot, type IsharBitmap } from './ishar-sprites.js';
 

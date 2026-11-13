@@ -38,12 +38,13 @@ const regions = JSON.parse(readFileSync('public/assets/ishar/amigaaga/data/regio
 const cont1 = regions.regions.find((r) => r.name === 'CONT1');
 if (!cont1) throw new Error('CONT1 region not found in regions.json');
 const terrain = cont1.layers[0]!;
+// Storage-indexed (`row*stride + col`, see `RegionGridSource`).
 const grid: RegionGridSource = {
   width: regions.width,
   height: regions.height,
-  read(_buf, gx, gy) {
-    if (gx < 0 || gy < 0 || gx >= regions.width || gy >= regions.height) return 0;
-    const v = terrain[gy * regions.width + gx]!;
+  read(_buf, col, row) {
+    if (col < 0 || row < 0 || col >= regions.width || row >= regions.height) return 0;
+    const v = terrain[row * regions.width + col]!;
     return v >= 128 ? v - 256 : v; // sign-extend, per ishar-regions.ts's tabchar() convention
   },
 };
@@ -55,13 +56,14 @@ if (!palette) throw new Error('FOND.bin has no resolvable 0xFE-marked palette re
 function findRenderablePose(): { partyX: number; partyY: number; facing: 0 | 1 | 2 | 3 } {
   let best: { partyX: number; partyY: number; facing: 0 | 1 | 2 | 3 } | null = null;
   let bestCount = 0;
-  for (let y = 2; y < regions.height - 2; y++) {
-    for (let x = 2; x < regions.width - 2; x++) {
+  // partyX = storage ROW (east-west), partyY = storage COLUMN (north-south).
+  for (let row = 2; row < regions.height - 2; row++) {
+    for (let col = 2; col < regions.width - 2; col++) {
       for (const facing of [0, 1, 2, 3] as const) {
-        const frame = renderIsharLocationFrame({ location: foret, fond, partyX: x, partyY: y, facing, grid });
+        const frame = renderIsharLocationFrame({ location: foret, fond, partyX: row, partyY: col, facing, grid });
         if (frame.placementCount > bestCount) {
           bestCount = frame.placementCount;
-          best = { partyX: x, partyY: y, facing };
+          best = { partyX: row, partyY: col, facing };
         }
       }
     }

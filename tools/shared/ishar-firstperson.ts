@@ -50,14 +50,15 @@
  * a real party pose, exactly the per-ring elevation/lateral-scale constants
  * and per-cell sprite-index-base values that were hand-decoded and cross-
  * checked against `github.com/maestun/alis`'s C source — see
- * `alis-interp.ts`'s module doc). The PIXEL COMPOSITING below (sprite
- * anchor point, backdrop layering, palette) is RENDERED/HYPOTHESIS: no
- * real screenshot or emulator capture was available to check pixel-exact
- * placement, sprite anchor convention (this renderer assumes each sprite's
- * pixel-X is its horizontal center and pixel-Y is its ground/base line —
- * a reasonable but UNVERIFIED convention for "billboarded objects standing
- * on terrain"), or the FOND backdrop's real tiling/parallax behavior (see
- * that function's own doc comment for what wasn't resolved).
+ * `alis-interp.ts`'s module doc). The sprite anchor is now source-confirmed
+ * (centre-anchored, `compositeFrame()`, 2026-11-13); the rest of the PIXEL
+ * COMPOSITING (backdrop layering, palette choice, the sky/ground fill) is
+ * RENDERED: no real screenshot or emulator capture was available to check
+ * pixel-exact placement.
+ *
+ * Grid orientation (2026-11-13): grid reads follow `tabchar()` (row = pop,
+ * column = D7) and the walker frame is the TRANSPOSE of storage -- see
+ * `RegionGridSource`.
  *
  * A benign artifact seen running EVERY script tried so far (FORET, VILLAGE,
  * and structurally in TEMPLE): after the real per-frame placement pass
@@ -89,10 +90,24 @@ import { findIsharDirectory, resolveIsharSlot, decodeIsharBitmap, isharBitmapToN
 import { isharBitmapToPaletteRGBA, type IsharPalette } from './ishar-palette.ts';
 import { unpackSilmarilsScript } from './silmarils-unpack.ts';
 
-/** Ishar 1's confirmed party-state/world globals (`docs/ishar-container-format.md` §9, `basemain`-relative). Ishar 2/3 use different offsets -- not re-derived this session (see module doc). */
+/**
+ * Ishar 1's confirmed party-state/world globals (`docs/ishar-container-format.md`
+ * §9, `basemain`-relative), named by their GRID-STORAGE role (2026-11-13,
+ * `ishar-grid-index-transpose`): `tabchar()` (`maestun/alis` `alis.c:2073`)
+ * addresses a `count=1` grid as `base + D7 + stride*pop`, so the popped value
+ * is the ROW index (`0..53`) and the accumulator D7 the COLUMN index
+ * (`0..89`, stride 90). The scripts' own view-edge clamps agree: `FORET.bin`
+ * bounds `0x137c` by `54-v-1` (`+0xdd`/`+0x2a7`) and `0x137d` by `90-v-1`
+ * (`+0x1d8`). Geographically the ROW index is the east-west axis and the
+ * COLUMN index north-south -- the stored grid is the in-game map TRANSPOSED
+ * (see `RegionGridSource`); the walker's `partyX`/`partyY` are therefore
+ * row/column respectively.
+ */
 export const ISHAR1_GLOBALS = {
-  partyX: 0x137c,
-  partyY: 0x137d,
+  /** Grid ROW index (popped by `tabchar`) = east-west = walker `partyX`. */
+  partyRow: 0x137c,
+  /** Grid COLUMN index (`tabchar`'s D7) = north-south = walker `partyY`. */
+  partyCol: 0x137d,
   partyFacing: 0x137e,
   locationType: 0x1508,
   gridBufferA: 0x80,
@@ -115,11 +130,35 @@ export const ISHAR1_GLOBALS = {
  */
 export const ISHAR1_GAME_SCREEN = { xCenter: 127, horizonY: 86, width: 255, height: 125 } as const;
 
+/**
+ * A `CONT*.FIC` region grid in its STORAGE layout: `width` = row stride
+ * (number of columns: 90/60/57 for Ishar 1/2/3), `height` = number of rows,
+ * cell `(col,row)` at byte `row*width + col` -- exactly `tabchar()`'s
+ * `base + D7 + stride*pop` with `col = D7`, `row = pop`.
+ *
+ * Orientation (2026-11-13, CONFIRMED for Ishar 1/2 against each title's own
+ * `MAP.DO` picture, and for all three by projection handedness): the stored
+ * grid is the in-game world map TRANSPOSED -- ROW = east-west (x),
+ * COLUMN = north-south (y, increasing southward). Drawn naively (columns
+ * across, rows down) it is a mirror image of what the first-person view
+ * shows: a cell one column to the display-left of the party's facing lands
+ * on screen-RIGHT for every facing of every Ishar 1/2/3 script tested. The
+ * walker therefore displays the transpose, and every renderer here takes
+ * `partyX` = row, `partyY` = column.
+ */
 export interface RegionGridSource {
   width: number;
   height: number;
-  /** Sign-extended cell reader for one buffer ('A' = `basemain+0x80`, 'B' = `basemain+0x234a`). Ishar 1 has only one real layer -- pass the same reader for both. */
-  read(buffer: 'A' | 'B', x: number, y: number): number;
+  /** Sign-extended cell reader for one buffer ('A' = `basemain+0x80`, 'B' = `basemain+0x234a`), storage-indexed: returns cell `row*width + col`. Ishar 1 has only one real layer -- pass the same reader for both. */
+  read(buffer: 'A' | 'B', col: number, row: number): number;
+}
+
+/** Shared `count=1` `tabchar()` grid read for the Ishar 1/2/3 `CONT*.FIC` arrays: `row = pop()`, `col = direct` (D7). Out-of-range reads return 0. */
+export function readStorageGrid(grid: RegionGridSource, buf: 'A' | 'B', pop: () => number, direct: number): number {
+  const row = pop();
+  const col = direct;
+  if (row < 0 || col < 0 || col >= grid.width || row >= grid.height) return 0;
+  return grid.read(buf, col, row);
 }
 
 function makeSceneEnv(globals: Record<number, number>, grid: RegionGridSource): SceneEnv {
@@ -127,16 +166,12 @@ function makeSceneEnv(globals: Record<number, number>, grid: RegionGridSource): 
     readMain(addr) {
       return globals[addr] ?? 0;
     },
-    // Ishar 1's CONT grids are `cdim count=1` (a single row-width stride) --
-    // one `pop()` call (the confirmed `x` role), `direct` (the accumulator
-    // at call time) plays the confirmed `y` role. See SceneEnv.readGrid's
-    // doc comment for the general N-ary formula this is the count=1 case of.
+    // Ishar 1's CONT grids are `cdim count=1` (a single row-width stride):
+    // `tabchar()` = `base + D7 + stride*pop`, so the one `pop()` is the ROW
+    // and `direct` (D7, the accumulator at call time) is the COLUMN.
+    // (Before 2026-11-13 this was transposed -- `x = pop(), y = direct`.)
     readGrid(addr, pop, direct) {
-      const buf = addr === ISHAR1_GLOBALS.gridBufferB ? 'B' : 'A';
-      const x = pop();
-      const y = direct;
-      if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) return 0;
-      return grid.read(buf, x, y);
+      return readStorageGrid(grid, addr === ISHAR1_GLOBALS.gridBufferB ? 'B' : 'A', pop, direct);
     },
   };
 }
@@ -217,9 +252,13 @@ function blit(canvas: Uint8Array, cw: number, ch: number, bmp: IsharBitmap, dstX
 
 /**
  * Draw a resolved placement list (already sorted far-to-near by the caller)
- * onto an RGBA canvas. Anchor convention (UNVERIFIED, see module doc):
- * pixelX is the sprite's horizontal CENTER, pixelY is its BASE (bottom
- * edge) -- the natural convention for a "standing on the ground" billboard.
+ * onto an RGBA canvas. Anchor convention CONFIRMED against the reference
+ * (`maestun/alis` `image.c` `deptopix()`, v<60 branch, ~3105-3126):
+ * `anchorx = newl >> 1`, `anchory = newh >> 1` where `newl`/`newh` are the
+ * STORED width/height (`real - 1`), and `newx = depx - anchorx`,
+ * `newy = depy - anchory` -- i.e. every sprite (and backdrop piece) is
+ * CENTRE-anchored on its projected point. (Before 2026-11-13 this drew
+ * base-anchored, `dstY = pixelY - height`, i.e. every sprite ~h/2 too high.)
  */
 export function compositeFrame(
   leaves: ScenePlacementLeaf[],
@@ -230,8 +269,8 @@ export function compositeFrame(
   for (const leaf of leaves) {
     const pixelX = screen.xCenter + leaf.x;
     const pixelY = screen.horizonY - leaf.z;
-    const dstX = Math.round(pixelX - leaf.bitmap.width / 2);
-    const dstY = Math.round(pixelY - leaf.bitmap.height);
+    const dstX = pixelX - ((leaf.bitmap.width - 1) >> 1);
+    const dstY = pixelY - ((leaf.bitmap.height - 1) >> 1);
     blit(canvas, screen.width, screen.height, leaf.bitmap, dstX, dstY, leaf.invertX, palette);
   }
 }
@@ -241,7 +280,9 @@ export interface LocationFrameOptions {
   location: Uint8Array;
   /** Decompressed `FOND.bin` (sky/backdrop companion) -- optional; omit to skip the backdrop layer. Ishar 1 ships exactly one `FOND.DO`, shared by every outdoor location script (no per-biome backdrop file exists on disk). */
   fond?: Uint8Array;
+  /** East-west position = grid ROW index (see `RegionGridSource` -- the stored grid is the map transposed). */
   partyX: number;
+  /** North-south position (increasing southward) = grid COLUMN index. */
   partyY: number;
   facing: 0 | 1 | 2 | 3;
   locationType?: number;
@@ -258,28 +299,15 @@ export interface LocationFrameOptions {
 }
 
 /**
- * Render one Ishar 1 outdoor-biome first-person frame by executing
- * `opts.location`'s real bytecode. See module doc for scope/confidence
- * (which scripts have actually been exercised end-to-end vs. only
- * disassembled). `facing` uses this project's own N/E/S/W = 0/1/2/3
- * convention (`tools/walker/games-ishar.ts`'s `dirs` array) -- internally
- * converted to the raw bytecode facing value (CONFIRMED empirically: the
- * script's `cswitch2 omainb(0x137e) ... base=-1` dispatch needs
- * `rawValue = facingIndex + 1` to land on slot `facingIndex`, and each
- * slot's own axis arithmetic was hand-verified to match N/E/S/W in table
- * order -- see `alis-interp.ts`'s test coverage and
- * `docs/ishar-container-format.md` §8).
- */
-/**
- * Flat two-tone sky/ground placeholder fill split at `screen.horizonY`, NOT
- * derived from real palette data (no AGA/OCS palette has been recovered for
- * this engine family -- see module doc / `ishar-sprite-format.md`).
- * Deliberately flat (not a gradient) so it reads unambiguously as "sky" vs
- * "ground" during visual verification, rather than producing an internal
- * colour-banding artifact that could be mistaken for backdrop sprite
- * content. Shared by every location renderer in this engine family
- * (Ishar 1-3, Crystals of Arborea) since none of them have real palette
- * data yet either.
+ * Flat two-tone sky/ground placeholder fill split at `screen.horizonY`. The
+ * fill colours themselves are NOT from game data: real palettes ARE
+ * recovered for this engine family (`ishar-palette.ts`,
+ * `ishar-sprite-format.md` §5) and used for sprites when a caller passes
+ * one, but what the real game shows behind the backdrop sprites (a cleared
+ * colour index? the backdrop covering everything?) is not traced, so this
+ * stays a placeholder. Deliberately flat (not a gradient) so it reads
+ * unambiguously as "sky" vs "ground" during visual verification. Shared by
+ * every location renderer in this engine family (Ishar 1-3, Crystals).
  */
 export function fillPlaceholderSkyGround(
   canvas: Uint8Array,
@@ -299,6 +327,20 @@ export function fillPlaceholderSkyGround(
   }
 }
 
+/**
+ * Render one Ishar 1 outdoor-biome first-person frame by executing
+ * `opts.location`'s real bytecode. See module doc for scope/confidence.
+ * `facing` uses this project's N/E/S/W = 0/1/2/3 convention in the
+ * TRANSPOSED (geographic) frame -- N = -column, E = +row, S = +column,
+ * W = -row (see `RegionGridSource`). Raw `omainb(0x137e)` = `facing + 1`:
+ * re-derived 2026-11-13 by EXECUTING each script's own `cswitch2 base=-1`
+ * facing dispatch for raw values -3..4 and recording every grid cell it
+ * reads -- raw 1/2/3/4 scan a symmetric 6-deep wedge toward -column/+row/
+ * +column/-row respectively, 0 and out-of-range read nothing (FORET, VILLAGE,
+ * PLAINE, RAMPART, TEMPLE identical; `docs/ishar-container-format.md`
+ * § "2026-11-13 follow-up"). The old "hand-verified" `facing + 1` was the
+ * same table checked in the un-transposed frame, where it was mirrored.
+ */
 export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPersonFrame {
   const screen = opts.screen ?? ISHAR1_GAME_SCREEN;
   const warnings: string[] = [];
@@ -306,8 +348,8 @@ export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPerso
   fillPlaceholderSkyGround(canvas, screen);
 
   const globals: Record<number, number> = {
-    [ISHAR1_GLOBALS.partyX]: opts.partyX,
-    [ISHAR1_GLOBALS.partyY]: opts.partyY,
+    [ISHAR1_GLOBALS.partyRow]: opts.partyX,
+    [ISHAR1_GLOBALS.partyCol]: opts.partyY,
     [ISHAR1_GLOBALS.partyFacing]: opts.facing + 1,
     [ISHAR1_GLOBALS.locationType]: opts.locationType ?? 0,
   };

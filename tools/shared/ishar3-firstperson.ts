@@ -21,6 +21,17 @@
  * silhouettes against sky, visibly different per facing) -- see §8.6 for the
  * PNGs and the render-verification detail.
  *
+ * > **2026-11-13 correction:** the "residual quirk" below was an
+ * > interpreter bug, not engine behaviour -- `acc OP[opile]` is evaluated as
+ * > `popped OP acc` in the reference (`opile` swaps D6/D7,
+ * > `opernames.c:617`), so the `osup[opile]` edge clamps ran backwards.
+ * > Fixed in `alis-interp.ts`; every facing now scans a symmetric 6-deep
+ * > wedge. The grid read was also transposed (now `row = pop`, `col = D7`)
+ * > and the facing table is re-derived in the transposed (geographic)
+ * > walker frame -- see `ISHAR3_FACING_RAW` and
+ * > `docs/ishar-container-format.md` § "2026-11-13 follow-up". The
+ * > paragraphs below are kept as history.
+ *
  * **A real, source-confirmed residual quirk remains** (independent of the
  * CFG misdiagnosis above): in each facing block, one of the two lateral-scan
  * bounds (`0x54`/`0x55` in the disassembly) can get set to the FULL distance
@@ -101,34 +112,56 @@
  */
 
 import type { SceneEnv } from './alis-interp.ts';
-import { computeScenePlacements, compositeFrame, fillPlaceholderSkyGround, type FirstPersonFrame, type RegionGridSource } from './ishar-firstperson.ts';
+import type { IsharPalette } from './ishar-palette.ts';
+import { computeScenePlacements, compositeFrame, fillPlaceholderSkyGround, readStorageGrid, type FirstPersonFrame, type RegionGridSource } from './ishar-firstperson.ts';
 
 /** Ishar 3's confirmed party-state globals (`basemain`-relative). See module doc for the disassembly evidence. */
 export const ISHAR3_GLOBALS = {
-  partyX: 0x14b6,
-  partyY: 0x257,
+  /** Grid COLUMN index (`tabchar` D7, bounded by the 57 stride) = north-south = walker `partyY`. */
+  partyCol: 0x14b6,
+  /** Grid ROW index (popped, bounded by the 82 rows) = east-west = walker `partyX`. */
+  partyRow: 0x257,
   partyFacing: 0x14b7,
   gridBufferA: 0x260,
   gridBufferB: 0x14ae,
 } as const;
 
-/** N/E/S/W (index 0-3) -> raw `omainb(0x14b7)` facing value. See module doc for the per-block coordinate-update trace this was derived from. */
-export const ISHAR3_FACING_RAW: readonly [number, number, number, number] = [-2, -1, 2, 1];
+/**
+ * N/E/S/W (index 0-3, transposed/geographic walker frame: N = -column,
+ * E = +row) -> raw `omainb(0x14b7)` facing value. Re-derived 2026-11-13 by
+ * EXECUTING the `cswitch2 base=2 count=4` dispatch of `FORET.bin` and
+ * `JUNGLE.bin` for raw -3..4 and recording the cells each reads: raw 1 scans
+ * -column, 2 +row, -1 +column, -2 -row; 0/3/4/-3 read nothing. Supersedes
+ * `[-2, -1, 2, 1]`, which was the same per-block axis trace expressed in the
+ * un-transposed (mirrored) display frame.
+ */
+export const ISHAR3_FACING_RAW: readonly [number, number, number, number] = [1, 2, -1, -2];
 
 /** Ishar 3's game screen (`cdefsc scridx=0x000e`), CONFIRMED from `MAIN.bin`'s own decompiled config block -- byte-identical to Ishar 2's. */
-export const ISHAR3_GAME_SCREEN = { xCenter: 127, horizonY: 78, width: 255, height: 112 } as const;
+/**
+ * View-window geometry (2026-11-13, `ishar2-view-window-offset`): the
+ * `cdefsc` block (`MAIN.bin+0x18`) gives cx 127, cy 78, window newx 0,
+ * **newy 13**, w 255, h 112. In the reference (`maestun/alis` `image.c`
+ * `deptopix()` ~3127 and the `fenx1/feny1` clip at ~4422) cx/cy are added
+ * to the projected point in ABSOLUTE screen coordinates and sprites are then
+ * clipped to the window `newy..newy+h`, so inside this window-sized canvas
+ * the horizon sits at `cy - newy` = 65, not 78 (Ishar 1's window has
+ * newy 0, so its 86 was already right). Before this fix every frame drew
+ * 13 px low with the window's bottom 13 rows lost.
+ */
+export const ISHAR3_GAME_SCREEN = { xCenter: 127, horizonY: 78 - 13, width: 255, height: 112 } as const;
 
 function makeIshar3SceneEnv(globals: Record<number, number>, grid: RegionGridSource): SceneEnv {
   return {
     readMain(addr) {
       return globals[addr] ?? 0;
     },
+    // Same count=1 `tabchar()` read as Ishar 1: row = pop(), col = D7.
+    // (Before 2026-11-13 this read `x = pop(), y = direct` -- transposed,
+    // so most reads landed on the wrong (usually empty) cells: FORET at
+    // row 70/col 20 placed 0 sprites.)
     readGrid(addr, pop, direct) {
-      const buf = addr === ISHAR3_GLOBALS.gridBufferB ? 'B' : 'A';
-      const x = pop();
-      const y = direct;
-      if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) return 0;
-      return grid.read(buf, x, y);
+      return readStorageGrid(grid, addr === ISHAR3_GLOBALS.gridBufferB ? 'B' : 'A', pop, direct);
     },
   };
 }
@@ -138,11 +171,15 @@ export interface Ishar3LocationFrameOptions {
   location: Uint8Array;
   /** Decompressed backdrop companion (`FFORET.bin`, `FJUNGLE.bin`, ...). */
   fond?: Uint8Array;
+  /** East-west = grid ROW index (see `RegionGridSource`). */
   partyX: number;
+  /** North-south = grid COLUMN index. */
   partyY: number;
   facing: 0 | 1 | 2 | 3;
   grid: RegionGridSource;
   screen?: { xCenter: number; horizonY: number; width: number; height: number };
+  /** Optional real AGA palette (`ishar-palette.ts`) -- e.g. `resolveIsharOwnPalette(fond)`: every backdrop script installs its own `0xFE` palette slot on its second tick (see `docs/ishar-sprite-format.md` §5). Omit for greyscale. */
+  palette?: IsharPalette;
 }
 
 /**
@@ -156,8 +193,8 @@ export function renderIshar3LocationFrame(opts: Ishar3LocationFrameOptions): Fir
   fillPlaceholderSkyGround(canvas, screen);
 
   const globals: Record<number, number> = {
-    [ISHAR3_GLOBALS.partyX]: opts.partyX,
-    [ISHAR3_GLOBALS.partyY]: opts.partyY,
+    [ISHAR3_GLOBALS.partyRow]: opts.partyX,
+    [ISHAR3_GLOBALS.partyCol]: opts.partyY,
     [ISHAR3_GLOBALS.partyFacing]: ISHAR3_FACING_RAW[opts.facing],
   };
   const env = makeIshar3SceneEnv(globals, opts.grid);
@@ -165,13 +202,13 @@ export function renderIshar3LocationFrame(opts: Ishar3LocationFrameOptions): Fir
   let placementCount = 0;
   if (opts.fond) {
     const fondLeaves = computeScenePlacements(opts.fond, env, warnings);
-    compositeFrame(fondLeaves, screen, canvas);
+    compositeFrame(fondLeaves, screen, canvas, opts.palette);
     placementCount += fondLeaves.length;
   }
 
   const locationLeaves = computeScenePlacements(opts.location, env, warnings);
   locationLeaves.sort((a, b) => b.sortY - a.sortY);
-  compositeFrame(locationLeaves, screen, canvas);
+  compositeFrame(locationLeaves, screen, canvas, opts.palette);
   placementCount += locationLeaves.length;
 
   return { width: screen.width, height: screen.height, rgba: canvas, placementCount, warnings };
