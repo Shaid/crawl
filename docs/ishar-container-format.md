@@ -121,6 +121,119 @@ palette change in caves/temples or at dusk? a ~13 px UI strip above Ishar 2's
 3D window? what blocks walking (forest/mountain/coast/sea)? is the map
 north-up, and does turning right go clockwise on it?
 
+## 2026-11-13 follow-up — audit findings worked through (read with the Review above)
+
+Status per audit finding; evidence scripts are scratch probes, but the core
+invariants are now a committed test
+(`tools/walker/__tests__/ishar-grid-orientation.test.ts`).
+
+**Finding 1 (grid transpose) — FIXED, and the walker frame is now the
+transpose of storage.** All three Ishar renderers read `count=1` grids as
+`row = pop()`, `col = direct` (shared `readStorageGrid()` in
+`tools/shared/ishar-firstperson.ts`). Two further results came out of
+re-deriving the facings:
+
+- *Interpreter operand-order bug (`alis-interp.ts`).* Every binary opername
+  computes `D6 OP D7` after copying the accumulator into D6, but `opile`
+  itself does `D7 = D6; D6 = pop` (`opernames.c:617`), so `acc OP[opile]`
+  is really `popped OP acc`. Our interpreter computed `acc OP popped`. The
+  only non-commutative case in the shipped location scripts is the four
+  `osup[opile]` view-edge clamps per script (e.g. Ishar 1 `FORET.bin+0xdd`
+  `v39 > 54 - Y - 1`), which therefore tested the wrong way round and left
+  one lateral scan bound at the full distance to the region edge — the
+  "residual, source-confirmed quirk" `ishar3-firstperson.ts` used to
+  describe. Fixed (`applyUnaryStep`). Before: Ishar 1 FORET facing 1 read
+  183 cells spanning rows −6…+26; after: 48 cells, a symmetric 6-deep
+  wedge (rows −6…+6, mean lateral offset exactly 0). Every facing of all
+  9 Ishar 1/2/3 location scripts now scans a symmetric wedge (the committed
+  test asserts mean lateral = 0 and |lateral| ≤ 7).
+- *Facing tables, re-derived by execution, not grep.* For raw facing
+  values −3…4 each script's own facing `cswitch2` was executed and every
+  cell read recorded. Ishar 1 (`0x137e`, all 5 scripts) and Ishar 2
+  (`0x2ab6`, both): raw 1/2/3/4 scan −column/+row/+column/−row; 0 and
+  out-of-range read nothing. Ishar 3 (`0x14b7`, FORET/JUNGLE): raw
+  1/2/−1/−2 scan −column/+row/+column/−row; 0/3/4/−3 read nothing.
+- *Handedness → orientation.* With a single non-zero cell planted two
+  cells to one side of the wedge, drawing storage naively (columns across,
+  rows down) puts the display-LEFT cell on screen-RIGHT, for every facing
+  of every title tested (Ishar 1 FORET/VILLAGE 4/4 facings, PLAINE 3/3,
+  Ishar 2 FORET1 4/4, Ishar 3 FORET 4/4) — i.e. the naive top-down view is a mirror
+  image of the 3D view. The reference projection does not flip x
+  (`deptopix()`: `newx = depx - depx_scene + cx - anchorx`). So geography
+  is a transpose (or a rotation of one) of storage. The in-game map
+  pictures pick the transpose: Ishar 1 `MAP.DO` shows five tall lands with
+  the round labyrinths at the BOTTOM of lands 3/4, matching transposed
+  `CONT3`/`CONT4`; Ishar 2 `MAP.DO` island 1 (town crossroads top-left,
+  sea inlet from the top, forest right, dock bottom-left) matches
+  transposed `CONT1` and not its vertical flip. Ishar 3's `Koren-Bahnir`
+  map comparison was inconclusive; the transpose is assumed by family
+  consistency.
+- *Resulting convention.* Walker/renderer `partyX` = storage ROW
+  (east-west), `partyY` = storage COLUMN (north-south, increasing south);
+  N = −column. Ishar 1/2: raw facing = `facing + 1` (the old value, now
+  justified in the correct frame); Ishar 3: `[1, 2, −1, −2]` (was
+  `[−2, −1, 2, 1]`). Globals renamed by storage role: `partyRow`/`partyCol`
+  = `0x137c`/`0x137d` (Ishar 1), `0x2ab4`/`0x2ab5` (Ishar 2),
+  `0x257`/`0x14b6` (Ishar 3). Note this means the audit's suggested names
+  ("`0x137d` = X") hold in storage terms but not geographically.
+  `tools/walker/games-ishar.ts` transposes each region at load; the
+  top-down view now matches the map pictures.
+- *Regression:* Ishar 3 FORET at row 70 / column 20: 0 → 44–51 location
+  placements per facing (189 over N/E/S/W, plus FFORET's 2 backdrop leaves
+  each); row 70 / column 40: 0 → 40–50. The committed test asserts > 100
+  over the four facings. (The audit's "~640" counted the pre-`opile`-fix
+  over-wide scan.) Before/after renders of all 13 shipped locations (Ishar 1
+  FORET/VILLAGE/PLAINE/RAMPART/TEMPLE, Ishar 2 FORET1/VILLE, Ishar 3
+  FORET/JUNGLE, Crystals ARBRE/NPLAINE/PLAGES/CAVINT) were inspected: trees
+  and buildings now stand on the ground with the backdrop filling the
+  window; Ishar 3 FORET at (70,20) is a dense, coloured autumn forest.
+- *Crystals:* its 2-pop formula was already right, but the `opile` fix
+  changes it too — every facing of ARBRE/NPLAINE/PLAGES/CAVINT now scans the
+  same symmetric 48-cell wedge (it previously ran to the region edge on one
+  side). Crystals' handedness/orientation was not checked.
+
+**Finding 2 (anchor) — FIXED.** `compositeFrame()` centre-anchors:
+`dstX = px − ((w−1)>>1)`, `dstY = py − ((h−1)>>1)` (stored dims are
+`w−1`/`h−1`, `image.c` `deptopix()` v<60 branch). The `creducing` field
+is `config[0x17]` (0xff in Ishar 1/2/3); `config[0x18]` is redmax.
+Observation, not acted on: Crystals' screen-14 `cdefsc` has
+`config[0x17] = 3`, i.e. a NON-negative `creducing`, so the reference's
+perspective divide may be live there (TODO `crystals-perspective-divide`).
+
+**Finding 3 (Ishar 1 palette) — RESOLVED, shipped palette kept.** `cstop`
+is a per-frame yield, not an end (`opcodes.c:1151` only clears
+`running`; `alis_loop()` resumes at `pc` next frame). Our CFG walk stops
+at it, which hid `FOND.bin+0x68 cpalette(8)` (second tick). Every backdrop
+script loads its own palette this way; see `ishar-sprite-format.md` §5's
+2026-11-13 follow-up for the full trace (FRISE 40 at UI init, GERDEP's
+red-flash-then-restore sequence, Ishar 2's `0x519f` day-phase selector).
+The Ishar 2/3 `0xFE` "false positive" is a real 16-colour palette.
+The disassembler still treats `cstop` as terminal (fine for the
+single-frame interpreter, wrong for reachability) — TODO
+`ishar-cstop-yield-cfg`.
+
+**Finding 5 (Ishar 2 view window) — FIXED.** cx/cy are added in absolute
+screen coordinates and the result is clipped to the window
+`newx..newx+w`, `newy..newy+h` (`image.c:4422`); `cdefsc` byte layout
+per `screen.h` (`config[k]` → `scridx+6+k`: cx `[4:6]`, cy `[6:8]`,
+newx `[8:10]`, newy `[0xa:0xc]`, w `[0xc:0xe]`, h `[0xe:0x10]`). Ishar 2
+and 3 (byte-identical blocks): newy 13, cy 78 → window-relative horizon
+65. Ishar 1: newy 0, unchanged. `ISHAR2_GAME_SCREEN`/`ISHAR3_GAME_SCREEN`
+now use `horizonY: 78 − 13`.
+
+**Finding 6 (doc/code contradictions) — FIXED.** §2.3 census re-counted
+from the files (Ishar 2's `0x81` file is `LIONMAN5.DO`); §3's Ishar 2/3
+MAIN note resolved; §7 counts and palette status updated;
+`silmarils-unpack.ts` selects the old codec's interlace by bit `0x40`
+(regression: 413/413 corpus files unpack byte-identical to the cached
+output); `fillPlaceholderSkyGround`'s comment corrected; Crystals counts
+in `ishar-sprite-format.md` §4 are 33/42 files, 931 sprites. The Ishar 1
+"74 atlases vs 75 manifest entries" mismatch is not a contradiction: the
+manifest holds 74 sprite atlases plus `data/regions` and
+`screens/foret-color` (76 entries at the time of writing).
+
+**Finding 7 (walkability etc.) — not attempted this pass.**
+
 ## 1. Executables (disassembly oracle)
 
 Every title ships a real AmigaOS `loadseg()`-able hunk executable, which
@@ -226,8 +339,14 @@ without cracking the codec — see `docs/crystalsofarborea/amiga/data-structure.
 | classByte | Ishar 1 | Ishar 2 | Ishar 3 | Crystals |
 |---|---|---|---|---|
 | `0xA1` | 97/98 | 136/137 | 136/136 | 0 |
-| `0x81` | 1/98 (`MAIN.DO`) | 1/137 (`MAIN.DO`) | 0 | 36/42 |
+| `0x81` | 1/98 (`MAIN.DO`) | 1/137 (`LIONMAN5.DO`) | 0 | 36/42 |
 | `0x01` (stored) | 0 | 0 | 0 | 6/42 |
+
+> **Correction (2026-11-13, re-counted from the first byte of every file):**
+> Ishar 2's one `0x81` file is `LIONMAN5.DO`, not `MAIN.DO` — Ishar 2's
+> `MAIN.DO` is `0xA1` like Ishar 3's. Census 97+1 / 136+1 / 136 / 36+6.
+> The prose below that says "Ishar 1/2 kept `0x81` only for `MAIN.DO`"
+> holds for Ishar 1 only.
 
 `0xA1`-class files share the identical 10-byte codec table
 `00 01 0B 09 0A 0B 07 05 06 07` at offset 4-13 across **all three** Ishar
@@ -396,9 +515,12 @@ supporting this.
 
 Ishar 2 and Ishar 3's own `MAIN.DO` do **not**
 show the same readable-string behavior (`strings` on them returns almost
-nothing filename-shaped) — either their compression differs enough to
-obscure the same content, or their manifest is structured differently.
-Open; see `docs/ishar/TODO.md`.
+nothing filename-shaped).
+
+> **Resolved (2026-11-13):** both are `0xA1` (LZ77) files — real
+> compression hides the text that Ishar 1's barely-compressing `0x81` RLE
+> `MAIN.DO` leaks. Decompressed, all three read the same way (§2.3
+> correction; `ishar-main-manifest-structure` in `docs/ishar/TODO.md`).
 
 ## 4. `blanc.snd` — confirmed identical across all four titles
 
@@ -547,10 +669,11 @@ indirection, ported from `github.com/maestun/alis`) resolves numbered
 confirmed: raw/banked 4-bit and direct 8-bit, each masked or opaque).
 Applied blind to real corpus bytes and confirmed via genuinely recognizable
 rendered art across all four titles (barbarian warriors, a dragon, a tree,
-an orc-like monster, a skeleton) — 1,608/2,244/2,744/905 sprites decoded for
-Ishar 1/2/3/Crystals respectively. Real AGA colour palette resolution
-remains open (VM-bytecode-selected, not statically located this pass — see
-that doc's §5).
+an orc-like monster, a skeleton) — 1,608/2,244/2,744/931 sprites decoded for
+Ishar 1/2/3/Crystals respectively (Crystals: 33/42 files; the older 905/31-of-36
+figure predates the stored-class fix). Real AGA palettes are recovered
+(that doc's §5): every backdrop script installs its own `0xFE` slot —
+Ishar 1 CONFIRMED, Ishar 2/3 per-title selection partly open.
 
 This closes the `ishar-png-render` TODO item and directly answers the task
 brief's Priority 1.
@@ -1124,6 +1247,10 @@ tuning constants differ. This structural correspondence (same shell, same
 operand-position roles feeding `omaintc`, only the literal addresses/
 constants swapped) is the evidence for:
 
+> **Correction (2026-11-13):** names now `partyRow = 0x2ab4`,
+> `partyCol = 0x2ab5`; the grid read was transposed and the horizon is 65
+> window-relative, not 78 — see § "2026-11-13 follow-up".
+
 - `ISHAR2_GLOBALS`: `partyX = 0x2ab4`, `partyY = 0x2ab5`,
   `partyFacing = 0x2ab6` (a `cswitch2 base=-1 count=3` on `0x2ab6`, matching
   Ishar 1's `rawValue = facingIndex + 1` convention exactly — confirmed
@@ -1182,6 +1309,12 @@ identically for Ishar 2 as they already did for Ishar 1.
 
 **Ishar 3 — attempted, NOT achieved this session. Left OPEN, well-scoped.**
 The same structural-correspondence approach found:
+
+> **Correction (2026-11-13):** `0x14b6` is the grid COLUMN (D7) and
+> `0x257` the ROW (popped); the read was transposed, the facing table is
+> now `[1, 2, -1, -2]` in the transposed walker frame, and the "lateral
+> bound" quirk below was an interpreter `opile` operand-order bug — see
+> § "2026-11-13 follow-up".
 
 - `ISHAR3_GLOBALS`: `partyX = 0x14b6` (clamped against 57, matching
   `ISHAR_REGION_LAYOUT.ishar3.width`), `partyY = 0x257` (clamped against

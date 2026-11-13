@@ -141,7 +141,7 @@ CLI wrappers: `tools/ishar/amigaaga/sprites.ts`,
 | Ishar 1 | 74/98 | 1,608 |
 | Ishar 2 | 119/137 | 2,244 |
 | Ishar 3 | 113/136 | 2,744 |
-| Crystals of Arborea | 31/36 | 905 |
+| Crystals of Arborea | 33/42 | 931 |
 
 Files without a valid directory are predominantly scripts/tables/text
 resources with no image content at all (expected — not every `.DO`/`.CO`
@@ -172,13 +172,37 @@ six supported types, across all four titles.
 
 ## 5. Real AGA colour palette — CONFIRMED (2026-09-01)
 
-> **2026-11-13 correction — the decode is right, the Ishar 1 *choice* is
-> unproven.** No `cpalette`/`cput` reaches FOND slot 8; `FRISE.bin+0xeb`'s
-> literal `cpalette(40)` (= `GERDEP` slot 12) differs from it in exactly
-> entries 81–86, the backdrop ground bank — so the ground colour is likely
-> wrong. One apparent `0xFE` false positive each in Ishar 2/3; Crystals is
-> `EPlatformAmiga`, not AGA. See `ishar-container-format.md` § "Review —
-> 2026-11-13", finding 3.
+> **2026-11-13 follow-up — FOND slot 8 IS the live outdoor palette; the
+> audit's "unproven" premise was a CFG artifact.** The audit (correction
+> block preserved in `ishar-container-format.md` § "Review — 2026-11-13",
+> finding 3) found no `cpalette` reaching FOND slot 8 because our
+> disassembler treats `cstop` as terminal. In the reference `cstop` only
+> clears `script->running` (`opcodes.c:1151`); `alis_loop()` keeps `pc`, so
+> the script **resumes after it next frame** — it is a per-frame yield.
+> `FOND.bin` continues past its `+0x64 cstop` into `+0x65 cselpalet(0)`,
+> `+0x68 cpalette(8)`, `+0x6b csleep`, then its cloud-animation loop: the
+> backdrop installs its own slot 8 on its second tick, every time it is
+> started. The same shape holds for **every** backdrop script in the
+> family (linear sweep past each `cstop`): Ishar 1 `FTEMPLE` `cpalette(4)`,
+> `FVILLE` `cpalette(0)`, `FCAVE` `cpalette(1)`; Ishar 3 `FFORET`/`FJUNGLE`
+> `cpalette(0)` (+ `ctopalet(0)` fades); Ishar 2 `FOND1` picks slot
+> 3/4/5 and `FVILLE` slot 0/8/7 by main global `0x519f` == 1/2/3 (a
+> day-phase selector, `FOND1.bin+0xe1`; `ctopalet` fades between them at
+> `+0x9b`). Other loads of the same tables: `FRISE.bin+0xeb cpalette(40)`
+> runs once at UI init (before any backdrop); `GERDEP.bin+0x16cd` is a
+> one-frame flash sequence — `cpalette(13)` (red), `cstop`, then
+> `+0x16d9`: location type `0x1508` ∈ {12,15} → `cpalette(16)` (cave)
+> else `cpalette(12)` (= FRISE 40). So the shipped FOND-8 ground (81–86,
+> saturated greens) is what a freshly entered outdoor scene shows; after a
+> GERDEP flash the ground bank would read FRISE 40's olive/grey-green until
+> the backdrop restarts — plausibly a real engine quirk, flagged as an
+> owner check, not modelled. The "apparent `0xFE` false positive" in Ishar
+> 2/3 (`FRISE.bin` slot 105, `colors=0 b2=2 b3=68`) is a genuine 16-colour
+> palette: `colors=0` selects the nibble-packed format, so bytes 2–3 are the
+> first colour word `$0244`, not offset fields (16 plausible `$0RGB`
+> browns/oranges). `ishar-palette.ts`'s Crystals platform remark is
+> corrected (plain `EPlatformAmiga`; all 41 Crystals palettes take the
+> 16-colour path either way).
 
 > **Correction:** superseding the "not yet recovered" verdict below (kept
 > as the paths-tried record) — a real AGA colour palette IS now recovered
@@ -309,8 +333,8 @@ at all).
 |---|---|
 | Unimplemented bitmap types | Rect-fill, Mac 1-bit, DOS CGA, FLI-video-delta, and the Transarctica/RR map-tile renderer types (see §2) are not ported. Not confirmed present in this corpus, but not exhaustively ruled out either — the 82-90%-of-slots-resolve figure (module doc) suggests a real minority of directory entries use a type not implemented here, or are placeholder (`0xff`) slots. |
 | Raw Amiga planar variant (`draw_ami_5bit_*`) | Named in the reference source's function list but not traced or tested against this corpus — not confirmed present or absent. |
-| Ishar 2/3/Crystals world palette | No single shared `FOND`-equivalent file was checked for these titles (Ishar 1 was the task's target) — a full colour pass for them needs finding their own per-region/per-location world-palette convention, likely each location's own backdrop file's `0xFE` slot rather than one shared resource. |
-| Interactive walker colour wiring | `ishar-firstperson.ts`'s `palette` option is implemented but not yet passed from `tools/walker/games-ishar.ts` (the live browser walker still renders first-person frames in greyscale) — deliberately out of scope this session to avoid touching a type shared across all 4 titles' walker wiring without re-verifying each one. |
+| Ishar 2/3/Crystals world palette | **Lead found 2026-11-13:** every backdrop script installs its own `0xFE` slot after its first `cstop` yield (see the follow-up block at the top of §5); Ishar 2's `FOND1`/`FVILLE` choose one of three by main global `0x519f`. The walker now renders with the backdrop's FIRST `0xFE` slot (Ishar 2: the `0x519f == 1` variant). Which phase is "day", and Crystals' convention, still open — `docs/ishar/TODO.md` `ishar-palette-non-ishar1-titles`. |
+| Interactive walker colour wiring | **Done 2026-11-13** — `tools/walker/games-ishar.ts` passes `resolveIsharOwnPalette(backdrop)` to all three Ishar renderers (Ishar 2/3 renderers gained the same `palette` option). |
 
 ### Paths tried (palette recovery)
 
