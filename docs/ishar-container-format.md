@@ -232,7 +232,21 @@ in `ishar-sprite-format.md` §4 are 33/42 files, 931 sprites. The Ishar 1
 manifest holds 74 sprite atlases plus `data/regions` and
 `screens/foret-color` (76 entries at the time of writing).
 
-**Finding 7 (walkability etc.) — not attempted this pass.**
+**Finding 7 (walkability etc.) — located, not modelled.** One step of
+the movement handler (Ishar 1 `GERDEP.bin`, entered by explicit entry
+`+0x9a5`; one of four per-direction copies): reads the target cell
+`grid[row=v(0x3fd0), col=v(0x137d)]` into `dirb(18)` and a second cell
+into `dirb(19)`, calls the test subroutine `+0xc38`, and moves
+(`cadd 1 → 0x137c`) only if it returns `dirb(20) == 1`. `+0xc38` first
+scans the 4 party slots (an all-incapacitated guard), then at `+0xc84`
+classes the target cell: `-25 ≤ v ≤ -1` or `v ∈ {-40..-43}` → a long
+facing-dependent case chain (`+0xcb8`…, doors/buildings: `csend`
+messages 17/14/15 to other scripts, location-type `0x1508` tests);
+`v == -80` → region change (`+0x101c`: per-location-type teleport to fixed
+row/col, e.g. type 1 → (17,67)); other values fall through to the default
+path. So "negative = blocked" is too coarse: negatives are mostly
+*interactive* cells. Modelling the chain is the remaining work
+(`ishar-walkability-rule`).
 
 ## 1. Executables (disassembly oracle)
 
