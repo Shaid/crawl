@@ -34,8 +34,144 @@ THE TEST LEVEL" instead. Restoring it is roughly 20 bytes of x86 in
 existing `.text` slack — see §1A, which is **resolved: go**.
 
 So the work is real but it is *data and art* work: Phase 2 (byte-exact
-map converter) and Phase 3 (19 creature clusters + 2 tilesets into
-`clipper.clp`) are the schedule. Phase 4 is no longer the risk.
+map converter) and Phase 3 (23 creature clusters + 2 tilesets into
+`clipper.clp`; "19" in older text predates §1D's exact count) are the schedule. Phase 4 is no longer the risk.
+
+---
+
+## Review — 2026-11-13 `re-codebreaker` gap audit
+
+A fresh adversarial pass over this whole plan, the DOS format doc, the four
+DOS TODO rows and the scripts, checked against the real `crypt.exe` and
+`clipper.clp`. **Tooling note:** radare2 was not on PATH that session;
+disassembly used `objdump -M intel`, so addresses below are VAs
+(file offset = VA − `0x400000`). Probe scripts were scratch-only and not
+committed. Findings are ranked; each one is also applied as an inline
+correction at the section it affects (search this file for "2026-11-13").
+
+1. **Critical: the live-test package's `orig<N>.gam` files have the 52-byte
+   header the game never writes** — likely root cause of §10–§12's
+   "empty map / middle of nowhere" symptom. On New Game, `fcn.00401fa0`
+   reads `MainDung.gam`, copies the 13-dword offset table, then skips it
+   (`0x402015 add eax,0x34`, `0x402024 sub ebp,0x34`) and writes only the
+   body to `orig%d.gam` (`0x402018`) and `TempDung.gam` (`0x402081`). The
+   shipped files agree: `orig1.gam`/`tempdung.gam` are 15,047 B vs
+   `maindung.gam` 15,099 B, and the table's slot 2 holds 15,047 — offsets
+   are body-relative. §9 provisioned `orig2/3/4.gam` as full 171,005-B
+   copies, so every `LoadDungeon` fseek lands 52 B early (simulated: map 13
+   parses as an empty header, map 1 as zero rows). §12's hypothesis-4 row
+   ("all five byte-identical, all 171,005 B — ruled out") is in fact the
+   evidence *for* the bug. **Fix:** `orig<N>.gam` = `maindung[52:]`
+   (170,953 B), or let New Game write them. No script generates them yet.
+   TODO: `blackcrypt-testpkg-origgam`.
+2. **High: map switching never applies the new map's accent ramp** —
+   corrects § "No new palette entries" (Phase 3.4). DOS *does* carry the
+   Amiga runtime ramp mechanism: the 12×12-byte ramp table at `0x432d08`
+   (12/12 entries identical to Amiga, byte-swapped), the per-map default
+   table at `0x434f22` = `0,0,0,0,1,2,2,2,2,2,2,3,3` (identical to Amiga
+   S_2 `+0x39E`), and `fcn.0040aaa0` → `fcn.00403220` writing palette
+   entries 26–31 plus half-bright 58–63. The per-map table is read only at
+   `0x40f8d0`, on a dark-square (bit-31) state flip; maps 5–8 and 11–13
+   have zero bit-31 squares, and neither `SwitchMap`, the Phase 4 thunk
+   nor the stairs/teleport paths set the ramp (restore re-applies the
+   saved `0x46f820`). After the 4→5 stairs, map 5 would render ramp 0
+   (tan) permanently, and save it. **Fix (~25 B, cave space
+   `0x42df2e`–`0x42e000`):** `movzx eax,word[0x47481a]; mov ax,[eax*2+0x434f22];
+   mov [0x46f820],ax; push eax; call 0x40aaa0; add esp,4`.
+   TODO: `blackcrypt-mapswitch-ramp`.
+3. **High: Phase 3's nearest-RGB colour conversion is the wrong method.**
+   The demo's map-1 tileset is a **direct index copy** of Amiga `bcdfx`
+   (225,351/230,901 = 97.6% of opaque pixels; null controls `bcdfz` 10.7%,
+   1-px shift 51.8%). Shipped tiles use only indices 0–63, and 80.4% of
+   their pixels sit in the ramp ranges 26–31/58–63 — recoloured at runtime
+   by finding 2. Nearest-RGB discards that, and the §3a POC wrote index 236
+   (a pure-green placeholder, 0,255,0) into 320 px across Plaque A, Door
+   Type 1-1/1-2 and five Rock Eye entries; shipped art never uses 236–254,
+   and windowed mode's loader adds +10 to every index ≤ `0xF5`
+   (`0x4023a3`–`0x4023c9`). **Fix:** copy Amiga indices straight through,
+   masked pixels as each entry's own colour key. Probably the same for
+   creatures (the DOS palette's first 64 entries hold the Amiga EHB palette)
+   — not yet checked per creature.
+4. **Solved: `Wall Left`/`Wall Right` for the two new tilesets** (Phase 3
+   open sub-item (b)). Both lookups filter by active tileset group
+   (`0x406476`, `0x406594`) and skip the draw on a miss (`0x40649e`), so
+   without them maps 5–11 have no side walls. Recipe — each entry 80×140,
+   background index 32, pieces at depths 0–3:
+
+   | Entry | Pieces | Positions (x,y) |
+   |---|---|---|
+   | `Wall Left` | `sidewall-depth{0..3}-near` | (0,0) (16,5) (48,18) (64,24) |
+   | `Wall Right` | `sidewall-depth{0..3}-far` | (64,0) (32,5) (16,18) (0,24) |
+
+   Verified 11,200/11,200 px exact for each against the shipped map-1
+   entries; near/far swapped as a null control scores 4,811.
+5. **Medium: structure art fell out of the 299-entry manifest.** §1B says
+   "5 structure gfxNumbers" but lists 4, and none are in the Phase 3
+   manifest. Map 11's 9 statues need `Statue 1/2/3`, named by the exe's
+   creature record but absent from `clipper.clp` (add at group 21). Switch
+   gfx `0x3D` (30 placements, maps 2/3/4/6/7/11) and special panel `0x46`
+   (14) are not yet proven covered by existing art. Benign error: §3.4's
+   "no Fountain at all" is wrong — `Fountain` is entry 83 (80×72, group 0,
+   resident on every map), so nothing is needed.
+6. **Medium: the creature frame-slot "w/h" fields are draw offsets, not a
+   hitbox.** `0x405bd7`–`0x405bef` subtracts them from the screen position
+   before blitting; flag 1 = mirrored blit (`0x405c4c`). Slot order per
+   tier is N, E, S, W with W = E mirrored — a ready-made oracle for Phase 3
+   open sub-item (a) (the 11 aliased entries). The offsets were authored
+   for DOS art that was never shipped: against the Amiga frames the median
+   x-offset is 0.50 × frame width, but 21/276 slots are implausible, so
+   some creatures may draw shifted.
+7. **Medium: the restored cross-map stairs path skips the same-map tail.**
+   After the stub call it jumps to `0x423e00`, skipping
+   `fcn.0040aa20`/`fcn.00403d20`; the teleport path does redraw
+   (`416f30`/`4102c0`). Possible stale view after stairs — live-test item.
+8. **Medium: §10–§13's save conclusions came from tests confounded by
+   finding 1.** The `0x70`–`0xA8` residue is still raw-copied. Save
+   conversion isn't needed for playability (New Game writes its own files);
+   re-test before further converter work.
+9. **Low: all patch code sits past its section's declared VirtualSize.**
+   `.text` is declared to end at `0x42deb4` but caves run
+   `0x42deb3`–`0x42df2e`; `.rdata` ends at `0x42f2da` but patch strings
+   run to `0x42f621`. Works because sections map in whole pages (§7's cave
+   executed under Wine), but tooling won't show it. **Fix:** set
+   VirtualSize to `0x2d000`/`0x2000` in the patchers.
+10. **Undocumented, relevant to §1C (tiny viewport):** `crypt.exe` has a
+    `-window` command-line switch (string `0x43ae50`, clears `0x46bd18` at
+    `0x413681`) and an Alt+Enter windowed/fullscreen toggle (`0x412e44`).
+
+**Closed by this review:** §1B's floor-item residual — the DOS floor-item
+group table is at `0x431e9c` and matches Amiga `+0x26FDE` on 236/236
+entries (`0x43272a` is a different table).
+
+**Re-confirmed:** `verify_maindung.py` passes (15,099/15,099 B; 171,005 B
+full output; 0/265 monster-extension triggers). All four exe patchers
+self-check, and applied in sequence change bytes only inside 7 windows.
+Action records need no byte-swap for *any* opcode — every action field the
+dispatcher reads is a single byte (`0x41afd8`–`0x41afec`,
+`0x41b84d`–`0x41b8cc`), covering the 15 opcodes (163 records) absent from
+map 1 that were previously only range-checked. Every map's header dword and
+trailer count are 0 (raw copy safe); largest map chunk 19,719 B < 40,000-B
+buffer; each placed monster appears on exactly one map (the `map+10` group
+id suffices); DOS keeps Amiga's map-5 alcove special case (`0x40f39c` →
+"Pillar A"), which the `bcdfy` manifest includes.
+
+**Recommended next step:** write the Phase 3 injector (direct index copy,
+the Wall Left/Right recipe, `Statue 1/2/3` at group 21), and add the
+finding-2 ramp-set to `patch_crypt_exe.py`'s thunk in the same pass.
+
+**Live tests for the project owner** (not automatable here):
+1. *New-game stairs:* scratch dir with the Phase 4 + guard patched exe, the
+   converted 171,005-B `maindung.gam`, stock `clipper.clp`, `Config.dat`;
+   delete every `tempdung.gam`/`orig*.gam`/`char*.dat`. Run
+   `wine crypt.exe -window`, New Game; check `tempdung.gam` is 170,953 B;
+   take map 1's stairs at col 49, row 23 → expect map 2 at (27,20), no
+   "TEST LEVEL" message, refreshed view; walk back up.
+2. *Display:* compare `wine crypt.exe -window`, plain `wine crypt.exe`, and
+   Alt+Enter in game — does the viewport fill, do colours shift?
+3. *Save retest:* regenerate `orig4.gam` as `maindung.gam` minus its first
+   52 B (170,953 B), load slot 4, check map 13's walls; re-note the party
+   display.
+4. *After the ramp fix:* stairs map 4 → 5; walls should turn violet.
 
 ---
 
@@ -435,7 +571,10 @@ injecting at all** — a large scope reduction.
 > `fcn.00405620`, which appears to be the DOS counterpart of the Amiga
 > `+0x26FDE` floor-group table but was not exhaustively verified; flagged
 > as a small residual unknown, not a blocker, since the bank *size* match
-> already gives strong indirect confidence), **Phase 3 shrinks to just
+> already gives strong indirect confidence; **2026-11-13 correction:** the
+> real DOS floor-item group table is `0x431e9c`, matching Amiga `+0x26FDE`
+> on 236/236 entries — `0x43272a` is a different table; see the 2026-11-13
+> review), **Phase 3 shrinks to just
 > the 19 creature clusters and 2 tilesets already scoped in § "1D"** —
 > item/key art needs no injection at all.
 >
@@ -1260,6 +1399,15 @@ at group `2`, `3`, or any of `11..23`), so there is no collision risk.
 
 #### No new palette entries — a real correction to § "1D"'s manifest
 
+> **2026-11-13 correction — the "no runtime palette mechanism" conclusion
+> below is wrong** (review finding 2). DOS carries Amiga's ramp table
+> (`0x432d08`) and per-map defaults (`0x434f22`) and rewrites entries
+> 26–31/58–63 via `fcn.0040aaa0`; it just never does so on a map switch.
+> The nearest-RGB residual check below also measured the wrong thing:
+> shipped tiles are a direct Amiga index copy (finding 3). "0 new palette
+> entries" still holds; the conversion method and a thunk fix do not.
+> The "no Fountain" claim elsewhere in §3.4 is also wrong (entry 83).
+
 § "1D" carried over Amiga's accent-ramp mechanism (3 new 32-word ramps)
 into DOS's scope uncritically. Tracing the only 2 functions anywhere in
 `crypt.exe` that reference any `"...Palette"` string finds **DOS has no
@@ -2022,7 +2170,7 @@ cheaper first — 1A's outcome means neither blocks the other.
 | 1C Wine viability | Hours | Partially answered (launches, presentation broken) | `wine`, `winedbg`, scratch copy of game dir |
 | ~~1D art scoping~~ | **Done** (one session) | **Resolved — exact payload manifest: 23 creature clusters (198 entries, 187 new sprites), 131 tileset sub-images, 3 ramps** | `game-re`, radare2, existing Amiga corpus |
 | ~~2 converter~~ | **Done** (one session) | **Verified — zero deviation, 15,099/15,099 B** | Python, `bclib`, `game-re`, radare2 |
-| 3 resource injection | Days–weeks (19 clusters + 2 tilesets) | Medium-high | Python, existing extraction pipeline |
+| 3 resource injection | Days–weeks (23 clusters + 2 tilesets + `Statue 1/2/3`; direct index copy, see 2026-11-13 review) | Medium-high | Python, existing extraction pipeline |
 | ~~4 code patch~~ | **Done** (one session) | **Resolved — byte-exact verified; live proof blocked on §1C + tooling, not the patch** | `rasm2`, radare2, Python patcher (`scripts/patch_crypt_exe.py`) |
 
 **Phase 2 is the safest work in the whole plan** and independently valuable
@@ -2886,7 +3034,12 @@ crash again:
    same composability check above. The pre-patch file was kept as a
    scratch backup, not deleted.
 2. **`orig2.gam`, `orig3.gam`, `orig4.gam` provisioned**, each a copy of
-   the full 13-map `maindung.gam` already in that directory. This is a
+   the full 13-map `maindung.gam` already in that directory.
+   **2026-11-13 correction: this was wrong** — the game writes
+   `orig%d.gam` *without* `maindung.gam`'s 52-byte offset table
+   (170,953 B, not 171,005 B), so every map load in this package read
+   52 B early. See the 2026-11-13 review, finding 1; it confounds the
+   live results in §10–§13. This is a
    deliberate, documented simplification (same spirit as `charsave.py`'s
    position/facing/turn-counter reset) — there is no real per-map dungeon
    *state* delta from the Amiga playthrough to carry over (only the
@@ -3292,7 +3445,7 @@ assumption:
 | 1 | `fcn.00426390`'s map-offset-table copy loop mis-indexes the runtime table | **Ruled out** | Disassembled the loop fresh (file+`0x426787`-`0x4267a2`): `mov eax,0x4738b8; mov ecx,0xd; loop: mov esi,dword[edx]; add edx,4; mov dword[eax],esi; add eax,4; dec ecx; jne loop` — a trivial linear 13-dword copy, on-disk index `i` (0-based) → runtime slot `0x4738b8+4i` = map `i+1`, no branch on `curMap`, no indexing trick. Since this same unconditional loop already runs correctly for the shipped demo's `char1.dat` (map 1) on every real "Load Game", any indexing bug here would break map 1 too — it doesn't. Independently confirmed by decoding `char4.dat`'s own table bytes: all 13 entries match the already-triple-confirmed values exactly (map 13 = 165686) |
 | 2 | `SwitchMap`/`fcn.00426880` unconditionally overwrites the position `charsave.py` just wrote | **Ruled out** | Disassembled `fcn.00426880` in full (file+`0x426880`-`0x426926`, 39 instructions): it touches `word[0x47481a]` (curMap), calls `SaveDungeon`/`LoadDungeon`/`LoadResourceGroup`/`LoadPerMapResources`, and conditionally zeroes `word[0x46f84a]` — it never references `0x46f880` (X), `0x46f87e` (Y), or `0x46bd60` (facing) at all. Cross-checked with a full xref census on all three globals: every writer besides the confirmed restore-game write (`fcn.00426390` @ `0x4265ee`/`0x426600`/`0x426613`) and the already-known legitimate live-transition writers (`fcn.00401fa0` "New Game" default, `fcn.0041adf0`/`fcn.0041afc0` teleport/`MoveParty`, `fcn.00423b60` real movement stepping) — none of which run inside `SwitchMap`'s own call chain (`SaveDungeon`/`LoadDungeon`/`LoadResourceGroup`/`LoadPerMapResources` don't appear in either xref list) |
 | 3 | Map 13's DOS-encoded dungeon data at the runtime-table offset doesn't actually contain real geometry | **Not the cause, but led to the real bug** | See below — the map data itself is fine; what's wrong is unrelated *party-scalar* state read immediately beforehand |
-| 4 | Live-test package files are stale/mismatched (`maindung.gam` vs `orig4.gam`, wrong sizes) | **Ruled out** | `md5sum` of `maindung.gam`, `orig2.gam`, `orig3.gam`, `orig4.gam`, and even the already-populated `tempdung.gam` (left over from a prior `CopyFileA` that evidently ran) in the live-test package: all five **byte-identical**, all 171,005 B (the confirmed full 13-map size). `crypt.exe` in the package matches the twice-patched (Phase 4 + §9 guard) build. No staleness found |
+| 4 | Live-test package files are stale/mismatched (`maindung.gam` vs `orig4.gam`, wrong sizes) | **Ruled out** | `md5sum` of `maindung.gam`, `orig2.gam`, `orig3.gam`, `orig4.gam`, and even the already-populated `tempdung.gam` (left over from a prior `CopyFileA` that evidently ran) in the live-test package: all five **byte-identical**, all 171,005 B (the confirmed full 13-map size). `crypt.exe` in the package matches the twice-patched (Phase 4 + §9 guard) build. No staleness found. **2026-11-13: verdict reversed — this row is the evidence of the bug, not against it:** `orig*.gam`/`tempdung.gam` must be 170,953 B (body only, 52-byte table stripped by `fcn.00401fa0`); see the 2026-11-13 review, finding 1 |
 
 None of the four explained the symptom. The real bug was found by pushing
 past hypothesis 3 into territory the task brief flagged as worth
