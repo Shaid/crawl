@@ -609,7 +609,9 @@ injecting at all** — a large scope reduction.
 > on 236/236 entries — `0x43272a` is a different table; see the 2026-11-13
 > review), **Phase 3 shrinks to just
 > the 19 creature clusters and 2 tilesets already scoped in § "1D"** —
-> item/key art needs no injection at all.
+> item/key art needs no injection at all. *(2026-11-13: "19" predates § "1D"'s
+> exact count of **23** clusters; the injector also adds Statue and the
+> special panels — see § "Phase 3 injector — 2026-11-13".)*
 >
 > Function/address summary for future reference: `fcn.00403550` (item
 > icon resolver, general), `fcn.004033c0` (its zero-offset wrapper, 13
@@ -1155,6 +1157,11 @@ the correct `Start X`/`End X` bracket (resolved by name in `.text`); `End
 Monsters` currently sits at file offset 1,151,267 = EOF, the natural
 growth point for creatures.
 
+> **2026-11-13 correction:** 23 creature clusters, not 19 (§ "1D"), and
+> brackets don't matter — creature/structure lookups are by name over the
+> whole directory (§ "3.4"). The real injector adds 317 entries (1,133
+> total, under the 2,000 ceiling); see § "Phase 3 injector — 2026-11-13".
+
 ### 3.2 Art conversion
 
 Source: `public/assets/blackcrypt/amiga/` (gitignored, rebuild via
@@ -1165,6 +1172,12 @@ correspondence (already partly proven — DOS's `Character Gen Palette` is
 confirmed to be the Amiga chargen palette rescaled, `n×17` vs `n×16`,
 94/96 components matching; do the same derivation for the dungeon palette
 and the 4 remaining `bcdfu` accent ramps) → write mask pixels as index 33.
+
+> **2026-11-13 correction:** no remap is needed. DOS `Palette` 0–63 already
+> is the Amiga EHB palette (ramp 0) except indices 19/32/33/51, and the
+> ramps are 3 more (1, 2, 3 — § "1D"), not 4, applied at runtime by
+> `fcn.0040aaa0` (review finding 2). The injector copies Amiga indices
+> directly (review finding 3).
 Entry names are dictated by `crypt.exe`'s own creature table, removing
 naming guesswork.
 
@@ -1175,8 +1188,9 @@ DOS entries are 8-bit against a 256-entry palette. Colour fidelity will be
 *better* than the Amiga original, but injected creatures will visibly
 differ in style from Rick Johnson's two hand-redrawn DOS creatures (Two
 Head and Rock Eye were re-authored for the port, same as the item icons —
-not converted). The result is "the full game, with 19 creatures rendered
-in Amiga art," not "the port Raven/Rick Johnson would have shipped."
+not converted). The result is "the full game, with 23 creatures rendered
+in Amiga art" (2026-11-13: was "19"), not "the port Raven/Rick Johnson
+would have shipped."
 
 ### 3.4 Real injection mechanics — insertion, naming, colour keys, group ids
 
@@ -1533,6 +1547,111 @@ DirectDraw blocker as Phases 3a/4/5/6/7, § "1C") — the insertion mechanics,
 naming, colour-key, and group-id claims above are disassembly-traced and
 self-consistency-checked against real shipped data, not yet run through
 the real game.
+
+
+### Phase 3 injector — 2026-11-13
+
+**Done (static verification only; not run in-game).**
+`python3 scripts/inject_clipper_phase3.py [--out PATH] [--manifest J] --force`
+reads the stock `clipper.clp` and writes
+`build/blackcrypt/phase3/clipper.clp` (gitignored; never under `data/`).
+It is the inverse of `scripts/extract_clipper.py`, using the append-at-EOF
+algorithm from § "3.4": the 816 stock records keep every field except
+`data_offset` (+`N`×56), the stock data blob is copied unchanged, and the
+new records and pixels follow in order. Shared helper: `scripts/bclib/levelfile.py`
+(Amiga level-file tail layout, see below).
+
+| Kind | Entries | Group | Key | Source |
+|---|---:|---|---|---|
+| Creatures (23 clusters) | 198 | map + 10 | 33 | `bcdfb`–`bcdfn` frame directory |
+| Statue 1/2/3 (gfx `0xbd`) | 3 | 21 | 33 | `bcdfl` creature slot 2 |
+| `bcdfy` tileset | 35 (33 + `Wall Left`/`Right`) | 2 | `bcdfx` sibling's | `TILESET_MAP` + finding-4 recipe |
+| `bcdfz` tileset | 70 (68 + `Wall Left`/`Right`) | 3 | `bcdfx` sibling's | same |
+| Special-panel bodies | 6 | map + 10 | `0xFFFF` | `bcdfc/d/e/g/j/l` tail |
+| Panel insets (`blue eyes`, `sun key`, `moon key`, `crown`, `pearl`) | 5 | map + 10 | 33 | same |
+| **Total** | **317** | | | file **2,538,507 B** (+1,387,240) |
+
+> **Correction to § "3.4"'s totals.** 299 → 317 entries and 2,478,475 →
+> 2,538,507 B. The difference is Statue (3), the two side walls per new
+> tileset (4) and the special panels (11), plus exact sizes for the 11
+> aliased creature entries.
+
+**Pixels: direct index copy (finding 3).** Amiga indices are copied
+verbatim except the four indices where DOS `Palette` differs from the Amiga
+EHB palette: `32 → 0` (both black — the shipped map-1 tileset does exactly
+this, 97/97 px), `33 → 45`, `51 → 42`, `19 → 11` (nearest RGB among
+non-ramp, non-key indices 0–63; ΔRGB 30.9/41.6/82.2). That touches
+2,277 of 1,369,488 output pixels (32: 2,214, 33: 56, 51: 4, 19: 3); every
+other non-key pixel is the Amiga index. Masked pixels take the entry's key.
+Every new pixel is < 64.
+
+**Creature frames — the 11 aliased entries are resolved exactly (finding 6).**
+The planner (`plan_phase3_clipper_injection.py`) paired names with Amiga
+frames in list order. That only works when the counts agree; for Magnito,
+Big Glop, Little Glop, Ram Demon and Cloaker it assigned wrong frames. The
+injector instead uses the Amiga monster file's own 42-entry directory,
+which has the same shape as the DOS record: entries `c*12 + s` are creature
+slot `c`'s 12 tier×facing slots (N, E, S, W; W = E with type `0x500`
+mirrored), and `36 + 2c` / `37 + 2c` are its two pose frames. DOS slot `s`
+and pose names `A 0`/`A 1` map onto those one to one, so each DOS name
+resolves to exactly one Amiga bitmap (asserted). Examples: `Magnito 1 N`
+and `1 E` share one 64×79 bitmap; Ram Demon's `A 0`/`A 1` share one.
+
+| Check | Result |
+|---|---|
+| Shipped Two Head + Rock Eye resolved this way: Amiga (w,h) == shipped DOS (w,h) | **14/14**; rotated-pairing null control 2/14 |
+| DOS W slot flag 1 ⇔ Amiga entry type `0x500` | 54/63. The 9 exceptions are Green Guy, Slime and Lich Dragon, where DOS mirrors W and Amiga doesn't (symmetric single-view sprites) |
+| Frame-slot x draw offset ÷ Amiga frame width (finding 6) | median **0.500**, **0/279** outside 0.25–0.75 (the review's in-order pairing gave 21/276 implausible — those came from the wrong pairing, not the slots) |
+| Name set per creature == planner's (exe-derived) set | 24/24 records |
+
+**Tilesets.** The same builder run on `bcdfx` reproduces the shipped
+map-1 entries at **265,107/270,560 px = 97.98 %** (70 entries;
+`Wall Left`/`Right` 11,200/11,200 each; `Fountain` 5,760/5,760;
+`Floor Pit D` left orientation 100 %). The residue is the DOS artist's own
+edits: alcove/plaque edges keyed out to 32 (Plaque A–E, Alcove D/E) and
+swapped ramp shades (26↔27, 58↔60) in Alcove C. The new tilesets copy the
+Amiga art as-is (opaque edges, as on Amiga) rather than guess those cut-outs.
+
+**Finding 5 — switch `0x3D` and special panel `0x46` coverage.**
+
+- `0x3D` is drawn by `fcn.00405ec0` (`0x405ed3 sub eax,0x3d`) as
+  `Secret Button 1 In`/`Out`, looked up with the active tileset group
+  (`0x40614f`); group 1 → (153,60), group 3 → (54,62), **group 2 → no
+  draw** (`esi = -1`, matching `bcdfy` having no button chunk). After
+  injection both names exist in group 3, so maps 6/7/11 are covered; maps
+  2/3/4 use group 1 (shipped).
+- `0x46` is drawn by `fcn.004049a0`: `Panel Top` (tileset-group lookup,
+  now present in group 3) at (64,9), then `Fountain` or — for the current
+  map (`word[0x46b304]`, set by `fcn.0040b7a0`) — `The <X> Panel` from the
+  6×40-B table at `0x4307a8`, and per set bit up to 3 inset sprites
+  (`fcn.00404aa0`). **None of those 11 names were in the demo's
+  `clipper.clp`.** Their Amiga source was not documented anywhere: the
+  Amiga level loader (S_1 `+0x21F1C`–`+0x21F72`) reads, only when the gate
+  word at S_1 `+0x21FE8` is non-zero, a 4,320-B 80×72×6-plane body, 112 B
+  of inset blit descriptors and the inset pixels from the level file right
+  after its 1,932-B decoration block. Gate non-zero = levels **2,3,4,6,9,11**
+  = exactly the DOS table's maps; the 24 descriptor (x,y) pairs equal the
+  DOS table's 24/24; the descriptors tile each gate block exactly; and the
+  six bodies render as the golden face, druid face, tomb, three-skull,
+  clam and Medusa panels in the DOS names' order. The `smiley` inset
+  (maps 4/11, at 0,0) is a placeholder and is not added: one name, two
+  different bitmaps, unfiltered lookup. See `amiga/data-structure.md`
+  § "Trailing Data" correction.
+
+**Verification of the written file** (re-read with
+`extract_clipper.parse_clp`): 1,133 entries; length = stock + 317×56 +
+pixel bytes exactly; data packed contiguously to EOF; all 816 stock
+entries byte-identical in data with name/type/group/size/key/w/h unchanged
+and offsets +17,752; 317/317 new entries decode and equal the built arrays
+pixel-for-pixel; non-tileset names are new game-wide and each tileset
+(name, group) pair is unique; no new group id collides with a stock one.
+`build_dos_testpkg.py --clipper build/blackcrypt/phase3/clipper.clp` ships it.
+
+**Not verified:** anything in-game. Open risks for the live test: surface
+memory with ~300 extra surfaces (only the current map's groups load); the
+DOS draw offsets authored for art that was never shipped (finding 6 —
+now all plausible); arriving on a dark/water square after a map switch
+(see the Phase 4 addendum).
 
 ---
 

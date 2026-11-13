@@ -151,6 +151,11 @@ index plus a log of dead ends worth not repeating; where the two disagree,
   section. `scripts/extract_bcdfbn_decor.py` → `sprites/wall-decorations.*`,
   `audio/level<NN>-sfx.raw`, `data/level-sfx-banks.json`.
   (`scripts/extract_bcdfbn_icons.py` deleted.)
+  > **Correction (2026-11-13):** levels 2/3/4/6/9/11 hold a **special-panel
+  > block** between the decorations and the sound bank (4,320-B 80x72 panel
+  > body + 112-B inset descriptors + inset pixels, gated by S_1 `+0x21FE8`);
+  > the bank is the last `sfx[level]` bytes (S_1 `+0x22002`), 13/13 exact.
+  > `scripts/bclib/levelfile.py`; see data-structure.md "Trailing Data".
 
 - ~~**bcdfv** ("sound + sprite container")~~: **SOLVED — and the question was
   malformed.** bcdfv is the **endgame/epilogue sequence data** for `bcdfu`: 16

@@ -4028,6 +4028,44 @@ and no header. Its start is independently pinned by the 12-byte file header:
                     samples back to back, last sample ends exactly at EOF
 ```
 
+> **Correction (2026-11-13) — six files carry a special-panel block before
+> the sound bank.** "`+1932` to EOF = sound bank" holds only for levels 1,
+> 5, 7, 8, 10, 12, 13. The level loader inside the decompressed `bcdft` S_1
+> (`+0x21E7E`; musashi disassembly) reads each level file strictly in order:
+> `0x57A` header/directory → RLE stream (length = header long `+0`) →
+> `0x78C` decorations → **if `gate[level] != 0`** (13 BE words at S_1
+> `+0x21FE8`: `0,84,252,224,0,140,0,0,70,0,224,0,0`): `0x10E0` B
+> special-panel body into `$C8(A5)+6060` (the 4,320-B gap this doc already
+> found in the "Slot `$C8`" section — it comes from the *level* file, not
+> the tileset), `0x70` B = 4 × 28-B blit descriptors for the panel's inset
+> sprites into S_1 `+0x253C6`, then `gate[level]` B of inset pixels into
+> `$24(A5)` → finally the sound bank, `sfx[level]` B (13 BE words at S_1
+> `+0x22002`) into `$28(A5)+0x70AE`.
+>
+> ```
+> +1932         4320 B   special-panel body, 80×72, 6 planes, opaque   (gated levels only)
+> +6252          112 B   4 × 28-B inset blit descriptors               (gated)
+> +6364      gate[lv] B   inset pixels, 7-plane masked (mask + 6bpp)    (gated)
+> then       sfx[lv] B   monster sound bank, raw signed 8-bit PCM, to EOF
+> ```
+>
+> **Confirmed:** tail length == panel block + `sfx[level]` for **13/13**
+> files, byte-exact; all 16 DOS `clipper.clp` sound matches still land
+> inside the corrected banks (bcdfb's first sample starts exactly at the
+> bank start); gate non-zero exactly for levels 2,3,4,6,9,11 = the maps in
+> DOS `crypt.exe`'s special-panel table (`0x4307a8`: "The Golden Face /
+> Druid Face / Tomb / Skull / Clam / Medusa Panel"); the descriptors' dest
+> (x,y) equal the DOS table's inset positions 24/24 and tile each gate
+> block exactly; the six bodies render as those six panels in that order.
+> Inset sprites: `blue eyes` 32×3 (level 2), `sun key` 16×7 + `moon key`
+> 16×11 (3), `crown` 16×10 ×3 positions (6), `pearl` 16×5 (9), a 16×16
+> placeholder at (0,0) for 4 and 11 (DOS: `smiley`). Shared reader:
+> `scripts/bclib/levelfile.py`; `scripts/extract_bcdfbn_decor.py` now
+> slices the sound bank from the loader's offsets (it used to include the
+> panel block in `audio/level{02,03,04,06,09,11}-sfx.raw`). The panel art is
+> injected into DOS by `scripts/inject_clipper_phase3.py`; an Amiga-side
+> asset export is not written yet.
+
 > **Correction (supersedes two earlier passes).** This region was previously
 > documented as "692 standalone 1bpp 16×20 icons", then corrected to "92
 > 16×20 mask+6bpp-EHB icons, 7 per file". **Both are wrong.** Only the first
@@ -7659,6 +7697,14 @@ for this level" routine that does the RLE-chunk load, the two mirror blits,
 this raw `$C8`-tail `Read()`, and the level-file open, all in sequence.
 Closed: **found, mechanism identified (raw conditional `Read()`, not a
 blit), size and destination byte-exact against the already-documented gap.**
+
+> **Correction (2026-11-13):** the file handle `D4` here is the **level
+> file** (`bcdfb`–`bcdfn`, opened at `+0x21EB6` from the patched `"bcdf?"`
+> template with `0x62 + level`), not "the already-open tileset file". The
+> gate table at `+0x21FE8` is now decoded (`0,84,252,224,0,140,0,0,70,0,224,0,0`
+> — non-zero = inset-pixel byte count for levels 2,3,4,6,9,11) and the
+> per-level panel art is identified — see "Trailing Data — Wall Decorations
+> + Monster Sound Bank", 2026-11-13 correction.
 The exact per-level/tileset gate table at S_1 `+0x21FE8` (its content, and
 which levels set it) was not decoded further this pass — out of scope for
 this item, which only asked whether the fill code exists.

@@ -14,6 +14,13 @@ RLE stream's 0x00 terminator (= file offset 1402 + header word at +0x02):
     +1932   to EOF   monster sound-effect bank, raw signed 8-bit PCM,
                      samples stored back to back, last one ending at EOF
 
+> **Correction (2026-11-13):** for levels 2, 3, 4, 6, 9 and 11 the sound bank
+> does *not* start at +1932. Those six files carry a special-panel block
+> first — a 4,320-B 80x72x6-plane panel body, 112 B of inset blit
+> descriptors and the inset pixels — exactly as the level loader reads them
+> (`bclib.levelfile`, S_1 `+0x21F1C`). The bank is the last `sfx[level]` bytes
+> (S_1 `+0x22002`); every file now accounts byte-exact, 13/13.
+
 One 644-byte decoration block holds the SAME decoration at three view
 distances, 16 px wide throughout (2 bytes/row), 7 sequential planes each
 (plane 0 = 1bpp mask, planes 1-6 = 6bpp EHB colour) — the game's usual sprite
@@ -35,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bclib
+from bclib import levelfile
 
 LETTERS = 'bcdefghijklmn'
 
@@ -69,6 +77,8 @@ def main(src_dir=None, pal_path=None):
     pal_file = Path(pal_path) if pal_path else Path(__file__).parent / 'palette_final.json'
     pal = bclib.load_palette_json(pal_file)
 
+    s1 = (bclib.data_dir('blackcrypt', 'amiga').parent / 'extracted'
+          / 'bcdft_decompressed.bin').read_bytes()
     audio_dir = bclib.asset_dir('audio', 'blackcrypt', 'amiga')
     sprites = []
     banks = []
@@ -88,12 +98,18 @@ def main(src_dir=None, pal_path=None):
 
         sprites.extend(decor_sprites(body[:GFX_BYTES], mapno, pal))
 
-        sfx = body[GFX_BYTES:]
+        lay = levelfile.tail_layout(raw, s1, mapno)
+        if lay['decor'] != end_pos:
+            raise ValueError(f'bcdf{letter}: RLE stream ends at {end_pos}, '
+                             f'loader reads decorations at {lay["decor"]}')
+        sfx = raw[lay['sfx']:]
+        assert len(sfx) == lay['sfx_bytes']
         name = f'level{mapno:02d}-sfx'
         (audio_dir / f'{name}.raw').write_bytes(sfx)
         banks.append({
             'map': mapno, 'file': f'bcdf{letter}',
             'streamEnd': end_pos, 'graphicsBytes': GFX_BYTES,
+            'specialPanelBytes': lay['sfx'] - end_pos - GFX_BYTES,
             'sfxBytes': len(sfx), 'raw': f'audio/{name}.raw',
             'format': 'pcm_s8', 'note': 'samples stored back to back; boundary table not yet located',
         })

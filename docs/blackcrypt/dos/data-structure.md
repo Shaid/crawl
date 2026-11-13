@@ -50,6 +50,14 @@ The archive uses a simple directory + raw data layout:
 | 0x34   | 2    | uint16  | Width (images only)                      |
 | 0x36   | 2    | uint16  | Height (images only)                     |
 
+> **Correction (2026-11-13):** the table above skips two fields every
+> consumer uses: `+0x29` uint8 **group id** (0 = always resident, 1/2/3 =
+> tileset, 5/6 = UI bundles, map + 10 = per-map creatures; loaders
+> `fcn.0040b820`/`fcn.0040b7a0`) and `+0x32` uint16 **colour key** (passed
+> to `SetColorKey`; `0xFFFF` = opaque). Both confirmed in
+> `full-game-restoration-plan.md` § "3.4"/§ "3a.6"; the Phase 3 injector
+> writes and re-reads them (`scripts/inject_clipper_phase3.py`).
+
 ### Entry Types
 
 | Type Code | Count | Description                               |
@@ -724,6 +732,35 @@ an address:
   49 floor-item groups, all 29 keys + 87 keyholes are present. The smaller
   executable size vs. the Amiga's executable+overlays is compiler output,
   not a missing subsystem.
+
+### Creature frame slots and the special-panel table (2026-11-13)
+
+**Creature record frame slots ↔ Amiga frame directory — confirmed.** Each
+180-B creature record (`0x430898`, 26 records) has 2 pose-name pointers
+(`+0x04`/`+0x08`) and 12 × 12-B frame slots at `+0x24` = 3 tiers × facings
+N, E, S, W: `(char *name, i16 dx, i16 dy, u32 flag)`. `dx`/`dy` are draw
+offsets subtracted from the screen position (`0x405bd7`–`0x405bef`) and
+flag 1 is a mirrored blit (`0x405c4c`). The Amiga monster file's 42 × 28-B
+directory has the same shape: entry `c*12 + s` is creature slot `c`'s
+frame slot `s`, and `36 + 2c`/`37 + 2c` are its poses. Pairing the two
+reproduces the shipped Two Head/Rock Eye (w,h) 14/14, puts every `dx` at
+0.25–0.75 of its frame width (279/279, median 0.500), and agrees on W-slot
+mirroring 54/63 (exceptions: Green Guy, Slime, Lich Dragon — DOS mirrors
+W, Amiga doesn't). Detail: `full-game-restoration-plan.md` § "Phase 3
+injector — 2026-11-13".
+
+**Special-panel table `0x4307a8` — confirmed.** 6 × 40 B:
+`i16 map, u16 pad, char *body, 4 × (char *inset, i16 x, i16 y)`. Read by
+`fcn.004049a0` (draws `Panel Top` at (64,9), then `Fountain` or the body
+for `word[0x46b304]` = current map at (64,38)) and `fcn.00404aa0` (inset k
+per set bit). Rows: map 2 `The Golden Face Panel` + `blue eyes` (92,78);
+3 `The Druid Face Panel` + `sun key` (132,43), `moon key` (67,41);
+4 `The Tomb Panel` + `smiley` (0,0); 6 `The Skull Panel` + `crown`
+(97,47)/(72,65)/(121,65); 9 `The Clam Panel` + `pearl` (95,79);
+11 `The Medusa Panel` + `smiley` (0,0). None of these names are in the
+demo `clipper.clp`; the Amiga source is the level-file panel block
+(`amiga/data-structure.md` § "Trailing Data", 2026-11-13 correction),
+whose blit descriptors carry the same 24 (x,y) pairs.
 
 ---
 
