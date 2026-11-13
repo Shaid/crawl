@@ -18,17 +18,124 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 | ishar-main-manifest-structure | open | `MAIN.DO`'s content is now fully readable in all 3 Ishar titles (resource manifest + monster roster + level-editor strings — the earlier "Ishar 2/3 don't show readable strings" note was a false negative from checking pre-decompression bytes, corrected this session), but its *binary record structure* (per-scene resource lists as actual records with offsets/counts, not just repeated substrings found via `strings`) is still not decoded | `docs/ishar-container-format.md` §3, `docs/ishar/amigaaga/data-structure.md` §4, `docs/ishar2/amigaaga/data-structure.md` §3, `docs/ishar3/amigaaga/data-structure.md` §2 | 2026-08-30 |
 | ishar-cell-value-semantics | open | The region-grid cell-value alphabet (§9.2: `0x00` void, low codes = terrain/feature, high-bit `0x9D`/`0xCC-0xCE`/`0xE1`/`0xE5-0xE6` = obstacle classes; cells read sign-extended so `< 0` is the natural blocked test — HYPOTHESIS) needs its value→walkability and value→scene-script dispatch decoded (very likely the `cswitch` streams around `MAIN.bin+0x18e8..0x1c74` where all the location `.AO` names sit) | `docs/ishar-container-format.md` §9.2 | 2026-09-01 re-oracle |
 | ishar-fic-semantics | open | Remaining `.FIC` semantics now that the format layer is solved (§9): the role split between the two region-grid buffers (`basemain+0x80` vs `+0x234a` — adjacent-region staging vs pristine-copy both fit the paired reads); `EN1.FIC`'s 28/29 per-array record layouts (sizes byte-exact from bytecode, content undecoded); `TAB1.FIC`'s 19×19 {1..4} grid's role; Ishar 2/3's second grid layer's meaning | `docs/ishar-container-format.md` §9.1-9.3 | 2026-09-01 re-oracle |
-| ishar-sprite-palette | open | The real AGA colour palette for decoded sprites (§7/`docs/ishar-sprite-format.md`) is not yet recovered — `topalette()` resolves a palette resource via the same `adresdes()` directory mechanism as bitmaps, but the specific directory INDEX that is "the palette for this scene" is chosen by VM bytecode at runtime, not by any static marker. All shipped sprite renders are greyscale (RENDERED, not CONFIRMED colour) | `docs/ishar-sprite-format.md` §5 | 2026-08-31 |
 | ishar-scene-header-subtype-byte | open | The shared 16-byte scene header (§6's evidence) has a varying byte at offset 21 (`0x0a` graphics/Ishar-1 caves, `0x47` Ishar-2 dungeon files, `0x1e` a third subgroup) that looks like a content-subtype discriminator — not traced to any consumer code. (Note: this header is the ALIS *script* header — `id@0`, `code_loc@+4`→bytecode entry, `dirOff@+0x0e` — per §9's `script.c` layout, so the "subtype byte" is a script-header field, likely `vram_alloc`-adjacent) | `docs/ishar-container-format.md` §6, §9 | 2026-09-01 re-oracle |
 | ishar-firstperson-generalize | open | The first-person renderer now executes FIVE Ishar 1 location scripts (`FORET.bin`, `VILLAGE.bin`, `PLAINE.bin`, `RAMPART.bin`, `TEMPLE.bin` — all RENDERED, wired into the walker's `KeyC` cycle; `TEMPLE.bin` supersedes an earlier INCONCLUSIVE verdict, see the correction in `docs/ishar-container-format.md` §8.7), TWO Ishar 2 location scripts (`FORET1.bin`, `VILLE.bin` — RENDERED, wired, per-location backdrop convention), and now TWO Ishar 3 location scripts (`FORET.bin`, `JUNGLE.bin` — RENDERED, wired, CONFIRMED — see the correction in §8.6: the earlier "4 unconditional diamond-scan blocks" verdict was a CFG-reachability misdiagnosis, the real shell is Ishar 1/2's single facing-selected block, no code change was needed) — `ORC.bin` (Ishar 1 monster placement) deliberately not wired (no real per-frame encounter data to drive it honestly), and Ishar 2/3's `ARBO.bin`/`PLAINE1.bin`/`MONTAGNE.bin` remain unexercised (structurally more complex, out of scope) | `docs/ishar-container-format.md` §8.6 (Ishar 3 correction), §8.7 (TEMPLE) | 2026-09-02 |
-| ishar-cavint-sceneLayer-writer | open | `CAVINT.bin`'s own real cell-value alphabet is now confirmed to live in `INIT.FIC`'s Z=1 sub-array (not Z=0), meaning the real game must set `omainb(0x2b3c)` to 1 somewhere in `CAVINT`'s own launch path (most likely `MAIN.CO`'s scene/location dispatcher) — that write site was not located this session (the walker forces `sceneLayer=1` as a wired, RENDERED-not-CONFIRMED convention) | `docs/ishar-container-format.md` §8.5, `docs/crystalsofarborea/amiga/data-structure.md` §8 correction block | 2026-09-02 |
-| ishar-firstperson-backdrop-anchor | open | `FOND.bin`'s backdrop-panel anchor/tiling/parallax convention is UNVERIFIED against any real screenshot — panels resolve to large (up to 96×85px) composites anchored base-at-horizon, plausible as "distant hill/cloud silhouette" but two panels don't tile to cover the full 255px screen width, leaving flat placeholder sky visible at the frame edges (may be correct, may indicate a missing repeat rule) | `docs/ishar-container-format.md` §8.2 | 2026-09-01 |
-| ishar-greyscale-atlas-normalize | open | The already-shipped sprite atlas (`ishar-sprite-atlas.ts`) still uses the fixed-0-255-scale `isharBitmapToGreyscaleRGBA()`, which silently renders any bitmap with `palOffset` above ~40 as a near-flat block even though the real decoded indices vary normally (confirmed via a histogram on two `FOND.bin` sprites this session). A per-bitmap-normalized version now exists (`isharBitmapToNormalizedGreyscaleRGBA()`) and is used by the first-person renderer, but the corpus-wide atlas pipeline was not re-run with it | `tools/shared/ishar-sprites.ts` module doc | 2026-09-01 |
+| ishar-cavint-sceneLayer-writer | open | `CAVINT.bin`'s own real cell-value alphabet is confirmed to live in `INIT.FIC`'s Z=1 sub-array (not Z=0), meaning the real game must set `omainb(0x2b3c)` to 1 somewhere in `CAVINT`'s own launch path (most likely `MAIN.CO`'s scene/location dispatcher). Write site still not located — a follow-up pass found a concrete structural blocker: `MAIN.bin`'s reached CFG covers only 2.5% of the file, stopping at an indirect-jump opcode family (`cjsrabs`/`cjmpabs`/`cjsrind16`/etc, `0x0b`-`0x10`) `alis-disasm.ts` doesn't implement and the reference `alis` source itself leaves as empty `[N/I]` stubs (no operand width derivable) — a genuine oracle gap of the same class `cdefmap` was (§8.1), confirmed NOT Crystals-specific (Ishar 1's own `MAIN.bin` hits it 61 times). Good `re-oracle` candidate, not escalated this pass | `docs/ishar-container-format.md` §8.5, `docs/crystalsofarborea/amiga/data-structure.md` §8's second follow-up correction block | 2026-09-03 |
 | ishar-t3-crystals-executable-trace | deferred | Ishar 3's `START` and Crystals' `T.X` were not disassembled this pass (only Ishar 1's `T.X` was traced) — the `0xA1`/`0x81` codec port is now verified corpus-wide by output self-consistency + readable content instead, which is strong enough evidence to not require this, but a direct trace on a second title's executable would still strengthen the "one shared codec" claim further | `docs/ishar-container-format.md` §1, §2.5 | 2026-08-30 |
 | crystals-carte-array-role | open | `CARTE.CO`'s two confirmed 8-element scratch arrays (`0x3c`/`0x46`) match the 8 confirmed UI strings `JON/ZACH/IRVAN/AKEER/OLBAR/THORM/ALL/NONE` in count+order (STRUCTURAL), but which array means "currently selected" vs. some other axis, and what index 0's un-written default value really is, is not decoded | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
 | crystals-carte-destination-mechanism | open | The real "travel to a location" mechanism: a confirmed consumer region hit-tests the 8 checklist rows (`cftstset`+"forme" collision test) and calls `clive` (load-and-run-another-script-by-id) on confirmation, but the literal script id(s) `clive` loads, and any per-location map hotspot/placement table (for "click a place on the map"), were not found this session | `docs/crystalsofarborea/amiga/data-structure.md` §3.5 | 2026-09-01 |
+| ishar-palette-non-ishar1-titles | open | Real-colour palette recovery (`tools/shared/ishar-palette.ts`) is CONFIRMED for Ishar 1 (world palette pinned to `FOND.DO`'s own `0xFE` slot) and generalizes usefully but incompletely to Ishar 2/3/Crystals (74/119, 64/113, 12/33 atlases resolve to colour via each file's OWN `0xFE` slot only) — none of those three titles ship one shared `FOND`-equivalent world-palette file the way Ishar 1 does, so their outdoor/location scripts with no dedicated palette still render greyscale. A per-title world-palette convention (likely each location's own backdrop file) was not investigated | `docs/ishar-sprite-format.md` §5 | 2026-09-01 |
+| ishar-walker-colour-wiring | open | `ishar-firstperson.ts`'s new `LocationFrameOptions.palette` option is implemented and CONFIRMED (see §5) but not yet threaded through `tools/walker/games-ishar.ts`'s live browser walker (`RENDER_FRAME`/`LocationFrameRenderer`, shared across all 4 titles) — the interactive first-person view still renders greyscale. Deliberately left out of the session that added the option, to avoid touching a type shared across 4 titles' wiring without re-verifying each one | `docs/ishar-sprite-format.md` §5 | 2026-09-01 |
 
 ## Session log
+
+- **2026-09-03 (fifteenth pass — 4 bounded loose ends: 1 closed as
+  superseded by a parallel session, 1 CONFIRMED by direct disassembly, 1
+  checked-and-refuted, 1 left open with a sharper structural blocker)**:
+  **Item 1** (`ishar-greyscale-atlas-normalize`): wired
+  `ishar-sprite-atlas.ts` to `isharBitmapToNormalizedGreyscaleRGBA()` and
+  re-ran the atlas pipeline for all 4 titles from clean state (same decode
+  counts as before — 1608/2244/2744/931 sprites — confirming no regression);
+  verified the fix directly on a real corpus example (`KNIGHT.DO` idx13,
+  index range 124-127): flat-scale render collapsed to values `{105,106}`
+  (near-indistinguishable), normalized render spans `{30,100,170,240}` (full
+  contrast). A concurrent sibling session then landed real AGA palette
+  recovery on top of this exact change (`ishar-palette.ts`, `resolveIsharOwnPalette`/
+  `mergeIsharPalettes`) and re-ran the pipeline again with real colour (all
+  74 Ishar 1 atlases now `hasPalette: true`) — row closed as superseded, not
+  independently re-claimed. **Item 2** (`ishar-cavint-sceneLayer-writer`):
+  attempted to locate `MAIN.CO`'s real `omainb(0x2b3c)=1` write for
+  `CAVINT`; not found, but found a concrete NEW reason why — `MAIN.bin`'s
+  reached CFG (`alis-disasm.ts` from its entry point) covers only 312 of
+  12,448 bytes (2.5%) before hitting an indirect-jump opcode family
+  (`cjsrabs`/`cjmpabs`/`cjsrind16`/`cjsrind24`/`cjmpind16`/`cjmpind24`,
+  `0x0b`-`0x10`) this project's disassembler doesn't implement — confirmed
+  these are real instruction-boundary hits (not a decode desync, each
+  follows a legitimate `cnul` fallthrough) and confirmed NOT Crystals-
+  specific (Ishar 1's own already-trusted `MAIN.bin` hits the same family
+  61 times). The reference `alis` source itself stubs all 6 opcodes as
+  `[N/I]` with zero operand-reading code, so no width can be derived from
+  it — a genuine oracle gap of the same class `cdefmap` was (§8.1, resolved
+  via `re-oracle`). Not escalated this pass (bounded/optional item per this
+  session's scope); flagged as a good future `re-oracle` candidate. Row
+  text updated with this sharper evidence, left open. **Item 3**
+  (`ishar-firstperson-backdrop-anchor`): disassembled `FOND.bin` directly —
+  the WHOLE script is 12 instructions, 0 branches, 0 loops, exactly 2
+  `cputnat` calls at hardcoded (position/facing-independent) screen anchors,
+  then `cstop`. A second backdrop script (`FTEMPLE.bin`) shows the same
+  shape at smaller scale (11 instructions, 1 `cputnat`). This is direct
+  code-level proof there is no missing tiling/repeat loop — exactly 2 fixed
+  panels IS FOND.bin's complete, real, intentional behaviour. Row CLOSED
+  (UNVERIFIED → CONFIRMED); no code change needed. **Item 4** (quick check,
+  not a TODO row): checked `MAIN.bin`'s manifest for a
+  `cload(fville.AO); cload(village.AO)` adjacent pair analogous to
+  TEMPLE's confirmed `ftemple.AO`/`temple.AO` zero-gap pair — REFUTED.
+  `fville.AO` sits inside a CAVE-entry dispatch chain
+  (`fcave`/`colcave`/`fville`/`mcave`/`scave`/`fcave2`, each gated by its
+  own branch), not the location-scripts registration zone; the nearest
+  `.AO` load is actually `ville.AO` (`VILLE.DO`, a file distinct from
+  `VILLAGE.DO`), and even that pair fails the strict zero-gap test (real
+  branch bytecode in between). `village.AO` itself is ~4,500 bytes away, in
+  the monster-roster bulk-registration block (a negative control showing
+  zero-gap adjacency alone isn't sufficient evidence outside an isolated
+  context). No code change made — `VILLAGE.bin` correctly keeps the shared
+  `FOND.bin` backdrop. Verification: `npx tsc --noEmit -p .` and
+  `npx eslint` clean on all changed files; `npm test` still 370/370 (no
+  regressions — no runtime code was changed by items 2-4, only docs; item
+  1's change was a like-for-like render-function swap with an
+  already-existing, already-used function). No amiberry/emulator use. Full
+  evidence: `docs/ishar-container-format.md` §8.2 (FOND.bin correction),
+  §8.7 (FVILLE/VILLAGE correction), `docs/crystalsofarborea/amiga/
+  data-structure.md` §8 (CAVINT follow-up correction).
+
+- **2026-09-01 (concurrent pass, run alongside the fifteenth pass above —
+  `ishar-sprite-palette` CLOSED, real AGA colour recovered)**: Traced real
+  `cpalette`/`ctopalet` call sites (`tools/shared/alis-disasm.ts`) across
+  Ishar 1's `.DO` corpus (38 hits) to answer §5's open question. Most
+  monster/portrait scripts (`DRAGON.DO`, `GEANT.DO`, `SKELET.DO`, ...)
+  resolve to a literal `oimmb` directory-index operand; `MAIN.DO`'s own 12
+  call sites resolve to a `basemain`-relative global byte or a runtime
+  restore/load-slot-0 boolean, with no static write site found in the
+  reached CFG — but this turned out to be the wrong question, since NO
+  outdoor location script (`FORET.bin`, `VILLAGE.bin`, etc.) issues a
+  `cpalette` call at all. The real unlock: every genuine palette resource
+  carries a dedicated, zero-false-positive marker byte at its resolved
+  header (`paldata[0] === 0xFE`, 62 hits corpus-wide, cross-checked against
+  every known bitmap `type` byte) — `findIsharPaletteSlotIndex()`
+  (`tools/shared/ishar-palette.ts`, new) finds a script's own palette
+  directly by directory scan, sidestepping the bytecode-index trace
+  entirely. Cross-checked independently: 15+ monster scripts' own literal
+  `cpalette oimmb(N)` operands land EXACTLY on their own `0xFE` slot.
+  `FOND.DO`'s slot 8 (256-entry, 24-bit AGA RGB, 16 material-ramp banks) is
+  Ishar 1's shared world palette — near-identical to several other
+  location scripts' own embedded copies (`GERDEP.DO` differs in 6/256
+  entries), and every outdoor script has zero `0xFE` slots of its own,
+  consistent with the already-documented shared-`FOND.bin`-backdrop
+  convention. Ported `topalette()`'s two on-disk encodings (16-colour
+  nibble-packed and AGA 24-bit RGB-triplet) and its persistent-palette-
+  buffer overlay semantics (`mergeIsharPalettes()`) directly from
+  `image.c`. Applied to the batch atlas pipeline (`ishar-sprite-atlas.ts`,
+  own-palette-then-world-palette-then-greyscale-fallback, zero decode-count
+  regression) and to a new first-person preview
+  (`tools/ishar/amigaaga/firstperson-preview.ts` → `public/assets/ishar/
+  amigaaga/screens/foret-color.png`, 196 real sprite placements). Result:
+  74/74 Ishar 1 atlases now real colour; generalizes usefully but
+  incompletely to Ishar 2 (74/119), Ishar 3 (64/113), and Crystals of
+  Arborea (12/33) since none of those ship one shared `FOND`-equivalent
+  file (see the new `ishar-palette-non-ishar1-titles` row). Visual
+  confirmation (Method §4): red/dark-red dragon, green tree foliage over
+  brown trunks, tan/brown humanoid skin tones (Ishar 1); an orange dragon
+  amid yellow-orange fire frames (Ishar 2); a dramatic burning-forest death
+  screen with a red/orange fire sky (Crystals) — all genuinely plausible,
+  none garish/random. The `FORET.bin` colour/greyscale pair is especially
+  decisive: the same backdrop panels that are illegible static noise in
+  greyscale immediately read as blue sky + white clouds over green grass
+  in colour. `npx tsc --noEmit -p .`/`npx eslint` clean on all
+  changed/new files; `npm test` still 370/370 (no regressions — every
+  existing caller that omits the new optional `palette` field renders
+  byte-identically to before). No amiberry/emulator use — static
+  disassembly + directory census + `Read`-based visual inspection only.
+  Full evidence: `docs/ishar-sprite-format.md` §5.
 
 - **2026-09-02 (fourteenth pass — Ishar 3 first-person CONFIRMED, correcting
   the thirteenth pass's "4 unconditional diamond-scan blocks" verdict)**:

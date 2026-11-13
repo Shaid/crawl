@@ -712,6 +712,29 @@ interpreter's output:
   the frame edges (may be correct — genuinely open sky in those
   directions — or may indicate a missing tiling/repeat rule).
 
+  > **Correction (later session — CONFIRMED, no missing tiling rule)**:
+  > disassembled `FOND.bin`'s own bytecode directly (`alis-disasm.ts` from
+  > its `scriptEntryPoint()`). The WHOLE script is 12 instructions, 0
+  > branches, 0 loops, ending in `cstop` — a short straight-line setup
+  > (`cscreen`, a few `cstore`s) followed by exactly TWO `cputnat` calls
+  > (composite indices 6 and 7) and nothing else. Both calls' `x` operands
+  > are `<const> * <local-var-just-set-to-1>` expressions (`16*1+1=17` and
+  > `32*1=32`) — fixed, hardcoded screen anchors with **no dependence on
+  > party position or facing at all** (unlike the location scripts, which
+  > read real position/facing globals). A second backdrop script,
+  > `FTEMPLE.bin`, shows the identical shape at smaller scale (11
+  > instructions, 1 `cputnat`, 1 branch, 0 loops). This settles the
+  > question: **exactly 2 fixed-position backdrop composites is FOND.bin's
+  > complete, real, intentional behaviour** — there is no loop anywhere in
+  > the script that could place additional tiling panels, so the flat sky
+  > visible at the frame edges is genuine open-sky content, not a rendering
+  > gap. Status upgraded from UNVERIFIED to **CONFIRMED** (direct bytecode
+  > evidence, not inference) — matches this project's own "distant hill/
+  > cloud silhouette against open sky" plausibility read from the first
+  > pass, now with a code-level reason it's correct. No code change made in
+  > `ishar-firstperson.ts`'s backdrop compositing — none was needed. See
+  > `docs/ishar/TODO.md` (`ishar-firstperson-backdrop-anchor`, closed).
+
 **NOT generalized this session** (deliberately, per the task's "don't force
 false generality" instruction):
 
@@ -1302,6 +1325,39 @@ own confirmed companion asset per the manifest evidence above.
 `tools/ishar/amigaaga/scripts.ts`) and wired into
 `tools/walker/games-ishar.ts`'s `LOCATION_SCRIPTS.ishar` (`fondKey:
 'ftemple'`, `regionPattern: /^CONT[346]/i`) and `KeyC` cycle.
+
+> **Correction (later session — `FVILLE.DO`/`VILLAGE.bin` pairing checked
+> and REFUTED)**: re-ran the exact zero-gap-adjacency test that confirmed
+> `ftemple.AO`/`temple.AO` (§ above) against `fville.AO`/`village.AO` and
+> it does NOT hold. `fville.AO` (`cload id=33`) sits at file-relative
+> bytecode offset `0x1bdd` inside a totally different region of `MAIN.bin`'s
+> manifest — a CAVE-entry dispatch chain (`fcave.AO`/`colcave.AO`/
+> `fville.AO`/`mcave.AO`/`scave.AO`/`fcave2.AO`, each `cload` gated by its
+> own `cbz`-guarded comparison, interleaved with `telep.AO`/`clive`
+> teleport-script calls and `cstore`s to per-cave state flags), not the
+> "location scripts" registration zone `ftemple.AO`/`temple.AO` and
+> `fond.AO`/`plaine.AO`/`rplaine.AO` occupy. The nearest `.AO` load to
+> `fville.AO` is actually `ville.AO` (a DISTINCT resource — `VILLE.DO` also
+> exists on disk, separate from `VILLAGE.DO`) two `cload`s later at
+> `0x1c48`, but even that pair fails the strict test: `fville.AO`'s
+> instruction ends at `0x1bea` while the next `cload` (`telep.AO`) doesn't
+> start until `0x1c14` (a 42-byte gap containing real conditional-branch
+> bytecode, not a contiguous instruction pair), and `ville.AO` itself isn't
+> reached until 40 bytes after `telep.AO` ends. `village.AO` (`VILLAGE.DO`'s
+> own resource, confirmed by name) doesn't appear anywhere near `fville.AO`
+> at all — its nearest occurrences are ~4,500 bytes later, embedded in the
+> monster/creature-roster bulk-registration block (immediately preceded by
+> `loup.AO` = "wolf"), which is a dense run where EVERY adjacent pair is
+> zero-gap by construction (bulk listing, not a semantic pairing) — a
+> useful negative control showing zero-gap adjacency alone isn't sufficient
+> evidence outside an isolated context like TEMPLE's. **Conclusion: no
+> evidence supports `FVILLE.DO` as `VILLAGE.bin`'s backdrop** — it more
+> plausibly belongs to Ishar 1's cave/dungeon-entry system (perhaps a cave
+> near/under the village, matching `fcave`/`colcave`/`mcave`/`scave`'s
+> naming pattern), a mechanism out of scope here. No code change made;
+> `VILLAGE.bin` keeps the shared `FOND.bin` backdrop it already ships with.
+> See `docs/ishar/TODO.md` (`ishar-village-backdrop-check`, closed as a
+> checked-and-refuted negative, not left open).
 
 **Paths tried** (superseding §8.3's row for this item):
 

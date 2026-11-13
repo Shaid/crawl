@@ -514,6 +514,49 @@ evidence only).
 > param — the walker just wasn't threading it through per-script before).
 > See `docs/ishar-container-format.md` §8.5 for the cross-referenced
 > write-up.
+>
+> **Follow-up (later session — `sceneLayer` writer NOT located; a concrete
+> structural blocker found)**: attempted to locate the real
+> `omainb(0x2b3c) = 1` write in `MAIN.CO`'s scene/location dispatcher, per
+> this row's own next-step suggestion. Two approaches, both negative:
+> (1) `MAIN.bin`'s manifest DOES contain a `cload(id=12, "cavint.AO")` at
+> file offset `0x16a8`, but it sits in a long, flat, branch-free run of
+> ~20 `cload`s (a straight resource-registration list, same shape as
+> Ishar 1's `MAIN.bin` manifest) — no nearby `cstore`/`smainb` write of any
+> kind, so this is pure ID registration, not dispatch logic. (2) A full
+> reached-CFG walk of `MAIN.bin` from its entry point (`alis-disasm.ts`)
+> found **zero** `cstore`s targeting `smainb 0x2b3c` anywhere in the
+> instructions it could reach — but that walk only covers 312 of the
+> file's 12,448 bytes (2.5%), and terminates at 3 addresses (`0x8c8`,
+> `0x9b0`, `0x1d27`) where it hits opcode bytes `0x0c`/`0x0d`
+> (`cjmpabs`/`cjsrind16` in `github.com/maestun/alis`'s own opcode table —
+> "jump/jump-to-subroutine with absolute/indirect address"), which this
+> project's disassembler doesn't implement. Confirmed these are NOT a
+> decode desync: each sits immediately after a legitimate 1-byte `cnul`
+> fallthrough (a real, unambiguous instruction boundary), so the bytes
+> genuinely are meant to be read as opcodes there. Critically, **this is
+> not Crystals-specific** — the identical check against Ishar 1's own
+> `MAIN.bin` (already-confirmed dispatch/manifest code, same engine
+> family) hits the SAME opcode family repeatedly (61 errors total,
+> including `0x0c`/`0x0d` at ~15+ distinct addresses), leaving only 2,022
+> of ~7,000+ reachable instructions decoded. The reference `alis` source
+> itself marks all 6 of these opcodes (`cjsrabs`/`cjmpabs`/`cjsrind16`/
+> `cjsrind24`/`cjmpind16`/`cjmpind24`, opcodes `0x0b`-`0x10`) as `[N/I]`
+> (empty stub, `ALIS_DEBUG` only, no operand-reading code at all) —
+> meaning no operand WIDTH can be derived from the reference implementation
+> for any game, the same class of genuine reference-oracle gap that
+> §8.1/the fifth pass hit with `cdefmap` (which WAS later resolved via
+> `re-oracle`). Given this item's own scope explicitly permits leaving the
+> manual `sceneLayer=1` override in place if the real write site isn't
+> independently reachable, and given the missing-opcode blocker is a
+> genuine, well-scoped negative (not a search-effort gap) rather than the
+> session's primary task, it was NOT escalated this pass — flagged as a
+> good `re-oracle` candidate for a future session instead (same class of
+> problem that broke open the whole world-grid system once escalated).
+> **No code change made**; the walker's manual `sceneLayer=1` force-set for
+> `CAVINT` remains the shipped, honestly-labelled mechanism. See
+> `docs/ishar/TODO.md` (`ishar-cavint-sceneLayer-writer`, left open with
+> this sharper evidence).
 
 The rest of this section (below) is kept as the original paths-tried record.
 

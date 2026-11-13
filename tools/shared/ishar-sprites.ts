@@ -70,16 +70,18 @@
  * this module produces is therefore RENDERED/greyscale, not CONFIRMED
  * colour.
  *
- * Visualization caveat found this session: `isharBitmapToGreyscaleRGBA()`'s
+ * Visualization caveat found in an earlier session: `isharBitmapToGreyscaleRGBA()`'s
  * fixed 0-255 scale silently renders any bitmap whose real index range sits
  * in a narrow `palOffset`-shifted band (common for `palOffset` > ~40) as a
  * near-flat block, even though the underlying decode is fine and the real
  * indices vary normally — see `isharBitmapToNormalizedGreyscaleRGBA()`'s doc
- * comment for the confirming histogram. The already-shipped sprite atlas
- * (`ishar-sprite-atlas.ts`) still uses the fixed-scale function and was NOT
- * re-rendered this session (out of scope for the first-person-view task that
- * found this) — a corpus-wide re-check of the atlas with the normalized
- * function is a plausible, undone follow-up.
+ * comment for the confirming histogram.
+ *
+ * Correction (later session): `ishar-sprite-atlas.ts`'s corpus-wide atlas
+ * pipeline has now been switched to `isharBitmapToNormalizedGreyscaleRGBA()`
+ * and re-run for all 4 titles from clean state — previously near-flat
+ * `palOffset` > ~40 sprites now show real varying tones (see
+ * `docs/ishar/TODO.md`'s closed `ishar-greyscale-atlas-normalize` row).
  */
 
 export type IsharBitmapType = 0x00 | 0x02 | 0x10 | 0x12 | 0x14 | 0x16;

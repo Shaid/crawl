@@ -71,11 +71,22 @@
  * AFTER the one real placement pass has already run and populated
  * `placements`, so it costs a fixed, cheap 200,000-step spin (sub-
  * millisecond) and does not affect output correctness.
+ *
+ * Colour (2026-09-01 addition, `ishar-palette.ts`): pass `LocationFrameOptions
+ * .palette` (e.g. `resolveIsharOwnPalette(fond)` -- `FOND.bin`'s own
+ * directory carries Ishar 1's real shared outdoor/world palette, a 256-entry
+ * AGA RGB table, CONFIRMED via its `0xFE` palette marker plus a genuinely
+ * plausible browns/greens/reds/blues colour structure that ALSO very closely
+ * matches several other location scripts' own embedded copies -- see
+ * `docs/ishar-sprite-format.md` §5) to render real colour instead of
+ * greyscale. Omitting `palette` renders EXACTLY as before (default
+ * unchanged, no regression to any existing caller).
  */
 
 import { scriptEntryPoint } from './alis-disasm.ts';
 import { runIsharScene, resolveIsharComposite, type SceneEnv } from './alis-interp.ts';
 import { findIsharDirectory, resolveIsharSlot, decodeIsharBitmap, isharBitmapToNormalizedGreyscaleRGBA, type IsharBitmap } from './ishar-sprites.ts';
+import { isharBitmapToPaletteRGBA, type IsharPalette } from './ishar-palette.ts';
 import { unpackSilmarilsScript } from './silmarils-unpack.ts';
 
 /** Ishar 1's confirmed party-state/world globals (`docs/ishar-container-format.md` §9, `basemain`-relative). Ishar 2/3 use different offsets -- not re-derived this session (see module doc). */
@@ -183,8 +194,8 @@ export interface FirstPersonFrame {
   warnings: string[];
 }
 
-function blit(canvas: Uint8Array, cw: number, ch: number, bmp: IsharBitmap, dstX: number, dstY: number, invertX: boolean): void {
-  const src = isharBitmapToNormalizedGreyscaleRGBA(bmp);
+function blit(canvas: Uint8Array, cw: number, ch: number, bmp: IsharBitmap, dstX: number, dstY: number, invertX: boolean, palette?: IsharPalette): void {
+  const src = palette ? isharBitmapToPaletteRGBA(bmp, palette) : isharBitmapToNormalizedGreyscaleRGBA(bmp);
   for (let y = 0; y < bmp.height; y++) {
     const py = dstY + y;
     if (py < 0 || py >= ch) continue;
@@ -214,13 +225,14 @@ export function compositeFrame(
   leaves: ScenePlacementLeaf[],
   screen: { xCenter: number; horizonY: number; width: number; height: number },
   canvas: Uint8Array,
+  palette?: IsharPalette,
 ): void {
   for (const leaf of leaves) {
     const pixelX = screen.xCenter + leaf.x;
     const pixelY = screen.horizonY - leaf.z;
     const dstX = Math.round(pixelX - leaf.bitmap.width / 2);
     const dstY = Math.round(pixelY - leaf.bitmap.height);
-    blit(canvas, screen.width, screen.height, leaf.bitmap, dstX, dstY, leaf.invertX);
+    blit(canvas, screen.width, screen.height, leaf.bitmap, dstX, dstY, leaf.invertX, palette);
   }
 }
 
@@ -235,6 +247,14 @@ export interface LocationFrameOptions {
   locationType?: number;
   grid: RegionGridSource;
   screen?: { xCenter: number; horizonY: number; width: number; height: number };
+  /**
+   * Real AGA colour palette (`ishar-palette.ts`) to render sprites/backdrop
+   * with, e.g. `resolveIsharOwnPalette(fond)` for Ishar 1's shared world
+   * palette (`FOND.bin`'s own directory, see `ishar-palette.ts` module doc).
+   * Omit to render greyscale exactly as before this field was added (no
+   * behaviour change for existing callers).
+   */
+  palette?: IsharPalette;
 }
 
 /**
@@ -297,13 +317,13 @@ export function renderIsharLocationFrame(opts: LocationFrameOptions): FirstPerso
 
   if (opts.fond) {
     const fondLeaves = computeScenePlacements(opts.fond, env, warnings);
-    compositeFrame(fondLeaves, screen, canvas);
+    compositeFrame(fondLeaves, screen, canvas, opts.palette);
     placementCount += fondLeaves.length;
   }
 
   const locationLeaves = computeScenePlacements(opts.location, env, warnings);
   locationLeaves.sort((a, b) => b.sortY - a.sortY); // far-to-near painter's algorithm
-  compositeFrame(locationLeaves, screen, canvas);
+  compositeFrame(locationLeaves, screen, canvas, opts.palette);
   placementCount += locationLeaves.length;
 
   return { width: screen.width, height: screen.height, rgba: canvas, placementCount, warnings };

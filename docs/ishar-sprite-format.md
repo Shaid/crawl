@@ -170,17 +170,145 @@ This is real, decisive, non-statistical confirmation: the decode chain
 (directory resolution -> bitmap header -> pixel unpack) is CONFIRMED for all
 six supported types, across all four titles.
 
-## 5. Open — not yet recovered
+## 5. Real AGA colour palette — CONFIRMED (2026-09-01)
+
+> **Correction:** superseding the "not yet recovered" verdict below (kept
+> as the paths-tried record) — a real AGA colour palette IS now recovered
+> and applied, for Ishar 1 CONFIRMED end-to-end and generalized (RENDERED)
+> across all four titles. See `tools/shared/ishar-palette.ts` for the full
+> derivation/implementation and its module doc for the exact source-level
+> citations.
+
+**The blocking question was never "what does a palette resource look
+like"** (§5's old "paths tried" table already had that from `topalette()`'s
+source) **— it was "which directory index holds it," which this session
+sidestepped entirely** rather than tracing bytecode: every real palette
+resource in this corpus carries a dedicated marker byte, `0xFE`, at its
+resolved header offset (`paldata[0]`) — distinct from all six bitmap `type`
+bytes (§2) and the `0xFF` placeholder marker. `findIsharPaletteSlotIndex()`
+(`tools/shared/ishar-palette.ts`) scans a script's own directory for it
+directly; no runtime index ever needs resolving. Confirmed empirically: 62
+hits across Ishar 1's `.DO` corpus alone, 0 false positives against known
+bitmap-type bytes, and every decoded result is a plausible, non-random RGB
+table (see below) — including 15 monster/portrait scripts (`DRAGON.DO`,
+`GEANT.DO`, `SKELET.DO`, `ZOMBI.DO`, ...) whose own `cpalette` call sites
+disassemble to a literal `oimmb` operand landing EXACTLY on their own
+`0xFE` slot (e.g. `DRAGON.DO 0x47 cpalette expr=oimmb(0x11)` → directory
+index 17 → the `0xFE`-marked resource at file offset `0x3f3e`), which is
+independent, disassembly-level confirmation that the marker-byte shortcut
+finds the SAME resource the real VM's bytecode would.
+
+**On-disk format** (`decodePaletteChunk()`, ported from `topalette()`'s
+AmigaAGA branch, `image.c:254-331`): `paldata[1]` (`colors`) selects one of
+two encodings. `colors === 0` → 16-colour Amiga/AmigaAGA-native nibble-packed
+format (`paldata[2..2+32)`, byte0 low nibble = R, byte1 high/low nibbles =
+G/B, each `<<4` to 8-bit — the classic Amiga 12-bit `$0RGB` colour-register
+word). `colors !== 0` → AmigaAGA's own 24-bit RGB-triplet format:
+`paldata[2]` = starting palette slot (`offset`), `count = colors + 1` raw
+`(r,g,b)` byte triplets from `paldata[4]` onward, written to slots
+`offset..offset+count-1` INCLUSIVE (an off-by-one trap if read as
+`count = colors`).
+
+**Which resource is "the" world palette**: `FOND.DO`'s own directory slot 8
+(header offset `0x2f4e`, `0xFE`-marked) is a FULL 256-entry, 24-bit AGA
+palette (`offset=0, count=256`) organized as 16 banks of 16 colours each —
+a base UI bank, then material ramps for wood/ground (browns), foliage
+(greens), fire/blood (a genuine 16-step red-to-orange gradient at bank 10),
+magic/energy (a magenta-purple ramp at bank 11), sky/water (teal/blue
+ramps), and more. This is a STRUCTURAL match for the "banked 4-bit" bitmap
+convention (§2's `palOffset` field selects a 16-colour bank), and it is
+near-identical to several OTHER location scripts' own embedded `0xFE`
+copies — `GERDEP.DO`'s copy differs in only 6/256 entries, `FVILLE.DO`'s in
+82/256 (plausibly a location-specific variant of the same base table) —
+strong corroborating evidence this is the shared, engine-wide default
+outdoor/interior palette, not a `FOND`-specific one-off. Every outdoor
+location script (`FORET.bin`, `VILLAGE.bin`, `PLAINE.bin`, `RAMPART.bin`,
+`TEMPLE.bin`) carries ZERO `0xFE` slots of its own (confirmed by directory
+census) — they render entirely off this shared resource, consistent with
+`docs/ishar-container-format.md`'s already-established convention that
+`FOND.bin` is these scripts' one shared companion asset.
+
+**Persistent-buffer semantics, confirmed from source and reproduced
+faithfully**: `image.atpalet` (the VM's live palette buffer) is never
+cleared between `topalette()` calls — each call only overwrites its own
+`offset..offset+count-1` sub-range. `mergeIsharPalettes(own, fallback)`
+reproduces this exactly: `FOND.bin`'s 256-entry world palette is the base,
+and a script's own dedicated palette (e.g. a monster's 16-colour portrait
+bank) overlays on top where it applies — this is a real simulation of what
+the engine's palette buffer would hold at that moment, not a rendering
+convenience.
+
+**Applied and shipped**:
+- `tools/shared/ishar-sprite-atlas.ts` (batch atlas pipeline, all 4 titles):
+  resolves each file's own `0xFE` palette, falls back to a sibling
+  `FOND.DO`/`FOND.CO`'s world palette, falls back to the existing
+  normalized-greyscale render only if NEITHER resolves (no file's render
+  regresses). Same decode counts as before (1608/2244/2744/931 sprites) —
+  purely a rendering change. Result: **74/74 Ishar 1 atlases**,
+  **74/119 Ishar 2**, **64/113 Ishar 3**, **12/33 Crystals of Arborea**
+  atlases now render in real colour (`manifest.json`'s `hasPalette: true`).
+  Ishar 2/3/Crystals don't ship a single shared `FOND.DO`/`FOND.CO` file
+  (per-location backdrops instead, or none for Crystals), so only files
+  with their OWN `0xFE` slot get colour there — a full world-palette
+  fallback for those titles is unexplored, out of this session's scope
+  (Ishar 1 was the target per the task brief).
+- `tools/shared/ishar-firstperson.ts`: `LocationFrameOptions.palette`
+  (optional, `IsharPalette` from `ishar-palette.ts`) threads through
+  `compositeFrame()`/`blit()`; omitting it renders exactly as before (no
+  regression to any existing caller, including the interactive walker,
+  which is NOT yet wired to pass a palette — out of this session's scope).
+- `tools/ishar/amigaaga/firstperson-preview.ts` (new, committed): renders
+  one real `FORET.bin` frame (196 real sprite placements, the richest of
+  every `CONT1` interior cell tried) with `FOND.bin`'s resolved world
+  palette, shipped as `public/assets/ishar/amigaaga/screens/foret-color.png`
+  + `.json` sidecar + manifest entry.
+
+**Visual confirmation** (Method §4's bar — via `Read` on the rendered
+PNGs, all genuinely plausible, none garish/random-looking):
+- `sprites/dragon.png` (Ishar 1): a red/dark-red dragon — a real fire/scale
+  colour scheme, not noise.
+- `sprites/arbre.png` (Ishar 1, tree): green foliage canopies over brown
+  trunks.
+- `sprites/orc.png`/`sprites/barbare.png` (Ishar 1): tan/brown skin tones,
+  dark leather/armor accents — real, plausible humanoid figure colouring.
+- `sprites/dragon5.png` (Ishar 2): an orange/tan dragon amid yellow-orange
+  fire/explosion frames.
+- `sprites/death.png` (Crystals of Arborea): a dramatic burning-forest death
+  screen — a skeletal figure rising against an orange/red fire sky, dark
+  silhouetted trees — clearly deliberate, evocative artwork, not an
+  arbitrary palette assignment.
+- `screens/foret-color.png` vs. the same frame rendered greyscale
+  (`tools/.scratch/foret-preview-grey.png`, not shipped): the greyscale
+  version is illegible static noise for the backdrop panels; the colour
+  version immediately reads as a blue sky with white clouds over a green
+  grass field — a decisive readability improvement, not just "different
+  colours."
+
+**Confidence**: CONFIRMED for the on-disk format (direct source port) and
+for the `0xFE` marker mechanism (corpus census + independent disassembly
+cross-check on 15+ monster scripts' own literal `cpalette` operands).
+RENDERED for the specific claim that `FOND.DO`'s slot 8 is THE single
+canonical world palette used by every outdoor scene (strong circumstantial
+evidence — near-identical embedded copies elsewhere, correct `palOffset`
+alignment, decisive visual plausibility — but no bytecode trace pins a
+`cpalette` call site loading this exact resource for `FORET.bin`
+specifically, since outdoor scripts issue no `cpalette` call of their own
+at all).
+
+## Remaining open items
 
 | Item | Status |
 |---|---|
-| Real AGA colour palette | Every render above is greyscale (index value mapped to a grey ramp), not true colour. `topalette()` (`image.c`) resolves a palette via the SAME `adresdes()` directory mechanism as bitmaps, but at a bytecode-chosen index — i.e. *which* directory entry is "the palette for this scene" is selected by VM bytecode at runtime, not by any static marker on the resource itself. No disassembly trace or bytecode interpretation was attempted this session to locate that index. |
 | Unimplemented bitmap types | Rect-fill, Mac 1-bit, DOS CGA, FLI-video-delta, and the Transarctica/RR map-tile renderer types (see §2) are not ported. Not confirmed present in this corpus, but not exhaustively ruled out either — the 82-90%-of-slots-resolve figure (module doc) suggests a real minority of directory entries use a type not implemented here, or are placeholder (`0xff`) slots. |
 | Raw Amiga planar variant (`draw_ami_5bit_*`) | Named in the reference source's function list but not traced or tested against this corpus — not confirmed present or absent. |
+| Ishar 2/3/Crystals world palette | No single shared `FOND`-equivalent file was checked for these titles (Ishar 1 was the task's target) — a full colour pass for them needs finding their own per-region/per-location world-palette convention, likely each location's own backdrop file's `0xFE` slot rather than one shared resource. |
+| Interactive walker colour wiring | `ishar-firstperson.ts`'s `palette` option is implemented but not yet passed from `tools/walker/games-ishar.ts` (the live browser walker still renders first-person frames in greyscale) — deliberately out of scope this session to avoid touching a type shared across all 4 titles' walker wiring without re-verifying each one. |
 
 ### Paths tried (palette recovery)
 
-| Approach | Result | Why it stalled |
+| Approach | Result | Why it stalled / superseded |
 |---|---|---|
-| Static byte-pattern scan for a palette-shaped resource (16 or 256 RGB triplets) | Not attempted this session | Lower priority than pixel-format cracking per the task brief; deferred |
-| Reading `topalette()`'s AmigaAGA branch | Confirmed the FORMAT (`paldata[1]`=count, `paldata[2]`=bank offset, RGB triplets from `paldata[4]`) but not WHICH directory index holds it for any given scene | The index is chosen by VM bytecode context, not a static field — needs either a bytecode trace or a brute-force scan of every directory entry for one that looks palette-shaped (count/RGB-triplet sanity) |
+| Static byte-pattern scan for a palette-shaped resource (16 or 256 RGB triplets) | Not attempted in the original session | Lower priority than pixel-format cracking per that session's brief; deferred |
+| Reading `topalette()`'s AmigaAGA branch | Confirmed the FORMAT (`paldata[1]`=count, `paldata[2]`=bank offset, RGB triplets from `paldata[4]`) but not WHICH directory index holds it for any given scene | Superseded below — the index question turned out to be avoidable, not just traceable |
+| Disassembling `cpalette`/`ctopalet` call sites across the Ishar 1 `.DO` corpus (`tools/shared/alis-disasm.ts`) | Found 38 real call sites; most in monster/portrait scripts resolve to a literal `oimmb` operand (directly usable), but `MAIN.DO`'s own 12 call sites resolve to a `basemain`-relative global byte (`omainb(0x21)`) or a runtime boolean condition (`odiff(oimmb(-1))`, `oegal(oimmb(-1))` choosing between "restore" and a literal slot) with no static write to that global found in this session's reached CFG | Correctly diagnosed as "runtime-computed for outdoor scenes specifically" — but turned out to be the wrong question to chase, since NO outdoor location script issues a `cpalette` call at all (see below) |
+| Scanning every directory slot's resolved header for a palette-shaped signature (byte0, count/RGB-triplet sanity) instead of tracing bytecode | **SUCCEEDED** — `paldata[0] === 0xFE` is a clean, universal, zero-false-positive marker (62 hits, cross-checked against all known bitmap types) | This is the shipped mechanism — see the CONFIRMED section above |
