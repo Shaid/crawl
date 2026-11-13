@@ -172,6 +172,14 @@ six supported types, across all four titles.
 
 ## 5. Real AGA colour palette — CONFIRMED (2026-09-01)
 
+> **2026-11-13 correction — the decode is right, the Ishar 1 *choice* is
+> unproven.** No `cpalette`/`cput` reaches FOND slot 8; `FRISE.bin+0xeb`'s
+> literal `cpalette(40)` (= `GERDEP` slot 12) differs from it in exactly
+> entries 81–86, the backdrop ground bank — so the ground colour is likely
+> wrong. One apparent `0xFE` false positive each in Ishar 2/3; Crystals is
+> `EPlatformAmiga`, not AGA. See `ishar-container-format.md` § "Review —
+> 2026-11-13", finding 3.
+
 > **Correction:** superseding the "not yet recovered" verdict below (kept
 > as the paths-tried record) — a real AGA colour palette IS now recovered
 > and applied, for Ishar 1 CONFIRMED end-to-end and generalized (RENDERED)

@@ -15,6 +15,112 @@ Everything past the container layer (per-title resource semantics, the
 overworld/dungeon-view question) remains a from-scratch investigation —
 no prior-art tool or fan documentation covers Ishar's *content* formats.
 
+## Review — 2026-11-13 `re-codebreaker` gap audit (read first)
+
+An adversarial pass over this doc, `ishar-sprite-format.md`, `docs/ishar/TODO.md`
+and the `tools/shared/ishar-*`/`alis-*` code, checked against the
+`maestun/alis` reference source (commit `31b1811`, 2026-10-23). Probes were
+scratch-only. Inline corrections elsewhere are marked "2026-11-13".
+
+1. **HIGH — grid lookups are transposed in all three Ishar first-person
+   renderers.** Reference: `tabchar()` (`alis.c:2073`) computes
+   `base + D7 + stride*pop`, and `omaintc` = `(s8)xread8(tabchar(basemain+off))`
+   (`opernames.c:479`) — D7 (the accumulator, `direct`) is the **column**, the
+   popped value is the **row**. Code: `readGrid` uses `x = pop(); y = direct;
+   grid.read(buf, x, y)` → `terrain[gy*width + gx]`, putting the popped value
+   on the column (`ishar-firstperson.ts:134-140`, `ishar2-firstperson.ts`,
+   `ishar3-firstperson.ts`, callers `games-ishar.ts:495`,
+   `firstperson-preview.ts:44`). The scripts' own clamps fix the axes: Ishar 1
+   `FORET.bin` clamps `0x137c` by `54-v-1` (row count, `+0xdd`/`+0xf2`) and
+   `0x137d` by `90-v-1` (stride, `+0x1d8`/`+0x1ed`), so `0x137c` = Y and
+   `0x137d` = X — `ISHAR1_GLOBALS` names them backwards (§9.1's own GERDEP
+   formula `grid[v(0x3fd0)*90 + v(0x137d)]` agrees `0x137d` is the column).
+   Ishar 2 `FORET1`: `0x2ab4` bounded by 90 (rows), `0x2ab5` by 60 (stride) —
+   names swapped the same way. Ishar 3 `FORET`: `0x257` bounded by 82 (rows),
+   `0x14b6` by 57 — names right, read still transposed. **Effect:** in Ishar
+   1/2 the double swap reads the right cells but puts the script's clamps and
+   facing slots on the wrong axis — walker facing f behaves as real slot 3−f,
+   placements' lateral positions are roughly mirrored, and facings 0/2 see
+   only 165 of 381 cells. In Ishar 3 the wrong cells are read: (20,70) gives
+   0 placements (794/794 reads return 0) vs 640 under reference indexing;
+   (40,70) 0 vs 412; (20,10) 1,042 vs 1,376. The "hand-verified" `facing+1`
+   mapping was checked inside the transposed frame and must be re-derived.
+   Crystals' 2-pop formula already matches `tabchar`. TODO:
+   `ishar-grid-index-transpose`.
+2. **HIGH/MED — sprites are centre-anchored, not base-anchored.** Reference
+   (v<60, `image.c:~3105-3126`): `anchorx = newl>>1`, `anchory = newh>>1`,
+   `newy = tmpdepy - anchory`. `compositeFrame` uses `dstY = pixelY - height`,
+   drawing every sprite and the backdrop ~h/2 too high. Fix:
+   `dstX = pixelX - ((w-1)>>1)`, `dstY = pixelY - ((h-1)>>1)`. The rest of the
+   projection checks out: Ishar 1's `cdefsc` block (`MAIN.bin+0x18`) gives
+   numelem `0x40`, so `scalaire()` reduces to `screenY = y*k - z` with
+   `k = config[0x1e] = 0`, `credon_off = 0`, `creducing = config[0x17] = 0xff`
+   (no perspective divide) — note the module doc cites `config[0x18]` for
+   creducing; that byte is redmax (also `0xff`), right only by coincidence.
+   TODO: `ishar-sprite-anchor`.
+3. **MED — Ishar 1's world palette (FOND slot 8) is not the one the code
+   demonstrably loads.** No `cpalette` and no `cput` reaches FOND slot 8
+   (FOND's only placements are `cputnat` idx 6/7). `FRISE.bin+0xeb` does a
+   literal `cpalette(40)`; that 256-colour table is byte-identical to `GERDEP`
+   slot 12 and differs from FOND slot 8 in exactly entries 81–86 — FOND's own
+   backdrop ground bank (palOffset 80, 2,579 px at 81–86). So the shipped
+   `foret-color.png` ground is probably wrong (FRISE40 = olive/grey-green,
+   FOND8 = saturated). `GEREN.bin` issues `cpalette` 14–17 (variants differing
+   from FOND in 87–105 entries) — palettes look location/time-dependent. The
+   reference also applies a palette when a `0xFE` resource is `cput`
+   (`image.c:1582`, `picture_v10:1439`). The "0 false positives" `0xFE` claim
+   has an apparent exception: one slot each in Ishar 2/3 with
+   `colors=0 b2=2 b3=68`. `ishar-palette.ts` calls Crystals `EPlatformAmigaAGA`;
+   it is `EPlatformAmiga` (`.CO`, `platform.c:41`) — harmless, all 41 Crystals
+   palettes use the 16-colour path. TODO: `ishar1-palette-provenance`.
+4. **Resolved — header byte 21 is not a subtype byte.** Old-format header
+   (`script.c:845-850`): `+18 w_unknown5` (0x20), `+20 vram_alloc_sz` (u16),
+   `+22 w_unknown7`; byte 21 is the low byte of the script's local-variable RAM
+   size. Check: highest referenced local offset ≤ `vram_alloc_sz` in Ishar 1
+   89/89 and Ishar 2 130/130; null controls (+18 or +22) give 35/89 and 40/130
+   violations. The rest of §6's "shared scene header" is just the ALIS script
+   header (id, unknown01/02 = 0x1c, code_loc 0x0016, ret_offset, dw3,
+   dw4 = dirOff); `0x47` in the DJ files means more locals. §6's reading as
+   evidence of a scene-descriptor format is superseded. Closes
+   `ishar-scene-header-subtype-byte`.
+5. **MED — Ishar 2 view window may be 13 px low.** Its `cdefsc` gives
+   newx 0, **newy 13**, w 255, h 112, cy 78; the reference adds cx/cy to the
+   projected position and clips to `newx..newx+w` (`image.c:4422`), so cy is
+   probably absolute screen coordinates while the code treats horizonY 78 as
+   window-relative. Blit not traced. TODO: `ishar2-view-window-offset`.
+6. **LOW — doc/code contradictions.** §2.3: Ishar 2's only `0x81` file is
+   `LIONMAN5.DO` (its `MAIN.DO` is `0xA1`; census 97+1 / 136+1 / 136 / 36+6).
+   §3's "Ishar 2/3 MAIN.DO show no strings — open" is explained by `0xA1`.
+   §2.5/`silmarils-unpack.ts`: Amiga interlace is bit `0x40` (`unpack.c:417`),
+   not `0x80` (harmless — no `0x80` file observed). §7 still says the palette
+   "remains open". `fillPlaceholderSkyGround`'s comment says no palette is
+   recovered. Counts disagree: Crystals 31/36 files & 905 sprites (sprite §4)
+   vs 931 (§5) vs 33/42 & 931 on disk; Ishar 1 74/74 atlases vs 75 manifest
+   entries.
+7. **Unknowns with no TODO row.** Walkability is `isBlocked` (value < 0), a
+   hypothesis (GERDEP's real movement test at `+0x9a5` not in the reached
+   CFG). One screen config for every placement, where the reference keys it
+   per sprite (`elemsprvar->screen_id`; FOND `cputnat` numelem 1/0, GERDEP
+   14/15). The interpreter drops writes to main globals and defaults unwritten
+   ones to 0 (Crystals `0x2b3c`, Ishar 1 palette global `omainb(0x21)` depend
+   on this). `cswitch2` sets D7 to `2*index` in our interpreter where the
+   reference doesn't keep it; no s16 truncation of switch values. Ishar 3
+   `partyY = 0x257` sits just below the grid's `cdim` at `0x260` — plausible,
+   recheck. TODO: `ishar-walkability-rule`.
+
+**Re-verified and holding:** game IDs (`val3*val4` = 0xb71b00/0xec82e0/
+0x15b2330/0x6ddd00, 4/4 vs `platform.h`); stored/0x81/0xA1 header handling vs
+`unpack.c:375-419`/`script.c:1582-1630`; `cswitch1`/`cswitch2` vs
+`opcodes.c:819-873` incl. TEMPLE [10,16]; Crystals `direct + 2*p1 + 114*p2`
+vs `cdim`+`tabchar`; v20 `adresdes`; RGB12 `<<4`; Ishar 1/2 `cdefsc`
+cx/cy/w/h (127/86/255/125, 127/78/255/112).
+
+**Owner checks from memory:** do outdoor trees/buildings sit *on* the
+horizon or straddle it? Ishar 1 grass olive or saturated green? does the
+palette change in caves/temples or at dusk? a ~13 px UI strip above Ishar 2's
+3D window? what blocks walking (forest/mountain/coast/sea)? is the map
+north-up, and does turning right go clockwise on it?
+
 ## 1. Executables (disassembly oracle)
 
 Every title ships a real AmigaOS `loadseg()`-able hunk executable, which
@@ -333,6 +439,11 @@ misdecoded as garbage headers:
   = French "object/item") pending decompression, not as a real image file.
 
 ## 6. A single shared "scene/resource header" beneath the payload — STRUCTURAL, cross-title
+
+> **2026-11-13 correction:** this is the ordinary ALIS *script* header, not a
+> scene descriptor; byte 21 is the low byte of `vram_alloc_sz` (review
+> finding 4 at the top of this doc). The cross-title-format argument below is
+> superseded.
 
 The single most important structural finding of this session, and the
 strongest lead on the task's central "overworld vs. dungeon-view mechanism"
