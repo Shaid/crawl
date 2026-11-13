@@ -11,7 +11,11 @@
  *
  * - `magic = readU32BE(0)`; `packerKind = magic >>> 24` is exactly this
  *   project's `classByte` (`ishar-container.ts`): `0x81` = "old" RLE,
- *   `0x80` = "old interlaced" RLE, `0xA1` = "new" LZ77-style codec.
+ *   `0xA1` = "new" LZ77-style codec. (2026-11-13 correction: on Amiga the
+ *   old codec's 8-pass interlace is selected by bit `0x40` of the packer
+ *   byte -- `unpack.c:417`, `(typepack & 0x40) == 0 ? 1 : 8` -- not by
+ *   `0x80` vs `0x81`; `0x80` is a plain old-RLE file. No interlaced file
+ *   exists in this corpus, so no output changed.)
  * - `unpackedSize = magic & 0x00ffffff` is exactly `(sizeHigh << 16) |
  *   sizeLow` from `parseIsharHeader`.
  * - The `u16` at file offset 4 (this project's "table[0:2]", always `0x0001`
@@ -52,7 +56,10 @@
  */
 
 const PACKER_KIND_OLD = 0x81;
-const PACKER_KIND_OLD_INTERLACED = 0x80;
+/** Old-RLE packer bytes accepted: `0x80`/`0x81`, plus the `0x40`-flagged (Amiga 8-pass interlaced) `0xC0`/`0xC1`. */
+const PACKER_KINDS_OLD = new Set([0x80, PACKER_KIND_OLD, 0xc0, 0xc1]);
+/** Amiga interlace flag for the old codec (`unpack.c:417`). */
+const PACKER_FLAG_INTERLACED = 0x40;
 const PACKER_KIND_NEW = 0xa1;
 /**
  * "Stored" class (`docs/ishar-container-format.md` §2.2) — no compression at
@@ -284,8 +291,7 @@ export function unpackSilmarilsScript(buf: Buffer | Uint8Array): UnpackResult | 
   const magic = view.readUInt32BE(0);
   const packerKind = magic >>> 24;
   if (
-    packerKind !== PACKER_KIND_OLD &&
-    packerKind !== PACKER_KIND_OLD_INTERLACED &&
+    !PACKER_KINDS_OLD.has(packerKind) &&
     packerKind !== PACKER_KIND_NEW &&
     packerKind !== PACKER_KIND_STORED
   ) {
@@ -319,10 +325,8 @@ export function unpackSilmarilsScript(buf: Buffer | Uint8Array): UnpackResult | 
     data = packedBuffer.subarray(0, unpackedSize);
   } else if (packerKind === PACKER_KIND_NEW) {
     data = unpackNew(packedBuffer, unpackedSize, dictionary);
-  } else if (packerKind === PACKER_KIND_OLD) {
-    data = unpackOld(packedBuffer, packedSize, unpackedSize, false);
   } else {
-    data = unpackOld(packedBuffer, packedSize, unpackedSize, true);
+    data = unpackOld(packedBuffer, packedSize, unpackedSize, (packerKind & PACKER_FLAG_INTERLACED) !== 0);
   }
 
   return { packerKind, isMain, data };
