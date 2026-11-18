@@ -44,18 +44,18 @@
  *    2 wallsets -> 241/242 present). This is a strong independent
  *    ID-arithmetic cross-check, not a coincidence.
  *
- * The **pixel format** of `8x8d.dax`'s tiles is a lower-confidence,
- * "rendered" (not code-confirmed) extension of this: each block's
- * decompressed data is 4 bytes shorter than a clean multiple of 8
- * (2252 = 4 + 8*281, 1036 = 4 + 8*129, 1484 = 4 + 8*185 — all exact), so
- * `decode8x8Tiles` below skips a 4-byte per-block header and treats the
- * rest as 8-byte, 1-bit-per-pixel, MSB-first tiles — identical to Gold Box
- * Explorer's DOS-side `MonoBlock` decoder, minus that leading header (whose
- * own meaning is not decoded). Rendered wall composites using this decode
- * show clear, non-random brick/stone crosshatch texture and symmetric
- * door/frame structure (see `docs/poolofradiance/amiga/data-structure.md`),
- * which is real visual evidence the decode is basically right, but no
- * disassembly trace confirms it — flagged "rendered" throughout.
+ * The **pixel format** of `8x8d.dax`'s tiles (corrected 2026-11-18 — the
+ * earlier "4-byte header + 1bpp 8-byte tiles" reading was WRONG, see
+ * `docs/poolofradiance/audit-2026-11-13-changes.md`): every entry is one
+ * 12-byte image header `(u16 h=8, u16 wBytes=2, u16 x, u16 y, u16 count,
+ * u16 bytesPerItem=16)` followed by FOUR bitplanes, each holding the whole
+ * bank (`count` items of 16x8 px = two 8x8 glyphs side by side). Exact:
+ * `len == 12 + count*16*4` on 23/23 entries. One walldef byte indexes one
+ * glyph: index 0 = none, 1..45 = universal bank (id 203) glyphs 0..44
+ * (glyph 45 is all-zero padding of the last 16-wide item), then the
+ * wallset's own 70 glyphs (`program+0x6D53E` holds the matching slot-base
+ * table 1, 46, 116, 186, 256). 4 planes = 16 index values; no palette has
+ * been located (`por-palette`), so renders map the index to a grey ramp.
  */
 import { readDaxDirectory, decompressDaxEntry, type DaxEntry } from './dax.ts';
 
@@ -107,49 +107,80 @@ export function decodeWallSlices(data: Uint8Array): WallSlice[] {
 }
 
 /**
- * Decode one `8x8d.dax` block's tiles: skip its 4-byte leading header, then
- * read 8x8 1bpp MSB-first tiles (one bit per pixel, 255 = set / 0 = clear).
- * Returns a flat array of 64-byte (8x8) greyscale tiles, one per index.
+ * Build one 8x8 greyscale tile (64 bytes, row-major) from planar glyph data:
+ * `planeRows[p][y]` is the byte for plane `p`, row `y` (MSB = leftmost
+ * pixel, plane 0 = bit 0 of the colour index). The colour index is mapped
+ * to a grey ramp (`index * 255 / (2^planes - 1)`) because no palette is
+ * known yet; the mapping is injective, so equality tests on the grey value
+ * are equality tests on the index.
  */
-export function decode8x8Tiles(data: Uint8Array): Uint8Array[] {
-  const body = data.subarray(4);
-  const count = Math.floor(body.length / 8);
-  const tiles: Uint8Array[] = [];
-  const bitMask = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
-  for (let t = 0; t < count; t++) {
-    const tile = new Uint8Array(64);
-    for (let y = 0; y < 8; y++) {
-      const b = body[t * 8 + y];
-      for (let x = 0; x < 8; x++) {
-        tile[y * 8 + x] = b & bitMask[x] ? 255 : 0;
-      }
+export function glyphFromPlanes(planeRows: number[][]): Uint8Array {
+  const planes = planeRows.length;
+  const max = (1 << planes) - 1;
+  const tile = new Uint8Array(64);
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      let idx = 0;
+      for (let p = 0; p < planes; p++) if (planeRows[p][y] & (0x80 >> x)) idx |= 1 << p;
+      tile[y * 8 + x] = Math.round((idx * 255) / max);
     }
-    tiles.push(tile);
   }
-  return tiles;
+  return tile;
 }
 
 /**
- * Assemble the tile bank a given walldef.dax block id draws from: index 0 is
- * a placeholder (grey — no real tile has been observed to need it, but
- * indices are read unchecked from the wall data), followed by the
- * "universal" tile block (id 203, present in every corpus 8x8d.dax) and
- * then this block's own specific tiles (matching Gold Box Explorer's
- * `load8x8Bitmaps` ordering).
+ * Decode one `8x8d.dax` entry (12-byte image header + 4 whole-bank bitplanes,
+ * 16x8-px items = two glyphs) into 8x8 greyscale glyph tiles, left glyph of
+ * item 0 first. Throws if the exact-length invariant `len == 12 + count*16*4`
+ * does not hold.
  */
-export function buildTileBank(fileData: Uint8Array, blockId: number): Uint8Array[] {
+export function decodePorGlyphs(data: Uint8Array): Uint8Array[] {
+  if (data.length < 12) throw new Error('8x8d entry shorter than its 12-byte header');
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const [h, wBytes, , , count, bpi] = [0, 2, 4, 6, 8, 10].map((o) => dv.getUint16(o, false));
+  if (h !== 8 || wBytes !== 2 || bpi !== 16 || data.length !== 12 + count * bpi * 4) {
+    throw new Error(`8x8d entry: bad header h=${h} wBytes=${wBytes} count=${count} bpi=${bpi} len=${data.length}`);
+  }
+  const glyphs: Uint8Array[] = [];
+  for (let i = 0; i < count; i++) {
+    for (let half = 0; half < 2; half++) {
+      const planeRows: number[][] = [];
+      for (let p = 0; p < 4; p++) {
+        const rows: number[] = [];
+        for (let y = 0; y < 8; y++) rows.push(data[12 + p * count * bpi + i * bpi + y * 2 + half]);
+        planeRows.push(rows);
+      }
+      glyphs.push(glyphFromPlanes(planeRows));
+    }
+  }
+  return glyphs;
+}
+
+/** Number of real glyphs in the universal bank (id 203): its 46th glyph is all-zero padding that fills the last 16-px item. */
+export const POR_UNIVERSAL_GLYPHS = 45;
+
+/**
+ * Open `8x8d.dax` once: the universal glyphs (id 203, glyph 45 padding
+ * dropped) and a `lookup(id)` for a wallset's own 70 glyphs. Compose a
+ * walldef entry's bank with `buildEntryTileBank`
+ * (`tools/shared/goldbox-walltiles.ts`): `[none, universal(45), wallset
+ * glyphs at 46 + 70*slot]`.
+ */
+export function openTileBanks(fileData: Uint8Array): {
+  universal: Uint8Array[];
+  lookup: (id: number) => Uint8Array[] | undefined;
+} {
   const { entries } = readDaxDirectory(fileData);
   const byId = new Map<number, DaxEntry>(entries.map((e) => [e.indexID, e]));
-  const placeholder = new Uint8Array(64).fill(128);
-  const bank: Uint8Array[] = [placeholder];
-
-  const universal = byId.get(203);
-  if (universal) bank.push(...decode8x8Tiles(decompressDaxEntry(fileData, universal)));
-
-  const specific = byId.get(blockId);
-  if (specific) bank.push(...decode8x8Tiles(decompressDaxEntry(fileData, specific)));
-
-  return bank;
+  const u = byId.get(203);
+  const universal = u ? decodePorGlyphs(decompressDaxEntry(fileData, u)).slice(0, POR_UNIVERSAL_GLYPHS) : [];
+  return {
+    universal,
+    lookup: (id) => {
+      const e = byId.get(id);
+      return e ? decodePorGlyphs(decompressDaxEntry(fileData, e)) : undefined;
+    },
+  };
 }
 
 /** Composite a view's tile-index grid into a flat 8bpp greyscale bitmap (width*height bytes, one byte per pixel). */

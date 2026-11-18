@@ -27,7 +27,8 @@ import { resolve } from 'node:path';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
 import { readDaxDirectory, decompressDaxEntry } from './dax.ts';
-import { decodeWallSlices, buildTileBank, renderView, VIEW_OFFSET } from './walldef.ts';
+import { decodeWallSlices, openTileBanks, renderView, VIEW_OFFSET } from './walldef.ts';
+import { buildEntryTileBank, SLICES_PER_WALLSET } from '../../shared/goldbox-walltiles.ts';
 import { assetDir, syncDataManifest, manifestEntry, writeManifest } from '../../shared/asset-paths.ts';
 import { decodePorGeoEntry } from '../../shared/goldbox-geo.ts';
 import { exportGeoDungeon } from '../../shared/goldbox-dungeon-export.ts';
@@ -106,12 +107,17 @@ export async function exportPoolOfRadianceData(dataDir: string) {
     const walldefData = readBinary(walldefPath);
     const tilesData = readBinary(tilesPath);
     const { entries } = readDaxDirectory(walldefData);
+    const banks = openTileBanks(tilesData);
     const renderedFiles: string[] = [];
     const viewToRender = VIEW_OFFSET.length - 4; // view index 6, the 8x7 "front face"
     for (const entry of entries) {
       const decoded = decompressDaxEntry(walldefData, entry);
       const slices = decodeWallSlices(decoded);
-      const bank = buildTileBank(tilesData, entry.indexID);
+      const wallsetCount = Math.ceil(slices.length / SLICES_PER_WALLSET);
+      // One bank per ENTRY: a multi-wallset entry (0 -> 1/2/3, 21 -> 211/212,
+      // 24 -> 241/242) loads its wallsets into consecutive slots and its
+      // slices reference glyphs across all of them.
+      const bank = buildEntryTileBank(banks.universal, entry.indexID, wallsetCount, banks.lookup);
       for (const slice of slices) {
         const view = slice.views[viewToRender];
         if (view.rows * view.cols <= 1) continue; // skip degenerate 1-tile views

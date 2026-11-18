@@ -12,16 +12,21 @@
  * length is an exact multiple of 156 bytes, zero remainder, corpus-wide (see
  * each title's `data-structure.md` §2).
  *
- * The 8x8 tile PIXEL format (1 bit per pixel, MSB-first, 8 bytes per tile —
- * `decode8x8Tiles` below) is also identical to Pool of Radiance's, but with
- * **no leading 4-byte per-block header** — PoR's dax-compressed
- * `8x8d.dax` blocks were each 4 bytes shorter than a clean multiple of 8,
- * so its own `decode8x8Tiles` skips 4 bytes before reading tiles. GLIB's own
- * "TILE"-tagged tile-group sub-blocks (found inside a nested GLIB/HLIB
- * container — see below) are tight, EXACT multiples of 8 bytes with no
- * header at all (confirmed on dozens of sample blocks: 40 = 5*8, 48 = 6*8,
- * etc, zero remainder every time) — a genuine, if minor, format divergence
- * from PoR, not a bug in either decoder.
+ * **Tile pixel format (corrected 2026-11-18 — the earlier "header-less 1bpp,
+ * 8 bytes per tile" reading was WRONG in every title, see
+ * `docs/<game>/audit-2026-11-13-changes.md`).** Every "TILE" sub-block is ONE
+ * 8x8 glyph: an 8-byte header `(u16 height=8, u16 x, u16 y, u8 widthBytes=1,
+ * u8 flag)` followed by P bitplanes stored plane-major, 8 bytes (one per
+ * row, MSB = leftmost pixel) per plane. 48 B = 5 planes (Curse/Secret walls
+ * and the universal bank 203), 40 B = 4 planes (bank 202, UI/arrow glyphs —
+ * not wall art), 56 B = 6 planes (Pools wallsets). A sub-block with
+ * `height = 0` is a palette (8-byte header + 16 or 32 RGB888 triplets), not
+ * a glyph. The header grammar fits 1325/1325 (Curse), 1395/1395 (Secret) and
+ * 1536/1536 (Pools) glyph blocks. One WALLDEF byte indexes one GLYPH:
+ * 0 = none, 1..45 = universal glyphs 0..44, then the wallset's own 70
+ * glyphs (Curse/Secret); Pools has 256 glyphs per bank and no universal
+ * bank. Colours are palette indices; no palette is wired up yet
+ * (`goldbox-glib-palette`), so renders use a grey ramp of the index.
  *
  * **Two distinct tile-bank organizations are present in this corpus** (see
  * data-structure.md for the full writeup):
@@ -60,14 +65,15 @@
  *    `buildWallSpecificTileBank` composes `[placeholder, ...universal,
  *    ...specific]` — the exact 3-part structure Pool of Radiance's own
  *    `buildTileBank` (`tools/poolofradiance/amiga/walldef.ts`) already uses,
- *    reused here rather than re-derived. The **tile-vs-block index-unit
- *    question is still open** (`docs/goldbox-glib-format.md` §5.6) — these
- *    renders use the "index = one 8x8 tile" reading, matching Pool of
- *    Radiance's own confirmed convention, and are labelled RENDERED, not
- *    CONFIRMED, pending that question's resolution.
+ *    reused here rather than re-derived. The tile-vs-block index-unit question
+ *    (`docs/goldbox-glib-format.md` §5.6) is settled: one byte = one 8x8
+ *    glyph (the "one byte = one block" correction, recorded as confirmed
+ *    but never applied to this decoder until 2026-11-18). Validated by the
+ *    seam-continuity oracle in `tools/shared/__tests__/goldbox-glyph.test.ts`.
  */
 import {
   decodeWallSlices,
+  glyphFromPlanes,
   renderView,
   VIEW_OFFSET,
   VIEW_COLS,
@@ -77,38 +83,41 @@ import {
   type WallView,
 } from '../poolofradiance/amiga/walldef.ts';
 import {
-  decodeGlibIndex,
-  findBlockById,
   parseGlibContainer,
   readBlock,
   type GlibBlock,
-  type GlibContainer,
 } from './goldbox-glib.ts';
 import { decompressGlibBlock } from './goldbox-glib-codecs.ts';
 
-export { decodeWallSlices, renderView, VIEW_OFFSET, VIEW_COLS, VIEW_ROWS, WALL_SLICE_SIZE };
+export { decodeWallSlices, glyphFromPlanes, renderView, VIEW_OFFSET, VIEW_COLS, VIEW_ROWS, WALL_SLICE_SIZE };
 export type { WallSlice, WallView };
 
-/** Decode raw, uncompressed, header-less 8x8 1bpp MSB-first tiles (8 bytes each) — the GLIB "TILE" sub-block layout. */
-export function decode8x8Tiles(data: Uint8Array): Uint8Array[] {
-  const count = Math.floor(data.length / 8);
-  const tiles: Uint8Array[] = [];
-  const bitMask = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
-  for (let t = 0; t < count; t++) {
-    const tile = new Uint8Array(64);
-    for (let y = 0; y < 8; y++) {
-      const b = data[t * 8 + y];
-      for (let x = 0; x < 8; x++) {
-        tile[y * 8 + x] = b & bitMask[x] ? 255 : 0;
-      }
-    }
-    tiles.push(tile);
-  }
-  return tiles;
+export interface GlibGlyph {
+  planes: number;
+  /** 8x8 greyscale tile (index mapped to a grey ramp, see `glyphFromPlanes`). */
+  tile: Uint8Array;
 }
 
 /**
- * Decode one nested GLIB "TILE" bucket into a flat tile array. Compression-
+ * Decode one GLIB "TILE" sub-block: 8-byte header + P plane-major bitplanes.
+ * Returns `undefined` for a palette block (`height = 0`) or anything that
+ * does not match the glyph grammar (`height = 8`, `widthBytes = 1`,
+ * `(len - 8) % 8 == 0`, 1..8 planes) — callers that need an exact census
+ * should count the `undefined`s.
+ */
+export function decodeGlibGlyph(block: Uint8Array): GlibGlyph | undefined {
+  if (block.length < 16 || (block.length - 8) % 8 !== 0) return undefined;
+  const height = (block[0] << 8) | block[1];
+  const widthBytes = block[6];
+  const planes = (block.length - 8) / 8;
+  if (height !== 8 || widthBytes !== 1 || planes < 1 || planes > 8) return undefined;
+  const planeRows: number[][] = [];
+  for (let p = 0; p < planes; p++) planeRows.push(Array.from(block.subarray(8 + p * 8, 16 + p * 8)));
+  return { planes, tile: glyphFromPlanes(planeRows) };
+}
+
+/**
+ * Decode one nested GLIB "TILE" bucket into a flat glyph array (palette blocks skipped). Compression-
  * aware: decompresses first (a no-op copy for a stored/method-0 block — see
  * `decompressGlibBlock`), THEN parses the result as a container and decodes
  * every sub-block's tiles. Calling `parseGlibContainer` directly on a
@@ -121,30 +130,11 @@ export function decodeGlibTileBucket(data: Uint8Array, block: GlibBlock): Uint8A
   const image = decompressGlibBlock(data, block);
   const sub = parseGlibContainer(image, 0);
   const tiles: Uint8Array[] = [];
-  for (const b of sub.blocks) tiles.push(...decode8x8Tiles(readBlock(image, b)));
-  return tiles;
-}
-
-/**
- * The confirmed-working "flat" tile bank: index 0 = grey placeholder,
- * followed by every tile from the id-203 "universal" nested sub-container
- * (if present), followed by every tile from all OTHER ids' nested
- * sub-containers concatenated in index-table order. Each id's own block is
- * itself a nested GLIB container (tag "TILE") whose own blocks are raw,
- * header-less, exact-multiple-of-8-byte tile groups.
- */
-export function buildFlatTileBank(data: Uint8Array, outer: GlibContainer): Uint8Array[] {
-  const index = decodeGlibIndex(data, outer);
-  const placeholder = new Uint8Array(64).fill(128);
-  const bank: Uint8Array[] = [placeholder];
-
-  const universalBlock = findBlockById(outer, index, 203);
-  if (universalBlock) bank.push(...decodeGlibTileBucket(data, universalBlock));
-  for (const { id, blockIndex } of index) {
-    if (id === 203) continue;
-    bank.push(...decodeGlibTileBucket(data, outer.blocks[blockIndex]));
+  for (const b of sub.blocks) {
+    const glyph = decodeGlibGlyph(readBlock(image, b));
+    if (glyph) tiles.push(glyph.tile); // palette blocks (height 0) are skipped
   }
-  return bank;
+  return tiles;
 }
 
 /**
@@ -223,13 +213,53 @@ export function resolveFlatWalldefId(entries: FlatWalldefEntry[], flatId: number
  * 3-part structure Pool of Radiance's own `buildTileBank`
  * (`tools/poolofradiance/amiga/walldef.ts`) already uses for its
  * `walldef.dax`/`8x8d.dax` pairing, reused here rather than re-derived.
- * `specificTiles` is `undefined` when the composite id has no scheme-2
- * entry (the bank then falls back to universal-only content).
  */
 export function buildWallSpecificTileBank(
   universalTiles: Uint8Array[],
   specificTiles: Uint8Array[] | undefined,
 ): Uint8Array[] {
+  // Pools of Darkness has no universal bank: its 256-glyph banks are indexed
+  // directly (index n = glyph n, no leading "none" slot) — seam-continuity
+  // lift 0.40 vs 0.17 for the placeholder-shifted alignment.
+  if (universalTiles.length === 0) return specificTiles ?? [new Uint8Array(64).fill(128)];
   const placeholder = new Uint8Array(64).fill(128);
   return [placeholder, ...universalTiles, ...(specificTiles ?? [])];
+}
+
+/** Glyphs in one bundled wallset's own bank (Curse/Secret and PoR: 70 = 35 16x8 items in PoR); the slot stride of the glyph index space. */
+export const GLYPHS_PER_WALLSET = 70;
+
+/**
+ * Compose the glyph bank one WALLDEF ENTRY draws from. Glyph index space:
+ * 0 = none, 1..45 = universal glyphs, then wallset slot `k` at
+ * `46 + GLYPHS_PER_WALLSET*k`. A multi-wallset entry (`wallsetCount > 1`)
+ * whose composite banks `10*id+n` exist has wallset `n` in slot `n-1`;
+ * otherwise the entry's own direct id is the (single) bank. `lookup(id)`
+ * returns a bank's glyphs or `undefined`. A missing composite is padded
+ * with `GLYPHS_PER_WALLSET` placeholders to keep later slots aligned.
+ * With no universal bank (Pools of Darkness) the bank is the direct id's
+ * glyphs unshifted (see `buildWallSpecificTileBank`). Returns `[]` when the
+ * entry has no bank at all.
+ *
+ * Why per entry: in Curse/Secret, 17/19 multi-wallset-entry slices draw
+ * glyphs from more than one slot, so the old per-slice single-bank render
+ * fell out of range (13 Curse and 57 Secret views were skipped) while this
+ * layout renders every view in range.
+ */
+export function buildEntryTileBank(
+  universalTiles: Uint8Array[],
+  baseId: number,
+  wallsetCount: number,
+  lookup: (id: number) => Uint8Array[] | undefined,
+): Uint8Array[] {
+  const direct = lookup(baseId);
+  if (direct) return buildWallSpecificTileBank(universalTiles, direct);
+  const specific: Uint8Array[] = [];
+  let any = false;
+  for (let n = 1; n <= Math.max(wallsetCount, 1); n++) {
+    const g = lookup(baseId * 10 + n);
+    if (g) any = true;
+    specific.push(...(g ?? Array.from({ length: GLYPHS_PER_WALLSET }, () => new Uint8Array(64).fill(128))));
+  }
+  return any ? buildWallSpecificTileBank(universalTiles, specific) : [];
 }

@@ -12,12 +12,10 @@ import { assetDir, manifestEntry, syncDataManifest, writeJson, writeManifest } f
 import { decodeGlibIndex, findBlockById, readBlock } from './goldbox-glib.ts';
 import { loadGlibFile } from './goldbox-glib-codecs.ts';
 import {
-  buildFlatTileBank,
-  buildWallSpecificTileBank,
+  buildEntryTileBank,
   decodeGlibTileBucket,
   decodeWallSlices,
   renderView,
-  resolveCompositeWallId,
   SLICES_PER_WALLSET,
   VIEW_OFFSET,
 } from './goldbox-walltiles.ts';
@@ -50,15 +48,14 @@ export interface WallRenderSource {
    * covers this gracefully with zero code changes).
    */
   walldefPath?: string;
-  /** Path to an 8x8-tile GLIB file using the "flat universal+specific" scheme (see goldbox-walltiles.ts). Optional — omit when no working flat source exists for this title (e.g. Pools of Darkness). */
+  /** @deprecated No longer rendered (2026-11-18): the flat bank (ids 202+203) is UI/arrow glyphs, not wall art. Kept so title configs still type-check. */
   tilesPath?: string;
   /**
    * Path to the per-wall-id nested-scheme ("scheme 2") 8x8-tile GLIB file —
    * the pairing WALLDEF is actually keyed to at runtime (its ids match
    * WALLDEF's own ids exactly via `resolveCompositeWallId`), now decodable
    * thanks to `goldbox-glib-codecs.ts`. When present, a second set of
-   * renders (`walldef2-*`) is written using this source, alongside (not
-   * replacing) any `tilesPath` renders.
+   * renders (`walldef2-*`) is written using this source.
    */
   specificTilesPath?: string;
   /**
@@ -215,39 +212,12 @@ export async function exportGoldBoxGlibData(
     const { data: wdata, container: wcon } = loadGlibFile(readFileSync(resolve(dataDir, wallRender.walldefPath)));
     const windex = decodeGlibIndex(wdata, wcon);
 
-    // 3a. "Flat" universal+specific scheme — a working sanity check of the
-    // pixel format + view-geometry compositor, not necessarily the file
-    // this WALLDEF is paired with at runtime (see WallRenderSource doc).
-    if (wallRender.tilesPath) {
-      const { data: tdata, container: tcon } = loadGlibFile(readFileSync(resolve(dataDir, wallRender.tilesPath)));
-      const bank = buildFlatTileBank(tdata, tcon);
-      let skippedOutOfRange = 0;
-      let rendered = 0;
-      for (const { id, blockIndex } of windex) {
-        const block = wcon.blocks[blockIndex];
-        const raw = wdata.subarray(block.start, block.end);
-        if (raw.length % 156 !== 0) continue;
-        const slices = decodeWallSlices(raw);
-        for (const slice of slices) {
-          const view = slice.views[viewToRender];
-          if (view.rows * view.cols <= 1) continue;
-          const maxIdx = Math.max(...view.tileIndices.flat());
-          if (maxIdx >= bank.length) {
-            skippedOutOfRange++;
-            continue;
-          }
-          const name = `walldef-${id}-wall${slice.wallNumber}-view${view.view}`;
-          await writeViewPNG(textureOutDir, name, view, bank);
-          allRenderedFiles.push(`textures/${name}`);
-          rendered++;
-        }
-      }
-      console.log(
-        `walldef textures (scheme 1, flat bank): ${rendered} PNGs written to ${textureOutDir} (${skippedOutOfRange} skipped, tile index out of this bank's range)`,
-      );
-    }
+    // (2026-11-18) The old "3a" flat-bank render (DISKA 8X8D.TLB, ids 202+203,
+    // named `walldef-*`) is retired: bank 202 is a 4-plane UI/arrow glyph set,
+    // not wall art, and the render was a wrong-decode plausibility check.
+    // `WallRenderSource.tilesPath` is accepted but no longer rendered.
 
-    // 3b. Per-wall-id nested ("scheme 2") — the pairing WALLDEF is actually
+    // 3. Per-wall-id nested ("scheme 2") — the pairing WALLDEF is actually
     // keyed to at runtime, decodable now that goldbox-glib-codecs.ts covers
     // the compressed nested payload. Index-unit question still open
     // (docs/goldbox-glib-format.md §5.6) — labelled RENDERED, not CONFIRMED.
@@ -270,38 +240,26 @@ export async function exportGoldBoxGlibData(
         const raw = wdata.subarray(block.start, block.end);
         if (raw.length % 156 !== 0) continue;
         const slices = decodeWallSlices(raw);
-        // Try the WALLDEF id DIRECTLY first — this covers both Curse/
-        // Secret's own single-wallset ids (5 slices) AND Pools of
-        // Darkness's later-title simplification (a direct 1:1 index with
-        // NO composite ids at all, even though its own entries run 15
-        // slices — 3x the 5-slice quantum below). Composite ids are a
-        // Curse/Secret-specific fallback for their own multi-wallset ids
-        // (14/17 etc), tried only when no direct entry exists.
-        const directBlock = findBlockById(scon, sindex, id);
-        // A composite wallset's tile bank is shared across a fixed run of 5
-        // raw wall slices (`SLICES_PER_WALLSET`, confirmed against every
-        // Curse/Secret WALLDEF entry's own byte length: 780/1560/2340 are
-        // all multiples of 780 = 5*156) — NOT one composite id per slice.
-        // Curse's own scheme-2 index confirms this exactly: ids 14/17
-        // (1560 B, two wallsets of 5 slices) resolve to composite ids
-        // 141/142 and 171/172 respectively, one composite id per 5-slice
-        // chunk, not per individual slice.
+        // One bank per WALLDEF ENTRY (not per slice): an entry with several
+        // bundled wallsets (5 slices each, `SLICES_PER_WALLSET`) loads them
+        // into consecutive slots — glyph index 46+70*slot — and its slices
+        // reference glyphs across all of them (a slice of wallset 0 often
+        // mixes slot-0 and slot-1 glyphs). See `buildEntryTileBank`.
+        // Pools of Darkness has no composite ids (a direct 1:1 index, 15
+        // slices per entry) and no universal bank.
         const wallsetCount = Math.ceil(slices.length / SLICES_PER_WALLSET);
+        const lookup = (tid: number) => {
+          const b = findBlockById(scon, sindex, tid);
+          return b ? decodeGlibTileBucket(sdata, b) : undefined;
+        };
+        const bank = buildEntryTileBank(universalTiles, id, wallsetCount, lookup);
+        if (bank.length === 0) {
+          skippedNoEntry += slices.length;
+          continue;
+        }
         for (const slice of slices) {
           const view = slice.views[viewToRender];
           if (view.rows * view.cols <= 1) continue;
-          let specificBlock = directBlock;
-          if (!specificBlock) {
-            const wallsetIndex = Math.floor(slice.wallNumber / SLICES_PER_WALLSET);
-            const compositeId = resolveCompositeWallId(id, wallsetIndex, wallsetCount);
-            specificBlock = findBlockById(scon, sindex, compositeId);
-          }
-          if (!specificBlock) {
-            skippedNoEntry++;
-            continue;
-          }
-          const specificTiles = decodeGlibTileBucket(sdata, specificBlock);
-          const bank = buildWallSpecificTileBank(universalTiles, specificTiles);
           const maxIdx = Math.max(...view.tileIndices.flat());
           if (maxIdx >= bank.length) {
             skippedOutOfRange++;
