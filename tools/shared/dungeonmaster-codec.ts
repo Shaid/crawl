@@ -17,9 +17,12 @@
  * .../data-files/ — fetched 2026-09-02) and verified against real corpus
  * bytes (see `docs/dungeonmaster-format.md`): `decompressDungeon` produces
  * exactly the declared uncompressed byte count with 0 deviation on every
- * dungeon file in the corpus, and `decodeImg1` decodes every `GRAPHICS.DAT`
- * item to exactly `width*height` pixels with 0 residue/overrun on the full
- * corpus (see the extractor's self-check).
+ * dungeon file in the corpus. For the pixel codecs, "decodes cleanly" must
+ * be judged with the `*Checked` variants (`decodeImg1Checked`,
+ * `decodeImg4Checked`), which report how much of the item's own bytes the
+ * run stream consumed: the plain decoders allocate `width*height` pixels
+ * up front and read zeros past end-of-item, so `pixels.length === w*h` and
+ * "fully filled" hold even for a mis-parsed item (2026-11 audit).
  */
 import { r16 } from '@seer-project/core';
 
@@ -32,15 +35,26 @@ export interface DecodedImage {
 
 /** Reads 4-bit nibbles MSB-first out of a byte stream (high nibble of each byte first). */
 class NibbleReader {
-  private pos = 0; // nibble position
+  /** Nibbles consumed so far, counted from the reader's start. */
+  pos = 0;
+  /** True once a read went past `limitNibbles` (reads then return 0). */
+  overrun = false;
   private data: Uint8Array;
   private byteOffset: number;
-  constructor(data: Uint8Array, byteOffset: number) {
+  private limitNibbles: number;
+  constructor(data: Uint8Array, byteOffset: number, startNibble = 0, limitNibbles = Infinity) {
     this.data = data;
     this.byteOffset = byteOffset;
+    this.pos = startNibble;
+    this.limitNibbles = limitNibbles;
   }
 
   nibble(): number {
+    if (this.pos >= this.limitNibbles) {
+      this.overrun = true;
+      this.pos++;
+      return 0;
+    }
     const byteIdx = this.byteOffset + (this.pos >> 1);
     const b = this.data[byteIdx] ?? 0;
     const n = this.pos & 1 ? b & 0xf : (b >> 4) & 0xf;
@@ -62,10 +76,31 @@ class NibbleReader {
  * big-endian and IMG2 little-endian but the RLE stream is identical).
  */
 export function decodeImg1Stream(data: Uint8Array, payloadOffset: number, width: number, height: number): Int16Array {
+  return img1Run(data, payloadOffset, width, height, Infinity).pixels;
+}
+
+/** Result of a consumption-aware decode: how much of the item's own bytes the run stream used. */
+export interface CheckedStream {
+  pixels: Int16Array;
+  /** Nibbles the run stream consumed (counted from the first stream nibble). */
+  consumedNibbles: number;
+  /** Nibbles available to the stream (item end, or end minus trailer). */
+  availableNibbles: number;
+  /** True if the stream tried to read past `availableNibbles`. */
+  overrun: boolean;
+}
+
+function img1Run(
+  data: Uint8Array,
+  payloadOffset: number,
+  width: number,
+  height: number,
+  limitNibbles: number,
+): CheckedStream {
   const total = width * height;
   const out = new Int16Array(total).fill(-1);
   let pos = 0;
-  const nr = new NibbleReader(data, payloadOffset);
+  const nr = new NibbleReader(data, payloadOffset, 0, limitNibbles);
 
   const putSolid = (count: number, color: number) => {
     for (let i = 0; i < count && pos < total; i++) out[pos++] = color;
@@ -130,7 +165,49 @@ export function decodeImg1Stream(data: Uint8Array, payloadOffset: number, width:
       break;
     }
   }
-  return out;
+  return { pixels: out, consumedNibbles: nr.pos, availableNibbles: limitNibbles, overrun: nr.overrun };
+}
+
+/**
+ * `IMG1` decode of a whole item with an exact-consumption verdict. `exact`
+ * is the real structural check (the run stream ends precisely on the item's
+ * last nibble); `pixels.length === width*height` proves nothing because the
+ * output is allocated at that size.
+ */
+export interface CheckedImage extends DecodedImage {
+  consumedNibbles: number;
+  availableNibbles: number;
+  exact: boolean;
+}
+
+export function decodeImg1Checked(item: Uint8Array): CheckedImage {
+  const width = r16(item, 0, 'be');
+  const height = r16(item, 2, 'be');
+  const avail = (item.length - 4) * 2;
+  const r = img1Run(item, 4, width, height, avail);
+  return {
+    width,
+    height,
+    pixels: r.pixels,
+    consumedNibbles: r.consumedNibbles,
+    availableNibbles: avail,
+    exact: !r.overrun && r.consumedNibbles === avail,
+  };
+}
+
+/**
+ * Is this GRAPHICS.DAT (DM1/CSB, DMCSB2) item a real `IMG1` image? Decides
+ * by exact consumption, not by a width/height size filter (the old
+ * w<=350/h<=220/w*h<=40000 filter dropped the five 320x153/320x200
+ * full-screen images — items 1, 4, 5, 728, 738 — and admitted item 672,
+ * a length-prefixed data item whose header merely reads as 130x11).
+ */
+export function isImg1Image(item: Uint8Array): boolean {
+  if (item.length < 5) return false;
+  const w = r16(item, 0, 'be');
+  const h = r16(item, 2, 'be');
+  if (w === 0 || h === 0 || w > 1024 || h > 1024) return false;
+  return decodeImg1Checked(item).exact;
 }
 
 /** Decode a full `IMG1` item (big-endian width/height header + RLE payload). */
@@ -165,10 +242,24 @@ export function decodeImg3Stream(
   height: number,
   localPalette: number[],
 ): Int16Array {
+  return img3Run(data, payloadOffset, 0, width, height, localPalette, Infinity).pixels;
+}
+
+function img3Run(
+  data: Uint8Array,
+  payloadOffset: number,
+  startNibble: number,
+  width: number,
+  height: number,
+  localPalette: number[],
+  limitNibbles: number,
+): CheckedStream & { selector5Runs: number; overshoot: boolean } {
   const total = width * height;
   const out = new Int16Array(total).fill(-1);
   let pos = 0;
-  const nr = new NibbleReader(data, payloadOffset);
+  let selector5Runs = 0;
+  let overshoot = false;
+  const nr = new NibbleReader(data, payloadOffset, startNibble, limitNibbles);
 
   const readCount = (): number => {
     const n1 = nr.nibble();
@@ -189,11 +280,20 @@ export function decodeImg3Stream(
     const multi = (control & 0x8) !== 0;
     const colorSel = control & 0x7;
     let color = -2; // -2 sentinel = "copy from previous line"
-    if (colorSel <= 5) color = localPalette[colorSel];
-    else if (colorSel === 7) color = nr.nibble();
+    if (colorSel <= 5) {
+      if (colorSel >= localPalette.length) {
+        // 5-entry-palette variant: selector 5 is not a palette slot. It is
+        // used by 727/730 of those items (2026-11 audit), so it is a real
+        // role (hypothesis: "take the pixel from the base image", the
+        // IMG7/IMG8 differential case). Left transparent (-1) here.
+        selector5Runs++;
+        color = -1;
+      } else color = localPalette[colorSel];
+    } else if (colorSel === 7) color = nr.nibble();
     // colorSel === 6: copy-from-previous-line, color stays -2
 
     const count = multi ? readCount() : 1;
+    if (count > total - pos) overshoot = true;
     for (let i = 0; i < count && pos < total; i++) {
       if (color === -2) {
         const src = pos - width;
@@ -203,7 +303,79 @@ export function decodeImg3Stream(
       }
     }
   }
-  return out;
+  return {
+    pixels: out,
+    consumedNibbles: nr.pos - startNibble,
+    availableNibbles: limitNibbles - startNibble,
+    overrun: nr.overrun,
+    selector5Runs,
+    overshoot,
+  };
+}
+
+/** Bytes of per-image trailer at the end of every DM2 `IMG4` item (2026-11 audit; see the doc). */
+export const IMG4_TRAILER_BYTES = 16;
+
+export interface CheckedImg4 extends DecodedImage {
+  /** Local-palette length: 6 (selectors 0-5) or 5 (selectors 0-4). */
+  paletteNibbles: 5 | 6;
+  localPalette: number[];
+  /**
+   * The last 16 bytes of the item. Values reach 0xFF, so they are not
+   * nibbles: hypothesis (unverified) that they are a per-image
+   * 16-entry nibble->global-colour map.
+   */
+  trailer: Uint8Array;
+  /**
+   * Runs that used selector 5 (only possible in the 5-nibble variant, where
+   * it is not a palette slot; those pixels are returned as -1/transparent
+   * and are the differential/overlay part the codec cannot resolve).
+   */
+  selector5Runs: number;
+  /** True when the run stream plus the trailer tile the item with at most one pad nibble. */
+  exact: boolean;
+  /** Pad nibbles between the run stream and the trailer (0 or 1). */
+  padNibbles: number;
+}
+
+/**
+ * Decode a DM2 `IMG4` item under the exact grammar: 4-byte BE w/h, a 5- or
+ * 6-nibble local palette, a run stream, an optional pad nibble, and a
+ * 16-byte trailer. Tries the 6-nibble variant first, then the 5-nibble
+ * one; the first whose run stream ends exactly 0 or 1 nibbles before the
+ * trailer wins. Returns `null` when neither tiles the item (the audit
+ * found 3/2,263 such items; those are not images under this grammar).
+ * Whether the item is a 5- or 6-nibble variant is not signalled by the
+ * first palette nibble (no discriminator found), so it is decided by the
+ * tiling itself.
+ */
+export function decodeImg4Checked(item: Uint8Array, onlyVariant?: 5 | 6): CheckedImg4 | null {
+  if (item.length < 4 + 3 + IMG4_TRAILER_BYTES) return null;
+  const width = r16(item, 0, 'be');
+  const height = r16(item, 2, 'be');
+  if (width === 0 || height === 0 || width * height > 1 << 22) return null;
+  const nibbleAt = (n: number) => ((item[4 + (n >> 1)] ?? 0) >> (n & 1 ? 0 : 4)) & 0xf;
+  const streamEnd = (item.length - 4) * 2 - IMG4_TRAILER_BYTES * 2; // nibbles, relative to payload start
+  for (const pal of [6, 5] as const) {
+    if (onlyVariant !== undefined && pal !== onlyVariant) continue;
+    const localPalette = Array.from({ length: pal }, (_, i) => nibbleAt(i));
+    const r = img3Run(item, 4, pal, width, height, localPalette, streamEnd);
+    if (r.overrun || r.overshoot) continue;
+    const pad = streamEnd - (pal + r.consumedNibbles);
+    if (pad !== 0 && pad !== 1) continue;
+    return {
+      width,
+      height,
+      pixels: r.pixels,
+      paletteNibbles: pal,
+      localPalette,
+      trailer: item.subarray(item.length - IMG4_TRAILER_BYTES),
+      exact: true,
+      padNibbles: pad,
+      selector5Runs: r.selector5Runs,
+    };
+  }
+  return null;
 }
 
 /** Decode a full `IMG4` item (big-endian header, 6-nibble local palette). */

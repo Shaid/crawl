@@ -11,8 +11,10 @@
  * are NOT `IMG1` — the community docs' own item-type table marks almost
  * the whole file `RAW1` ("not yet decoded"). Real bytes confirm they are
  * `IMG4` instead (big-endian header, 6-nibble local palette, different RLE
- * control-nibble grammar): 2,237/2,263 plausible-header items (98.9%)
- * decode to >=95% filled with zero decode errors, and the rendered atlas
+ * control-nibble grammar, plus a 16-byte trailer): 2,260/2,263
+ * plausible-header items tile exactly under the 5-/6-nibble-palette
+ * grammar (the earlier ">=95% filled, 98.9%" figure was a vacuous metric),
+ * and the rendered atlas
  * shows unmistakable real content (multi-language status-bar UI text —
  * "HEALTH/STAMINA/MANA", "GEZOND/KRAFT/MANA", "SANTE/VIGUEUR/MANA",
  * "POISONED VERGIFTET VENENEUX" — plus weapon and wall-texture art). See
@@ -38,7 +40,7 @@ import { resolve } from 'node:path';
 import { writePNG } from '@seer-project/pipeline';
 import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex } from '../../shared/asset-paths.ts';
 import { parseDataFileHeader, readItem } from '../../shared/dungeonmaster-container.ts';
-import { decodeImg4, ensureDungeonDecompressed } from '../../shared/dungeonmaster-codec.ts';
+import { decodeImg4, decodeImg4Checked, ensureDungeonDecompressed } from '../../shared/dungeonmaster-codec.ts';
 import { parseDungeon, type ParsedDungeon } from '../../shared/dungeonmaster-dungeon.ts';
 import { packGreyscaleAtlas, renderMapTopDown } from '../../shared/dungeonmaster-render.ts';
 import { convertPlayer4xToMod, isPlayer4x } from '../../shared/amiga-player4x.ts';
@@ -82,27 +84,30 @@ async function exportWallAtlas() {
   const data = new Uint8Array(readFileSync(resolve(DATA_DIR, 'GRAPHICS.DAT')));
   const df = parseDataFileHeader(data);
   const images: { name: string; img: ReturnType<typeof decodeImg4> }[] = [];
-  let candidateCount = 0;
+  let tiledCount = 0;
+  let differentialCount = 0;
   for (const item of df.items) {
-    if (item.size < 8 || item.size > 32768) continue;
     const raw = readItem(data, item);
+    // Same plausibility gate as the spec/test (flag-masked dimensions are a
+    // separate open item, dm2-gfx-dimension-flags).
+    if (raw.length < 8 || raw.length > 32768) continue;
     const w = (raw[0] << 8) | raw[1];
     const h = (raw[2] << 8) | raw[3];
     if (w === 0 || h === 0 || w > 350 || h > 220 || w * h > 40000) continue;
-    candidateCount++;
-    let img: ReturnType<typeof decodeImg4>;
-    try {
-      img = decodeImg4(raw);
-    } catch {
+    // Exact grammar: 4-byte w/h + 5- or 6-nibble palette + run stream +
+    // optional pad nibble + 16-byte trailer must tile the item exactly.
+    // (The old ">=95% filled" gate was vacuous: the decoder reads zeros past
+    // end-of-item and loops until w*h pixels exist, so almost anything
+    // "decoded"; see docs/dungeonmaster2/amiga/data-structure.md.)
+    const img = decodeImg4Checked(raw);
+    if (!img) continue;
+    tiledCount++;
+    // 5-nibble-palette items use selector 5 for pixels this codec cannot
+    // resolve (differential/overlay); skip those rather than ship holes.
+    if (img.selector5Runs > 0) {
+      differentialCount++;
       continue;
     }
-    // A minority of items are the "differential"/overlay `IMG8` sub-format
-    // (composited over a separately-stored base image) — decodeImg4 alone
-    // leaves those mostly unfilled. Skip anything that isn't >=95% filled
-    // rather than shipping a partially-garbage render.
-    let filled = 0;
-    for (const p of img.pixels) if (p >= 0) filled++;
-    if (filled < img.pixels.length * 0.95) continue;
     images.push({ name: `item${item.index}`, img });
   }
   const sample = images.slice(0, 400);
@@ -110,7 +115,7 @@ async function exportWallAtlas() {
   const spriteDir = assetDir('sprites', GAME, PLATFORM);
   await writePNG(resolve(spriteDir, 'graphics-sample.png'), atlas.rgba, atlas.width, atlas.height);
   writeJson(resolve(spriteDir, 'graphics-sample.json'), { frames: atlas.frames, width: atlas.width, height: atlas.height });
-  return { entry: manifestEntry('sprites/graphics-sample', sample.length), candidateCount, decodedCount: images.length };
+  return { entry: manifestEntry('sprites/graphics-sample', sample.length), tiledCount, differentialCount, decodedCount: images.length };
 }
 
 function exportMusic() {
@@ -137,9 +142,9 @@ async function main() {
   const dm2 = exportDungeon('DUNGEON.DAT', 'dungeon');
   manifest.push(...(await exportTopDownMaps(dm2, 'dm2')));
 
-  const { entry, candidateCount, decodedCount } = await exportWallAtlas();
+  const { entry, tiledCount, differentialCount, decodedCount } = await exportWallAtlas();
   manifest.push(entry);
-  console.log(`GRAPHICS.DAT: ${candidateCount} plausible image-shaped items, ${decodedCount} decoded as IMG4 (>=95% filled)`);
+  console.log(`GRAPHICS.DAT: ${tiledCount} items tile exactly as IMG4 (${differentialCount} differential/selector-5 skipped), ${decodedCount} in atlas`);
 
   const { unpacked, skipped } = exportMusic();
   console.log(`music/: ${unpacked} P41A modules unpacked to ProTracker .mod, ${skipped} skipped (not P41A-signed)`);

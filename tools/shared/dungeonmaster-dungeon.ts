@@ -12,13 +12,15 @@
  * Only the square-type grid (needed for a top-down/renderer view) is
  * decoded structurally here — doors/teleporters/sensors/creatures/items
  * lists are documented but not parsed (see that doc's "Open" section).
- * The map-data section start is located by working backward from the end
- * of the (already-decompressed) dungeon buffer using the header's own
- * declared `mapDataSize`, since Map Data is always the last content
- * section before an optional 2-byte checksum — this needs no assumption
- * about the exact record width of every preceding list type (some of
- * which — Projectiles/Explosions — the community docs don't give a fixed
- * record size for, and can be non-empty in save-embedded dungeons).
+ * The map-data section start is located by walking the sections forward
+ * from the header (all 16 thing-type record sizes are known: projectile = 8,
+ * explosion = 4 — confirmed 2026-11 on the CSB `MINI.DAT` embedded dungeon,
+ * 60 projectiles + 50 explosions, and the same size table is stored as data
+ * in each game's executable overlay). The forward walk lands exactly on EOF
+ * (or EOF-2 plus a checksum) for DM1 EN/FR/DE, CSB Prison EN/FR/DE, DM2 and
+ * `MINI.DAT`; the declared `mapDataSize` is kept as an independent
+ * cross-check. The optional 2-byte trailer is the big-endian 16-bit sum of
+ * every preceding byte (4/4 exact: DM1 EN, CSB Prison, DM2, MINI).
  */
 import { r16 } from '@seer-project/core';
 
@@ -52,7 +54,12 @@ export interface DungeonHeader {
 
 export interface MapDefinition {
   index: number;
-  mapDataOffsetWords: number;
+  /**
+   * Byte offset of this map's cells within the Map Data section (14/14 DM1,
+   * 2/2 CSB Prison, 44/44 DM2, 11/11 MINI maps equal the cumulative byte
+   * cursor). Earlier versions called this a word offset; that was wrong.
+   */
+  mapDataOffsetBytes: number;
   offsetX: number;
   offsetY: number;
   width: number;
@@ -93,6 +100,16 @@ export interface ParsedDungeon {
   maps: ParsedMap[];
   mapDataOffset: number;
   hasChecksum: boolean;
+  /** Stored/computed 16-bit trailer sum when a trailer is present. */
+  checksum?: { stored: number; computed: number; valid: boolean };
+  /**
+   * True when the forward section walk (header + 16 record lists) landed
+   * exactly on the declared Map Data start; false only for the legacy
+   * back-from-EOF fallback.
+   */
+  forwardTilingExact: boolean;
+  /** True when every map's def.mapDataOffsetBytes equals the cumulative byte cursor. */
+  mapOffsetsMatchCursor: boolean;
 }
 
 const RECORD_SIZE = {
@@ -107,7 +124,41 @@ const RECORD_SIZE = {
   potions: 4,
   containers: 8,
   misc: 4,
+  projectiles: 8,
+  explosions: 4,
 } as const;
+
+/** 16-bit big-endian-comparable byte sum used by the optional 2-byte trailer. */
+export function dungeonChecksum(d: Uint8Array, end: number, start = 0): number {
+  let sum = 0;
+  for (let i = start; i < end; i++) sum = (sum + d[i]!) & 0xffff;
+  return sum;
+}
+
+/** Byte length of everything before Map Data, from the header's own counts. */
+function frontMatterBytes(header: DungeonHeader, defs: { width: number }[]): number {
+  const c = header.counts;
+  return (
+    44 +
+    header.mapCount * 16 +
+    defs.reduce((sum, m) => sum + m.width * 2, 0) +
+    header.objectListSizeWords * 2 +
+    header.textDataSizeWords * 2 +
+    c.doors * RECORD_SIZE.doors +
+    c.teleporters * RECORD_SIZE.teleporters +
+    c.texts * RECORD_SIZE.texts +
+    c.sensors * RECORD_SIZE.sensors +
+    c.creatures * RECORD_SIZE.creatures +
+    c.weapons * RECORD_SIZE.weapons +
+    c.armours * RECORD_SIZE.armours +
+    c.scrolls * RECORD_SIZE.scrolls +
+    c.potions * RECORD_SIZE.potions +
+    c.containers * RECORD_SIZE.containers +
+    c.misc * RECORD_SIZE.misc +
+    c.projectiles * RECORD_SIZE.projectiles +
+    c.explosions * RECORD_SIZE.explosions
+  );
+}
 
 function parseHeader(d: Uint8Array): DungeonHeader {
   const startWord = r16(d, 8, 'be');
@@ -147,7 +198,7 @@ function parseMapDefs(d: Uint8Array, count: number): MapDefinition[] {
     const doorWord = r16(d, o + 14, 'be');
     defs.push({
       index: i,
-      mapDataOffsetWords: r16(d, o, 'be'),
+      mapDataOffsetBytes: r16(d, o, 'be'),
       offsetX: d[o + 6],
       offsetY: d[o + 7],
       height: ((sizeWord >> 11) & 0x1f) + 1,
@@ -175,98 +226,91 @@ function decodeSquare(byte: number): Square {
 }
 
 /**
- * Parse a fully-decompressed dungeon buffer (see `ensureDungeonDecompressed`
- * in `dungeonmaster-codec.ts` for compressed `DUNGEON.DAT` files).
+ * Locate an uncompressed "Dungeon Data" section embedded in a larger buffer
+ * (e.g. Chaos Strikes Back's `MINI.DAT` saved-game file, which embeds its
+ * whole dungeon in plaintext — see `docs/dungeonmaster-format.md`).
+ *
+ * Seed-agnostic: a candidate offset is accepted only if (1) the header and
+ * map definitions are structurally plausible, (2) the forward section walk
+ * (`frontMatterBytes` + `mapDataSize`) ends inside the buffer, and (3) the
+ * 2-byte trailer right after Map Data equals the 16-bit sum of every byte
+ * from the candidate start up to it. (The previous scan whitelisted the
+ * ornament seeds {99,8,13,0,5,6}, which already contained the answer's own
+ * seed, so it was not independent; 2026-11 audit.) On the real `MINI.DAT`
+ * this yields exactly one hit, 10098, ending exactly at EOF.
  */
-/**
- * Locate an uncompressed "Dungeon Data" section embedded in a larger
- * buffer (e.g. Chaos Strikes Back's `MINI.DAT` saved-game file, which
- * embeds its whole dungeon in plaintext per the "Saved Game Files" docs —
- * see `docs/dungeonmaster-format.md`). Scans for the header shape
- * `[ornamentSeed:u16][mapDataSize:u16][mapCount:u8][pad:u8]` with
- * `mapCount` matching one of the known real values (2 = CSB Prison,
- * 11 = CSB Dungeon, 14 = DM1, 44 = DM2) and `pad === 0`. Returns the byte
- * offset of every match — callers should expect exactly one on a
- * well-formed file (verified 2026-09-02 against the real `MINI.DAT`: a
- * single hit, whose distance to EOF matches the dmweb-documented section
- * byte length exactly).
- */
-const KNOWN_ORNAMENT_SEEDS = new Set([99, 8, 13, 0, 5, 6]); // see dmweb "Dungeon Files" § header word 0
-
-export function findDungeonDataOffsets(d: Uint8Array, knownMapCounts = [2, 11, 14, 44]): number[] {
+export function findDungeonDataOffsets(d: Uint8Array, maxMapCount = 64): number[] {
   const hits: number[] = [];
   for (let i = 0; i + 44 + 16 <= d.length; i++) {
-    const ornamentSeed = r16(d, i, 'be');
-    const mapCount = d[i + 4];
-    if (d[i + 5] !== 0 || !knownMapCounts.includes(mapCount) || !KNOWN_ORNAMENT_SEEDS.has(ornamentSeed)) continue;
+    const mapCount = d[i + 4]!;
+    if (d[i + 5] !== 0 || mapCount < 1 || mapCount > maxMapCount) continue;
+    if (i + 44 + mapCount * 16 > d.length) continue;
     const mapDataSize = r16(d, i + 2, 'be');
-    if (mapDataSize < 16 || mapDataSize > 200000) continue;
-    // Cross-check map definition 0 (right after the 44-byte header) for a
-    // plausible width/height/level, and that its declared map-data offset
-    // fits inside the declared map-data region.
-    const sizeWord = r16(d, i + 44 + 8, 'be');
-    const height = ((sizeWord >> 11) & 0x1f) + 1;
-    const width = ((sizeWord >> 6) & 0x1f) + 1;
-    const level = sizeWord & 0x3f;
-    const mapDataOffsetWords = r16(d, i + 44, 'be');
-    if (width < 1 || width > 32 || height < 1 || height > 32 || level > 63) continue;
-    if (mapDataOffsetWords * 2 >= mapDataSize) continue;
+    if (mapDataSize < mapCount) continue;
+    const sub = d.subarray(i);
+    const header = parseHeader(sub);
+    const defs = parseMapDefs(sub, mapCount);
+    if (defs.some((m) => m.width > 32 || m.height > 32 || m.level > 63)) continue;
+    const mapDataStart = frontMatterBytes(header, defs);
+    const end = mapDataStart + mapDataSize;
+    if (i + end + 2 > d.length) continue;
+    // Map Data must itself be exactly the sum of the maps' cell counts + per-map graphics lists.
+    const expectMap = defs.reduce(
+      (sum, m) => sum + m.width * m.height + m.creatureTypesCount + m.wallCount + m.floorCount + m.doorDecoCount,
+      0,
+    );
+    if (expectMap !== mapDataSize) continue;
+    const stored = r16(d, i + end, 'be');
+    if (dungeonChecksum(d, i + end, i) !== stored) continue;
     hits.push(i);
   }
   return hits;
 }
 
+/**
+ * Parse a fully-decompressed dungeon buffer (see `ensureDungeonDecompressed`
+ * in `dungeonmaster-codec.ts` for compressed `DUNGEON.DAT` files).
+ */
 export function parseDungeon(d: Uint8Array): ParsedDungeon {
   const header = parseHeader(d);
   const defs = parseMapDefs(d, header.mapCount);
 
-  // Locate Map Data: it's the last content section, sized exactly
-  // header.mapDataSize, optionally followed by a 2-byte checksum before EOF.
-  const withChecksumOffset = d.length - 2 - header.mapDataSize;
-  const noChecksumOffset = d.length - header.mapDataSize;
-  // Independent cross-check for files where Projectiles/Explosions are
-  // known-empty (every standalone dungeon.dat; save-embedded dungeons may
-  // have non-zero counts and this front-matter estimate will then be a
-  // lower bound rather than exact).
-  const indexOfSquaresBytes = defs.reduce((sum, m) => sum + m.width * 2, 0);
-  const frontMatter =
-    44 +
-    header.mapCount * 16 +
-    indexOfSquaresBytes +
-    header.objectListSizeWords * 2 +
-    header.textDataSizeWords * 2 +
-    header.counts.doors * RECORD_SIZE.doors +
-    header.counts.teleporters * RECORD_SIZE.teleporters +
-    header.counts.texts * RECORD_SIZE.texts +
-    header.counts.sensors * RECORD_SIZE.sensors +
-    header.counts.creatures * RECORD_SIZE.creatures +
-    header.counts.weapons * RECORD_SIZE.weapons +
-    header.counts.armours * RECORD_SIZE.armours +
-    header.counts.scrolls * RECORD_SIZE.scrolls +
-    header.counts.potions * RECORD_SIZE.potions +
-    header.counts.containers * RECORD_SIZE.containers +
-    header.counts.misc * RECORD_SIZE.misc;
-
+  // Forward walk: header, map defs, per-column counts, object list, text,
+  // then the 16 fixed-size record lists, then Map Data. The legacy
+  // back-from-EOF placement is kept only as a fallback when the forward
+  // walk does not agree with the declared mapDataSize.
+  const forward = frontMatterBytes(header, defs);
   let mapDataOffset: number;
   let hasChecksum: boolean;
-  if (header.counts.projectiles === 0 && header.counts.explosions === 0 && frontMatter === withChecksumOffset) {
-    mapDataOffset = withChecksumOffset;
-    hasChecksum = true;
-  } else if (header.counts.projectiles === 0 && header.counts.explosions === 0 && frontMatter === noChecksumOffset) {
-    mapDataOffset = noChecksumOffset;
+  let forwardTilingExact: boolean;
+  if (forward + header.mapDataSize === d.length) {
+    mapDataOffset = forward;
     hasChecksum = false;
-  } else {
-    // Save-embedded dungeon (or a variant with non-empty projectile/
-    // explosion lists this reader doesn't size): trust the header-declared
-    // section ordering. Community docs confirm save-embedded Dungeon Data
-    // always carries a checksum.
-    mapDataOffset = withChecksumOffset;
+    forwardTilingExact = true;
+  } else if (forward + header.mapDataSize + 2 === d.length) {
+    mapDataOffset = forward;
     hasChecksum = true;
+    forwardTilingExact = true;
+  } else {
+    // Embedded in a larger buffer or an unsized variant: trust the declared
+    // size, counted back from EOF (assume a trailing checksum).
+    mapDataOffset = d.length - 2 - header.mapDataSize;
+    hasChecksum = true;
+    forwardTilingExact = false;
+  }
+  let checksum: ParsedDungeon['checksum'];
+  if (hasChecksum && mapDataOffset + header.mapDataSize + 2 <= d.length) {
+    const end = mapDataOffset + header.mapDataSize;
+    const stored = r16(d, end, 'be');
+    const computed = dungeonChecksum(d, end);
+    checksum = { stored, computed, valid: stored === computed };
   }
 
   const maps: ParsedMap[] = [];
   let cursor = mapDataOffset;
+  let mapOffsetsMatchCursor = true;
   for (const def of defs) {
+    if (def.mapDataOffsetBytes !== cursor - mapDataOffset) mapOffsetsMatchCursor = false;
     const cellCount = def.width * def.height;
     const squares: Square[][] = Array.from({ length: def.height }, () => new Array(def.width));
     // Stored column-major: column 0 top-to-bottom, then column 1, etc.
@@ -287,5 +331,5 @@ export function parseDungeon(d: Uint8Array): ParsedDungeon {
     maps.push({ def, squares, creatureGraphics, wallDecoGraphics, floorDecoGraphics, doorDecoGraphics });
   }
 
-  return { header, maps, mapDataOffset, hasChecksum };
+  return { header, maps, mapDataOffset, hasChecksum, checksum, forwardTilingExact, mapOffsetsMatchCursor };
 }

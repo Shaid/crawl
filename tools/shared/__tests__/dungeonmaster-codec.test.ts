@@ -4,6 +4,9 @@ import {
   decodeImg1,
   decodeImg3Stream,
   decodeImg4,
+  decodeImg1Checked,
+  isImg1Image,
+  decodeImg4Checked,
   parseCompressedDungeonHeader,
   decompressDungeon,
   isDungeonCompressed,
@@ -142,5 +145,67 @@ describe('decompressDungeon', () => {
     const plain = new Uint8Array([1, 2, 3, 4]);
     expect(isDungeonCompressed(plain)).toBe(false);
     expect(ensureDungeonDecompressed(plain)).toBe(plain);
+  });
+});
+
+
+describe('exact-consumption checks (the w*h assertion is a tautology)', () => {
+  it('decodeImg1Checked: a well-formed item consumes exactly its own nibbles', () => {
+    const item = new Uint8Array([0x00, 0x04, 0x00, 0x01, 0x05, 0xa2]);
+    const r = decodeImg1Checked(item);
+    expect(r.exact).toBe(true);
+    expect(r.consumedNibbles).toBe(4);
+    expect(r.availableNibbles).toBe(4);
+    expect(isImg1Image(item)).toBe(true);
+  });
+
+  it('null control: a truncated item still yields w*h pixels but is NOT exact', () => {
+    const item = new Uint8Array([0x00, 0x04, 0x00, 0x01, 0x05]); // second run missing
+    const r = decodeImg1Checked(item);
+    expect(r.pixels).toHaveLength(4); // the tautology: always true
+    expect(r.exact).toBe(false);
+    expect(isImg1Image(item)).toBe(false);
+  });
+
+  it('null control: trailing junk after a complete stream is NOT exact', () => {
+    const item = new Uint8Array([0x00, 0x04, 0x00, 0x01, 0x05, 0xa2, 0x77]);
+    expect(decodeImg1Checked(item).exact).toBe(false);
+  });
+
+  function img4Item(trailer: number[], streamBytes: number[], pal: number[]): Uint8Array {
+    // 4-byte header (w=4,h=1) + palette nibbles packed + stream + trailer
+    const nibs = [...pal];
+    const bytes: number[] = [0, 4, 0, 1];
+    const all = [...nibs];
+    for (const b of streamBytes) all.push(b >> 4, b & 15);
+    if (all.length % 2) all.push(0); // pad nibble
+    for (let i = 0; i < all.length; i += 2) bytes.push((all[i]! << 4) | all[i + 1]!);
+    return new Uint8Array([...bytes, ...trailer]);
+  }
+  const trailer = Array.from({ length: 16 }, (_, i) => 0xf0 + i);
+
+  it('decodeImg4Checked: 6-nibble palette + run stream + 16-byte trailer tile exactly', () => {
+    const item = img4Item(trailer, [0x01, 0x23], [0, 1, 2, 3, 4, 5]);
+    const r = decodeImg4Checked(item)!;
+    expect(r).not.toBeNull();
+    expect(r.paletteNibbles).toBe(6);
+    expect(Array.from(r.pixels)).toEqual([0, 1, 2, 3]);
+    expect(Array.from(r.trailer)).toEqual(trailer);
+  });
+
+  it('decodeImg4Checked: 5-nibble variant (selector 5 = non-palette role) tiles with a pad nibble', () => {
+    // pal nibbles 0..4 (5 entries); run stream control nibbles: 0,5,1,5 (two selector-5 pixels).
+    const item = img4Item(trailer, [0x05, 0x15], [9, 8, 7, 6, 5]);
+    const r = decodeImg4Checked(item, 5)!;
+    expect(r).not.toBeNull();
+    expect(r.paletteNibbles).toBe(5);
+    expect(r.selector5Runs).toBeGreaterThan(0);
+  });
+
+  it('null control: dropping one trailer byte (or adding one) breaks the tiling', () => {
+    const good = img4Item(trailer, [0x01, 0x23], [0, 1, 2, 3, 4, 5]);
+    expect(decodeImg4Checked(good)).not.toBeNull();
+    expect(decodeImg4Checked(good.subarray(0, good.length - 2))).toBeNull();
+    expect(decodeImg4Checked(new Uint8Array([...good, 0x00, 0x00]))).toBeNull();
   });
 });

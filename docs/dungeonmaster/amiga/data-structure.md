@@ -16,8 +16,8 @@ Extractor: `tools/dungeonmaster/amiga/export-data.ts`.
 | File | Role | Status |
 |---|---|---|
 | `Dungeon.DAT` / `DungeonF.DAT` / `DungeonG.DAT` | English/French/German dungeon (14 maps each) | **confirmed**, decoded end-to-end |
-| `Graphics.DAT` | Wall/UI/item bitmaps, `DMCSB1` container + `IMG1` codec | **confirmed**, 683/683 image items decode with 0 residue |
-| `TITL.DAT` | Title screen | not decoded (likely `IMG1`/`IMGx`, same container — not attempted this pass) |
+| `Graphics.DAT` | Wall/UI/item bitmaps, `DMCSB1` container + `IMG1` codec | **confirmed** by exact stream consumption: 687 image items (not 683; see Correction in § `Graphics.DAT`) |
+| `TITL.DAT` | Title screen | not decoded. **Correction (2026-11-18):** not a DMCSB container; an `AN`-chunk tagged stream (`AN 0140 00C8 0004`, tags `BR`/`P8`/`PL`/`SD`/...; `PL` = 16-colour palette). See `docs/dungeonmaster-format.md` § "FTL `AN`-chunk animation files" |
 | `ANIM.FTL`, `APPA.FTL`, `APPB.FTL`, `CNFG.FTL`, `GRF1.FTL`, `KAOS.FTL`, `MEM1.FTL`, `SWSH.FTL`, `USIO.FTL`, `VDEO.FTL` | Executable overlay/code segments (`.FTL` = FTL's own loader convention, not a data container) | not investigated — code, out of scope for this pass |
 | `BJELoad_R` | Boot loader | not investigated |
 | `save/` | Saved games | not investigated (see the shared doc's "Saved Game Files" citation, used for CSB instead since DM1 didn't need it) |
@@ -48,13 +48,25 @@ doesn't parse) — not byte-identical, but structurally identical (same
 CSB's `disk1/Graphics.DAT`, not the signature-less `DMCSB1` shape an earlier
 pass of this doc incorrectly assumed by community-docs analogy rather than
 real bytes), **749** total items, of which **683** are image-shaped
-candidates (header `width*height` in `[1,40000]`). All 683 decode under
-`IMG1` with 0 residue. Exported as a greyscale-ramp atlas (real pixel
+candidates (header `width*height` in `[1,40000]`). Exported as a greyscale-ramp atlas (real pixel
 *indices*, palette not yet recovered — see the shared doc):
 `public/assets/dungeonmaster/amiga/sprites/graphics-sample.png` +
 `.json` sidecar (400-item sample of the 683; every item decodes cleanly per
 the extractor's self-check, the cap is only to keep the shipped PNG a
 reasonable size).
+
+> **Correction (2026-11-18):** the "683 image items, 0 residue" statement was
+> circular (the test asserted `pixels.length === w*h`, true by construction)
+> and the size-filter classifier was wrong in both directions. By exact stream
+> consumption there are **687** images: item 672 (header "130x11") is a
+> length-prefixed data item and is excluded; five full screens (items 1, 4, 5,
+> 728, 738; 320x153/320x200) were dropped by the `w<=350, h<=220` filter and
+> are now included. Items 671-693 (and ~60 items 671-748) are length-prefixed
+> non-image data (several with PCM-like lag-1 correlation: items 675, 687, 711,
+> r1 0.90-0.96; item 694 starts "COMPAS"); sound may live there, contrary to
+> `dm1-music-sfx`'s "no sample files evident" (tracked as
+> `dm-graphics-nonimage-items`). See `docs/dungeonmaster-format.md`. The
+> shipped atlas now uses `isImg1Image`.
 
 **Rendered, unmistakably real content** (visually confirmed): "The End"
 title text, a legible on-screen alphabet keyboard/name-entry UI, champion

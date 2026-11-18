@@ -10,7 +10,7 @@ function sq(type: Square['type'], hasObject = false): Square {
 describe('renderMapTopDown', () => {
   it('renders a 2x2 map at 10px/cell with the object marker only on flagged squares', () => {
     const map: ParsedMap = {
-      def: { index: 0, mapDataOffsetWords: 0, offsetX: 0, offsetY: 0, width: 2, height: 2, level: 0, floorRandomCount: 0, floorCount: 0, wallRandomCount: 0, wallCount: 0, difficulty: 0, creatureTypesCount: 0, doorDecoCount: 0, doorType1Index: 0, doorType0Index: 0, mapGraphicsStyle: 0, floorCeilingStyle: 0 },
+      def: { index: 0, mapDataOffsetBytes: 0, offsetX: 0, offsetY: 0, width: 2, height: 2, level: 0, floorRandomCount: 0, floorCount: 0, wallRandomCount: 0, wallCount: 0, difficulty: 0, creatureTypesCount: 0, doorDecoCount: 0, doorType1Index: 0, doorType0Index: 0, mapGraphicsStyle: 0, floorCeilingStyle: 0 },
       squares: [
         [sq('wall'), sq('floor', true)],
         [sq('floor'), sq('door')],

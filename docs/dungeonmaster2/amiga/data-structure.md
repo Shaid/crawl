@@ -15,7 +15,7 @@ Extractor: `tools/dungeonmaster2/amiga/export-data.ts`.
 | File | Role | Status |
 |---|---|---|
 | `DUNGEON.DAT` | Dungeon (44 maps) | **confirmed**, decoded end-to-end |
-| `GRAPHICS.DAT` | Wall/UI/item bitmaps, `DMII` container | **confirmed** for the `IMG4` "full"/base sub-format (98.9% of image-shaped items); **open** for the `IMG8` differential/overlay sub-format (~11%) |
+| `GRAPHICS.DAT` | Wall/UI/item bitmaps, `DMII` container | **confirmed** (exact tiling, 2,260/2,263 plausible-header items) for the `IMG4` grammar incl. the 5-nibble variant and 16-byte trailer (see Correction in § `IMG4` confirmed); **open**: the meaning of selector 5 / the differential compositing, and the 5-vs-6 variant flag |
 | `sample_palette.IFF` | A real ILBM (per the task brief) | not opened this pass — see TODO |
 | `music/*.MOD` (×10) | **`P41A`-packed modules, not standard ProTracker** despite the `.MOD` extension | **confirmed and decoded** — see below |
 | `save/*.DAT` | Saved games | not investigated |
@@ -34,6 +34,20 @@ docs' own independently-stated in-game location for this dungeon's first
 map ("Level 7 — Sun Clan / Hall of Champions") — a second, independent
 piece of corroborating evidence for the header/map-definition byte layout
 beyond the shared "coherent maze" visual check.
+
+> **Correction (2026-11-18):** the "level 7" match is weak corroboration (DM2
+> has several maps per level; maps 2/3, 4/5, ... share levels) and the
+> "coherent maze" check is visual. The real evidence is structural: the
+> forward section walk (header, 44 map defs, column counts, object list, text,
+> 16 thing lists, Map Data) lands exactly on EOF-2; the 2-byte trailer is the
+> 16-bit byte sum (0x3D9F, verified); the per-column thing-count table equals
+> the `hasObject` squares of the column-major grid on 725/725 columns (row-major
+> null control: 122/725); and all 44 per-map byte offsets equal the cumulative
+> cursor. Square type 7 is 4,320 of 12,192 cells and type 2 only 576; whether
+> DM1's type semantics carry over to DM2 is unverified. `sample_palette.IFF`
+> is a 320x200 4-plane ILBM with a 16-entry CMAP (`000000 707070 909090
+> 703000 ...`) of unknown provenance (not a retail-style filename); it cannot
+> be the DM2 global palette if the image trailers index up to 255.
 
 Exported: `public/assets/dungeonmaster2/amiga/data/dungeon.json` (full
 header + all 44 map definitions + square grids), 44 top-down PNGs under
@@ -70,8 +84,8 @@ this file directly:
 
 - **2,263** items have a plausible image-shaped header (`width*height` in
   `[1,40000]`, both dimensions ≤350/220).
-- **2,237 (98.9%)** decode to ≥95%-filled pixel buffers with **zero** decode
-  exceptions.
+- ~~**2,237 (98.9%)** decode to ≥95%-filled pixel buffers with **zero** decode
+  exceptions.~~ **Vacuous — see the Correction below.**
 - Rendered as a greyscale atlas, the output is unmistakably real:
   **multi-language status-bar text baked directly into the bitmap art** —
   `HEALTH/STAMINA/MANA` (English), `GEZOND/KRAFT/MANA` (Dutch),
@@ -84,7 +98,30 @@ Exported: `public/assets/dungeonmaster2/amiga/sprites/graphics-sample.png`
 (400-item sample of the 2,237 successfully-decoded items) + `.json`
 sidecar.
 
+> **Correction (2026-11-18, supersedes the 98.9% claim above and the 6-nibble-only
+> grammar):** the "≥95% filled" gate measured nothing (the decoder loops to
+> `w*h` and reads zeros past end-of-item). Exact-consumption check: only 5/2,263
+> candidates consumed their item exactly under the 6-nibble grammar as shipped.
+> The leftover was a constant 32-33 nibbles = a **16-byte trailer**. Real
+> grammar: `u16 w, u16 h,` 6- or 5-nibble local palette, run stream, optional pad
+> nibble, 16-byte trailer. Result (`decodeImg4Checked`, test
+> `dungeonmaster2-amiga.test.ts`): **1,533** tile as 6-nibble, **727** as
+> 5-nibble (all use selector 5), **3** unexplained (2,260/2,263). Null controls:
+> pre-audit grammar (no trailer) <30 tile, IMG1 <100. 179 items tile under both
+> variants (a one-nibble shift self-synchronises), so tiling does not fix 5 vs 6
+> for those; no discriminator found in the first palette nibble. Trailer bytes
+> reach 0xFF (782 distinct): hypothesis, a per-image 16-entry nibble->global
+> colour map (the palette mechanism; `dm2-palette` is therefore not a 16-colour
+> table). ~751 further "non-candidate" items tile as images when the top 6 bits
+> of the width/height words are masked, so those words carry flags (533
+> six-nibble, 218 five-nibble; `dm2-gfx-dimension-flags`). GRAPHICS.DAT item 0
+> (80,380 B) begins `0x8001`, likely a nested index (`dm2-gfx-item0-index`).
+> The atlas exporter now ships exact-tiling items without selector 5.
+
 ### Open: the differential/overlay sub-format
+
+> Reframed 2026-11-18: the grammar is solved (see Correction above). What is
+> open is the meaning of selector 5 (compositing source) and the variant flag.
 
 The remaining ~11% of image-shaped items (26/2,263 candidates fell below
 the 95%-filled threshold, and an unknown further fraction of the corpus's

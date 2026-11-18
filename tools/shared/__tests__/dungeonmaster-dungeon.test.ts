@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDungeon, findDungeonDataOffsets } from '../dungeonmaster-dungeon.ts';
+import { parseDungeon, findDungeonDataOffsets, dungeonChecksum } from '../dungeonmaster-dungeon.ts';
 
 /**
  * Build a minimal synthetic uncompressed dungeon buffer: 44-byte header,
@@ -29,14 +29,17 @@ function buildSyntheticDungeon(): { buf: Uint8Array; squaresOffset: number } {
   // 16 squares, all "floor" (type=1, no object, attr=0) = byte 0x20.
   const squares = new Uint8Array(16).fill(0x20);
 
-  const checksum = new Uint8Array([0xab, 0xcd]);
-
-  const buf = new Uint8Array(header.length + def.length + squares.length + checksum.length);
+  // Per-column cumulative thing counts: 2 bytes per column (width=4 -> 8 bytes).
+  const colCounts = width * 2;
+  const buf = new Uint8Array(header.length + def.length + colCounts + squares.length + 2);
   buf.set(header, 0);
   buf.set(def, 44);
-  const squaresOffset = 44 + 16;
+  const squaresOffset = 44 + 16 + colCounts;
   buf.set(squares, squaresOffset);
-  buf.set(checksum, squaresOffset + squares.length);
+  // Real trailer: 16-bit sum of every preceding byte, big-endian.
+  const sum = dungeonChecksum(buf, squaresOffset + squares.length);
+  buf[squaresOffset + squares.length] = sum >> 8;
+  buf[squaresOffset + squares.length + 1] = sum & 0xff;
   return { buf, squaresOffset };
 }
 
@@ -69,12 +72,11 @@ describe('parseDungeon', () => {
     // Column-major: [ (x0,y0), (x0,y1), (x1,y0), (x1,y1) ]
     // wall(type0)=0x00, floor(type1)=0x20, door(type4)=0x80, stairs(type3)=0x60
     const squares = new Uint8Array([0x00, 0x20, 0x80, 0x60]);
-    const checksum = new Uint8Array([0, 0]);
-    const buf = new Uint8Array(44 + 16 + 4 + 2);
+    const colCounts = 2 * 2; // 2 columns x 2 bytes
+    const buf = new Uint8Array(44 + 16 + colCounts + 4 + 2);
     buf.set(header, 0);
     buf.set(def, 44);
-    buf.set(squares, 60);
-    buf.set(checksum, 64);
+    buf.set(squares, 60 + colCounts);
 
     const parsed = parseDungeon(buf);
     const sq = parsed.maps[0]!.squares;
@@ -95,13 +97,60 @@ describe('findDungeonDataOffsets', () => {
     outer.set(dungeon, junkBefore.length);
     outer.set(junkAfter, junkBefore.length + dungeon.length);
 
-    // mapCount=1 isn't one of the real games' known counts, so pass it explicitly.
-    const hits = findDungeonDataOffsets(outer, [1]);
+    const hits = findDungeonDataOffsets(outer);
     expect(hits).toEqual([junkBefore.length]);
   });
 
-  it('finds nothing when no known map count / ornament seed combination is present', () => {
+  it('null control: one corrupted byte in the dungeon breaks the checksum and the hit disappears', () => {
+    const { buf: dungeon } = buildSyntheticDungeon();
+    const outer = new Uint8Array(37 + dungeon.length + 23);
+    outer.set(dungeon, 37);
+    outer[37 + 50] ^= 0x01; // flip a byte inside the map-data region
+    expect(findDungeonDataOffsets(outer)).toEqual([]);
+  });
+
+  it('finds nothing in blank filler', () => {
     const junk = new Uint8Array(200).fill(0x00);
     expect(findDungeonDataOffsets(junk)).toEqual([]);
+  });
+});
+
+describe('parseDungeon: forward tiling and checksum', () => {
+  it('forward walk lands exactly on the declared Map Data start and the trailer verifies', () => {
+    const { buf, squaresOffset } = buildSyntheticDungeon();
+    const parsed = parseDungeon(buf);
+    expect(parsed.forwardTilingExact).toBe(true);
+    expect(parsed.mapDataOffset).toBe(squaresOffset);
+    expect(parsed.checksum).toMatchObject({ valid: true });
+    expect(parsed.mapOffsetsMatchCursor).toBe(true);
+  });
+
+  it('projectile (8 B) and explosion (4 B) records are counted in the forward walk', () => {
+    const { buf } = buildSyntheticDungeon();
+    // Insert 2 projectiles + 3 explosions (2*8 + 3*4 = 28 bytes) before Map Data.
+    const extra = 28;
+    const out = new Uint8Array(buf.length + extra);
+    const mdo = 60 + 8; // Map Data start (after def + 8 bytes of column counts)
+    out.set(buf.subarray(0, mdo), 0);
+    out.set(buf.subarray(mdo), mdo + extra);
+    const dv = new DataView(out.buffer);
+    dv.setUint16(40, 2);
+    dv.setUint16(42, 3);
+    const end = out.length - 2;
+    const sum = dungeonChecksum(out, end);
+    out[end] = sum >> 8;
+    out[end + 1] = sum & 0xff;
+    const parsed = parseDungeon(out);
+    expect(parsed.forwardTilingExact).toBe(true);
+    expect(parsed.mapDataOffset).toBe(mdo + extra);
+    expect(parsed.checksum?.valid).toBe(true);
+    // Null control: with the old "unknown size" assumption (0 bytes each) the walk would miss by 28.
+    expect(parsed.mapDataOffset).not.toBe(mdo);
+  });
+
+  it('a wrong trailer is reported invalid, not silently accepted', () => {
+    const { buf } = buildSyntheticDungeon();
+    buf[buf.length - 1] ^= 0xff;
+    expect(parseDungeon(buf).checksum?.valid).toBe(false);
   });
 });

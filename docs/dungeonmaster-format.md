@@ -108,12 +108,30 @@ Control grammar, read as nibble pairs `(n1, n2)`:
 | `0xa` | Transparent run: `n2+1` pixels |
 | `0xe` | Transparent run, extended: `n2<=0xc` → `n2+17`; `n2==0xd` → `byte()+1`; `n2==0xe` → `byte()+257`; else → `word()+1` |
 
-**Verified**: every `Graphics.DAT` item classified as image-shaped (header
+> **Correction (2026-11-18):** the "0 residue across 683/683" claim below was
+> circular. The tests asserted `pixels.length === width*height`, but the
+> decoder allocates exactly that many pixels up front, so the assertion could
+> never fail; and the `w<=350 && h<=220 && w*h<=40000` classifier both
+> admitted a non-image and dropped real images. Re-derived with an
+> **exact-consumption** check (the run stream must end on the item's last
+> nibble, `decodeImg1Checked`/`isImg1Image`): **687 real images** in both DM1's
+> and CSB's `Graphics.DAT`. Item **672** (header reads "130x11", 132 B) is a
+> length-prefixed data item (the run stream fills 1,430 px after 18 nibbles and
+> leaves 238 unread), not an image. The filter wrongly excluded five
+> full-screen images: items **1** (320x153) and **4, 5, 728, 738** (320x200);
+> all five consume exactly. The old 683 = 682 real images + item 672, so the
+> true count is 682 + 5 = 687. The DMCSB2 attribute words equal the item's first two
+> words in 731/749 items (data items included), so they are a header copy, not
+> an image/non-image oracle. Null control: the IMG4+trailer grammar tiles
+> <5% of the 687. Old text kept below as the superseded claim.
+
+**Superseded claim (circular):** every `Graphics.DAT` item classified as image-shaped (header
 `width*height` in `[1, 40000]`) decodes with **0 residue** (RLE stream
 consumes to exactly `width*height` pixels, no overrun/underrun) across
 **683/683** items in both DM1's and CSB's `Graphics.DAT` (byte-identical
 item counts and — spot-checked — several byte-identical item payloads,
-consistent with CSB reusing DM1's asset base). Rendered as a greyscale atlas
+consistent with CSB reusing DM1's asset base). DM1 vs CSB: 669/749 items
+byte-identical, 80 differ (2-5, 11, 26, 42-47, 329-378, 504, 550, 588-650, ...). Rendered as a greyscale atlas
 (`public/assets/dungeonmaster/amiga/sprites/graphics-sample.png` and the
 `chaosstrikesback` equivalent), the output is unmistakably real: "The End"
 title text, a legible on-screen alphabet keyboard, champion portrait
@@ -141,7 +159,31 @@ Run length (only when `bit3` set; otherwise implicitly 1):
 - else `n2,n3 = nibble(),nibble()`; `v=n2*16+n3`; if `v<0xff`: count = `v+17`.
 - else `n4..n7 = nibble()×4`; count = `n4*4096+n5*256+n6*16+n7`.
 
-**Verified**: applied to DM2's `GRAPHICS.DAT` (`DMII` container, 4,630
+> **Correction (2026-11-18):** the "2,237 (98.9%) decode to >=95%-filled"
+> metric measured nothing. The decoder loops until `pos >= width*height` and
+> its nibble reader returns 0 past end-of-item, so nearly every item "fills"
+> whether or not it parsed. Under the 6-nibble grammar as first shipped only
+> 5/2,263 candidates consumed their item exactly, 415 overran it, and the rest
+> left a dominant leftover of exactly 32-33 nibbles: a **fixed 16-byte
+> trailer** (one pad nibble when the run stream ends on an odd nibble, plus 16
+> bytes). Corrected grammar (`decodeImg4Checked`): `u16 w, u16 h,` a **6- or
+> 5-nibble local palette**, the run stream, an optional pad nibble, a 16-byte
+> trailer. Tiling the item exactly: **1,533** under the 6-nibble variant,
+> **727** under the 5-nibble variant (all 727 use selector 5, which is not a
+> palette slot there), **3** unexplained, of 2,263 plausible-header items
+> (2,260 tile). Trailer bytes are values up to 0xFF (782 distinct trailers;
+> common maxima 0xEF/0xFF/0xFD), so they cannot be nibbles. Hypothesis, not
+> confirmed: a per-image 16-entry nibble-to-global-colour map, i.e. the real
+> palette mechanism (the global palette is therefore not a 16-colour table).
+> Caveat: **179 items parse exactly under both variants** (a one-nibble shift
+> self-synchronises), so tiling alone does not decide 5 vs 6 for them; the
+> decoder prefers 6, and no first-palette-nibble discriminator was found.
+> Also ~751 "non-candidate" items tile as images once the top 6 bits of the
+> width/height words are masked as flags (533 six-nibble, 218 five-nibble),
+> so the dimension words carry flags and the earlier "~2,367 non-image
+> items" is overstated.
+
+**Superseded claim (vacuous metric):** applied to DM2's `GRAPHICS.DAT` (`DMII` container, 4,630
 items), of 2,263 items with a plausible image-shaped header, **2,237
 (98.9%)** decode to ≥95%-filled pixel buffers with zero decode exceptions.
 Rendered as a greyscale atlas
@@ -161,8 +203,9 @@ lists almost the entire item population as `RAW1` ("not yet decoded"), which
 was the tell that a different codec was needed; the fan-analysis secondary
 source named it as `IMG4`.
 
-**Open**: the remaining ~11% of image-shaped items that don't reach the
-≥95%-filled threshold are (per the fan analysis) the "differential"/overlay
+**Open** (reframed 2026-11-18: the *grammar* is solved, see the correction
+above; what remains is the meaning of selector 5 / compositing and the 5-vs-6
+variant flag): the 5-nibble items (727 + up to 179 ambiguous) are (per the fan analysis) the "differential"/overlay
 sub-format `IMG7`/`IMG8` — 5-nibble local palette, composited over a
 separately-stored base image via a second colour-selector role
 ("Transparent color" = copy same position from a different, previously
@@ -213,18 +256,36 @@ offset 12  13× u16 section counts (doors, teleporters, texts, sensors,
                     containers, misc, [3 unused words], projectiles,
                     explosions)
 offset 44  mapCount × 16-byte map definitions
-...        (per-map object/door/teleporter/text/sensor/creature/item lists —
-            documented in the source but not parsed by this reader)
+...        per-column cumulative thing counts (sum of widths, u16 each)
+...        object list (objectListSizeWords u16: first-thing-on-square list)
+...        text data (textDataSizeWords u16)
+...        16 thing-type lists, record sizes {4,6,4,8,16,4,4,4,4,8,4,0,0,0,8,4}
+            (doors, teleporters, texts, sensors, creatures, weapons, armours,
+            scrolls, potions, containers, misc, 3 unused, projectiles = 8,
+            explosions = 4) — contents not parsed by this reader
 ...        Map Data (see below) — always the LAST content section, exactly
             mapDataSize bytes, per-map
-...        optional 2-byte checksum (save-embedded dungeons always have one;
-            standalone files: both are seen, detected structurally)
+...        optional 2-byte trailer = 16-bit big-endian sum of every preceding
+            byte (present: DM1 EN, CSB Prison EN, DM2, MINI; absent: DM1 FR/DE,
+            CSB Prison FR/DE)
 ```
+
+> **Correction (2026-11-18):** (1) The per-map `mapDataOffset` field is a
+> **byte** offset, not words (14/14 DM1, 2/2 CSB Prison, 44/44 DM2, 11/11
+> MINI maps equal the cumulative byte cursor); the field was previously named
+> `mapDataOffsetWords` and `findDungeonDataOffsets` multiplied it by 2.
+> (2) Projectile/explosion record sizes are **8 and 4** bytes (the older text
+> says "not documented"): MINI.DAT has 60 projectiles + 50 explosions and
+> tiles exactly at those sizes; the same size table appears as data in DM1
+> `KAOS.FTL`+5346, CSB `KAOS.FTL`+5448 and DM2 `SKUL.FTL`+3830 (`04 06 04 08
+> 10 04 04 04 04 08 04 ...`). (3) The "optional checksum" is the byte-sum
+> trailer above (4/4 exact: 0x2853 DM1 EN, 0x939F CSB Prison, 0x3D9F DM2,
+> 0x7CC6 MINI), now verified by `parseDungeon().checksum`.
 
 Each 16-byte map definition:
 
 ```
-offset+0   u16 mapDataOffsetWords
+offset+0   u16 mapDataOffsetBytes   (BYTE offset into Map Data, not words; see correction)
 offset+6   u8  offsetX
 offset+7   u8  offsetY
 offset+8   u16 sizeWord: height=[11:16)+1, width=[6:11)+1, level=[0:6)
@@ -251,18 +312,24 @@ entry, from the map definition's own counts): creature-type graphics
 indices, wall-decoration graphics indices, floor-decoration graphics
 indices, door-decoration graphics indices.
 
-**Verified — locating Map Data without guessing every preceding section's
-width**: rather than summing every list-section byte width (some, like
-Projectiles/Explosions, have no fixed record size documented and can be
-non-empty in save-embedded dungeons), the reader works backward from EOF
-using the header's own `mapDataSize` field, since Map Data is always the
-last content section. Cross-checked forward (summing every known
-fixed-width section) for files where the community docs guarantee
-Projectiles/Explosions are empty (every standalone `.DAT` in this corpus):
-the forward-computed offset matches the backward-computed one **exactly**,
-with 0 deviation, for DM1's 3 dungeon files and CSB's Prison dungeon.
+**Verified — forward section tiling (2026-11-18, supersedes the
+back-from-EOF placement)**: walking header -> map defs -> per-column counts ->
+object list -> text -> 16 thing-type lists -> Map Data lands exactly on EOF
+(or EOF-2 with the trailer) for DM1 EN/FR/DE, CSB Prison EN/FR/DE, DM2 and
+the `MINI.DAT`-embedded dungeon (8/8), with the declared `mapDataSize` as an
+independent cross-check. Earlier text said projectile/explosion sizes were
+undocumented and so worked backward from EOF; that is now only a fallback.
+CSB `disk1` also ships `DungeonF.DAT`/`DungeonG.DAT` (French/German Prison,
+2 maps, dungeon id 12), both tiling exactly.
 
-**Verified — square-grid coherence**: rendered top-down (see
+**Verified — column-count oracle (2026-11-18)**: the per-column cumulative
+thing-count table matches the number of `hasObject` squares per column in the
+column-major grid: DM1 412/412, CSB Prison 41/41, MINI 296/296, DM2 725/725
+columns. Null control (reading the grid row-major): 40/412, 7/41, 26/296,
+122/725. This confirms grid orientation, dimensions and the hasObject bit,
+and replaces the visual argument below as the evidence.
+
+**Visual corroboration (weak, kept for context)**: rendered top-down (see
 `renderMapTopDown`), every decoded map produces a visually coherent maze —
 connected corridors, wall placement forming enclosed rooms, doors/stairs/
 teleporters appearing as isolated markers at plausible positions, not
@@ -271,7 +338,10 @@ files, 14 maps each), CSB's Prison (2 maps) and main dungeon (11 maps,
 located inside `disk2/MINI.DAT`, see below), and DM2 (44 maps, including the
 DM2-only `empty` square type appearing as real observed data, and map 0's
 declared `level=7` matching the community docs' own independently-stated
-"Level 7 — Sun Clan / Hall of Champions").
+"Level 7 — Sun Clan / Hall of Champions"; weak, since DM2 has several maps
+per level — maps 2/3, 4/5 share levels — so a level number alone is not
+corroboration). DM2 square type 7 covers 4,320/12,192 cells and type 2 only
+576; whether DM1 type semantics carry over to DM2 is unverified.
 
 ### Locating CSB's dungeon inside a saved-game file
 
@@ -279,27 +349,38 @@ Chaos Strikes Back does not ship a standalone `Dungeon.DAT`-equivalent for
 its own (non-Prison) 11-map dungeon on Amiga — per the "Saved Game Files"
 docs, the full Dungeon Data section is embedded, uncompressed, inside every
 save file. `findDungeonDataOffsets()` (`dungeonmaster-dungeon.ts`) locates
-it by scanning for the header shape rather than trusting a hardcoded offset:
+it without any hardcoded offset or seed list:
 
-1. `ornamentSeed` (u16 at scan position) is a member of the small set of
-   values documented/observed across this corpus (`{99,8,13,0,5,6}`).
-2. `mapCount` (byte at +4) is one of the known real map counts for this
-   family (`{2,11,14,44}`).
-3. Padding byte (+5) is `0`.
-4. `mapDataSize` (+2) is in a plausible byte range.
-5. Map definition 0 (right after the 44-byte header) decodes to a
-   plausible width (1-32), height (1-32), and level (≤63), and its own
-   `mapDataOffsetWords*2` fits inside the declared `mapDataSize`.
-
-An earlier, weaker version of this scan (checks 2-4 only) produced **97**
-false-positive matches inside `disk2/MINI.DAT`'s encrypted/binary
-saved-game payload. Adding checks 1 and 5 reduced this to **exactly 1**
-match, at file offset **10098** — matching a hand-derived value found via
-an independent manual scan during development. The extractor asserts
-`offsets.length === 1` and throws otherwise, so this stays a verified
-invariant rather than a silent best-guess.
+> **Correction (2026-11-18):** the earlier scan whitelisted ornament seeds
+> `{99,8,13,0,5,6}` and map counts `{2,11,14,44}`. The seed whitelist already
+> contained the answer's own seed (13), and the "independent manual scan" was
+> not independent, so the "unique hit at 10098" evidence was circular (the
+> answer was right). Replaced by a seed-agnostic scan: a candidate is accepted
+> only if the header/map definitions are plausible, the forward section walk
+> (`mapDataStart = front matter`; `mapDataSize` must equal the sum over maps
+> of cells + creature/wall/floor/door-deco entry counts) ends inside the
+> buffer, and the 2-byte trailer after Map Data equals the 16-bit sum of every
+> byte from the candidate start. On the real `MINI.DAT` this finds a **unique**
+> hit at **10098**, ending exactly at EOF (42,786), with a valid checksum
+> (0x7CC6). Null control: flipping one byte inside the dungeon removes the hit.
+> The older heuristic (97 false positives with a weaker version) is retired.
 
 ## Palette — open
+
+> **2026-11-18 leads (hypothesis, not yet rendered/verified):** (a) DM1
+> `KAOS.FTL` holds a run of 15-16 words at about +0x79A (`0666 0888 0620
+> 00CC 0840 0080 00C0 0F00 0FA0 0C86 0FF0 0444 0AAA 000F 0FFF`), with a
+> variant table at about +0x7BC (entries 12/13 differ); CSB `disk1/KAOS.FTL`
+> has the same tables at about +0x100A. Plausibly the dungeon-view palette
+> (the community "G0021"); the preceding word `0020` may be a separate
+> field. Next step: re-render an atlas with it and compare against a public
+> Amiga screenshot. (b) The Amiga `TITL.DAT`/`ENDA.DAT`/`ANIM.DAT`/`SWSH.DAT`
+> files carry `PL` chunks holding 16-colour palettes as (index, r, g, b)
+> nibbles (CSB TITL/ENDA, DM2 SWSH/ENDA). (c) DM2 `IMG4` items carry a
+> per-image 16-byte trailer (see above). (d) DM2's `sample_palette.IFF` is a
+> 320x200 4-plane ILBM with a 16-entry CMAP (`000000 707070 909090 703000
+> ...`), provenance unknown (not a retail-style filename), and cannot be the
+> DM2 global palette if image trailers index up to 255.
 
 No Amiga IRGB/colour-register palette has been recovered from the
 executable for any of the three games yet. All rendered `IMGx` output ships
@@ -329,3 +410,14 @@ a byte-exact standard `M.K.`-tagged ProTracker `.mod`. See
 `docs/dungeonmaster2/amiga/data-structure.md` for the full verification
 evidence (all 10 files decode with 0 exceptions; RMS + lag-1 autocorrelation
 confirms real, non-degenerate decoded audio).
+
+
+## FTL `AN`-chunk animation files (`TITL.DAT`, `ENDA.DAT`, `ANIM.DAT`, `SWSH.DAT`) — lead (2026-11-18)
+
+These are **not** DMCSB containers. Every one starts with `AN` + `0140 00C8
+0004` (320x200, 4 planes) and is a tagged-chunk stream. Tags seen: `AN`, `BR`,
+`P8`, `PL`, `SD`, `SF`, `MF`, `EN`, `SO`. `PL` chunks hold 16-colour palettes
+as (index, r, g, b) nibbles. Files: DM1 `TITL.DAT`, CSB `TITL.DAT` (identical
+on disk1 and disk2), CSB `ENDA.DAT`, CSB `ANIM.DAT`, DM2 `TITL.DAT`/`ENDA.DAT`/
+`SWSH.DAT`. The audit's quick walk did not resolve the chunk length semantics
+and stopped early; **hypothesis-grade**. Tracked as `dm1-titl-dat`.

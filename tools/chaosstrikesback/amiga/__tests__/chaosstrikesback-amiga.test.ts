@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { adfBootblockType, listAdf } from '@seer-project/amiga';
 import { parseDataFileHeader, readItem } from '../../../shared/dungeonmaster-container.ts';
-import { decodeImg1, ensureDungeonDecompressed } from '../../../shared/dungeonmaster-codec.ts';
+import { decodeImg4Checked, isImg1Image, ensureDungeonDecompressed } from '../../../shared/dungeonmaster-codec.ts';
 import { findDungeonDataOffsets, parseDungeon } from '../../../shared/dungeonmaster-dungeon.ts';
 
 const DATA_DIR = 'data/chaosstrikesback/amiga';
@@ -17,6 +17,10 @@ describe.skipIf(!HAS_CORPUS)('Chaos Strikes Back (Amiga), real corpus', () => {
     const parsed = parseDungeon(d);
     expect(parsed.header.mapCount).toBe(2);
     expect(parsed.maps).toHaveLength(2);
+    // Forward section walk lands exactly on Map Data; trailer = 16-bit byte sum (0x939F).
+    expect(parsed.forwardTilingExact).toBe(true);
+    expect(parsed.checksum).toEqual({ stored: 0x939f, computed: 0x939f, valid: true });
+    expect(parsed.mapOffsetsMatchCursor).toBe(true);
   });
 
   it('locates exactly one Dungeon Data section in disk2/MINI.DAT, matching the 11-map main dungeon', () => {
@@ -26,28 +30,35 @@ describe.skipIf(!HAS_CORPUS)('Chaos Strikes Back (Amiga), real corpus', () => {
     const parsed = parseDungeon(mini.subarray(offsets[0]!));
     expect(parsed.header.mapCount).toBe(11);
     expect(parsed.maps).toHaveLength(11);
+    // Seed-agnostic: unique by exact forward tiling + checksum, ending exactly at EOF.
+    expect(parsed.header.counts.projectiles).toBe(60);
+    expect(parsed.header.counts.explosions).toBe(50);
+    expect(parsed.forwardTilingExact).toBe(true);
+    expect(offsets[0]! + parsed.mapDataOffset + parsed.header.mapDataSize + 2).toBe(mini.length);
+    expect(parsed.checksum?.valid).toBe(true);
+    // Null control: one flipped byte inside the dungeon removes the (only) hit.
+    const bad = mini.slice();
+    bad[offsets[0]! + 100] ^= 0x01;
+    expect(findDungeonDataOffsets(bad)).toEqual([]);
   });
 
-  it('disk1/Graphics.DAT: every image-shaped IMG1 item decodes with 0 residue (DMCSB2 container)', () => {
+  it('disk1/Graphics.DAT: IMG1 classification by exact stream consumption (687 images; item 672 is data)', () => {
     const data = new Uint8Array(readFileSync(resolve(DATA_DIR, 'disk1/Graphics.DAT')));
     const df = parseDataFileHeader(data);
     expect(df.format).toBe('DMCSB2');
     expect(df.itemCount).toBe(749); // same container shape/item count as DM1's own Graphics.DAT
-    let imageItems = 0;
-    for (const item of df.items) {
-      if (item.size < 4 || item.size > 32768) continue;
-      const raw = readItem(data, item);
-      const w = (raw[0] << 8) | raw[1];
-      const h = (raw[2] << 8) | raw[3];
-      if (w === 0 || h === 0 || w > 350 || h > 220 || w * h > 40000) continue;
-      imageItems++;
-      const img = decodeImg1(raw);
-      expect(img.pixels).toHaveLength(w * h);
-    }
-    // Confirmed 2026-09-02: 683/683, same as DM1's Graphics.DAT — the
-    // truncation bug fix (see docs/chaosstrikesback/amiga/data-structure.md)
-    // is what raised this from 23 to 683; guard against a regression.
-    expect(imageItems).toBe(683);
+    const images: number[] = [];
+    for (const item of df.items) if (isImg1Image(readItem(data, item))) images.push(item.index);
+    // 2026-11 audit: 687, not the earlier "683/683" (that count came from a
+    // size filter and a w*h assertion that could never fail). The ADF-truncation
+    // fix is still real: the container tiles exactly and the images consume exactly.
+    expect(images).toHaveLength(687);
+    for (const full of [1, 4, 5, 728, 738]) expect(images).toContain(full);
+    expect(images).not.toContain(672);
+    // Null control: the DM2 IMG4+trailer grammar must tile almost none of them.
+    let wrong = 0;
+    for (const i of images) if (decodeImg4Checked(readItem(data, df.items[i]!))) wrong++;
+    expect(wrong).toBeLessThan(images.length * 0.05);
   });
 
   it.skipIf(!existsSync(resolve(RAW_DISK3)))('Disk.3 is a real, valid, but blank/formatted (0-file) AmigaDOS filesystem', () => {

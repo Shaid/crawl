@@ -21,7 +21,7 @@ import { resolve } from 'node:path';
 import { writePNG } from '@seer-project/pipeline';
 import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex } from '../../shared/asset-paths.ts';
 import { parseDataFileHeader, readItem } from '../../shared/dungeonmaster-container.ts';
-import { decodeImg1, ensureDungeonDecompressed } from '../../shared/dungeonmaster-codec.ts';
+import { decodeImg1, ensureDungeonDecompressed, isImg1Image } from '../../shared/dungeonmaster-codec.ts';
 import { findDungeonDataOffsets, parseDungeon, type ParsedDungeon } from '../../shared/dungeonmaster-dungeon.ts';
 import { packGreyscaleAtlas, renderMapTopDown } from '../../shared/dungeonmaster-render.ts';
 
@@ -64,11 +64,9 @@ async function exportWallAtlas() {
   const df = parseDataFileHeader(data);
   const images: { name: string; img: ReturnType<typeof decodeImg1> }[] = [];
   for (const item of df.items) {
-    if (item.size < 4 || item.size > 32768) continue;
     const raw = readItem(data, item);
-    const w = (raw[0] << 8) | raw[1];
-    const h = (raw[2] << 8) | raw[3];
-    if (w === 0 || h === 0 || w > 350 || h > 220 || w * h > 40000) continue;
+    // Exact-consumption classification (see isImg1Image), not a size filter.
+    if (!isImg1Image(raw)) continue;
     const img = decodeImg1(raw);
     images.push({ name: `item${item.index}`, img });
   }
@@ -101,7 +99,7 @@ async function main() {
 
   const { entry, totalImageItems } = await exportWallAtlas();
   manifest.push(entry);
-  console.log(`disk1/Graphics.DAT: ${totalImageItems} IMG1 image-like items decoded (0 residue — see doc)`);
+  console.log(`disk1/Graphics.DAT: ${totalImageItems} IMG1 image-like items decoded (exact stream consumption — see doc)`);
 
   writeManifest(manifest, GAME, PLATFORM);
   writePlatformIndex([{ game: GAME, platform: PLATFORM }]);
