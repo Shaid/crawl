@@ -86,6 +86,16 @@ OD_block;                        // == our DirectoryBlock, byte-for-byte
 Extractor: `scripts/extract_dungeonhack_res.py` →
 `public/assets/dungeonhack/dosvga/data/{hack,open}-resources.json`.
 
+**Tiling check (2026-11-18, fresh parser, header 36 B + every 644 B directory
+block + every indexed `12 + data_size` entry):** the bytes covered by no
+directory entry equal the header's `lost_space` exactly: `HACK.RES` 45,816 =
+45,816, `OPEN.RES` 12,588 = 12,588. So both containers tile completely (a
+stronger result than the walker counts above). Contrast EOB3's `EYE.RES`, which
+fails the same check (35% uncovered with `lost_space=0`; see
+`docs/eotb3/dosvga/data-structure.md` § 1.3). No `ITEMTYPE.DAT` exists in
+`data/dungeonhack`; the EOB3 doc's claim that its format applies here was wrong
+and has been retracted.
+
 ### 1.1 `HACK.TBL` / `OPEN.TBL` — confirmed, redundant directory cache
 
 A sidecar pair not present for EOB3. Byte-exact identical to the flat

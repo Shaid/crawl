@@ -37,11 +37,11 @@ independent checks matter here:
    independently-derived `EYE.RES` counts byte-exact** (§1) — strong evidence
    the container format is right, not just that both projects made the same
    assumption.
-2. **One outright error in ThirdEye's own docs was found and corrected** here
-   (§6, `ITEMTYPE.DAT` field offsets) by cross-checking many known AD&D 2e
-   values directly against the real file bytes — so "cross-checked against
-   ThirdEye" always means "and independently verified against real bytes,"
-   not "trusted at face value."
+2. ~~One outright error in ThirdEye's own docs was found and corrected here
+   (§6, `ITEMTYPE.DAT` field offsets).~~ **Retracted (2026-11):** ThirdEye was
+   right; the "correction" was a framing error (the file has a u16 count
+   header). See §6.2. "Cross-checked against ThirdEye" still means "and
+   independently verified against real bytes."
 
 `docs/eotb3/eotb3-formats-research.md` (an earlier internet-research pass,
 explicitly marked unverified) claimed EOB3 uses "AESOP/32" bytecode and that
@@ -105,6 +105,20 @@ Resource slot ids are assigned sequentially by walking every directory
 block's `entry_header_index[]` in order (stopping a block's scan at the
 first `0` entry). **Confirmed**: this produces exactly **2449 entries** —
 again identical to ThirdEye's independently-reported count.
+
+> **Correction (2026-11):** "confirmed" above covers the walker counts (20
+> blocks, 2449 entries) only; it was never tiling-checked. Summing the 36 B
+> header + 20 x 644 B directory blocks + every indexed `12 + data_size` entry
+> leaves **2,399,876 B (35.06%) of the file uncovered**, although the header's
+> `lost_space` is `0`. (Contrast Dungeon Hack's `HACK.RES`/`OPEN.RES`, whose
+> uncovered bytes equal `lost_space` exactly: 45,816 / 12,588.) Re-verified
+> 2026-11-18 with a fresh parser: 20 / 2449 / 2,399,876 exactly. The audit
+> found the gap as 5 runs, each right after a directory block, each walking
+> cleanly as a chain of 12-byte entry headers (109 / 128 / 78 / 1 / 1 entries)
+> and resembling older versions of the same slots (hypothesis; not examined
+> further here). **Do not run raw byte-scan censuses over `EYE.RES`** (magic
+> strings, palette signatures, etc.): they will hit these stale, unindexed
+> copies. Tracked as `eotb3-eyeres-stale-region`.
 
 ### 1.4 Special tables 0–4 and the name dictionary
 
@@ -555,51 +569,50 @@ independently-produced dump of the same file exactly.
 | `+12` | u8 | `level` — dungeon level the item lives on |
 | `+13` | i8 | `value` — type-dependent bonus/charge/key-kind byte |
 
-### 6.2 `ITEMTYPE.DAT` — 1026 B, 64 type templates — confirmed (offsets
-corrected from ThirdEye's own docs)
+### 6.2 `ITEMTYPE.DAT` — 1026 B, 64 type templates — confirmed (ThirdEye/ScummVM layout; earlier "2-byte correction" retracted)
 
 ```
-N x 16-byte type records     N = (filesize - 2) / 16 = 64; no count header
-u16 trailer                   (0x0004 in the bundled file)
+u16 count                      = 64     (2 + 64*16 = 1026 = file size)
+count x 16-byte type records, starting at file offset 2
 ```
 
-> **Correction applied here**: ThirdEye's `docs/item_dat_format.md` documents
-> this record with `AC_bonus`@+4, `class_use_mask`@+5, `flag_x`@+6, damage
-> dice starting @+7. Cross-checking that doc's own cited AD&D 2e values
-> (axe 1d8/1d10, banded mail AC −6, spellbook Mage-only 0x02, ...) against
-> the real file bytes for 27 named type records shows the **actual** offsets
-> are each 2 bytes later — `AC_bonus`@+6, `class_use_mask`@+7, dice starting
-> @+9. At the corrected offsets, `ac_bonus` and every dice field match the
-> cited value exactly for all 27 records except `staff` (doc claims 2d6/1d6;
-> our decode reads 1d6/1d6, which is the canonical AD&D 2e quarterstaff
-> damage — this looks like a doc typo, not a decode error). `class_use_mask`
-> matches for 26 of 27 — the one disagreement is `shield`: the doc claims
-> `0x35` (Fighter+Cleric+Paladin+Ranger), the real byte at the corrected
-> offset is `0x3d` (adds Thief). Both readings are individually plausible
-> AD&D 2e rule variants (some editions restrict thief shield use, some
-> don't); recorded here as an open discrepancy rather than resolved either
-> way. See `scripts/eotb3lib/itemdat.py` reproduction below.
+`CHARGEN/ITEM.DAT` and `CHARGEN/ITEMTYPE.DAT` are **md5-identical to EOB2's**
+`data/eotb2/dosvga/ITEM.DAT` / `ITEMTYPE.DAT` (probably shipped for party
+import); the EOB2 spec applies verbatim. No `ITEMTYPE.DAT` exists in
+`data/dungeonhack`, so nothing here applies to Dungeon Hack.
 
-| off | size | field | verified against |
+> **Correction (2026-11):** the previous text of this section claimed ThirdEye's
+> record offsets were "each 2 bytes later" than documented, with "no count
+> header" and a trailing `u16 = 0x0004`. That was a framing error: the first
+> `u16` is the record **count** (64), so records start at file offset 2, and the
+> "trailer" `0x0004` is the last record's `extraProperties` (record-relative
+> +14). Decoding from offset 0 made the values come out right but every label
+> wrong (`mask_A` = the previous record's `extraProperties`, for record 0 the
+> count; `field3` = `handFlags`; `flag_x` = `requiredHands`). ThirdEye and
+> ScummVM (`engines/kyra/engine/items_eob.cpp:109-121`) were right as written.
+> The 27-named-type PHB cross-check (AC, class mask, dice) still holds: it is
+> the same bytes, now correctly labelled.
+
+| off (record-relative) | size | field | notes |
 |---|---|---|---|
-| `+0` | u16 | `mask_A` | unknown — correlates with equip slot but not cleanly decoded |
-| `+2` | u16 | `mask_B` | unknown |
-| `+4` | u16 | `field3` | unknown (icon dims? weight?) |
-| `+6` | i8 | `ac_bonus` | **signed**. banded −6, chainmail −5, platemail −7, scalemail −4, helmet/leather armour/shield −1/−2, 0 for all weapons |
-| `+7` | u8 | `class_use_mask` | bit0 Fighter, bit1 Mage, bit2 Cleric, bit3 Thief, bit4 Paladin, bit5 Ranger. lock picks=0x08 (Thief-only), spellbook=0x02 (Mage-only), holy symbol=0x14 (Paladin+Cleric), staff/rations/boots/robe/ring/bracers=0x3f (all six) |
-| `+8` | u8 | `flag_x` | small (0..2), roughly tracks weapon reach/class — hypothesis |
-| `+9` | u8 | `sm_dice_count` | axe/longsword=1, dagger=1, polearm=1... |
-| `+10` | u8 | `sm_dice_sides` | axe=8 (1d8), shortsword=6 (1d6), dagger=4 (1d4) — PHB exact |
-| `+11` | u8 | `sm_dmg_plus` | mace/flail=+1, others +0 |
-| `+12` | u8 | `lg_dice_count` | |
-| `+13` | u8 | `lg_dice_sides` | axe=10 (1d10), longsword=12 (1d12), shortsword=8 (1d8) — PHB exact |
-| `+14` | u8 | `lg_dmg_plus` | |
-| `+15` | u8 | `_pad` | `0` in every bundled record |
+| `+0` | u16 | `invFlags` | inventory/equip-slot flags |
+| `+2` | u16 | `handFlags` | hand/placement flags |
+| `+4` | i8 | `armorClass` | signed. banded -6, chainmail -5, platemail -7, scalemail -4, helmet/leather/shield -1/-2, 0 for weapons |
+| `+5` | u8 | `allowedClasses` | bit0 Fighter, bit1 Mage, bit2 Cleric, bit3 Thief, bit4 Paladin, bit5 Ranger. lock picks=0x08, spellbook=0x02, holy symbol=0x14, staff/rations/boots/robe/ring/bracers=0x3f |
+| `+6` | u8 | `requiredHands` | 0..2 |
+| `+7` | u8 | `dmgNumDiceS` | small-target dice count |
+| `+8` | u8 | `dmgNumPipsS` | axe=8 (1d8), shortsword=6, dagger=4 - PHB exact |
+| `+9` | i8 | `dmgIncS` | mace/flail=+1 |
+| `+10` | u8 | `dmgNumDiceL` | large-target dice count |
+| `+11` | u8 | `dmgNumPipsL` | axe=10, longsword=12, shortsword=8 - PHB exact |
+| `+12` | i8 | `dmgIncL` | |
+| `+13` | u8 | `unk1` | 0 in every record |
+| `+14` | u16 | `extraProperties` | per-type extra flags; last record = 0x0004 |
 
-Full verification table (27 named types, 26/27 exact — see §6.2 note above)
-is reproducible via `scripts/eotb3lib/itemdat.py` + the cross-check script
-used during this pass (not committed — a one-off comparison against the
-table above).
+Verification: record 0 at file offset 2 = `08 00 08 00 00 39 01 01 08 00 01 0a 00 00 01 00`
+decodes to a 1d8/1d10 one-hand weapon; the 27-named-type PHB table matches as
+before (26/27 on class mask, `shield` 0x3d vs ThirdEye 0x35 left open).
+Layout source: ScummVM `items_eob.cpp:109-121`.
 
 Extractor: `scripts/extract_eotb3_chargen.py` → `data/item.json`, `data/itemtype.json`.
 
@@ -874,7 +887,7 @@ before this pass.
 
 | Item | Status | Notes |
 |---|---|---|
-| EYE.RES bitmap ↔ palette resolution — remaining 47/312 | open | §4.2 — mechanism (5 DAC regions) confirmed and 265/312 (85%) bitmaps resolved to real colour. Remaining: the "outtake" family's 80-colour DAC placement formula (19), a few `PAL_WALLS`-region bitmaps that reuse a theme palette without a matching name (26, e.g. the `"Temple ..."` family likely reusing `"Marble palette"`), 2 other mismatches. |
+| EYE.RES bitmap ↔ palette resolution — remaining 33/312 | open | §4.2 — mechanism (5 DAC regions) confirmed; 279/312 (89%) per `docs/eotb3/TODO.md` (this row was stale at 265/312, 85%) bitmaps resolved to real colour. Remaining: the "outtake" family's 80-colour DAC placement formula (19), a few `PAL_WALLS`-region bitmaps that reuse a theme palette without a matching name (26, e.g. the `"Temple ..."` family likely reusing `"Marble palette"`), 2 other mismatches. |
 | DARK.GFF / LICH.GFF colour accuracy | rendered, not confirmed | §5 — no embedded PAL block, no oracle (ThirdEye only hand-codes INTRO.GFF's sequence); pixel-usage-profile analysis and cross-file palette comparison both investigated this pass without resolving it. `CHARGEN.PALETTE.COL` fallback remains unverified. |
 | AESOP bytecode (SOP code objects) | not attempted | 376 code objects live inside EYE.RES (per ThirdEye); this is game logic, not asset data, and out of scope for an asset-extraction pass — ThirdEye's `daesop` disassembler already covers this ground. §9.5 confirms the residual `unknown` classification bucket is predominantly this same category (SOP class objects without an `.IMPT`/`.EXPT` suffix), not overlooked asset content. |
 | GFF `ACF`/`MERR`/`*SEQ` tag blocks, and EYE.RES `iff_cue` resources | not decoded | Likely error-message tables + cutscene/outtake playback sequencing (ThirdEye's `gffi.cpp getSequence()` hand-codes INTRO.GFF's sequence rather than parsing a `*SEQ` block, suggesting these aren't a generic data format ThirdEye itself fully cracked either). §9.4 identified a second family of the same kind of data (`EYE.RES`'s `FORM....XDIR`-wrapped `iff_cue` resources, 66 of them) but didn't decode its `CAT ` payload either. Out of scope this pass — not visual/audio asset content. |

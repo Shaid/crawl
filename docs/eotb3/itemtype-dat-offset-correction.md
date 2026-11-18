@@ -1,3 +1,14 @@
+> **Retracted (2026-11-18):** this note's central claim is wrong. `ITEMTYPE.DAT`
+> starts with a `u16` record **count** (64; 2 + 64*16 = 1026), so records begin at
+> file offset 2 and ThirdEye's offsets (`armorClass`@+4, `allowedClasses`@+5,
+> `requiredHands`@+6, dice from +7, `extraProperties` u16 @+14) are correct as
+> documented (ScummVM `engines/kyra/engine/items_eob.cpp:109-121`). The
+> "trailer 0x0004" is the last record's `extraProperties`. The note below
+> decoded from offset 0, which shifted every label by 2 while the values still
+> looked right. The file is md5-identical to EOB2's `ITEMTYPE.DAT`, and no such
+> file exists for Dungeon Hack (that claim below is also wrong). Current spec:
+> `docs/eotb3/dosvga/data-structure.md` §6.2. Kept as a documented dead end.
+
 # `ITEMTYPE.DAT` field offsets: a 2-byte correction to ThirdEye's docs
 
 **Game:** Dungeon Hack / Eye of the Beholder III use the same `CHARGEN/ITEMTYPE.DAT`

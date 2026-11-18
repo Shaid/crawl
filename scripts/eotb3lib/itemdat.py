@@ -29,55 +29,39 @@ Item record (14 B):
     +12 u8   level         dungeon level the item lives on
     +13 i8   value         type-dependent bonus/charge/key-kind byte
 
-ITEMTYPE.DAT layout (no count header -- N = (filesize - 2) / 16, per
-ThirdEye's itemtype_dat.hpp/.cpp "no header, coincidental first field" note):
-    N x 16-byte type records (see decode_type_record)
-    u16 trailer               (0x0004 in the bundled file, purpose unknown)
+ITEMTYPE.DAT layout (corrected 2026-11; ThirdEye/ScummVM were right):
+    u16 count               (64 in the bundled file; 2 + 64*16 = 1026 = file size)
+    count x 16-byte type records (see load_itemtype_dat), starting at file
+    offset 2.
 
-Type record (16 B). ThirdEye's own docs/item_dat_format.md documents this
-record but with an offset mapping that does NOT match the bundled file
-byte-for-byte (its AC_bonus/class_use_mask/dice fields are each 2 bytes
-earlier than where they actually are). Re-derived here directly against
-the real bytes, cross-checking the same AD&D 2e PHB values that doc cites
-(axe 1d8/1d10, banded mail AC -6, spellbook Mage-only 0x02, etc.) across
-27 named type records (data/eotb3/dosvga/CHARGEN/ITEMTYPE.DAT) -- ALL
-match exactly at the offsets below (0 mismatches):
-    +0  u16  mask_A            item-handling flags -- unknown; correlates
-                                 with equip slot (0x80/0x81/0x82 cluster on
-                                 weapons, distinct values on armour/misc) but
-                                 not cleanly decoded
-    +2  u16  mask_B            secondary flags -- unknown, mostly 0x0008/
-                                 0x0088/0x000a-ish; not decoded
-    +4  u16  field3             unknown (icon dims? weight?); not decoded
-    +6  i8   ac_bonus            signed AC modifier. VERIFIED: banded -6,
-                                  chainmail -5, platemail -7, scalemail -4,
-                                  helmet/leather armour/shield -1/-2, 0 for
-                                  all weapons.
-    +7  u8   class_use_mask      bit0 Fighter, bit1 Mage, bit2 Cleric,
-                                  bit3 Thief, bit4 Paladin, bit5 Ranger.
-                                  VERIFIED against 27 named types (lock
-                                  picks=0x08 Thief-only, spellbook=0x02
-                                  Mage-only, holy symbol=0x14 Paladin+
-                                  Cleric, staff/rations/boots/robe/ring/
-                                  bracers=0x3f all-classes, ...).
-    +8  u8   flag_x              small (0..2) per-weapon value, roughly
-                                  tracks weapon reach/class (0 light 1H,
-                                  1 heavier 1H, 2 polearm/2H/bow); armour
-                                  and non-weapons are 0 or 1. Hypothesis,
-                                  not fully pinned down.
-    +9  u8   sm_dice_count       VERIFIED: axe/longsword 1, dagger 1, ...
-    +10 u8   sm_dice_sides       VERIFIED: axe 8 (1d8), shortsword 6 (1d6),
-                                  dagger 4 (1d4), matches PHB exactly.
-    +11 u8   sm_dmg_plus         VERIFIED: mace/flail +1, others +0.
-    +12 u8   lg_dice_count       VERIFIED.
-    +13 u8   lg_dice_sides       VERIFIED: axe 10 (1d10), longsword 12
-                                  (1d12), shortsword 8 (1d8) -- PHB exact.
-    +14 u8   lg_dmg_plus         VERIFIED.
-    +15 u8   _pad                0 in every record of the bundled file
-                                  (only 1 trailing byte; the earlier
-                                  research doc's separate slot_hint/_pad2
-                                  fields don't fit in the corrected layout
-                                  -- there is no room for them).
+Type record (16 B, record-relative offsets), per ScummVM
+engines/kyra/engine/items_eob.cpp:109-121 and ThirdEye's docs. Re-verified
+2026-11 against the real bytes (record 0 = `08 00 08 00 00 39 01 01 08 00
+01 0a 00 00 01 00`) and the 27 named PHB reference types:
+    +0  u16  invFlags          inventory/equip-slot flags
+    +2  u16  handFlags         hand/placement flags
+    +4  i8   armorClass        signed AC modifier (banded -6, chainmail -5,
+                                platemail -7, scalemail -4, ...)
+    +5  u8   allowedClasses    bit0 Fighter, bit1 Mage, bit2 Cleric, bit3 Thief,
+                                bit4 Paladin, bit5 Ranger
+    +6  u8   requiredHands     0..2 (reach/handedness)
+    +7  u8   dmgNumDiceS       small-target damage dice count
+    +8  u8   dmgNumPipsS       small-target dice sides
+    +9  i8   dmgIncS           small-target flat bonus
+    +10 u8   dmgNumDiceL       large-target dice count
+    +11 u8   dmgNumPipsL       large-target dice sides
+    +12 i8   dmgIncL           large-target flat bonus
+    +13 u8   unk1              0 in the bundled file
+    +14 u16  extraProperties   (the old "trailer = 0x0004" was the LAST
+                                record's value, not a file trailer)
+
+> Correction (2026-11): the earlier version of this module read records from
+> file offset 0 and called the first u16 (the record count) `mask_A`, treating
+> every field as "2 bytes later than ThirdEye". That was a framing error: the
+> file has a u16 count header, so the values were right but every label was
+> misassigned (`mask_A` = previous record's extraProperties, `field3` =
+> handFlags, `flag_x` = requiredHands). ThirdEye's layout is correct as written.
+> The bundled CHARGEN/ITEM.DAT + ITEMTYPE.DAT are md5-identical to EOB2's.
 """
 from __future__ import annotations
 
@@ -122,26 +106,25 @@ def load_item_dat(blob: bytes) -> dict:
 
 
 def load_itemtype_dat(blob: bytes) -> dict:
-    count = (len(blob) - 2) // TYPE_RECORD_SIZE
+    count = struct.unpack_from("<H", blob, 0)[0]
+    if 2 + count * TYPE_RECORD_SIZE != len(blob):
+        raise ValueError(f"ITEMTYPE.DAT: 2 + {count}*16 != {len(blob)} (count header mismatch)")
     types = []
-    off = 0
     for i in range(count):
-        rec = blob[off:off + TYPE_RECORD_SIZE]
-        mask_a, mask_b, field3 = struct.unpack_from("<3H", rec, 0)
-        ac_bonus = struct.unpack_from("<b", rec, 6)[0]
-        class_use_mask, flag_x = struct.unpack_from("<2B", rec, 7)
-        sm_dice_count, sm_dice_sides, sm_dmg_plus = struct.unpack_from("<3B", rec, 9)
-        lg_dice_count, lg_dice_sides, lg_dmg_plus = struct.unpack_from("<3B", rec, 12)
-        pad = rec[15]
+        off = 2 + i * TYPE_RECORD_SIZE
+        inv_flags, hand_flags = struct.unpack_from("<2H", blob, off)
+        armor_class = struct.unpack_from("<b", blob, off + 4)[0]
+        allowed_classes, required_hands = struct.unpack_from("<2B", blob, off + 5)
+        dice_s, pips_s, inc_s = struct.unpack_from("<BBb", blob, off + 7)
+        dice_l, pips_l, inc_l = struct.unpack_from("<BBb", blob, off + 10)
+        unk1 = blob[off + 13]
+        extra = struct.unpack_from("<H", blob, off + 14)[0]
         types.append({
-            "index": i, "maskA": mask_a, "maskB": mask_b, "field3": field3,
-            "acBonus": ac_bonus,
-            "classUseMask": class_use_mask, "flagX": flag_x,
-            "smDiceCount": sm_dice_count, "smDiceSides": sm_dice_sides,
-            "smDmgPlus": sm_dmg_plus, "lgDiceCount": lg_dice_count,
-            "lgDiceSides": lg_dice_sides, "lgDmgPlus": lg_dmg_plus,
-            "pad": pad,
+            "index": i, "invFlags": inv_flags, "handFlags": hand_flags,
+            "armorClass": armor_class, "allowedClasses": allowed_classes,
+            "requiredHands": required_hands,
+            "dmgNumDiceS": dice_s, "dmgNumPipsS": pips_s, "dmgIncS": inc_s,
+            "dmgNumDiceL": dice_l, "dmgNumPipsL": pips_l, "dmgIncL": inc_l,
+            "unk1": unk1, "extraProperties": extra,
         })
-        off += TYPE_RECORD_SIZE
-    trailer = struct.unpack_from("<H", blob, off)[0] if off + 2 <= len(blob) else None
-    return {"count": count, "types": types, "trailer": trailer}
+    return {"count": count, "types": types}
