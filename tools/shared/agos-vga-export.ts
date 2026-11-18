@@ -15,12 +15,14 @@ import { shelfPack } from '@seer-project/core';
 import {
   simonDecr,
   loadPalette,
+  paletteBankCount,
   readAnimTable,
   decodeImage,
   unpackIndices,
   indicesToRGBA,
   discoverZones,
   type AgosNamingScheme,
+  type RGB,
   type AgosZoneFiles,
 } from './agos-vga.ts';
 
@@ -29,6 +31,7 @@ export interface AgosExportSummary {
   zonesDecoded: number;
   zonesMissingFile: number;
   zonesNoPictures: number;
+  zonesNoPalette: number;
   imagesDecoded: number;
   screensWritten: number;
   errors: { zone: number; message: string }[];
@@ -55,13 +58,14 @@ export async function exportAgosPictures(
     zonesDecoded: 0,
     zonesMissingFile: 0,
     zonesNoPictures: 0,
+    zonesNoPalette: 0,
     imagesDecoded: 0,
     screensWritten: 0,
     errors: [],
   };
   const manifestEntries: ManifestEntry[] = [];
   const zoneTable: Record<string, unknown> = {};
-  const screenCandidates: { zone: number; area: number }[] = [];
+  const screenCandidates: { zone: number; area: number; hasPalette: boolean }[] = [];
 
   for (const zf of zones) {
     if (!zf.type1 || !zf.type2) {
@@ -71,7 +75,7 @@ export async function exportAgosPictures(
     try {
       const zoneResult = decodeZone(dataDir, zf);
       if (!zoneResult) continue;
-      const { palette, entries } = zoneResult;
+      const { palette, entries, hasPalette } = zoneResult;
       if (entries.length === 0) {
         summary.zonesNoPictures++;
         continue;
@@ -99,21 +103,28 @@ export async function exportAgosPictures(
         width: packed.width,
         height: packed.height,
       });
-      manifestEntries.push(manifestEntry(`textures/${zoneName}`, entries.length, true));
+      manifestEntries.push(manifestEntry(`textures/${zoneName}`, entries.length, hasPalette));
 
-      writeJson(resolve(paletteDir, `${zoneName}.json`), {
-        colors: palette.map((c) => ({ r: c.r, g: c.g, b: c.b })),
-      });
+      // Palette-less zones (vga1 declares 0 banks) get a greyscale ramp in the
+      // atlas and NO palettes/ file: the bytes at BE16(vga1+6) are header.
+      if (hasPalette) {
+        writeJson(resolve(paletteDir, `${zoneName}.json`), {
+          colors: palette.map((c) => ({ r: c.r, g: c.g, b: c.b })),
+        });
+      } else {
+        summary.zonesNoPalette++;
+      }
 
       zoneTable[zoneName] = {
         zone: zf.zone,
+        hasPalette,
         type1: zf.type1,
         type2: zf.type2,
         type3: zf.type3,
         images: entries.map((e) => ({ index: e.index, width: e.width, height: e.height, flags: e.flags, compressed: e.compressed })),
       };
 
-      screenCandidates.push({ zone: zf.zone, area: largest.width * largest.height });
+      screenCandidates.push({ zone: zf.zone, area: largest.width * largest.height, hasPalette });
       summary.zonesDecoded++;
     } catch (e) {
       summary.errors.push({ zone: zf.zone, message: (e as Error).message });
@@ -136,7 +147,7 @@ export async function exportAgosPictures(
     const rgba = indicesToRGBA(indices, palette);
     const name = `zone${String(cand.zone).padStart(3, '0')}_img${largest.index}`;
     await writePNG(resolve(screenDir, `${name}.png`), rgba, largest.width, largest.height);
-    manifestEntries.push(manifestEntry(`screens/${name}`, 1, true));
+    manifestEntries.push(manifestEntry(`screens/${name}`, 1, cand.hasPalette));
     summary.screensWritten++;
   }
 
@@ -161,7 +172,8 @@ function decodeZone(dataDir: string, zf: AgosZoneFiles) {
   const vga2raw = readBinary(resolve(dataDir, zf.type2));
   const vga1 = simonDecr(vga1raw);
   const vga2 = simonDecr(vga2raw);
-  const palette = loadPalette(vga1, 0, 16);
+  const hasPalette = paletteBankCount(vga1) > 0;
+  const palette = hasPalette ? loadPalette(vga1, 0, 16) : greyRamp(16);
   const table = readAnimTable(vga2);
   const entries: DecodedAnimEntry[] = table.map((e) => ({
     index: e.index,
@@ -171,7 +183,14 @@ function decodeZone(dataDir: string, zf: AgosZoneFiles) {
     compressed: e.compressed,
     src: vga2.subarray(e.offset),
   }));
-  return { palette, entries };
+  return { palette, entries, hasPalette };
+}
+
+function greyRamp(n: number): RGB[] {
+  return Array.from({ length: n }, (_, i) => {
+    const v = Math.round((i * 255) / (n - 1));
+    return { r: v, g: v, b: v };
+  });
 }
 
 function blit(dst: Uint8Array, dstWidth: number, src: Uint8Array, srcWidth: number, srcHeight: number, dx: number, dy: number): void {

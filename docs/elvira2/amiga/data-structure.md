@@ -10,17 +10,25 @@ prior triage pass's "different header" hypothesis). Implementation:
 `tools/shared/ilbm.ts` (`Pics/`). Extractor:
 `tools/elvira2/amiga/export-data.ts`. Open items: `docs/elvira2/TODO.md`.
 
-Raw data: `data/elvira2/amiga/data/` (200 `.pkd` files, zones 0-99),
+Raw data: `data/elvira2/amiga/data/` (200 `.pkd` files, zones 0-99, + one shared `013.OUT`; also `text02`-`text09`,
+`tables01` + `tables03`-`tables09`),
 `data/elvira2/amiga/Pics/` (4 plain IFF `ILBM` files), plus `Docs`,
 `ReadMe` (out of scope) and `Elvira2.slave` (WHDLoad slave).
 
 ## 1. `.pkd` zones — CONFIRMED, same container/codec as Elvira 1
 
 100 zones, ids 0-99 fully contiguous — a cleaner numbering than Elvira 1's.
-All 100 have both a type-1 and type-2 file; 93 decode with at least one
-real picture (7 zones' `vga2` tables are empty).
+All 100 have both a type-1 and type-2 file; 99 decode with at least one
+real picture (zone 99 has only one junk table entry).
 
-2,303 images decoded corpus-wide. Sizes range from small UI icons up to
+> **Correction (2026-11-18):** previously "93 zones / 7 empty / 2,303 images"
+> — truncated by the early-stop table walk (`docs/agos-pkd-format.md` §3).
+> Full walk: **3,272 images in 99 zones** (3,273 table entries incl. the junk
+> one). Also: zones 80 and 99 plus one more declare **0 palette banks**
+> (`vga1` word +2); zone 80's old `palettes/zone080.json` was read from header
+> bytes and is removed (§2 correction in `docs/agos-pkd-format.md`).
+
+3,272 images decoded corpus-wide. Sizes range from small UI icons up to
 full scene pictures; the largest sampled screen (zone 78) is a 224x127
 picture. **`colorDepth = 4` throughout, palette scale confirmed identical
 to Elvira 1** (`docs/agos-pkd-format.md` §2) — no Elvira-2-specific
@@ -73,10 +81,14 @@ public/assets/elvira2/amiga/
 ## 4. Still open
 
 See `docs/agos-pkd-format.md` §4 for the shared open items (`.out`/sound,
-`vga1` non-palette content, palette multi-slot compositing). Elvira 2's
+`vga1` VC-script semantics, palette banks). Elvira 2's
 `data/` directory also has only a single `013.OUT` (vs. Elvira 1's ~19) —
 plus several files entirely unexamined this pass: `0tune`-`9tune` (music,
 same un-probed family as Elvira 1's `*tune`), `ICON.DAT`, `menus.dat`,
-`tables01`/`03`/`04`, `gameamiga` (likely the AmigaOS executable),
-`runit`/`start` (likely launch scripts), `stripped.txt`. `Docs/` directory
-content also unexamined.
+`tables01`/`03`-`09` and `text02`-`text09` (plain text + `stripped.txt`
+index — the same lead as Waxworks's `text*`/`table*`), `gameamiga` (the
+game database, **not** the executable; `runit` is the executable),
+`start`, `stripped.txt` (TEXT index, 8-byte entries). `Docs/` directory
+content also unexamined. `0tune`-`9tune` are ProTracker modules (solved
+format, extractor pending). The `Pics/` ILBMs carry a "SKID ROW" credit and
+are not in ScummVM's file list: release-group add-ons, not retail data.

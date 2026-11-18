@@ -32,7 +32,7 @@ export async function exportElviraData(dataDir: string) {
   const summary = await exportAgosPictures(GAME, PLATFORM, dataDir, 'elvira');
   console.log(
     `elvira/amiga: ${summary.zonesDecoded}/${summary.zonesFound} zones decoded ` +
-      `(${summary.zonesMissingFile} missing type1/type2 file, ${summary.zonesNoPictures} decoded with no pictures — text/sound-only zones), ` +
+      `(${summary.zonesMissingFile} missing type1/type2 file, ${summary.zonesNoPictures} decoded with no pictures, ${summary.zonesNoPalette} palette-less (greyscale)), ` +
       `${summary.imagesDecoded} images, ${summary.screensWritten} screen samples` +
       (summary.errors.length ? `, ${summary.errors.length} error(s): ${JSON.stringify(summary.errors)}` : ''),
   );

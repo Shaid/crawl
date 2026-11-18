@@ -8,7 +8,10 @@ import {
   indicesToRGBA,
   discoverZones,
   pkdFilename,
+  paletteBankCount,
 } from '../agos-vga.ts';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 /**
  * Minimal companion bit-writer for `simon_decr` fixtures — mirrors the
@@ -200,4 +203,73 @@ describe('readAnimTable + decodeImage', () => {
     expect(rgba.slice(0, 4)).toEqual(new Uint8Array([255, 128, 64, 255]));
     expect(rgba.slice(4, 8)).toEqual(new Uint8Array([0, 0, 0, 255]));
   });
+});
+
+describe('readAnimTable — full-table walk (2026-11-18 audit)', () => {
+  function build(entries: { off: number; w: number; h: number }[], total: number): Uint8Array {
+    const buf = new Uint8Array(total);
+    const v = new DataView(buf.buffer);
+    entries.forEach((e, i) => {
+      v.setUint32((i + 1) * 8, e.off, false);
+      buf[(i + 1) * 8 + 5] = e.h;
+      v.setUint16((i + 1) * 8 + 6, e.w, false);
+    });
+    return buf;
+  }
+
+  it('skips 0x0 placeholders mid-table instead of stopping (old walk returned 1)', () => {
+    // entry1 placeholder(offset 0), entry2 real, entry3 0x0 placeholder with offset, entry4 real
+    const buf = build(
+      [
+        { off: 0, w: 0, h: 0 },
+        { off: 48, w: 16, h: 1 },
+        { off: 56, w: 0, h: 0 },
+        { off: 56, w: 16, h: 1 },
+      ],
+      72,
+    );
+    const t = readAnimTable(buf);
+    expect(t.map((e) => e.index)).toEqual([2, 4]);
+  });
+
+  it('palette bank count is BE16 at +2 (0 = palette-less zone)', () => {
+    const b = new Uint8Array(12);
+    new DataView(b.buffer).setUint16(2, 3, false);
+    expect(paletteBankCount(b)).toBe(3);
+    expect(paletteBankCount(new Uint8Array(12))).toBe(0);
+  });
+
+  const root = resolve(__dirname, '../../../data');
+  const cases: [string, string, number, number][] = [
+    ['elvira', 'elvira', 1654, 65],
+    ['elvira2', 'elvira', 3272, 99],
+    ['waxworks', 'waxworks', 4381, 140],
+  ];
+  for (const [game, scheme, imgs, zones] of cases) {
+    const dir = resolve(root, game, 'amiga/data');
+    it.skipIf(!existsSync(dir))(`${game}: real data yields ${imgs} images in ${zones} zones; early-stop walk undercounts`, () => {
+      const files = readdirSync(dir);
+      let total = 0;
+      let early = 0;
+      let nz = 0;
+      for (const z of discoverZones(files, scheme as 'elvira' | 'waxworks')) {
+        if (!z.type2) continue;
+        const v = simonDecr(new Uint8Array(readFileSync(resolve(dir, z.type2))));
+        const t = readAnimTable(v);
+        if (t.length) nz++;
+        total += t.length;
+        // null control: the retracted stop-at-first-0x0 rule
+        let k = 0;
+        for (let i = 1; i * 8 < 1e9 && i <= t[t.length - 1]?.index; i++) {
+          if (!t.some((e) => e.index === i)) break;
+          k++;
+        }
+        early += k;
+        for (const e of t) decodeImage(v.subarray(e.offset), e.width, e.height, e.compressed); // must not throw
+      }
+      expect(total).toBe(imgs);
+      expect(nz).toBe(zones);
+      expect(early).toBeLessThan(total);
+    });
+  }
 });

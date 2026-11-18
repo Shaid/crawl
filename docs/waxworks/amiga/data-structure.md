@@ -8,7 +8,7 @@ II, and Waxworks — read that doc first). Implementation:
 `tools/shared/agos-vga.ts` + `tools/shared/agos-vga-export.ts`. Extractor:
 `tools/waxworks/amiga/export-data.ts`. Open items: `docs/waxworks/TODO.md`.
 
-Raw data: `data/waxworks/amiga/data/` (298 `.pkd`/`.OUT` files, zones
+Raw data: `data/waxworks/amiga/data/` (297 zone `.pkd` + `icon.pkd` + 59 `.OUT`, zones
 0-155, 4-digit filenames — `NNN1.pkd`/`NNN2.pkd`/`NNN3.OUT`), plus
 `Manual`, `Solution`, `ReadMe` (out of scope) and `Waxworks.Slave`
 (WHDLoad slave).
@@ -16,13 +16,23 @@ Raw data: `data/waxworks/amiga/data/` (298 `.pkd`/`.OUT` files, zones
 ## 1. Zone inventory — the largest corpus of the three games
 
 156 zones, ids 0-155 fully contiguous. **15 zones have only a type-1
-file** (no picture at all — `data/agos-pkd-format.md`'s picture-less-zone
-convention, here at a higher rate than Elvira 1/2: zones 10, 20, 21, 22,
-24, 32, 34, 35, 85, 89, and 5 more — likely pure-text/dialogue or
-transitional "rooms"). Of the remaining 141 zones with both files, 126
-decode with at least one real picture (15 more have empty `vga2` tables).
+file** (zones 10, 20, 21, 22, 24, 32, 34, 35, 85, 89, 91, 92, 93, 95, 96).
+Of the remaining 141 with both files, 140 decode with real pictures (one has
+no valid table entry).
 
-2,318 images decoded corpus-wide — the largest single-game count of the
+> **Correction (2026-11-18):** (a) the type-1-only zones are **not**
+> "pure-text/dialogue" zones. They are exactly the zones where ScummVM's
+> `zoneTable[]` = 3 (`zones.cpp:43-86`): they load their `vga2` from zone 18
+> (zones < 85) or zone 94 (zones >= 85), the shared first-person **maze**
+> graphics. Their scripts draw 1,016 image numbers, all resolving to valid
+> entries in `0182.pkd`/`0942.pkd`; zone 41's atlas is first-person corridor
+> views. (b) the "15 more have empty `vga2` tables" claim came from the
+> truncated table walk. (c) 46 zones declare 0 palette banks; 39 were
+> previously exported with noise palettes from header bytes (now greyscale,
+> no palette file). (d) the cited path `data/agos-pkd-format.md` never
+> existed (it is `docs/agos-pkd-format.md`).
+
+4,381 images decoded corpus-wide (first pass: 2,318 — truncated walk) — the largest single-game count of the
 three. Container/codec/palette all identical to Elvira 1
 (`docs/agos-pkd-format.md` §§1-3); filename digit width is the only real
 difference (`pkdFilename('waxworks', ...)`, 3-digit zone id vs. Elvira's
@@ -47,11 +57,12 @@ Elvira 1/2, not examined this pass:
 - `tables01`-`tables16`, `xtable01`-`xtable04`, `tbllist`, `xtbllist` —
   plausibly index/lookup tables paired with the `text*`/`table*` files
   (the `tbllist`/`xtbllist` naming suggests a directory-of-directories).
-- `MENUS.DAT`, `stripped.txt` — un-probed.
-- Music: `0tune`-`2tune`, `7tune`-`10tune`, `23tune`-`26tune` (same
-  un-probed family as Elvira 1's `*tune`).
-- `gameamiga` (likely the AmigaOS executable), `runit`/`start` (likely
-  launch scripts), `saves/` (save games, out of scope).
+- `MENUS.DAT`, `stripped.txt` (TEXT index, 25-byte entries) — un-probed.
+- Music: `0tune`-`2tune`, `7tune`-`10tune`, `23tune`-`26tune` —
+  `simon_decr`-compressed ProTracker modules (solved format; `2tune`/`8tune`/`9tune`/`10tune`
+  hold several modules at ScummVM's `amigaWaxworksOffs` offsets).
+- `gameamiga` (`simon_decr`-compressed game database: items/rooms/exits/
+  subroutines — **not** the executable; `runit` is), `start`, `icon.pkd`, `saves/` (save games, out of scope).
 
 This is the single most promising lead for a follow-up pass — a
 `text*`/`table*` pair is a classic string-table + index-table shape, and
@@ -73,5 +84,5 @@ public/assets/waxworks/amiga/
 
 See `docs/agos-pkd-format.md` §4 for the shared open items. Waxworks-
 specific: the whole `text*`/`table*` family (§2) — the single largest
-undecoded lead across all three games; `.OUT` sound files (same undecoded
-format as Elvira 1/2, present here as `NNN3.OUT`).
+undecoded lead (Elvira II has the same `text*`/`tables*` family); `.OUT` sound
+files (format identified, extractor pending — see `docs/agos-pkd-format.md` §4).

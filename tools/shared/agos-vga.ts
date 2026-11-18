@@ -3,7 +3,7 @@
  * resource container + VC10 planar image codec.
  *
  * Shared by Elvira: Mistress of the Dark, Elvira II: The Jaws of Cerberus,
- * and Waxworks (all `data/_unexplored_/{Elvira,Elvira2,Waxworks}` in this
+ * and Waxworks (`data/{elvira,elvira2,waxworks}/amiga` in this
  * repo — see `docs/agos-pkd-format.md` for the container-format writeup and
  * `docs/elvira/amiga/data-structure.md` / `docs/elvira2/amiga/data-structure.md`
  * / `docs/waxworks/amiga/data-structure.md` for the per-game specs).
@@ -24,11 +24,12 @@
  * `simonDecr` is verified byte-exact-clean-decode (no bounds errors, no
  * checksum needed — the format has none) against every `.pkd` file in all
  * three games' corpora: 130/130 Elvira 1, 200/200 Elvira 2, 298/298
- * Waxworks (see the per-game export scripts' console output). The SAME
+ * Waxworks; the 2026-11-18 audit re-checked all 628 `.pkd` with full bitstream
+ * consumption (read pointer 0, 0 bits left). Note `.out` sound files are NOT
+ * simon_decr data (raw PCM); `*tune`/`gameamiga` are. The SAME
  * decoder handles all three — the probe recon's "Elvira 2 has a different
  * .pkd header" turned out to be normal compressed-content variance, not a
- * different container format (see the `elvira2` data-structure doc's
- * "Container format" section).
+ * different container format (see `docs/agos-pkd-format.md` §0).
  */
 
 // ---------------------------------------------------------------------------
@@ -135,6 +136,15 @@ export function pkdFilename(scheme: AgosNamingScheme, zone: number, type: number
 export interface RGB { r: number; g: number; b: number; }
 
 /**
+ * Number of 32-byte palette banks in a `vga1` resource: BE16 at +2
+ * (== (BE16(+10)-BE16(+6))/32 in 321/321 files, audit 2026-11-18). Zero means
+ * the zone has NO palette — bytes at `BE16(+6)` are header, not colours.
+ */
+export function paletteBankCount(vga1: Uint8Array): number {
+  return new DataView(vga1.buffer, vga1.byteOffset, vga1.byteLength).getUint16(2, false);
+}
+
+/**
  * Read `count` (default 32) consecutive Amiga 12-bit RGB colour words
  * from `vga1` (a decompressed "type 1" resource), starting at
  * `vga1 + BE16(vga1+6) + bank*32`.
@@ -145,8 +155,10 @@ export interface RGB { r: number; g: number; b: number; }
  * 46/47/48 handler used during real gameplay] and `debug.cpp`'s `palLoad`.
  * Visually verified: rendering with this exact scale (vs. the more
  * "obvious" `nibble*17` linear 4-to-8-bit expansion) produces a coherent,
- * recognizable jungle/swamp scene — see `docs/elvira/amiga/data-structure.md`
- * §Palette for the swatch comparison that ruled out `nibble*17`).
+ * recognizable jungle/swamp scene. See `docs/agos-pkd-format.md` §2: its
+ * 0xF96 swatch anecdote was retracted 2026-11-18 (the `*32` scale stands on
+ * the source alone), and bank 0 is only the static first bank — the real
+ * load is `vc22_setPalette`.
  */
 export function loadPalette(vga1: Uint8Array, bank = 0, count = 32): RGB[] {
   const view = new DataView(vga1.buffer, vga1.byteOffset, vga1.byteLength);
@@ -178,28 +190,39 @@ export interface AnimTableEntry {
 }
 
 /**
- * Walk a "type 2" resource's animation table. Entry 0 is always a reserved/
- * unused all-zero placeholder (see `dumpVgaBitmaps`, `debug.cpp:658-680` —
- * it starts iterating at index 1); entry 1's own `offset` field doubles as
- * the table's total byte span (the first real image's pixel data always
- * begins immediately after the last table entry, so no separate
- * "table size" field is stored). Walk stops at the first entry whose
- * `offset` is out of bounds or whose width/height is 0.
+ * Walk a "type 2" resource's animation table. Entry 0 is a reserved
+ * placeholder; entry `i` lives at `vga2 + i*8` (`drawImage_init`,
+ * `vga.cpp:861-874`, indexes the table directly and merely returns on a 0x0
+ * entry — it never stops there).
+ *
+ * Correction (2026-11-18): the old walk stopped at the first 0x0 entry,
+ * copied from ScummVM's debug-only `dumpVgaBitmaps` (`debug.cpp:659-677`);
+ * placeholder 0x0 entries sit mid-table (189/198/1,061 of them in
+ * Elvira 1/II/Waxworks), so that truncated 5,745 images to a true 9,308.
+ * The table spans from byte 0 to the lowest non-zero data offset of any
+ * entry (the first image's pixels start right after the last entry), so the
+ * walk skips 0x0 entries (keeping their indices) and shrinks `end` as it
+ * meets lower offsets. Entry 1's offset is NOT reliably the span (it is 0
+ * when entry 1 is itself a placeholder).
  */
 export function readAnimTable(vga2: Uint8Array): AnimTableEntry[] {
   const view = new DataView(vga2.buffer, vga2.byteOffset, vga2.byteLength);
   const entries: AnimTableEntry[] = [];
   if (vga2.length < 16) return entries;
-  const offsEnd = view.getUint32(8, false);
-  for (let i = 1; i * 8 < offsEnd; i++) {
+  let end = vga2.length;
+  for (let i = 1; i * 8 < end; i++) {
     const entryOff = i * 8;
     if (entryOff + 8 > vga2.length) break;
     const offset = view.getUint32(entryOff, false);
+    if (offset !== 0 && offset < end && offset >= 16) end = offset;
     const widthField = view.getUint16(entryOff + 6, false);
     const height = vga2[entryOff + 5];
     const flags = vga2[entryOff + 4];
     const width = Math.floor(widthField / 16) * 16;
-    if (offset >= vga2.length || width === 0 || height === 0) break;
+    if (offset === 0 || offset >= vga2.length || width === 0 || height === 0) continue;
+    // Junk entry (Elvira II zone 99 idx 4: 10240 px wide): an uncompressed image
+    // must fit inside the resource (4 planes x 2 bytes per 16px word column).
+    if ((flags & 0x80) === 0 && offset + (width / 16) * height * 8 > vga2.length) continue;
     entries.push({ index: i, offset, width, height, flags, compressed: (flags & 0x80) !== 0 });
   }
   return entries;

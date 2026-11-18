@@ -9,20 +9,22 @@ specific to Elvira 1). Implementation: `tools/shared/agos-vga.ts` +
 `tools/shared/agos-vga-export.ts`. Extractor:
 `tools/elvira/amiga/export-data.ts`. Open items: `docs/elvira/TODO.md`.
 
-Raw data: `data/elvira/amiga/data/` (130 `.pkd`/`.out` files + several
+Raw data: `data/elvira/amiga/data/` (130 `.pkd` + 19 `.out` files + several
 `*tune` files), plus `Manual`, `Maps`, `Cluebook`, `Solution`, `ReadMe`
 (scanned text/manual resources, out of scope) and `Elvira.slave` (a
 WHDLoad slave — no format info per `whdload-slave-no-format-info.md`).
 
 ## 1. Zone inventory
 
-65 zones (`data/elvira/amiga/data/NN1.pkd` + `NN2.pkd`, zone ids observed:
-1, 2, 3, and a contiguous run 6-74 — not perfectly contiguous from 1,
-matching however Elvira's scene graph actually numbers its rooms; ids
-4-5 simply have no `.pkd` pair). All 65 zones have both a type-1 and
-type-2 file; 62 decode with at least one real picture (3 zones' `vga2`
-anim tables are empty — text/sound-only rooms, e.g. inventory or dialogue
-screens with no static background).
+65 zones (`data/elvira/amiga/data/NN1.pkd` + `NN2.pkd`, zone ids:
+1-3, 6-9 and 17-74; ids 4-5 and 10-16 have no `.pkd` pair). All 65 zones
+have both a type-1 and type-2 file and **all 65 have pictures**.
+
+> **Correction (2026-11-18):** this section said "a contiguous run 6-74"
+> and that 3 zones' `vga2` tables were empty. Both wrong: the ids are 1-3,
+> 6-9, 17-74 (zones 10-16 missing), and the "empty" tables came from the
+> truncated early-stop table walk (`docs/agos-pkd-format.md` §3 correction).
+> The full-table walk finds pictures in 65/65 zones.
 
 `.out` "type 3" sound files present for a handful of zones (`013.out`,
 `033.out`, `093.out`, `243.out`, `253.out`, `263.out`, `273.out`,
@@ -30,12 +32,21 @@ screens with no static background).
 `563.out`, `573.out`, `613.out`, `643.out`, `663.out`, `693.out`) — see
 `docs/agos-pkd-format.md` §4, undecoded.
 
-`1tune`, `4tune`, `7tune`, `8tune`, `9tune`, `10tune`, `14tune` — un-probed,
-likely tracker-module music, not part of the `.pkd` naming scheme. Also
-present and unexamined: `gameamiga` (likely the AmigaOS executable),
-`icon.dat`, `runit`/`start` (likely launch scripts).
+`1tune`, `4tune`, `7tune`, `8tune`, `9tune`, `10tune`, `14tune` —
+`simon_decr`-compressed ProTracker modules (format solved 2026-11-18,
+`docs/agos-pkd-format.md` §4; extractor pending). `gameamiga` is the game
+database (items/rooms/exits/subroutines), **not** the executable — that is
+`runit`; `icon.dat` is the icon file, `start` the rest file (§4 there).
+`.out` files: 12-byte BE records `[u16 0][u16 size][u16 0][u16 id][u32 offset]`
+of signed 8-bit PCM (19/19 tile to EOF).
 
-## 2. Pictures — CONFIRMED, 1,124 images decoded across 62 zones
+## 2. Pictures — CONFIRMED, 1,654 images decoded across 65 zones
+
+> **Correction (2026-11-18):** previously "1,124 images across 62 zones" —
+> truncated by the early-stop table walk; see `docs/agos-pkd-format.md` §3.
+> Colours: per-zone bank-0 palette is *rendered*, not verified against the
+> scripts (Elvira 1 loads 13 zone colours + the engine's `extraColors`;
+> `docs/agos-pkd-format.md` §2 correction).
 
 Format, codec, palette scale: all identical to `docs/agos-pkd-format.md`
 §§1-3 — nothing Elvira-1-specific needed. `colorDepth = 4` (16 colours)
