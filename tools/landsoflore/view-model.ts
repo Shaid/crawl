@@ -12,9 +12,11 @@
  * approximation -- LOL's WLL table turned out to be exactly the oracle
  * EOB1's own still-open `wallMappingIndex` question needed (see
  * `decode-wll.ts`'s module doc). The clamp is kept only as a fallback for
- * a raw byte absent from a level's own WLL table (not observed in this
- * corpus, but a level whose WLL wasn't decoded/passed falls back to it
- * entirely).
+ * a raw byte absent from a level's own WLL table -- **exercised on LEVEL2
+ * (8 values, 30 sides) and LEVEL3 (5 values, 20 sides)**, where it draws a
+ * solid wall; the real engine has no such fallback (stale `_wllVmpMap`
+ * contents, or `olol_setWallType` rewriting the cell at runtime). A level
+ * whose WLL wasn't decoded/passed falls back to it entirely.
  */
 import { rotateOffset, roleSide, type Facing } from '../eotb/view-model.ts';
 import { wallTypeAt, type MazeData } from './decode-maze.ts';

@@ -15,7 +15,11 @@
  * byte value itself**, not a dense array indexed 0-51 -- and it exactly
  * covers every distinct raw byte value `LEVEL1.CMZ` actually uses (the
  * "clean 0-3" majority AND the "8, 53-79" cluster `decode-maze.ts`'s
- * module doc flags, zero misses, all 52 WLL keys accounted for). This is
+ * module doc flags, zero misses, all 52 WLL keys accounted for) --
+ * **LEVEL1 only (2026-11 audit correction):** LEVEL2 has 8 raw values (30
+ * sides: 46, 53-57, 59, 60) and LEVEL3 has 5 (20 sides: 58, 61, 63, 66,
+ * 67) with no record in their own `.WLL`, and LEVEL2/3/10 define keys 1
+ * and 2 twice; see `__tests__/landsoflore-wll-census.test.ts`. This is
  * the real mechanism EOB1's own still-open `wallMappingIndex` question was
  * reaching for -- LOL just happens to have the table decoded already.
  * `buildWllLookup` exposes this as the `rawByte -> vmpMapValue` map
@@ -58,7 +62,7 @@ export function decodeWll(data: Uint8Array): WllData {
   return { shpDatListIndex, records };
 }
 
-/** `rawByte -> vmpMapValue` lookup -- see module doc. Last record wins on a (unobserved) duplicate key. */
+/** `rawByte -> vmpMapValue` lookup -- see module doc. Last record wins on a duplicate key (observed: keys 1 and 2 in LEVEL2/3/10; matches `loadLevelWallData`, which overwrites in file order). */
 export function buildWllLookup(wll: WllData): Map<number, number> {
   const map = new Map<number, number>();
   for (const r of wll.records) map.set(r.wallTypeIndex, r.vmpMapValue);

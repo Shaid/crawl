@@ -232,7 +232,7 @@ per-level PAK (e.g. `LEVEL1.WLL` inside `L01.PAK`), not as loose ISO files:
 ```
 u16 LE  shpDatListIndex     # selects which _levelShpList/_levelDatList pair (decoration shapes) this level uses
 repeat (fileSize-2)/12:      # one record per wall-type index, 12 bytes each
-    u16 LE  wallTypeIndex          # sequential in practice: 0, 1, 2, 3, ...
+    u16 LE  wallTypeIndex          # NOT sequential: a sparse key (raw .CMZ value); see the 2026-11 Correction below
     u16 LE  vmpMapValue            # only the low byte is read (_wllVmpMap[idx] = *d) -- VMP-layer selector for this wall type
     u16 LE  shapeMapValue          # low byte read normally; if `mapShapes` and the full LE value is >0, it's a decoration-shape index instead
     u16 LE  specialWallType        # low byte read (_specialWallTypes[idx])
@@ -244,9 +244,35 @@ repeat (fileSize-2)/12:      # one record per wall-type index, 12 bytes each
 `L01.PAK`): `(626-2)/12 = 52.0` exactly — zero residue — and the decoded
 `wallTypeIndex` field increments cleanly `0, 1, 2, ..., 51` across all 52
 records with no gaps or out-of-order values, strong confirmation this is
-the right record boundary/stride. `_wllAutomapData` values are small
+the right record boundary/stride. (~~Wrong beyond the stride check~~ -- see
+the next Correction.) `_wllAutomapData` values are small
 integers (13, 63, 255, ...) consistent with a lookup-table role rather
 than raw colour/pixel data.
+
+> **Correction (2026-08-16, kept):** the "increments cleanly 0..51" statement
+> only holds for `LEVEL1.WLL`'s first 27 records; the field is a sparse key
+> (raw `.CMZ` byte), not a positional index.
+>
+> **Correction (2026-11-18, 12-level census):** the "zero misses / sequential"
+> picture was drawn from LEVEL1 (and LEVEL12) alone. Across the 12 cached level
+> PAKs (`tools/landsoflore/__tests__/landsoflore-wll-census.test.ts`, null
+> control = levels with 0 misses): no level's keys are a sequential `0..N-1`
+> array; **LEVEL2, LEVEL3 and LEVEL10 define keys 1 and 2 twice** (last record
+> wins, as `loadLevelWallData` overwrites in file order), so duplicate keys do
+> occur; and **raw CMZ values with no record in the level's own `.WLL` occur in
+> LEVEL2 (46, 53-57, 59, 60: 8 values, 30 sides) and LEVEL3 (58, 61, 63, 66, 67:
+> 5 values, 20 sides)**; levels 1 and 4-12 have none. `view-model.ts`'s fallback
+> (`raw <= max ? raw : 1`) therefore draws a solid wall on 2 of the 11 exported
+> levels. ScummVM has no such fallback (`_wllVmpMap` is never reset between
+> levels, `engine/kyra_rpg.cpp:191`, so unmapped values read whatever the
+> previous level left); `olol_setWallType` (`script_lol.cpp:95`) can also rewrite
+> wall bytes at runtime. `decode-emc.ts` over `LEVEL2.INI`/`LEVEL3.INI` finds
+> **zero** `setWallType` syscalls (L4-5, 7-12 have some), so the L2/L3 gaps are
+> not set by the INI scripts; most of them (53-55,57,59,60 / 58,61,63,66,67) do
+> exist in LEVEL1's `.WLL`, 46 and 56 in none checked, so a stale-table carry is
+> only a partial explanation (hypothesis). The audit counted 12 L2 values and
+> called LEVEL12 the only sequential one; the census finds 8 and no sequential
+> level, a minor disagreement. Tracked as `lol-wll-mapping-fallback`.
 
 ---
 
