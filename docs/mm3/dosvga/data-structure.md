@@ -266,6 +266,10 @@ and Xeen uses a full 4-bit wall-type value where MM3 splits 3+1.
 Assuming Xeen-compatibility here would silently produce a
 plausible-looking but 90°-rotated decode.
 
+> Cross-reference (2026-11-13 audit): MM1/MM2 page-0/page-1 bytes use the same
+> W,S,E,N slot order (W = low bits); their docs/codecs were labelled N,E,S,W
+> until the audit corrected them (see `docs/mm1/dosega/data-structure.md`).
+
 **Outdoor mazes (ids 41–64) are a different union member — SOLVED.** The
 same u16 keeps its 4 blocking bits (bits 3/7/11/15, unchanged W/S/E/N —
 read by the party's own step check at file `0x30387` and by monster AI,
@@ -664,7 +668,7 @@ oracle), both reproduced independently:
 | 832-byte raw records | 105/105 |
 | stored maze number (+0x1F) == filename id | 104/105 (`maze89` quirk above) |
 | wall blocking-bit symmetric across every interior wall (81 indoor mazes) | 38,878/38,880 (99.995%) |
-| surrounding-maze links reciprocal | 178/186 (95.7%; failures confined to 2 of 14 castle 2x2 blocks — original-data errors) |
+| surrounding-maze links reciprocal | 178/185 (audit 2026-11-13 recount; failures confined to the 2x2 blocks 12/65/66/67 and 15/74/75/76; maze 65's south link points to itself). "Original-data errors" is **unverified** — check against the game's 2x2-block table (`block_primary`) first (TODO `mm3-neighbour-2x2-nonrecip`) |
 | open map edge <-> surrounding-maze link agrees | 309/324 (95.4%) |
 | surrounding table agrees with the 6x4 world tiling | 24/24 |
 

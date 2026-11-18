@@ -18,11 +18,11 @@ composite path the BC/W6 views use.
 
 | | MM1 (`mm1`) | MM2 (`mm2`) | MM3 (`mm3`) |
 |---|---|---|---|
-| Wall art | **Real `WALLPIX.DTA` slices** (18 sets × 12 frustum slices) — each screen's near/mid/far frustum depth lanes each pick their own set from the decoded `.OVR` selection fields (`wallEntries[0..2]`; overland lanes are biome entries, e.g. AREAA1 = near/mid/far wall07/wall14/wall13) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) | **Real art on every visible face** — indoor: front, both sides, floor, and ceiling, through MM3's own real 44-slot indoor 3-D view (`tools/walker/mm3-indoor-view.ts`, ported from the disassembly-decoded `scripts/mm3lib/dos_indoor_view.py`), not the borrowed MM1/MM2 frustum. Each maze's environment (`twn`/`cav`/`dun`/`cas`/`sci`, resolved from a 40-byte constant table in the game's own code) picks its `<series>wl{1,2,3,4}.vga` + `<series>.sky` sprites; every wall's real per-position frame (door/torch/grate/opening/post) renders, not just a plain wall. Falls back to the older, partial depth-0-only MM1/MM2-frustum renderer if the real table/sprites fail to load. Outdoor: MM3's own real terrain draw list (`tools/walker/mm3-outdoor-view.ts`, ported from `scripts/mm3lib/dos_outdoor_view.py`) composites ground + overlay/scenery terrain sprites (grass, forest, mountains, desert, snow, lava, road, …) plus fixed `water.vga`/`day.vga` backdrops, including the driver's real decimating-shrink blit for distance falloff |
-| Torch overlays | **none** — MM1 renders no torch overlay (the reference implementation draws code-3 faces as plain walls; WALLPIX has no torch frames) | authentic `*t.32` with 3-phase flicker | none — MM3 doesn't distinguish door/torch from plain wall yet |
+| Wall art | **Real `WALLPIX.DTA` slices** (18 sets × 12 frustum slices) — each face picks its set **by wall code** from the decoded `.OVR` selection fields (code 1 -> `wallEntries[0]` plain, 2 -> `[1]` door, 3 -> `[2]` torch; `wallEntryForCode`, ScummVM `GameView::drawTile`; on overland the three entries are biome art, e.g. AREAA1 = wall07/wall14/wall13). *Corrected 2026-11-13: it was chosen by view depth, which showed a door on every wall one step away and a torch two away.* Geometry is still MM2's frustum — an approximation of ScummVM's `drawScene` (TODO `mm1-drawscene-port`) | Authentic `.32` sheets per env (`town`/`cave`/`castle` wall, floor, torch, sky) | **Real art on every visible face** — indoor: front, both sides, floor, and ceiling, through MM3's own real 44-slot indoor 3-D view (`tools/walker/mm3-indoor-view.ts`, ported from the disassembly-decoded `scripts/mm3lib/dos_indoor_view.py`), not the borrowed MM1/MM2 frustum. Each maze's environment (`twn`/`cav`/`dun`/`cas`/`sci`, resolved from a 40-byte constant table in the game's own code) picks its `<series>wl{1,2,3,4}.vga` + `<series>.sky` sprites; every wall's real per-position frame (door/torch/grate/opening/post) renders, not just a plain wall. Falls back to the older, partial depth-0-only MM1/MM2-frustum renderer if the real table/sprites fail to load. Outdoor: MM3's own real terrain draw list (`tools/walker/mm3-outdoor-view.ts`, ported from `scripts/mm3lib/dos_outdoor_view.py`) composites ground + overlay/scenery terrain sprites (grass, forest, mountains, desert, snow, lava, road, …) plus fixed `water.vga`/`day.vga` backdrops, including the driver's real decimating-shrink blit for distance falloff |
+| Torch overlays | **in the art** — MM1's door (code 2) and torch (code 3) faces are the `MAP_4`/`MAP_6` WALLPIX entries; no separate overlay pass | authentic `*t.32` with 3-phase flicker | every wall's real per-position frame (door/torch/grate/opening/post) via the 44-slot view (see Wall art) |
 | Floor/sky bands | simple dark band | `*f.32` floor + `sky.32` (roof bit flips the sky frame) | simple dark band (indoor); real `day.vga` sky + `water.vga` ocean backdrops (outdoor — `night.vga` is loaded but never selected, see `mm3-outdoor-view-port`) |
-| Screens | all 55 (indoor frustum everywhere; overland uses its biome wall art) | indoor: 0–4 town, 17–32 cavern, 45–59 castle; **overland (5–16, 33–44) renders the outdoor scene** (`outdoor3d.ts` port: outdoor1-3 horizon lanes + desert/ocean/swamp/tundra decor bands from the terrain ids, terrain minimap from `outb.32`) | **all 105**: the 81 indoor mazes (own 44-slot 3-D view) and the 24 outdoor mazes ids 41-64 (own terrain draw list — see above). No direct indoor↔outdoor maze-record link exists (checked against `data/mazes.json`); that transition, if real, is event-script-driven and not wired here |
-| Cross-screen stepping | none (edges clamp; level selector jumps) | yes — attrib `neighbours` links (indoor + overland) | yes — each maze's trailer stores its N/E/S/W neighbour maze id directly (`docs/mm3/dosvga/data-structure.md` "Maze records") |
+| Screens | all 55 (indoor frustum everywhere; overland uses its biome wall art); town screens start at the game's real cell + facing (`MM1_TOWN_START`) | indoor: 0–4 town, 17–32 cavern, 45–59 castle; **overland (5–16, 33–40: `attrib` `surface_flag != 0`) renders the outdoor scene**; 41–44 (elemental planes, surface 0) use the indoor renderer with the castle sheet (unconfirmed, TODO `mm2-env-from-attrib`); starts from `attrib` `entry_coord` (`outdoor3d.ts` port: outdoor1-3 horizon lanes + desert/ocean/swamp/tundra decor bands from the terrain ids, terrain minimap from `outb.32`) | **all 105**: the 81 indoor mazes (own 44-slot 3-D view) and the 24 outdoor mazes ids 41-64 (own terrain draw list — see above). No direct indoor↔outdoor maze-record link exists (checked against `data/mazes.json`); that transition, if real, is event-script-driven and not wired here |
+| Cross-screen stepping | yes — `.OVR` exits (`ovr.json` `exits`): indoor maps wrap onto themselves, the 20 overland sectors link as a 5x4 grid | yes — attrib `neighbours` links (indoor + overland) | yes — each maze's trailer stores its N/E/S/W neighbour maze id directly (`docs/mm3/dosvga/data-structure.md` "Maze records") |
 
 Controls: **WASD/arrows** move/turn, **Q/E** turn, noclip checkbox, Tab
 zooms the automap (BC/W6). URL params: `?game=mm1&map=5&x=4&y=2&facing=0`
@@ -67,7 +67,7 @@ consequences, both documented in `tools/walker/games-mm3.ts`:
   `roofBits` serialized as a string-keyed object (Uint8Array→JSON) — the
   loader handles both.
 - MM3: `public/assets/mm3/dosvga/data/mazes.json` (all 105 decoded maze
-  records; the walker filters to the 81 `kind: 'indoor'` ones). Each
+  records; the walker uses all 105 (81 `kind: 'indoor'`, 24 outdoor)). Each
   record's `walls` (256 × u16), `surrounding` (N/E/S/W neighbour maze
   ids), `runPosition` (per-maze start cell), and `graphics.wallSeries`/
   `.sky` (which texture set the maze uses) are used directly. Plus
@@ -87,8 +87,8 @@ data-structure.md` / `docs/mm2/amiga/data-structure.md` (the earlier
 
 Headless playwright run (MM1/MM2, predates MM3): the redirect lands on the
 integrated walker with MM1 selected; all games in the dropdown; MM1
-renders Sorpigal (entry cell (4,2), matching the OVR data) with white town
-walls and **no torch overlay**; MM2 renders town/cave/castle `.32` art
+renders Sorpigal (that run used the first-open-cell heuristic (4,2) — **superseded**: the real start is (8,3) facing N, see `docs/mm1/dosega/data-structure.md` "Start positions") with white town
+walls and (then) **no torch overlay** (superseded: door/torch art is selected by wall code); MM2 renders town/cave/castle `.32` art
 with sky/floor bands and **overland screens render the outdoor scene**
 (horizon + biome decor) with a terrain minimap; switching games leaves no
 stale pixels (the canvas is cleared in full); level switching, movement
@@ -98,7 +98,7 @@ biome mapping, neighbour stitching).
 
 MM3 verification (no browser available when it was built, so this is
 numeric + a mocked-canvas smoke test rather than a live Playwright pass —
-**still open** as a follow-up, see TODO `mm3-maze-viewer`): the wall bit
+follow-up **closed** — see the 2026-08-29 pass below): the wall bit
 packing is checked exhaustively against MM3's own disassembly-confirmed
 `wallBlocked` oracle (81 indoor mazes × 256 cells × 4 facings = 82,944
 cases, 0 mismatches — `tools/walker/__tests__/games-mm3.test.ts`), and a
@@ -130,10 +130,14 @@ correctly, 0 console errors.
 ## Known issues (user-reported, 2026-08-15)
 
 The user flagged real issues with the MM1 and MM2 walkers from actually
-using them, without specifics yet — **still open**, no repro details given.
-When specifics come in, reproduce live in the browser (not just the unit
-tests above, which cover specific mechanisms, not a full play-through)
-before making changes.
+using them, without specifics yet — **specifics supplied by the 2026-11-13 audit** (`docs/mm1/audit-2026-11-13.md`,
+applied in `docs/mm1/audit-2026-11-13-changes.md`): MM1 wall art chosen by
+depth not wall code (fixed), MM1 edges never crossed (fixed: `.OVR` exits),
+MM2 overland terrain rule blocked 41% of legal moves (fixed: game rule
+ported), destination back-face check wrongly blocked ~1% of indoor moves
+(removed), start positions heuristic (fixed), bit labels N/E/S/W vs real
+W,S,E,N (fixed in codecs). Still approximate: MM1 screen geometry (TODO
+`mm1-drawscene-port`). Live play-through by the user is the remaining check.
 
 The user also reported two MM3 issues from actually playing it:
 

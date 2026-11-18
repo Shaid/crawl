@@ -27,6 +27,7 @@ import { decodeStr } from '../str.ts';
 import { decodeMap } from '../map.ts';
 import { decodeAttrib } from '../attrib.ts';
 import { decodeEventFile } from '../event.ts';
+import { lzwDecompress } from '../pc-gfx.ts';
 
 const DATA_DIR = resolve('data/mm2/amiga/data');
 const GROUND_TRUTH = resolve(import.meta.dirname, '../fixtures/anm_decoded/51');
@@ -174,5 +175,46 @@ describe('MM2 real retail data', { skip: !hasData }, () => {
     expect(event.locations[63].kind).toBe('castle-blob');
     expect(event.locations[65].kind).toBe('castle-blob');
     expect(event.locations[68].kind).toBe('castle-blob');
+  });
+
+  it('wall bit labels W,S,E,N: indoor screens pair E face with east neighbour W face (null control N/W)', () => {
+    const maps = decodeMap(readFileSync(resolve(DATA_DIR, 'map.dat')));
+    const attrib = decodeAttrib(readFileSync(resolve(DATA_DIR, 'attrib.dat')));
+    const indoor = maps.filter((m) => attrib[m.index].surfaceFlag === 0 && m.index < 41);
+    const score = (a: 'n' | 'e', b: 'w') => {
+      let ok = 0, n = 0;
+      for (const s of indoor) {
+        for (let y = 0; y < 16; y++) {
+          for (let x = 0; x < 15; x++) {
+            const p = s.cells[y][x].visual[a], q = s.cells[y][x + 1].visual[b];
+            if (p === 0 && q === 0) continue;
+            n++;
+            if ((p !== 0) === (q !== 0)) ok++;
+          }
+        }
+      }
+      return ok / n;
+    };
+    expect(indoor.length).toBeGreaterThan(20);
+    expect(score('e', 'w')).toBeGreaterThan(0.99);
+    expect(score('n', 'w')).toBeLessThan(0.6);
+  });
+
+  it('DOS MAP.DAT (60 x u16 offset table; per screen u32 size=512 + LZW) equals Amiga map.dat byte-exact', () => {
+    const dosPath = resolve('data/mm2/dosega/MAP.DAT');
+    if (!existsSync(dosPath)) return;
+    const dos = readFileSync(dosPath);
+    const ami = readFileSync(resolve(DATA_DIR, 'map.dat'));
+    let exact = 0, wrong = 0;
+    for (let s = 0; s < 60; s++) {
+      const off = dos.readUInt16LE(s * 2);
+      expect(dos.readUInt32LE(off)).toBe(512);
+      const out = lzwDecompress(new Uint8Array(dos.subarray(off + 4)), 512);
+      if (Buffer.from(out).equals(ami.subarray(s * 512, s * 512 + 512))) exact++;
+      // null control: a different screen's Amiga bytes must NOT match
+      if (Buffer.from(out).equals(ami.subarray(((s + 1) % 60) * 512, ((s + 1) % 60) * 512 + 512))) wrong++;
+    }
+    expect(exact).toBe(60);
+    expect(wrong).toBe(0);
   });
 });

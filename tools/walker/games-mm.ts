@@ -93,9 +93,14 @@ interface MmScreen {
   collision: Uint8Array;
   neighbors: number[];
   roofBits?: Uint8Array;
-  /** MM1: near/mid/far WALLPIX entries (`.OVR` `wallEntries[0..2]`), indexed
-   * by frustum depth lane — not a single texture set for the whole screen. */
+  /** MM1: the three WALLPIX entries (`.OVR` `wallEntries[0..2]`) selected by
+   * WALL CODE (1/2/3 -> [0]/[1]/[2], ScummVM `GameView::drawTile`), NOT by
+   * frustum depth. */
   wallEntries: number[];
+  /** Real start cell (x, y) and facing (0 N,1 E,2 S,3 W) when the game
+   * defines one (MM1 towns: ScummVM `Maps::loadTown`; MM2: attrib
+   * `entry_coord`). Absent -> first-open-cell heuristic. */
+  start?: { x: number; y: number; facing: number };
   /** MM2 overland: attrib surface byte. */
   surface: number;
 }
@@ -119,6 +124,7 @@ interface CellJson {
   visual: { n: number; e: number; s: number; w: number };
   collision: { n: number; e: number; s: number; w: number };
   event: boolean;
+  dark?: boolean;
 }
 
 function pagesFromCells(cells: CellJson[][]): { visual: Uint8Array; collision: Uint8Array } {
@@ -128,17 +134,28 @@ function pagesFromCells(cells: CellJson[][]): { visual: Uint8Array; collision: U
     for (let x = 0; x < MAP_GRID; x++) {
       const c = cells[y][x];
       const i = y * MAP_GRID + x;
-      visual[i] = c.visual.n | (c.visual.e << 2) | (c.visual.s << 4) | (c.visual.w << 6);
+      // Page bit order is W,S,E,N (audit 2026-11-13); packing = codec inverse.
+      visual[i] = c.visual.w | (c.visual.s << 2) | (c.visual.e << 4) | (c.visual.n << 6);
       collision[i] =
-        (c.collision.n & 3) |
-        ((c.collision.e & 3) << 2) |
-        ((c.collision.s & 3) << 4) |
-        (c.collision.w !== 0 ? 0x40 : 0) |
+        (c.collision.w & 3) |
+        ((c.collision.s & 3) << 2) |
+        ((c.collision.e & 3) << 4) |
+        (c.collision.n !== 0 ? 0x40 : 0) |
         (c.event ? 0x80 : 0);
     }
   }
   return { visual, collision };
 }
+
+/** MM1 town start cells + facings, ScummVM `Maps::loadTown` (screen index ->
+ * start). Other screens have no fixed start (entered via exits/stairs). */
+export const MM1_TOWN_START: Record<number, { x: number; y: number; facing: number }> = {
+  0: { x: 8, y: 3, facing: 0 }, // Sorpigal, N
+  1: { x: 3, y: 12, facing: 3 }, // Portsmith, W
+  2: { x: 14, y: 8, facing: 3 }, // Algary, W
+  3: { x: 11, y: 8, facing: 1 }, // Dusk, E
+  4: { x: 4, y: 4, facing: 0 }, // Erliquin, N
+};
 
 let mm1Promise: Promise<Mm1Data> | null = null;
 let mm2Promise: Promise<Mm2Data> | null = null;
@@ -156,6 +173,9 @@ function loadMm1(): Promise<Mm1Data> {
       (s: { index: number; slug: string; title: string; env: string; cells: CellJson[][] }) => {
         const { visual, collision } = pagesFromCells(s.cells);
         const ovr = ovrJson.overlays.find((o: { slug: string }) => o.slug === s.slug);
+        // `.OVR` exits, N/E/S/W -> resolved screen index (unresolved -> self).
+        const exits = ovr && ovr.exits ? (ovr.exits as { screen: number | null }[]) : [];
+        const neighbors = [0, 1, 2, 3].map((k) => exits[k]?.screen ?? (exits.length ? s.index : -1));
         return {
           index: s.index,
           label: `${s.index}: ${s.title}`,
@@ -164,9 +184,10 @@ function loadMm1(): Promise<Mm1Data> {
           mapWalls: true,
           visual,
           collision,
-          neighbors: [-1, -1, -1, -1],
+          neighbors,
           wallEntries: ovr && ovr.wallEntries ? (ovr.wallEntries as number[]) : [0, 0, 0],
           surface: 0,
+          start: MM1_TOWN_START[s.index],
         };
       },
     );
@@ -179,8 +200,8 @@ const MM2_ENV_BY_RANGE: Array<[number, number, string, boolean]> = [
   [0, 4, 'town', false],
   [5, 16, 'outside', true],
   [17, 32, 'cavern', false],
-  [33, 44, 'outside', true],
-  [45, 59, 'castle', false],
+  [33, 40, 'outside', true],
+  [41, 59, 'castle', false], // 41-44: elemental planes (sheet unconfirmed, see TODO mm2-env-from-attrib)
 ];
 
 function loadMm2(): Promise<Mm2Data> {
@@ -208,8 +229,11 @@ function loadMm2(): Promise<Mm2Data> {
     ]);
     const screens: MmScreen[] = (mapJson as { index: number; cells: CellJson[][] }[]).map((s, i) => {
       const { visual, collision } = pagesFromCells(s.cells);
-      const [env, isOutdoor] = envFor(i);
       const attrib = attribJson[i];
+      const [env, rangeOutdoor] = envFor(i);
+      // Vairn: overland == attrib surface_flag != 0 (screens 5-16, 33-40);
+      // screens 41-44 are surface 0 + self-linked, so they are NOT overland.
+      const isOutdoor = attrib ? attrib.surfaceFlag !== 0 : rangeOutdoor;
       const roofBits =
         attrib && attrib.roofBits
           ? Uint8Array.from(Object.values(attrib.roofBits as Record<string, number>))
@@ -223,6 +247,7 @@ function loadMm2(): Promise<Mm2Data> {
         visual,
         collision,
         neighbors: attrib ? (attrib.neighbours as number[]) : [-1, -1, -1, -1],
+        start: attrib && attrib.entryCoord ? { x: attrib.entryCoord & 15, y: attrib.entryCoord >> 4, facing: 0 } : undefined,
         roofBits,
         wallEntries: [0, 0, 0],
         surface: attrib ? (attrib.surfaceFlag as number) : 0,
@@ -268,7 +293,11 @@ export abstract class MmWalkerView implements GameView {
     const found = screens.find((s) => s.index === startLevel);
     const level = found ?? screens.find((s) => !s.outdoor) ?? screens[0];
     const walkable = this.findWalkable(level);
-    this.pose_ = startPose ?? { level: level.index, x: walkable[0], y: walkable[1], facing: 0 };
+    this.pose_ =
+      startPose ??
+      (level.start
+        ? { level: level.index, x: level.start.x, y: level.start.y, facing: level.start.facing as Pose['facing'] }
+        : { level: level.index, x: walkable[0], y: walkable[1], facing: 0 });
   }
 
   private findWalkable(sc: MmScreen): [number, number] {
@@ -323,7 +352,7 @@ export abstract class MmWalkerView implements GameView {
     const dir = fwd ? facing : back ? (facing + 2) & 3 : -1;
     if (dir >= 0 && this.stepCooldown <= 0) {
       const sc = this.screens[level];
-      if (this.noclip || !movementBlocked(sc, x, y, dir)) {
+      if (this.noclip || !movementBlocked(sc, x, y, dir, this.screens)) {
         const next = stepParty(dir, x, y, level, this.screens, this.noclip);
         level = next.screen;
         x = next.x;
@@ -422,10 +451,12 @@ export abstract class MmWalkerView implements GameView {
 // MM1 view — real WALLPIX slices
 // ──────────────────────────────────────────────────────────────────────────
 
-/** Pick the near/mid/far WALLPIX entry for a blit's frustum depth lane
- * (depths beyond the far lane reuse it — there are only 3 lanes). */
-export function wallLaneForDepth(wallEntries: number[], depth: number): number {
-  return wallEntries[Math.min(depth, 2)] ?? wallEntries[0] ?? 0;
+/** Pick the WALLPIX entry for a face by its wall CODE: 1 -> `MAP_2`
+ * entry, 2 -> `MAP_4`, 3 -> `MAP_6` (ScummVM `GameView::drawTile` section
+ * select + `Maps::loadTiles`). Independent of view depth. */
+export function wallEntryForCode(wallEntries: number[], code: number): number {
+  const lane = Math.min(Math.max(code, 1), 3) - 1;
+  return wallEntries[lane] ?? wallEntries[0] ?? 0;
 }
 
 export class MM1View extends MmWalkerView {
@@ -453,13 +484,13 @@ export class MM1View extends MmWalkerView {
     const scene = buildIndoorScene(grid, this.pose_.x, this.pose_.y, this.pose_.facing);
 
     for (const b of scene.blits) {
-      const fr = data.wallpix.frame(wallpixSliceName(wallLaneForDepth(sc.wallEntries, b.depth), b.frame));
+      const fr = data.wallpix.frame(wallpixSliceName(wallEntryForCode(sc.wallEntries, b.code), b.frame));
       if (!fr) continue;
       ctx.drawImage(data.wallpix.img, fr.x, fr.y, fr.w, fr.h, b.x, b.y, fr.w, fr.h);
     }
-    // MM1 renders no torch overlays: the reference implementation
-    // (ScummVM drawTile) draws code-3 (wall+torch) faces as plain walls and
-    // WALLPIX has no torch frames, so MM2's torch art doesn't belong here.
+    // MM1 door/torch art is already part of the WALLPIX sets: wall code 2
+    // (door) and 3 (torch) faces select the MAP_4/MAP_6 entries above, so no
+    // separate overlay pass (MM2's torch sheets don't belong here).
   }
 
   renderMinimap(ctx: CanvasRenderingContext2D): void {

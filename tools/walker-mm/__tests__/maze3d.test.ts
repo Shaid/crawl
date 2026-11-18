@@ -65,16 +65,42 @@ describe('frustum engine', () => {
     expect(movementBlocked(sc, 2, 1, 0)).toBe(false);
   });
 
-  it('movementBlocked only applies the MM2 terrain-id check when mapWalls is false', () => {
+  it('movementBlocked ignores the destination cell back wall (game checks current cell only)', () => {
+    const sc = emptyScreen();
+    // facing N from (1,1): dest (1,2) has its S-facing collision bit (0x04)
+    // set — a one-way door. The game only reads the CURRENT cell: open.
+    sc.collision[2 * MAP_GRID + 1] = 0x04;
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(false);
+    // null control: the same bit on the current cell, facing S, does block.
+    sc.collision[1 * MAP_GRID + 1] = 0x04;
+    expect(movementBlocked(sc, 1, 1, 2)).toBe(true);
+  });
+
+  it('movementBlocked MM2 overland: wall bit gates a terrain-class check', () => {
     const sc = emptyScreen();
     sc.outdoor = true;
-    // destination visual byte 0xff matches MM1's border-cell convention but
-    // also happens to match MM2's terrain-block bit pattern ((v&0x60)===0x60).
-    // facing 0 (N) from (1,1) steps to (1,2) -> visual index 2*16+1 = 33.
-    sc.visual[2 * MAP_GRID + 1] = 0xff;
-    sc.mapWalls = true; // MM1: MapWalls encoding, not an MM2 terrain id — must not block
+    sc.mapWalls = false;
+    sc.surface = 0x1a; // env nibble 0x0A (water)
+    const N = 0x40; // facing N reads collision bit 0x40
+    const fwd = 2 * MAP_GRID + 1;
+    // wall bit clear: open even into a mountain (class 1, id 1)
+    sc.visual[fwd] = 1;
     expect(movementBlocked(sc, 1, 1, 0)).toBe(false);
-    sc.mapWalls = false; // MM2: same byte read as a terrain id — blocks
+    sc.collision[1 * MAP_GRID + 1] = N;
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(true); // mountain, no skill
+    sc.visual[fwd] = 3; // class 2 (not 1/3/4): passes although the wall bit is set
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(false);
+    sc.visual[fwd] = 4; // class 3 (forest)
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(true);
+    sc.visual[fwd] = 9; // class 4 (water): blocks only when env nibble == 0x0A
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(true);
+    sc.surface = 0x1b;
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(false);
+    // current cell is classified when the forward cell is unhandled
+    sc.visual[1 * MAP_GRID + 1] = 2;
+    expect(movementBlocked(sc, 1, 1, 0)).toBe(true);
+    // MM1 encoding (mapWalls): wall bit set blocks outright, no terrain read
+    sc.mapWalls = true;
     expect(movementBlocked(sc, 1, 1, 0)).toBe(true);
   });
 

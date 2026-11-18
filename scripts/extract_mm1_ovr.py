@@ -30,7 +30,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from mm1lib.ovr import read_ovr  # noqa: E402
+from mm1lib.ovr import read_ovr, resolve_exit  # noqa: E402
 from mm1lib.wallpix import TILE_AREAS, TILE_OFFSET  # noqa: E402
 from bclib.paths import write_manifest, write_platform_index  # noqa: E402
 
@@ -101,7 +101,10 @@ def main() -> None:
             'areaTable': wf['areaTable'],
             'lanes': [wf['lane1'], wf['lane2'], wf['lane3']],
             'wallEntries': [wallpix_entry(wf['areaTable'], wf[f'lane{i}']) for i in (1, 2, 3)],
-            'eventTriples': ovr.event_triples(),
+            # N,E,S,W exits; `screen` = resolved MAZEDATA index (null = no
+            # map with that id, e.g. pp1 -> treat as self).
+            'exits': [{'id': i, 'section': sec, 'screen': resolve_exit(i, sec)}
+                      for i, sec in ovr.exits()],
             'stringRegionStart': ovr.string_region_start,
             'strings': len(ovr.strings()),
         })

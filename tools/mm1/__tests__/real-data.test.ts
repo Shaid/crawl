@@ -26,6 +26,27 @@ import {
 const DATA_DIR = resolve('data/mm1/dosega');
 const hasData = existsSync(resolve(DATA_DIR, 'MAZEDATA.DTA'));
 
+
+/**
+ * Wall-bit slot pairing (audit 2026-11-13): a wall on a cell's E face must
+ * also be on its east neighbour's W face. With the correct W,S,E,N bit order
+ * this holds ~99.9%; the old N,E,S,W labelling pairs the wrong slots (~37%).
+ */
+function symmetry(screens: { cells: { visual: Record<string, number> }[][] }[], eastOf: string, westOf: string) {
+  let ok = 0, n = 0;
+  for (const s of screens) {
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 15; x++) {
+        const a = s.cells[y][x].visual[eastOf], b = s.cells[y][x + 1].visual[westOf];
+        if (a === 0 && b === 0) continue;
+        n++;
+        if ((a !== 0) === (b !== 0)) ok++;
+      }
+    }
+  }
+  return ok / n;
+}
+
 describe('MM1 real retail data', { skip: !hasData }, () => {
   it('MAZEDATA.DTA is exactly 55 screens of 512 bytes', () => {
     const maze = readFileSync(resolve(DATA_DIR, 'MAZEDATA.DTA'));
@@ -70,5 +91,12 @@ describe('MM1 real retail data', { skip: !hasData }, () => {
       );
       expect(wallBytes).toBe(true);
     }
+  });
+
+  it('wall bit labels W,S,E,N: east face pairs with east neighbour west face (null control: N/W)', () => {
+    const maze = new Uint8Array(readFileSync(resolve(DATA_DIR, 'MAZEDATA.DTA')));
+    const { screens } = decodeMazeData(maze);
+    expect(symmetry(screens, 'e', 'w')).toBeGreaterThan(0.99);
+    expect(symmetry(screens, 'n', 'w')).toBeLessThan(0.6); // wrong pairing collapses
   });
 });

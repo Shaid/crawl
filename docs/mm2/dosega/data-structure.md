@@ -11,10 +11,12 @@ against the retail bytes:
 
 | File | Status |
 |------|--------|
-| `STR.DAT`, `MONSTERS.DAT`, `ATTRIB.DAT` | LZW-wrapped (`u32LE` decompressed-size header + `lzwDecompress` body, same codec as the graphics files) — decompresses **byte-exact** to the Amiga `.dat` file (0 mismatches, full length); genuinely unported |
+| `MONSTERS.DAT`, `ATTRIB.DAT` | LZW-wrapped (`u32LE` decompressed-size header + `lzwDecompress` body, same codec as the graphics files) — decompresses **byte-exact** to the Amiga `.dat` file (6,656/6,656 and 3,840/3,840); genuinely unported |
+| `STR.DAT` | same LZW wrapper, but a **prefix** match only: DOS decodes to 7,707 B, Amiga `str.dat` is 7,808 B; the first 7,707 bytes are identical (2026-11-13 audit; earlier text said "full length") |
 | `ITEMS.DAT` | **not** LZW — plain, already Amiga-format bytes (byte-identical size to Amiga `items.dat`, 5120 B; readable directly, e.g. `"Small Club"` at record offset 20) — decodable today with the existing `tools/mm2/items.ts` Amiga codec, no new work needed |
 | `ROSTER.DAT` | **not** LZW — plain, Amiga-format-shaped (`"Sir Felgar"` at offset 0) but 8292 B vs Amiga `roster.dat`'s 8320 B (28-byte delta, cause not yet investigated) |
-| `MAP.DAT`, `SPELLS.DAT`, `EVENTSI.DAT`, `EVENTSO.DAT` | **unverified** — first 4 bytes are not a plausible `lzwDecompress` size header (e.g. `MAP.DAT` reads as ~37M, `SPELLS.DAT` as ~25M), so this is a different format, not the same LZW wrapper; not yet classified |
+| `MAP.DAT` | **solved (2026-11-13 audit)**: 60 × `u16 LE` offset table, then per screen a `u32 LE` size (always 512) + LZW body (`lzwDecompress`). Decodes **60/60 screens byte-exact** to Amiga `map.dat` (pinned by `tools/mm2/__tests__/real-data.test.ts`, null control: wrong-screen pairing 0/60) — a second-port confirmation of the Amiga grid with no per-port reorientation. (The earlier "implausible size header" read the offset table as a size.) |
+| `SPELLS.DAT`, `EVENTSI.DAT`, `EVENTSO.DAT` | **unverified** — not the plain size-header LZW wrapper. `EVENTSI.DAT` starts like `MAP.DAT` (71 × `u32` offset table, first value `0x11C` = 284) — try the offset-table + LZW shape (TODO `mm2-dos-eventsi-shape`) |
 
 See `docs/mm2/TODO.md` for the open-work breakdown.
 
@@ -120,8 +122,8 @@ Not analysed here.
   are **not** LZW-wrapped and could be exported today with the existing
   Amiga-format codecs (`tools/mm2/items.ts`/`roster.ts`) — no wrapper work
   needed, just wiring a DOS export path.
-- `MAP.DAT`/`SPELLS.DAT`/`EVENTSI.DAT`/`EVENTSO.DAT`: not the same LZW
-  wrapper as STR/MONSTERS/ATTRIB (implausible size header) — format
-  unclassified.
+- `SPELLS.DAT`/`EVENTSI.DAT`/`EVENTSO.DAT`: not the plain size-header LZW
+  wrapper; `EVENTSI.DAT` looks like `MAP.DAT`'s offset-table shape
+  (`MAP.DAT` itself is now solved, see the table above) — unclassified.
 - The walker-facing paired CGA/EGA silhouette masks (outdoor/sky/overlay
   renders) from the reference are documented but not ported.

@@ -79,14 +79,13 @@ describe('MM1 maze data decode', () => {
   });
 
   it('decodes visual-page wall code 2 as door and 3 as torch, not the reverse', () => {
-    // N=2 (door), E=3 (torch): byte = (3<<2)|2 = 0x0E. See the "Correction"
-    // note in docs/mm1/dosega/data-structure.md — earlier docs/comments had
-    // this backwards.
+    // Bit order is W,S,E,N: W=2 (door) in bits 0-1, S=3 (torch) in bits 2-3:
+    // byte = (3<<2)|2 = 0x0E. (2026-11-13: labels were N,E,S,W before.)
     const data = new Uint8Array(MM1_MAP_FILE_SIZE);
     data[0] = 0x0e; // screen 0, page 0 (visual), cell (row 0, col 0)
     const decoded = decodeMazeData(data);
     const cell = decoded.screens[0].cells[0][0];
-    expect(cell.visual.n).toBe(2); // door
-    expect(cell.visual.e).toBe(3); // wall+torch
+    expect(cell.visual.w).toBe(2); // door
+    expect(cell.visual.s).toBe(3); // wall+torch
   });
 });

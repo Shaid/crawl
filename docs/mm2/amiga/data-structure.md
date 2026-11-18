@@ -328,17 +328,55 @@ N/E/S/W: `0` open, `1` wall, `2` door, `3` wall+torch.
 > frames 0x10–0x1B for door art and the torch sheets hold the wall+torch
 > overlays — matching code 2/3 respectively.
 
+> **Correction (2026-11-13, audit):** the N/E/S/W bit labels above are a
+> permutation of the real layout. Neighbour-wall symmetry (a cell's E face
+> must equal its east neighbour's W face): the labels below pair correctly on
+> 100% of faces on every indoor screen (MM2) vs ~30% for the old
+> order; ScummVM `DIRMASK_N=0xC0, E=0x30, S=0x0C, W=0x03` and `getMoveDelta`
+> (S = (0,-1)) agree. **Real layout: visual page `W = byte&3`,
+> `S = (byte>>2)&3`, `E = (byte>>4)&3`, `N = (byte>>6)&3`; y+1 = north,
+> `idx = y*16+x`. Collision page: wall bits `0x55 & dirmask` (W 0x01, S 0x04,
+> E 0x10, N 0x40); `0x20` = cell-level DARK flag (`CELL_DARK`); `0x80` =
+> special/event cell; `0x02` and `0x08` unidentified** (not "per-direction
+> dark"). Engine/movement code was never affected (it repacks the raw
+> bytes); `tools/mm2/map.ts` (shared by MM1) field names and `dark` are fixed and
+> pinned by a real-data symmetry test with a null control. The old reading
+> of the 0x20/dark predicate scored TP 160 / FP 1,757 / FN 100. Text below
+> that still says N/E/S/W order is the superseded wording.
+
 ```
-N = byte & 3,  E = (byte >> 2) & 3,  S = (byte >> 4) & 3,  W = (byte >> 6) & 3
+(superseded labels) N = byte & 3,  E = (byte >> 2) & 3,  S = (byte >> 4) & 3,  W = (byte >> 6) & 3
+real:               W = byte & 3,  S = (byte >> 2) & 3,  E = (byte >> 4) & 3,  N = (byte >> 6) & 3
 ```
 
 **Page 1 — collision**: per direction `(dark << 1) | wall` (low bit wall, high
-bit darkness). **West has no dark slot — bit `0x80` is the event flag**
-(verified: every `event.dat` triplet sits on a collision cell with `0x80` set).
+bit darkness) — **superseded, see the 2026-11-13 Correction above**:
+wall bits are `0x55 & dirmask` (W 0x01, S 0x04, E 0x10, N 0x40), `0x20` is a
+cell-level dark flag, `0x02`/`0x08` unidentified. Bit `0x80` = special/event
+cell (verified: every `event.dat` triplet (2,730/2,730) sits on a collision
+cell with `0x80` set; 554 `0x80` cells have no triplet).
 
 ```
-bits 0-1 N, 2-3 E, 4-5 S, bit 6 W wall, bit 7 event
+bits 0 W wall, 2 S wall, 4 E wall, 5 dark(cell), 6 N wall, 7 event   (audit 2026-11-13)
 ```
+
+> **Correction (2026-11-13, audit):** movement checks only the **current**
+> cell's wall bit (Vairn `passabilityObstruction` @ 0x9424,
+> `mm2_map_passability_blocked(coll_current, facing)`); the destination's back
+> face is not read (160 one-way door faces; the old two-sided check blocked
+> 305 of 34,560 indoor moves). On overland (`surface_flag != 0`) a set wall
+> bit only triggers a terrain-class check: forward cell then current cell,
+> class via `visual & 0x1F` through `kClass[32]` = `0,1,1,2,3,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0`
+> (1 mountain, 3 forest, 4 water); class 1 blocks without Mountaineering
+> (skill 0x0B count>=2), 3 without Pathfinder (0x0D), 4 blocks only when
+> `surface & 0x0F == 0x0A` without Walk on Water. The walker's old
+> `(v&0x60)==0x60 || v&0x80` "fallback" rule (from Vairn's tools-level
+> `mm2_map_move.py`, itself labelled Fallback) blocked 9,490 / 23,040 (41.2%)
+> interior overland moves the game allows; ported in `maze3d.ts`
+> `movementBlocked`/`MM2_TERRAIN_CLASS` (after: 14,152 -> 4,662 blocked of
+> 19,200 on the 20 `surface!=0` screens; difference exactly 9,490). **Not
+> re-disassembled from the Amiga `mm2` binary** (TODO
+> `mm2-overland-passability-0x9424`).
 
 ---
 
@@ -349,15 +387,15 @@ Per-screen environment/world-adjacency/roof table parallel to `map.dat`.
 | Off | Field | Status |
 |-----|-------|--------|
 | `0x00` | area_id (= record index) | confirmed |
-| `0x01` | map_category (1 town, 2 cavern, 3 dungeon, 4 castle) | confirmed |
+| `0x01` | map_category — **overstated**: overland screens use 1/2 and screens 41-44 use 8/5/7/6 (the doc's "1 town, 2 cavern, 3 dungeon, 4 castle" does not hold; meaning of 5-8 open, TODO `mm2-env-from-attrib`) | partially confirmed |
 | `0x02` | tileset_id (town `0x21`, cavern `0x32`, dungeon `0x53`, castle `0x44`) | confirmed |
 | `0x03` | env_type (`0x11` town, `0x12` cavern, `0x13/0x14` castle) | confirmed |
-| `0x04` | surface_flag (0 interior; nonzero overland terrain class) | confirmed |
+| `0x04` | surface_flag (0 interior; nonzero = overland: screens 5-16 and 33-40 only; 41-44 are surface 0 and self-linked) | confirmed |
 | `0x05`–`0x08` | neighbour ids N/E/S/W (interiors set all four = self; overland table is fully symmetric) | confirmed |
 | `0x09` | field_09 (mostly `0x64`=100; read @`0x10A2`) | observed |
 | `0x0A`–`0x0C` | params (compared against runtime values @`0x12124`/`0x11FA2`/`0x11FB2`) | observed |
 | `0x0D` | field_0D (multiples of 10, 30..200; compared @`0x116CA`/`0x13148`) | observed |
-| `0x0E` | entry_coord, packed `(Y<<4)|X` spawn/safe square | ASM-confirmed |
+| `0x0E` | entry_coord, packed `(Y<<4)|X` spawn/safe square | ASM-confirmed; the walker now starts there when non-zero (differs from the old first-open-cell heuristic on 57/60 screens; screen 0 = (7,5); 0 -> heuristic) |
 | `0x0F` | era_gate (event interpreter compares to current era) | ASM-confirmed |
 | `0x11` | sublayout param (read/compared during screen setup @`0x12F58`) | observed |
 | `0x12` | **door_strength** — materialized to `A4-$5608`, consumed by the door-bash handler @`0x9C2A` | ASM-confirmed |

@@ -10,11 +10,12 @@
  * MM2 `map.dat` (Vairn's `21-map-dat-format.md`), which is why the cell decode
  * below is imported from the MM2 codec rather than re-derived:
  *
- *   Page 0 (visual, +0x000): four 2-bit wall fields per cell, N/E/S/W:
- *       `0` open, `1` wall, `2` door, `3` wall+torch.
- *   Page 1 (collision, +0x100): per direction `(dark<<1)|wall`; the low bit
- *       is the wall, the high bit darkness. West's dark slot is reused:
- *       bit 0x80 is the event flag.
+ *   Page 0 (visual, +0x000): four 2-bit wall fields per cell, bit order
+ *       W,S,E,N (W = byte&3 ... N = byte>>6): `0` open, `1` wall, `2` door,
+ *       `3` wall+torch.
+ *   Page 1 (collision, +0x100): wall bits `0x55 & dirmask`; 0x20 = cell DARK;
+ *       0x80 = special/event cell; 0x02/0x08 unidentified. (Labels corrected
+ *       2026-11-13 — see `../mm2/map.ts`.)
  *
  * Row 0 on disk = south (same convention as MM2; automap renders north-up).
  *
@@ -106,9 +107,11 @@ export function mm1EnvForSlug(slug: string): Mm1Env {
 export interface Mm1MapCell {
   /** Page-0 wall codes (0 open, 1 wall, 2 door, 3 wall+torch). */
   visual: { n: number; e: number; s: number; w: number };
-  /** Page-1 collision: wall low bit, dark high bit (north/east/south/west). */
+  /** Page-1 collision fields (see `../mm2/map.ts`): w/s/e raw 2-bit, n = 0x40 wall. */
   collision: { n: number; e: number; s: number; w: number };
-  /** True when collision byte bit 0x80 is set (event trigger). */
+  /** Collision bit 0x20: cell-level dark flag. */
+  dark: boolean;
+  /** True when collision byte bit 0x80 is set (special/event cell). */
   event: boolean;
 }
 
@@ -156,6 +159,8 @@ export function parseMapSlugsFromExe(exe: Uint8Array): string[] {
 /**
  * First fully open cell in the collision page (no wall in any direction) —
  * the natural walk-in point for the screen; falls back to the centre.
+ * HEURISTIC, not game data (no field gives it): real town starts are in
+ * `tools/walker/games-mm.ts` `MM1_TOWN_START` (ScummVM `Maps::loadTown`).
  */
 export function findEntry(collision: Uint8Array): [number, number] {
   for (let y = 0; y < MM1_MAP_GRID; y++) {

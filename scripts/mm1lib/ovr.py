@@ -26,7 +26,11 @@ Container (verified 55/55: `14 + code_sz + data_sz == file size`):
      data[1]      byte  WALLPIX area table (1-3, -> maps.cpp TILE_AREAS)
      data[2..7]   3x u16 wall/lane ids (near/mid/far frustum or horizon
                           lanes; resolved via TILE_AREAS/TILE_OFFSET)
-     data[8..19]  4x 3-byte event records (x, y, kind) — repeating
+     data[8..19]  4x 3-byte map EXITS N,E,S,W: (u16 LE map id, u8 section)
+                  -- ScummVM Maps::step MAP_{NORTH,EAST,SOUTH,WEST}_EXIT_ID/
+                  _SECTION (data offsets 8/10, 11/13, 14/16, 17/19). Resolved
+                  by `resolve_exit` below. (An earlier "(x, y, kind) event
+                  records" reading was wrong -- audit 2026-11-13.)
      data[20..]   more per-map tables, then the map's text strings
                   (null-separated, \r\n line breaks inside; the start of
                   the string region varies per file)
@@ -44,6 +48,31 @@ from pathlib import Path
 
 HEADER_SIZE = 14
 ENTRY_OFFSET = 0x00F2
+
+
+# Map id of each of the 55 screens, in MAZEDATA order. Source: ScummVM
+# engines/mm/mm1/maps/mapNN.h `Map(<idx>, "<slug>", <id>, ...)` constructors
+# (the id is not stored in the OVR itself). Exits refer to maps by this id.
+MAP_IDS = [
+    0x604, 0xc03, 0x203, 0x802, 0xb1a, 0xa11, 0x001, 0xc01, 0x202, 0x005, 0x51b, 0x212, 0x601, 0xa00,
+    0xf01, 0x502, 0xb02, 0x103, 0xa00, 0x703, 0x101, 0xd03, 0x304, 0xa11, 0x904, 0xf04, 0x505, 0xb05,
+    0x106, 0x801, 0x112, 0x706, 0xb1a, 0x11b, 0x706, 0xf08, 0x508, 0xf03, 0x703, 0xf02, 0x702, 0xf04,
+    0x704, 0xa11, 0x107, 0xf05, 0xa00, 0x705, 0x412, 0xb07, 0xf01, 0x701, 0xe00, 0x201, 0xb1a,
+]
+# ScummVM Maps::getIndex: search from LOOKUPS_START[section], first id match.
+LOOKUPS_START = [0, 0, 14, 34]
+
+
+def resolve_exit(map_id: int, section: int) -> int | None:
+    """Screen index an exit leads to, or None if the id matches no map
+    (pp1's exits, 0x010f, match nothing -- ScummVM would assert; treat as
+    'stay on this screen')."""
+    if section > 3:
+        return None
+    for k in range(LOOKUPS_START[section], len(MAP_IDS)):
+        if MAP_IDS[k] == map_id:
+            return k
+    return None
 
 
 class OvrOverlay:
@@ -68,9 +97,10 @@ class OvrOverlay:
             'lane3': d[6] | (d[7] << 8),
         }
 
-    def event_triples(self) -> list[tuple[int, int, int]]:
+    def exits(self) -> list[tuple[int, int]]:
+        """Raw (map id, section) exits in N, E, S, W order."""
         d = self.data_seg
-        return [(d[8 + i * 3], d[9 + i * 3], d[10 + i * 3]) for i in range(4)]
+        return [(d[8 + i * 3] | (d[9 + i * 3] << 8), d[10 + i * 3]) for i in range(4)]
 
     def strings(self, min_len: int = 4) -> list[dict]:
         """Text strings from the data segment: split on nulls, \r\n = line breaks.

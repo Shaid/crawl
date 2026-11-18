@@ -31,7 +31,23 @@ MM2 codec (`tools/mm2/map.ts` → `tools/mm1/map.ts`).
 > cells whose four fields are all `3` (byte `0xFF`) are border/edge cells
 > (Vairn doc 23).
 
-Cell packing, **visual page**: `N = byte&3`, `E = (byte>>2)&3`,
+> **Correction (2026-11-13, audit):** the N/E/S/W bit labels above are a
+> permutation of the real layout. Neighbour-wall symmetry (a cell's E face
+> must equal its east neighbour's W face): the labels below pair correctly on
+> 99.9% of faces (6,996/7,005 E<->W, 7,150/7,160 N<->S) vs ~37% for the old
+> order; ScummVM `DIRMASK_N=0xC0, E=0x30, S=0x0C, W=0x03` and `getMoveDelta`
+> (S = (0,-1)) agree. **Real layout: visual page `W = byte&3`,
+> `S = (byte>>2)&3`, `E = (byte>>4)&3`, `N = (byte>>6)&3`; y+1 = north,
+> `idx = y*16+x`. Collision page: wall bits `0x55 & dirmask` (W 0x01, S 0x04,
+> E 0x10, N 0x40); `0x20` = cell-level DARK flag (`CELL_DARK`); `0x80` =
+> special/event cell; `0x02` and `0x08` unidentified** (not "per-direction
+> dark"). Engine/movement code was never affected (it repacks the raw
+> bytes); `tools/mm1|mm2/map.ts` field names and `dark` are fixed and
+> pinned by a real-data symmetry test with a null control. The old reading
+> of the 0x20/dark predicate scored TP 160 / FP 1,757 / FN 100. Text below
+> that still says N/E/S/W order is the superseded wording.
+
+Cell packing, **visual page** (superseded labels, see Correction above): `N = byte&3`, `E = (byte>>2)&3`,
 `S = (byte>>4)&3`, `W = (byte>>6)&3` (four 2-bit fields).
 
 Cell packing, **collision page**: `N/E/S` are 2-bit `(dark<<1)|wall`
@@ -77,7 +93,7 @@ consecutive lowercase alphanumeric strings until 55 are found).
 | TS decode vs Vairn's independent Python decoder (`mm1_maps.py`) | byte-exact, 55/55 screens |
 | MM.EXE slug table @ `0x10C07` vs documented table | byte-exact, 55 slugs |
 | `*.OVR` filenames vs slug table | set-equal, 55/55 |
-| Minimap atlas (11×5, 2 px/cell, north-up) | 53,230/53,230 non-dot pixels exact + 3,090/3,090 event-dot pixels exact |
+| Minimap atlas (11×5, 2 px/cell, north-up) | **rendered** — the 53,230/53,230 / 3,090/3,090 figures compare the atlas against our own renderer (no external reference image); the dark predicate it used was the wrong one (2026-11-13 audit), now bit `0x20` |
 
 ## Outputs (`public/assets/mm1/dosega/`)
 
@@ -380,7 +396,7 @@ and `maps/map.h` names every field up to offset 50 via its `DataOffset` enum:
 |--------|------|-------|--------------|
 | +0x00 | 1 | map id/code: towns 1–5, caves 6–14 (screen index+1), overland 0x81–0x94 (0x80\|(index−13)), dungeons 0x20–0x40 (doom 0x20, alamar 0x22, demon 0x40, astral 0x39) | `MAP_ID` |
 | +0x01 | 1 | WALLPIX area table (1–3 → `maps.cpp` TILE_AREAS) | `MAP_1` |
-| +0x02 | 6 | 3 × `u16` wall/lane ids (near/mid/far frustum lanes or overland horizons) | `MAP_2`/`MAP_4`/`MAP_6` |
+| +0x02 | 6 | 3 × `u16` wall/lane ids selected **by wall code** (code 1 -> `MAP_2`, 2 (door) -> `MAP_4`, 3 (torch) -> `MAP_6`; ScummVM `GameView::drawTile`/`loadTiles`) — *not* near/mid/far depth lanes (2026-11-13 correction); overland codes select biome art | `MAP_2`/`MAP_4`/`MAP_6` |
 | +0x08 | 3 | **north exit**: `u16` dest map id, 1-byte dest section | `MAP_NORTH_EXIT_ID`/`_SECTION` |
 | +0x0B | 3 | **east exit**: `u16` dest map id, 1-byte dest section | `MAP_EAST_EXIT_ID`/`_SECTION` |
 | +0x0E | 3 | **south exit**: `u16` dest map id, 1-byte dest section | `MAP_SOUTH_EXIT_ID`/`_SECTION` |
@@ -402,9 +418,11 @@ and `maps/map.h` names every field up to offset 50 via its `DataOffset` enum:
 | +0x2F | 1 | unlabeled | `MAP_47` |
 | +0x30 | 1 | trap threshold | `MAP_TRAP_THRESHOLD` |
 | +0x31 | 1 | unlabeled | `MAP_49` |
-| +0x32 (=51) | N | **special-cell map-offset table** (see below) | — |
+| +0x33 (=51) | N | **special-cell map-offset table** (see below) | — |
 | +0x32+N (≈74/75) | N | **special-cell direction-mask table** (see below) | — |
 | after | … | further per-map data, then the map's text strings (null-separated, `\r\n` line breaks) | — |
+
+> **Correction (2026-11-13):** `+0x32` (= 50) is `MAP_SPECIAL_COUNT`; the special-cell offset table starts at +0x33 (51). Exits are now exported as `ovr.json` `overlays[].exits[{id,section,screen}]` (N,E,S,W; `scripts/mm1lib/ovr.py` `MAP_IDS`/`resolve_exit`, ids from ScummVM `mapNN.h`): every indoor map's four exits point at itself (edges wrap); the 20 overland sectors (14-33) form a 5x4 grid, 62/62 links reciprocal (null control N<->N: 0); only `pp2` (all four exits -> `dragad`) is non-reciprocal (4 links); `pp1`'s exits (`0x010f`) match no map id. The walker wires these into `neighbors`.
 
 > **Correction vs. earlier text**: `+0x08 | 12 | 4 × 3-byte event records
 > (x, y, kind)` was a guess. ScummVM's `DataOffset` enum shows those 12
@@ -517,3 +535,22 @@ lower-value exercise now that behavior is independently known).
   ScummVM's `mapNN.cpp` reimplementation (see § ".OVR map-script overlays"
   above), but the raw 8086 bytes are still undisassembled and unmapped to
   that behavior instruction-by-instruction.
+
+
+## Start positions (2026-11-13 audit)
+
+`maps.json` `entry` and the walker's old "entry cell (4,2)" for Sorpigal come
+from `tools/mm1/map.ts` `findEntry` (first fully open cell) — a heuristic; no
+`.OVR` field gives a start. The game's real town starts (ScummVM
+`Maps::loadTown`): Sorpigal (8,3) facing N, Portsmith (3,12) W, Algary
+(14,8) W, Dusk (11,8) E, Erliquin (4,4) N — `MM1_TOWN_START` in
+`tools/walker/games-mm.ts`. Other screens have no fixed start.
+
+## Movement rule (2026-11-13 audit)
+
+Only the **current** cell's collision wall bit for the facing blocks a step
+(ScummVM `ViewBase::forward`: `_currentState & 0x55 & mask`); the destination
+cell's back face is not checked. 121 door faces are open on one side and
+blocked on the other (`Map::unlockDoor` toggles the current cell's bit), so the
+old two-sided check wrongly blocked 356 of 33,600 indoor moves (1.1%) plus 28
+overland ones.

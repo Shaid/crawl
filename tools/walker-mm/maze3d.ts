@@ -4,9 +4,13 @@
  * Port of the shared core of Vairn/MM2's `wiki/{maze-walker,mm1-maze-walker}/
  * view3d.js` (itself a port of `tools/view3d_trace.py` + `view3d_indoor.py`
  * — traced from the games' own 68k/x86 3D-view code). Both games share this
- * frustum math; only the art sources differ (MM1: WALLPIX slices; MM2: `.32`
- * sheets), which the host supplies.
+ * frustum math (exact for MM2; an APPROXIMATION for MM1, whose real
+ * `GameView::drawScene` uses different positions and crops — TODO
+ * `mm1-drawscene-port`); the art sources differ (MM1: WALLPIX slices chosen
+ * by wall code; MM2: `.32` sheets), which the host supplies.
  *
+ * Page bytes pack four 2-bit fields in W,S,E,N order (W = low bits; audit
+ * 2026-11-13), y+1 = north.
  * Page-0 wall codes (confirmed by the ASM traces + the collision page:
  * code-2 faces are passable doorways, code-3 faces sit on blocked walls):
  *   `0` open, `1` plain wall, `2` door, `3` wall+torch.
@@ -88,23 +92,68 @@ function movementToCollisionDir(facing: number): number {
   return (3 - (facing & 3)) & 3;
 }
 
-export function movementBlocked(sc: ScreenLike, x: number, y: number, facing: number): boolean {
+/**
+ * MM2 overland terrain class (`visual & 0x1F` -> class), the game's own
+ * table at `A4-$720A` as read by `passabilityObstruction` @ 0x9524
+ * (Vairn/MM2 `mm2_map_outdoor_terrain_class`). 1 mountain, 3 forest, 4 water
+ * (ids 5-12, 28). NOT re-disassembled from the Amiga binary here — see TODO
+ * `mm2-overland-passability-0x9424`.
+ */
+export const MM2_TERRAIN_CLASS = [
+  0, 1, 1, 2, 3, 4, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0,
+];
+
+function visualAtWrapped(sc: ScreenLike, screens: ScreenLike[] | undefined, x: number, y: number): number {
+  let s = sc;
+  let lx = x;
+  let ly = y;
+  const hop = (slot: number): boolean => {
+    const n = sc.neighbors[slot];
+    if (!screens || n < 0 || n >= screens.length) return false;
+    s = screens[n];
+    return true;
+  };
+  if (lx < 0) { if (!hop(3)) return 0; lx += MAP_GRID; }
+  else if (lx >= MAP_GRID) { if (!hop(1)) return 0; lx -= MAP_GRID; }
+  if (ly < 0) { if (!hop(2)) return 0; ly += MAP_GRID; }
+  else if (ly >= MAP_GRID) { if (!hop(0)) return 0; ly -= MAP_GRID; }
+  return s.visual[ly * MAP_GRID + lx];
+}
+
+/**
+ * The game's movement rule. Only the CURRENT cell's collision bit for the
+ * facing matters (MM1 ScummVM `ViewBase::forward`: `_currentState & 0x55 &
+ * mask`; MM2 `passabilityObstruction` @ 0x9424) — the destination cell's
+ * back wall is NOT checked (121 MM1 / 160 MM2 door faces are one-way).
+ *
+ * MM2 overland (`outdoor && !mapWalls`): the wall bit only triggers a terrain
+ * check — the forward cell, then the current cell, is classified; class 1/3
+ * (mountain/forest) blocks unless the party has Mountaineering/Pathfinder
+ * (the walker has no party: always blocked), class 4 (water) blocks when the
+ * screen's `surface & 0x0F == 0x0A` (no Walk on Water). Anything else passes.
+ * `screens` supplies neighbour visuals for the forward-cell lookup at edges.
+ */
+export function movementBlocked(
+  sc: ScreenLike,
+  x: number,
+  y: number,
+  facing: number,
+  screens?: ScreenLike[],
+): boolean {
   const d = facing & 3;
   const cd = movementToCollisionDir(d);
-  const col = sc.collision;
-  const idx = y * MAP_GRID + x;
-  if (collisionFieldWall(col[idx], cd)) return true;
-  const nx = x + STEP_DX[d];
-  const ny = y + STEP_DY[d];
-  if (nx < 0 || ny < 0 || nx >= MAP_GRID || ny >= MAP_GRID) return false;
-  const back = movementToCollisionDir((d + 2) & 3);
-  const destIdx = ny * MAP_GRID + nx;
-  if (collisionFieldWall(col[destIdx], back)) return true;
+  if (!collisionFieldWall(sc.collision[y * MAP_GRID + x], cd)) return false;
   if (sc.outdoor && !sc.mapWalls) {
-    const destV = sc.visual[destIdx];
-    if ((destV & 0x60) === 0x60 || (destV & 0x80) !== 0) return true;
+    for (let step = 1; step >= 0; step--) {
+      const vx = step ? x + STEP_DX[d] : x;
+      const vy = step ? y + STEP_DY[d] : y;
+      const cls = MM2_TERRAIN_CLASS[visualAtWrapped(sc, screens, vx, vy) & 0x1f];
+      if (cls === 1 || cls === 3) return true;
+      if (cls === 4 && ((sc.surface ?? 0) & 0x0f) === 0x0a) return true;
+    }
+    return false;
   }
-  return false;
+  return true;
 }
 
 export interface FacingBits {
@@ -352,7 +401,7 @@ export function buildIndoorScene(grid: StitchedVisual, x: number, y: number, fac
 /** Step one grid cell; cross screen boundaries when `neighbors` allows. */
 export function stepParty(facing: number, x: number, y: number, screen: number, screens: ScreenLike[], noclip = false): Pose {
   const rec = screens[screen];
-  if (!noclip && movementBlocked(rec, x, y, facing)) {
+  if (!noclip && movementBlocked(rec, x, y, facing, screens)) {
     return { screen, x, y, facing };
   }
   x += STEP_DX[facing & 3];

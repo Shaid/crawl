@@ -47,7 +47,9 @@ const COLS = 11;
 const ROWS = 5;
 
 function cellIsDark(cell: Mm1MapCell): boolean {
-  return cell.collision.n === 2 || cell.collision.e === 2 || cell.collision.s === 2;
+  // Collision bit 0x20 = cell-level dark flag (ScummVM CELL_DARK); the old
+  // "collision field == 2" reading scored FP 1757 vs 160 TP against it.
+  return cell.dark;
 }
 
 function screenStats(cells: Mm1MapCell[][]): Record<string, number> {

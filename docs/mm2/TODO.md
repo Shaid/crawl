@@ -4,6 +4,17 @@ Single status surface for this game. Format details live in
 `docs/mm2/amiga/data-structure.md` (ported from the Vairn/MM2 ground truth);
 this file only tracks what's verified vs open, never restates format facts.
 
+## Open items
+
+| ID | Status | Question (one line) | Evidence | Updated |
+|----|--------|---------------------|----------|---------|
+| mm2-overland-passability-0x9424 | open | Re-disassemble the Amiga `mm2` binary at the passability routine (`0x9424`, class table `A4-$720A`) — the walker's ported rule (`maze3d.ts` `movementBlocked`) rests on Vairn's ASM-cited code; also model party skills (Mountaineering 0x0B / Pathfinder 0x0D / Walk on Water), which the walker lacks | `amiga/data-structure.md` § "Page 1 — collision" Correction | 2026-11-18 game-re |
+| mm2-env-from-attrib | open | Drive the walker environment from `attrib` `tileset_id`/`surface` instead of a screen-range table; meaning of `map_category` 5-8 and tileset -> sheet for screens 41-44 (elemental planes) and 45-59 (tileset `0x53` "dungeon" drawn with `castle`; screen 52 `0x33`) | `amiga/data-structure.md` § `attrib.dat`; `docs/mm2/audit-2026-11-13.md` finding 8 | 2026-11-18 game-re |
+| mm-coll-bits-0x02-0x08 | open | Identify collision-page bits `0x02` and `0x08` (MM1 + MM2; not per-direction dark) | `docs/mm1/dosega/data-structure.md` § Correction (bit layout) | 2026-11-18 game-re |
+| mm2-dos-eventsi-shape | open | Try the offset-table + LZW shape (as `MAP.DAT`) on `EVENTSI.DAT` (71 x u32 offsets, first `0x11C`), `EVENTSO.DAT`, `SPELLS.DAT` | `dosega/data-structure.md` | 2026-11-18 game-re |
+
+## Verification ledger (not open work)
+
 **Status key:** `verified-real` = checked against retail bytes in
 `data/mm2/amiga/data/` (or the Vairn test fixtures shipped under
 `tools/mm2/fixtures/`); `round-trip` = encode(decode(x)) == x on synthetic
@@ -19,7 +30,7 @@ here.
 | `roster.dat` | **verified-real** | Retail record 0 = "Sir Felgar". Shipped Vairn fixture `roster_create_test.dat` round-trips byte-exact. Global-stream + tail bytes preserved verbatim. | 2026-08-12 |
 | `spells.dat` | **verified-real** | 96 records + 64 trailing bytes from retail; known-answer record decode matches the documented examples. | 2026-08-12 |
 | `str.dat` | **verified-real** | Retail decode reproduces the joke/shop/prompt text verbatim. XOR-0x1C known answers + round-trip. | 2026-08-12 |
-| `map.dat` | **verified-real** | 60 screens × 512 from retail; cell field decode known-answers; collision `0x80` event-flag mapping per doc. | 2026-08-12 |
+| `map.dat` | **verified-real** | 60 screens × 512 from retail; cell field decode known-answers; collision `0x80` event-flag mapping (2,730/2,730 triplets). Bit labels corrected 2026-11-13 (W,S,E,N; neighbour-wall symmetry 100% indoor, null 0.3); DOS `MAP.DAT` decodes byte-exact 60/60. | 2026-11-18 |
 | `attrib.dat` | **verified-real** | 60 records; area 0 = Middlegate (category 1, env 0x11). Neighbour/roof/coord fields parsed per ASM-confirmed doc. | 2026-08-12 |
 | `event.dat` | **verified-real** | 71 locations; retail classification = 60 standard / 8 mixed / 3 castle-blob at locations 63/65/68 (matches Vairn doc). Triplet/script/string parse verified. | 2026-08-12 |
 | `.anm` composed sequence GIFs | open | Composed frames render as PNG strips, but the combat engine's *which sequence block = idle/walk/attack* selection isn't traced (Vairn marks this unknown too). Longest-block heuristic is the showcase fallback. | 2026-08-12 |
