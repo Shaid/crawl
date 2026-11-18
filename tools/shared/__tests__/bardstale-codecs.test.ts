@@ -87,11 +87,11 @@ describe('loadBard12Picture, real corpus', () => {
 });
 
 describe('loadBard3Picture, real corpus', () => {
-  it('every one of the 84 confirmed real pictures decodes to 4 x 4928-byte chunky sub-frames with a resolved palette', () => {
+  it('every one of the 85 confirmed real pictures decodes to 4 x 4928-byte chunky sub-frames with a resolved palette', () => {
     if (!existsSync(BT3_ALL_PIC) || !existsSync(BT3_BARD3)) return;
     const allPic = new Uint8Array(readFileSync(BT3_ALL_PIC));
     const bard3 = new Uint8Array(readFileSync(BT3_BARD3));
-    for (let i = 0; i < 84; i++) {
+    for (let i = 0; i < 85; i++) {
       const pic = loadBard3Picture(allPic, bard3, i);
       expect(pic.subFrames.length).toBe(4 * ((BARDSTALE_PICTURE_WIDTH * BARDSTALE_PICTURE_HEIGHT) / 2));
       expect(pic.paletteWords.length).toBe(16);
@@ -105,10 +105,17 @@ describe('loadBard3Picture, real corpus', () => {
     expect(sentinel >>> 0).toBe(allPic.length);
   });
 
-  it('directory slot 84 (the 85th record, between the last real picture and the sentinel) declares a plausible uncompressedSize but its LZ77 stream runs past EOF', () => {
+  it('slot 84 (last record, one-byte LZHUF read-ahead past EOF) decodes to 4 frames; no record is truncated', () => {
     if (!existsSync(BT3_ALL_PIC) || !existsSync(BT3_BARD3)) return;
     const allPic = new Uint8Array(readFileSync(BT3_ALL_PIC));
     const bard3 = new Uint8Array(readFileSync(BT3_BARD3));
-    expect(() => loadBard3Picture(allPic, bard3, 84)).toThrow(/read past end of buffer/);
+    const pic = loadBard3Picture(allPic, bard3, 84);
+    expect(pic.subFrames.length).toBe(19712);
+    // Real picture, not zero-filled: frame 0 has many distinct nibble values.
+    expect(new Set(pic.subFrames.subarray(0, 4928)).size).toBeGreaterThan(8);
+    // Null control: a truncated copy of the record's tail still must not silently "decode"
+    // past a cut that removes real bytes (cut 40 bytes -> mismatch/throw).
+    const cut = allPic.slice(0, allPic.length - 40);
+    expect(() => loadBard3Picture(cut, bard3, 84)).toThrow();
   });
 });

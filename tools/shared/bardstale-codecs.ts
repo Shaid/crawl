@@ -8,13 +8,12 @@
  * source (`Huffman.cs`, `RLE.cs`, `Picture_Amiga.cs` — see
  * http://bringerp.free.fr/RE/BardsTale/utility1.php5). That tool ships a
  * `Files/` directory containing byte-identical copies of this project's
- * own WHDLoad corpus files (`bard3`, `all.pic`, `pics`, `pics2` all
- * cmp-identical — see docs/bardstale1/amiga/data-structure.md), so the
- * C# source is a byte-exact ground-truth oracle here, not just a
- * plausible-shaped reimplementation.
+ * own WHDLoad corpus files (recalled claim, unverified — no copy on disk).
+ * Real oracle (2026-11 audit): independent Huffman + stock Okumura LZHUF
+ * decoders reproduce this port byte-for-byte (BT1 55/55, BT2 61/61, BT3 85/85).
  *
  * Three distinct schemes are covered:
- *  - BT1/BT2 "pics"/"pics2": a static Huffman tree (rebuilt per-file from
+ *  - BT1/BT2 "pics": a static Huffman tree (rebuilt per-file from
  *    a serialized bitstream) decodes a 4bpp-planar 112x88 base picture,
  *    itself further RLE-packed (BT1) or bit-transposed (BT2).
  *  - BT3 "all.pic": a from-scratch LZ77-with-adaptive-Huffman codec
@@ -45,6 +44,21 @@ export interface Cursor {
 function readU8(buf: Uint8Array, at: Cursor): number {
   if (at.v >= buf.length) throw new Error(`bardstale codec: read past end of buffer (offset ${at.v}, length ${buf.length})`);
   return buf[at.v++]!;
+}
+
+/**
+ * Bit-buffer refill read for the BT3 LZHUF decoder. Stock Okumura LZHUF
+ * refills while `<= 8` bits remain, so it reads one byte past the end of
+ * every record; for the last record in `all.pic` that byte is past EOF.
+ * Okumura's `getc` yields 0 there (the phantom byte is never consumed as
+ * data), so return 0 but still advance the cursor (the caller's
+ * `at.v - 1` end check relies on it). 2026-11 audit: this wrongly threw
+ * for slot 84, which is a real picture.
+ */
+function readBitByte(buf: Uint8Array, at: Cursor): number {
+  const v = at.v < buf.length ? buf[at.v]! : 0;
+  at.v++;
+  return v;
 }
 
 function readU16BE(buf: Uint8Array, at: Cursor): number {
@@ -507,7 +521,7 @@ export function unpackBard3(src: Uint8Array, at: Cursor, uncompressedSize: numbe
     for (let guard = 0; d6 < 627; guard++) {
       if (guard > 4096) throw new Error('unpackBard3: tab4 chain walk exceeded bound (corrupt or out-of-range record)');
       while (d3 <= 8) {
-        const d2 = readU8(src, at);
+        const d2 = readBitByte(src, at);
         d7 = (d7 | ((d2 << (8 - d3)) & 0xffff)) & 0xffff;
         d3 += 8;
       }
@@ -526,7 +540,7 @@ export function unpackBard3(src: Uint8Array, at: Cursor, uncompressedSize: numbe
       offsetTab1 &= 0xfff;
     } else {
       while (d3 <= 8) {
-        const d2 = readU8(src, at);
+        const d2 = readBitByte(src, at);
         d7 = (d7 | ((d2 << (8 - d3)) & 0xffff)) & 0xffff;
         d3 += 8;
       }
@@ -541,7 +555,7 @@ export function unpackBard3(src: Uint8Array, at: Cursor, uncompressedSize: numbe
         var10--;
         if (var10 === -1) break;
         while (d3 <= 8) {
-          const d2 = readU8(src, at);
+          const d2 = readBitByte(src, at);
           d7 = (d7 | ((d2 << (8 - d3)) & 0xffff)) & 0xffff;
           d3 += 8;
         }
@@ -597,7 +611,7 @@ function paletteWordsFromBytes(bytes: Uint8Array, offset = 0, count = 16): numbe
 }
 
 /**
- * BT1/BT2 "pics"/"pics2" — self-describing container: a `u32BE` directory
+ * BT1/BT2 "pics" — self-describing container: a `u32BE` directory
  * of per-picture start offsets (`dump[pictureIndex*4]`, no explicit count
  * field), each pointing at a record shaped
  * `[u32 sizeDst][u32 unk][huffman tree][huffman-coded: 32B palette + (sizeDst-32)B picture]`.
@@ -613,7 +627,7 @@ export function loadBard12Picture(dump: Uint8Array, pictureIndex: number, bardVe
   }
   const at: Cursor = { v: recordOffset };
   const sizeDst = readU32BERef(dump, at);
-  readU32BERef(dump, at); // `unk` in the C# source — always 0x167B6 there, role unconfirmed.
+  readU32BERef(dump, at); // `unk` = exact Huffman-stream bit count (tree+palette+payload); see picture-format.md §3
 
   // A garbage `sizeDst` (e.g. probing a pictureIndex past the real
   // directory, landing the "record" inside unrelated payload bytes) can
@@ -654,7 +668,7 @@ export interface BardstaleBard3Picture {
 }
 
 /**
- * BT3 "all.pic" — same directory-of-offsets convention as `pics`/`pics2`
+ * BT3 "all.pic" — same directory-of-offsets convention as `pics`
  * (`u32BE[N+1]`, last entry == file length), but each record is
  * `[u32 uncompressedSize][LZ77+adaptive-Huffman stream]` decoding to 4
  * chunky 112x88 4bpp sub-frames (19712 = 4 x 4928 bytes) with an

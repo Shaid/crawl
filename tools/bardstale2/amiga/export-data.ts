@@ -13,14 +13,11 @@
  * converging on the same 112x88 4bpp-planar layout BT1 reaches via RLE.
  *
  * The directory has 64 slots (0-63); 3 of them (indices 25, 30, 52) are
- * confirmed genuine placeholder/empty-picture sentinels — a real,
- * deliberate 10-byte record `[u32 sizeDst=1][u32 unk=0x10000000]` with no
- * huffman tree or payload at all, byte-identical at all 3 occurrences (not
- * corruption: verified by dumping the raw directory neighbours, see
- * docs/bardstale2/TODO.md). 61 of the 64 slots hold real pictures.
- *
- * Codec: `tools/shared/bardstale-codecs.ts` (see that module's doc for the
- * byte-exact ground-truth oracle this was ported from).
+ * "no picture" slots: a valid 1-byte Huffman record (`sizeDst=1`, single-leaf
+ * tree decoding to 0x8C / 0x05; they are NOT byte-identical — 2026-11 audit
+ * correction, see docs/bardstale-picture-format.md §5). 61 of the 64 slots
+ * hold real pictures. Trailing animation data (sizeDst-32 > 4928 in 50/61
+ * records) is dropped here — tracked as `bt2-animation`.
  *
  * Writes:
  *   public/assets/bardstale2/amiga/sprites/pics.png + .json (atlas + frames)

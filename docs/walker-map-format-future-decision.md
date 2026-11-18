@@ -726,8 +726,10 @@ until that happens.
   DM-style real compositing — the same hypothesis shape Gold Box carried
   before its own 2026-08-30 correction above (which refuted it for Gold Box
   specifically); Bard's Tale's version is unaffected and still just a
-  recalled, low-confidence guess pending its own real pass. Not present in
-  this corpus.
+  recalled, low-confidence guess pending its own real pass. The data **is** present
+  (`data/_unexplored_/BardsTale{NTSC,2,3}/`); BT1 `levs` decodes via the
+  shared Huffman container (22x22 2-bit wall grid), tracked as
+  `bt1-levs-cells` / `bt3-maps` in `docs/bardstale{1,3}/TODO.md`.
 
 **Net effect on the recommendation**: none of this changes the "don't force
 a merge yet" stance — if anything it reinforces it. The genre spans at least

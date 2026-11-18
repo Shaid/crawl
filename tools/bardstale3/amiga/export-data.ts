@@ -19,18 +19,21 @@
  * table at file offset 0x2589E (all.pic index -> row) feeding a
  * palette-select table at 0x25A98 (row -> palette index) feeding 16-word
  * palettes at 0x25978 + paletteIndex*32. Not every all.pic index appears in
- * the remap table (see docs/bardstale3/TODO.md for indices this leaves
- * unresolved).
+ * the remap table's 88 rows (rows 27/81/86 are 0xFF = "no picture"; all 85
+ * indices 0-84 are present once). A palette lookup miss throws (the picture
+ * then logs FAILED); `paletteMisses` only counts all-zero palettes.
  *
  * Codec: `tools/shared/bardstale-codecs.ts` (see that module's doc for the
  * byte-exact ground-truth oracle this was ported from).
  *
  * Real picture count: empirically probed (sequential decode until failure)
- * at exactly 84 (indices 0-83), all decoding cleanly.
+ * at 85 (indices 0-84). Slot 84 was long mis-reported as truncated: that was
+ * our decoder throwing on Okumura LZHUF's one-byte bit-buffer read-ahead past
+ * EOF (fixed 2026-11; an independent stock LZHUF decodes 85/85).
  *
  * Writes:
  *   public/assets/bardstale3/amiga/sprites/pics.png + .json (atlas + frames)
- *     — one atlas cell per (picture, sub-frame) pair, 84*4 = up to 336 cells.
+ *     — one atlas cell per (picture, sub-frame) pair, 85*4 = 340 cells.
  */
 import { resolve } from 'node:path';
 import { readBinary, writePNG } from '@seer-project/pipeline';
@@ -41,7 +44,7 @@ import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex }
 
 const GAME = 'bardstale3';
 const PLATFORM = 'amiga';
-const REAL_PICTURE_COUNT = 84;
+const REAL_PICTURE_COUNT = 85;
 const SUBFRAMES = 4;
 const SUBFRAME_BYTES = (W * H) / 2; // 4928, chunky 4bpp
 const COLS = 8; // in sub-frame cells
@@ -65,7 +68,7 @@ export async function exportBardsTale3Data(dataDir: string) {
     for (const w of picture.paletteWords) rgb.push(...amiga12ToRGB(w));
     if (picture.paletteWords.every((w) => w === 0)) paletteMisses++;
 
-    const usedPalette = rgb.length ? rgb : DEFAULT_PALETTE;
+    const usedPalette = rgb;
     for (let f = 0; f < SUBFRAMES; f++) {
       const sub = picture.subFrames.subarray(f * SUBFRAME_BYTES, (f + 1) * SUBFRAME_BYTES);
       const indices = decodePackedPixelLinear(sub, 0, W, H, 4);
@@ -97,9 +100,6 @@ export async function exportBardsTale3Data(dataDir: string) {
     `  bardstale3/amiga: ${ok}/${REAL_PICTURE_COUNT} pictures decoded from all.pic (${cells.length} sub-frame cells, ${paletteMisses} with no resolved palette) -> sprites/pics.png (${atlasW}x${atlasH})`,
   );
 }
-
-/** Fallback greyscale ramp for the rare picture whose id-remap-table lookup misses (see module doc). */
-const DEFAULT_PALETTE: number[] = Array.from({ length: 16 }, (_, i) => [i * 17, i * 17, i * 17]).flat();
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const dataDir = resolve(process.argv[2] ?? 'data/_unexplored_/BardsTale3/data');

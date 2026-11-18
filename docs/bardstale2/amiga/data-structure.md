@@ -35,8 +35,9 @@ data/fonts/narrow.font, data/libs/diskfont.library
 
 Full byte-level spec: `docs/bardstale-picture-format.md` §3.2 (BT2-specific
 bit-transpose+XOR steps) + §4 (Huffman) + §5 (BT2 has 64 directory slots,
-**61 real pictures** — indices 0-63 minus 3 confirmed placeholder/sentinel
-slots at 25, 30, 52).
+**61 real pictures** — indices 0-63 minus 3 "no picture" slots at 25, 30,
+52; these are valid 1-byte Huffman records, not payload-less and not
+byte-identical — see the 2026-11-18 correction in §5 of the shared doc).
 
 Verification: all 61 render as recognizable, non-degenerate character
 portraits and monster art (a Conan-style barbarian, a knight/paladin, a

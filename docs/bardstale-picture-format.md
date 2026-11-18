@@ -20,6 +20,14 @@ own `.slave` file's embedded WHDLoad header text (`strings -n 4 *.slave`),
 
 ## 1. Ground-truth oracle
 
+> **Correction (2026-11-18):** the "byte-identical (`cmp`)" claim below is a
+> recalled claim — no copy of Kroah's `Files/` exists in this repo or
+> `data/`, so it cannot be re-run (**unverified**). The codecs do not depend
+> on it: the 2026-11 audit wrote independent decoders (a from-scratch Huffman
+> decoder; a stock Okumura LZHUF, N=4096/F=60/THRESHOLD=2, ring buffer
+> pre-filled with spaces) that reproduce the TypeScript port byte-for-byte on
+> BT1 55/55, BT2 61/61, BT3 85/85. That is the real oracle now.
+
 Kroah's "Bard's Tale Picture Viewer" (C#, `bringerp.free.fr/RE/BardsTale/`,
 `utility1.php5`) ships a `Files/` directory that is **byte-identical**
 (`cmp`) to this project's own corpus files: `pics` (BT1), `pics` (BT2),
@@ -30,7 +38,7 @@ revision of the data this project actually has. Ported line-for-line
 (preserving statement order and 16-bit wraparound arithmetic) into
 `tools/shared/bardstale-codecs.ts`.
 
-## 2. Container: `u32BE[N]` offset directory, no explicit count
+## 2. Container: `u32BE[N]` offset directory (count = first offset / 4)
 
 Both `pics` (BT1/BT2) and `all.pic` (BT3) open with a flat, big-endian
 `u32` array of per-picture record start offsets — `recordOffset =
@@ -40,7 +48,12 @@ length/count field anywhere in the file.
 - **BT1/BT2 `pics`**: no sentinel. The real picture count has to be found
   empirically (see §5) — reading past the last valid slot lands on
   directory-adjacent payload bytes reinterpreted as a bogus offset, which a
-  bounds/sanity check must catch (see §6's implphausible-`sizeDst` note).
+  bounds/sanity check must catch (see §6's implausible-`sizeDst` note).
+  > **Correction (2026-11-18):** there *is* an implicit count — the first
+  > directory offset divided by 4 (BT1 220/4 = 55, BT2 256/4 = 64, BT3 `all.pic`
+  > 344/4 = 86 incl. sentinel). Records run back to back to EOF and obey the
+  > `unk` bit-count rule (§3). The §5 decode-until-failure probe was
+  > corroboration, not the only method.
 - **BT3 `all.pic`**: `u32BE[N+1]` with an explicit sentinel — the LAST
   directory entry equals the file's own byte length exactly. Confirmed on
   the real corpus file: `all.pic` is 526,002 bytes; directory entry `[85]`
@@ -60,8 +73,8 @@ length/count field anywhere in the file.
 
 | Field | Size | Notes |
 |---|---|---|
-| `sizeDst` | u32BE | Total huffman-DECODED byte count: 32 (palette) + payload. **confirmed** — real records cluster in the low thousands (e.g. BT1 record 0: matches `112*88/2 + 32` after RLE). |
-| `unk` | u32BE | Always `0x167B6` in every C# source sample cited in the oracle; role **not confirmed** here either — no consumer traced. |
+| `sizeDst` | u32BE | Total huffman-DECODED byte count: 32 (palette) + payload, where payload = base picture (4928 B once RLE'd/untransposed) **plus any trailing animation data** (see §8). **confirmed** |
+| `unk` | u32 | **Exact bit count of the Huffman stream** (tree + palette + payload). **confirmed (2026-11 audit, re-run 2026-11-18)**: BT1 `pics` big-endian equals the consumed-bit count on 54/55 (record 54, last in file, needs 1 byte past EOF; exact with 2 B padding); BT2 `pics` is stored **little-endian** and equals bit count + 7 on 64/64 slots. The old "always `0x167B6`" never occurs in this data. Independent zero-deviation check of the Huffman tree decoder. |
 | Huffman tree | variable, bit-packed | Serialized per-file (see §4). |
 | Huffman-coded payload | `sizeDst` decoded bytes | First 32 bytes = 16-word (32-byte) Amiga 12-bit RGB palette; remainder = the base picture, further transformed per-game (RLE for BT1, bit-transpose+XOR for BT2 — see §3.1/§3.2). |
 
@@ -121,8 +134,8 @@ adaptation.
   same bit-reader state — the 32-byte palette, then the picture payload —
   with no reset in between (`Picture_Amiga.LoadBard_1_2_Single`). Missing
   this was a real bug caught mid-session before it produced wrong output
-  (see `docs/bardstale1/TODO.md`'s "Errors and fixes" note, or the module
-  doc in `bardstale-codecs.ts`).
+  (see the module doc in `bardstale-codecs.ts`; the "Errors and fixes" note
+  once cited here in `docs/bardstale1/TODO.md` never existed).
 
 ## 5. Real picture counts (confirmed by exhaustive probe, not assumed)
 
@@ -136,7 +149,7 @@ coincidence). The decisive test: **sequentially decode picture index 0, 1,
 |---|---|---|---|
 | BT1 `pics` | 55 | **55** (indices 0-54) | Clean, contiguous, no placeholder slots. |
 | BT2 `pics` | 64 | **61** (indices 0-63 minus 3 placeholders) | 3 confirmed placeholder/sentinel slots — see below. |
-| BT3 `all.pic` | 86 entries = 85 record spans + 1 sentinel | **84** (indices 0-83) | Directory entry `[85]` == file length exactly (§2). Slot 84 (the 85th span, offsets 518857-526002, 7145 bytes) is real, distinct directory content — NOT the sentinel — but fails to decode (see correction below). |
+| BT3 `all.pic` | 86 entries = 85 record spans + 1 sentinel | **85** (indices 0-84) | Directory entry `[85]` == file length exactly (§2). Slot 84 (offsets 518857-526002) is a real picture — see 2026-11-18 correction below. |
 
 > **Correction (same session, caught by the shared codec's own regression
 > test — `tools/shared/__tests__/bardstale-codecs.test.ts`):** an earlier
@@ -156,10 +169,28 @@ coincidence). The decisive test: **sequentially decode picture index 0, 1,
 > (indices 0-83) is unaffected — this correction only concerns what sits in
 > the one directory slot just past them.
 
-**BT2's 3 placeholder slots** (indices 25, 30, 52): each is a real,
-deliberate 10-byte record — `[u32 sizeDst=1][u32 unk=0x10000000]`, no
-Huffman tree or payload at all — byte-identical at all 3 occurrences and
-sitting cleanly between two normal, differently-sized pictures (confirmed
+> **Correction (2026-11-18, audit):** slot 84 is **not** corrupt/truncated.
+> An independent stock Okumura LZHUF consumes exactly span + 1 bytes on all
+> 85 records; the extra byte is the decoder's bit-buffer refill (refills
+> while <= 8 bits remain) reading one byte past each record's end — past EOF
+> for the last record, where 15 bits were still buffered so the phantom byte
+> is never used. Our `readU8` threw on that read: a decoder bug, now fixed
+> (`readBitByte` returns 0 at EOF as Okumura's `getc` does). Slot 84 decodes
+> to 19,712 B = 4 clean animation frames (an old bearded man with goggles at
+> a machine), and `bard3`'s remap table references picture 84. BT3 has **85**
+> pictures. The "runs out before `uncompressedSize`" text above is the
+> retracted premise, kept as a dead end.
+
+**BT2's 3 "placeholder" slots** (indices 25, 30, 52):
+> **Correction (2026-11-18):** the text below ("no Huffman tree or payload",
+> "byte-identical") is wrong. Slots 25 and 30 end in `c6 00`, slot 52 in
+> `82 80`, so they differ; each is a valid 1-byte Huffman record — a
+> single-leaf tree decoding to 0x8C or 0x05 — and its `unk` (LE) = 16 = 9
+> bits + 7, same rule as §3. The listed `[u32][u32]` header is 8 bytes, not
+> 10. They remain "no picture" slots (`sizeDst=1`).
+
+Original (superseded) description: each is a deliberate 10-byte record —
+`[u32 sizeDst=1][u32 unk=0x10000000]` — sitting cleanly between two normal, differently-sized pictures (confirmed
 by dumping the raw directory offsets/header words around each; e.g. index
 24 ends at file offset 117115, index 25's whole 10-byte record runs
 117105-117115, index 26 starts at 117115 — no gap, no overlap). This is
@@ -168,7 +199,9 @@ convention for "no picture in this slot."
 
 ## 6. BT3: `all.pic` LZ77 + adaptive Huffman
 
-Structurally the classic **Okumura LZHUF/LHarc family**: 4096-byte ring
+Exactly stock **Okumura LZHUF** (N=4096, F=60, THRESHOLD=2, ring buffer
+filled with spaces) — a textbook implementation reproduces all 85 records
+byte-exact (2026-11 audit; a third-party oracle). 4096-byte ring
 buffer (`tab1`), position/length values split-coded through two hardcoded
 256-entry log2-bucket lookup tables (`_hard1`/`_hard2` in the C# source),
 with a dynamically-rebalanced adaptive Huffman tree over the LZ token
@@ -179,17 +212,23 @@ stream (frequency counts in `tab2`, sibling-swap tree maintenance in
 - Record: `[u32 uncompressedSize][LZ77+adaptive-Huffman stream]`.
 - Every real record decompresses to exactly **19712** bytes = 4 x 4928-byte
   chunky (packed-nibble, 2 pixels/byte) 112x88 4bpp sub-frames — **confirmed
-  invariant**, checked against every one of the 84 real records with zero
+  invariant**, checked against every one of the 85 real records with zero
   deviation; `unpackBard3` throws loudly if `uncompressedSize` is ever
   anything else, rather than silently truncating/overrunning its output
   buffer.
 - After decompression, an inter-sub-frame XOR delta is undone
-  (`uncryptXorBard3`): for `offset` 0..4927, `subFrame[1][offset] ^=
-  subFrame[0][offset]` — i.e. only sub-frames 1-3 are XORed against
-  sub-frame 0 (the base frame is stored raw). The 4 sub-frames per picture
-  are near-identical with small local differences (visually confirmed —
-  animation frames, e.g. a campfire scene's flame flicker, a creature's
-  mouth/eye movement — see §7's atlas).
+  (`uncryptXorBard3`).
+  > **Correction (2026-11-18):** the earlier text said sub-frames 1-3 are each
+  > XORed against sub-frame 0 over offsets 0..4927. The code is a **running
+  > chain over 14,784 bytes**: frame n is XORed with the already-decoded
+  > frame n-1 (the base frame is stored raw). The two readings differ on 85/85
+  > records; rendered both — the chain gives clean frames, the old reading
+  > gives noise in frames 2-3.
+
+  The 4 sub-frames are animation frames (campfire flicker, mouth/eye
+  movement) but **not** near-identical: on average 28.6% of bytes differ from
+  the previous frame (max 66%; picture 20 is a zoom-in, picture 3's frame 3
+  differs by 49%).
 - **Two real infinite-loop-class bugs were found and fixed while getting
   this codec to run cleanly**, both from JS's `undefined`/`NaN` semantics
   silently defeating `while (x !== 0)`-style loop conditions instead of
@@ -221,21 +260,26 @@ small lookup tables:
 1. `getPictureIndexGame`: linear-scan an 88-entry table at file offset
    `0x2589E` in `bard3` (one byte per entry) for a byte equal to the
    `all.pic` picture index; the matching table *row* (not the byte value
-   itself) is the result. **confirmed** — every one of the 84 real `all.pic`
-   indices (0-83) has exactly one matching row (0 misses across the whole
-   corpus, verified by the extractor's own `paletteMisses` counter).
+   itself) is the result. **confirmed** — every one of the 85 real `all.pic`
+   indices (0-84) has exactly one matching row (re-verified 2026-11-18:
+   table holds 0-84 once each plus three `0xFF` rows at 27, 81, 86).
+   > **Correction (2026-11-18):** the old "0 misses, verified by
+   > `paletteMisses`" was circular — a lookup miss throws (picture logs
+   > FAILED) and `paletteMisses` only counts all-zero palettes.
 2. `getPaletteBard3Words`: read the paletteIndex byte at `0x25A98 + row`,
    then 16 big-endian words (32 bytes) at `0x25978 + paletteIndex*32` — the
    Amiga 12-bit RGB palette for that picture.
 
-Not every `bard3` table row need be used by every `all.pic` index (the
-table has 88 rows for 84 real pictures) — the extra 4 rows are unaccounted
-for (see `docs/bardstale3/TODO.md`).
+The 88-row table = 85 pictures (0-84) + 3 `0xFF` ("no picture") rows at
+rows 27, 81, 86. Palette-select bytes reach at most 8; the 9 palettes at
+`0x25978` end exactly at `0x25A98`, where the select table starts.
+(**Correction 2026-11-18:** the earlier "4 unaccounted rows" was a
+miscount; there are 3 empty rows.)
 
 ## 7. Verification
 
 Every claim above is backed by rendering, not just "decode completes with
-no exception": every one of BT1's 55, BT2's 61 real, and BT3's 84x4=336
+no exception": every one of BT1's 55, BT2's 61 real, and BT3's 85x4=340
 sub-frame pictures renders as a **visually recognizable, non-degenerate**
 Bard's Tale character/monster/scene image (warriors, wizards, monsters,
 shop signage, an "Interplay Productions" splash panel appearing in both
@@ -243,35 +287,50 @@ BT1 and BT2's picture banks) — not noise, not a flat/uniform fill, not a
 torn/misaligned raster. See the shipped atlases:
 `public/assets/bardstale{1,2,3}/amiga/sprites/pics.png` (+ `.json`
 sidecars with per-frame rects and, for BT1/BT2, per-picture palette words).
-This is a **rendered** confidence level (recognizable art, visually
-cross-checked against Kroah's own gallery pages for BT1/BT2 where
-available) rather than a byte-for-byte pixel oracle — no independent
+This is a **rendered** confidence level (recognizable art; the old
+"cross-checked against Kroah's gallery pages" is a recalled claim, unverified) rather than a byte-for-byte pixel oracle — no independent
 pixel-exact reference render was available to diff against, but the
 byte-exact source-provenance chain (§1) plus the zero-deviation structural
 invariants (§5's contiguous counts, §6's fixed 19712-byte decompressed
 size) make this a high-confidence result, not a guess.
 
-## 8. Open (not yet decoded — see per-game `TODO.md` for the full paths-tried table)
+## 8. BT1/BT2 trailing animation data, and the shared data-file container (2026-11 audit)
 
-- The `unk` field's role (§3) — always `0x167B6` in the source, never
-  traced to a consumer.
-- BT2's `wpics` (a second, differently-named picture-like file, not yet
-  touched — possibly a wilderness/overland variant).
-- BT3's `.GRP` files (`D0WAL.GRP`, `GDUNG.GRP`, `SKARA.GRP`,
-  `WILDWAL.GRP`) — likely first-person wall/dungeon-view graphics, not yet
-  investigated.
-- BT3's `maps.hi`/`maps.lo` — same `u32BE[N+1]`-directory container
-  convention as `all.pic` (confirmed structurally), content not decoded;
-  likely dungeon/level layout data.
-- BT3's `monsterh`/`monsterl` — same container convention; an earlier
-  attempt assuming raw planar/chunky pixel data (before this LZHUF codec
-  was known) found no recognizable image via a `seer-probe gfx` parameter
-  sweep (best candidate score 0.68/1.0, visually noise) — now understood to
-  likely need `unpackBard3`'s codec instead, not yet re-attempted.
-- BT3's `driver` file — raw 68k code, not disassembled.
-- Animation-overlay data that follows each base picture in the real game
-  (mouth movement during dialogue, etc.) — the 4 BT3 sub-frames are
-  themselves confirmed real animation content (§6), but BT1/BT2's
-  equivalent overlay mechanism (if any exists beyond the single static
-  picture decoded here) has not been investigated.
-- 4 unaccounted-for rows in `bard3`'s 88-row id-remap table (§6.1).
+- **Animation overlay (answers `bt1-animation-overlay`: yes, inline).** In BT1,
+  44/55 records' Huffman output continues after the RLE terminator (185,308 B
+  total): a u16 count then entries like `03f0 0200 ...` ending `ffff`. In BT2,
+  50/61 records have `sizeDst - 32 > 4928` (210,848 extra bytes) that
+  `Uncrypt1` ignores. The decoder currently drops both; format undecoded
+  (`bt1-animation-format`, `bt2-animation`). (audit-probed, not re-run here)
+- **Shared container.** Every BT1/BT2 data file decodes with the same codec
+  as `[u32 size][u32 bitcount][Huffman]`, bit-count rule holding with zero
+  deviation (BT2 `big_dung`/`title`/`pics` little-endian +7): 40/40
+  single-record files (`big_city`, `big_dung`, `dung_blank`, `bard_screen`,
+  `control_panel`, `icon0-4`, the 5 instruments, BT1 `title`, `CITY/bi1..BI9`,
+  `city.name`, `city.path`, BT2 `wpics` (one 29,728 B record), `ic`, `title`,
+  `bs.anm`) plus directory files BT1 `levs` (16 x 2,048 B), BT2 `levs`
+  (25 x 3,072 B), BT2 `citys` (1 x 2,304 + 6 x 512). BT1 `levs` record 0
+  begins 484 = 22x22 bytes of 2-bit-per-side wall data then a 484-byte flag
+  grid (slack holds leftover Applesoft BASIC source). Instruments decode to
+  signed 8-bit PCM (`chant` lag-1 correlation 0.93). `chant/drums/harp/panflu/
+  trumpet/dung_blank` are identical in BT1 and BT2. **Probed by the audit
+  (single-record scan only re-verified for `pics`), not yet an extractor.**
+- BT3 `monsterh`/`monsterl`: no size header; all 41 record spans are
+  multiples of 48 — raw 48-byte monster stat records with high-bit ASCII
+  names ("Red Dragon", "Unbeliever"), **not graphics** (the old "try
+  `unpackBard3`" premise is retracted).
+- BT3 `maps.hi`/`maps.lo`: 71 records, each `[u32 size][stock LZHUF]`
+  (consumption span + 1, 71/71); decoded record = 16-byte high-bit name
+  ("Lucencia", "Wilderness", "Tower"), width/height byte (0x0C/0x10/0x14),
+  then word offsets. Cell format not yet decoded.
+- BT3 `.GRP`: little-endian u16 offset directory (D0WAL: 7 entries,
+  14..8864), each record starts with magic `RAW\x18`.
+- BT3 `title`/`titlescreen`/`victory`/`finalBardscreen` are IFF ILBM
+  (320x200 BMHD). BT1 `c/bardstale.dat` is the same size as `bardstale.dat`
+  but differs in 131,281 of 219,456 bytes (scrambled copy, probably copy
+  protection); BT1 inventory also gains `bards_data/CITY/` (11 files),
+  `data/title`, `c/xxx`, `c/zzz`.
+
+## 9. Open
+
+See `docs/bardstale{1,2,3}/TODO.md`.

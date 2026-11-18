@@ -28,9 +28,8 @@
  *
  * Writes:
  *   public/assets/bardstale1/amiga/sprites/pics.png + .json (atlas + frames)
- *   public/assets/bardstale1/amiga/sprites/pics.pal.json (per-picture palettes are NOT
- *     merged — each picture has its own 16-colour palette; see .json sidecar
- *     `frames[i].paletteWords`)
+ *   (palettes are per-picture and live in the .json sidecar as
+ *   `frames[i].paletteWords`; no separate pics.pal.json is written)
  */
 import { resolve } from 'node:path';
 import { readBinary, writePNG } from '@seer-project/pipeline';
