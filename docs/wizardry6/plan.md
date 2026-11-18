@@ -76,7 +76,7 @@ above.
 **Housekeeping:** the `amiga-disasm` sub-agent's IRA run wrote `Bane.cnf`
 into `data/wizardry6/amiga/` (the read-only original-files zone) alongside
 its `Bane.asm` output at the `docs/` root. Both were moved to
-`docs/wizardry6/amiga/disasm/` after the fact and `data/wizardry6/amiga/`
+`data/wizardry6/amiga/disasm/` after the fact and `data/wizardry6/amiga/`
 was re-verified back to its original 117 files. Worth remembering for
 future sessions in this project: disassembly tooling defaults its output
 location to wherever it's invoked from, so double-check `data/` stays
@@ -472,8 +472,8 @@ only as a game-content oracle (class roster, monster names).
 
 **Files written:**
 - `docs/wizardry6/snes/data-structure.md` — new.
-- `docs/wizardry6/snes/disasm/reset_startup.txt`,
-  `docs/wizardry6/snes/disasm/spc_upload_handshake.txt` — new, raw r2
+- `data/wizardry6/snes/disasm/reset_startup.txt`,
+  `data/wizardry6/snes/disasm/spc_upload_handshake.txt` — new, raw r2
   dumps (not hand-corrected past the first few dozen instructions each).
 - `tools/wizardry6/snes/decode-class-titles.ts`,
   `tools/wizardry6/snes/decode-monster-names.ts` — new, both with a
@@ -1800,7 +1800,7 @@ wall).
 
 Bounded infrastructure task (not new game-data RE): fixed the
 `amiga-ira-cnf-coverage-gap` TODO row Session 7 opened. Prior sessions'
-`docs/wizardry6/amiga/disasm/Bane.cnf` only declared an explicit `CODE`
+`data/wizardry6/amiga/disasm/Bane.cnf` only declared an explicit `CODE`
 range for a ~5.5KB cluster near `0x55032`-`0x5658a` out of the
 351,292-byte (`0x55C3C`) CODE hunk — the remaining ~345KB fell back to
 undifferentiated `DC.L` hex in `Bane.asm`, meaning every text/regex sweep
@@ -1854,9 +1854,9 @@ would be a large, separate undertaking. This session only confirms the
 tooling fix works.
 
 **Files written:**
-- `docs/wizardry6/amiga/disasm/Bane.cnf` — added the full-coverage `CODE`
+- `data/wizardry6/amiga/disasm/Bane.cnf` — added the full-coverage `CODE`
   range.
-- `docs/wizardry6/amiga/disasm/Bane.asm` — regenerated (113,178 lines, up
+- `data/wizardry6/amiga/disasm/Bane.asm` — regenerated (113,178 lines, up
   from 23,032).
 - `docs/wizardry6/amiga/data-structure.md` — §1, appended a
   `> **Resolved (this session):**` block documenting the fix and

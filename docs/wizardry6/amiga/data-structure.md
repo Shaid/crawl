@@ -158,7 +158,7 @@ found; this is a from-scratch corpus for the seer project family.
 ## 1. `Bane` — main executable
 
 **Confirmed** (disassembly triage via the `amiga-disasm` agent, IRA +
-radare2; see `docs/wizardry6/amiga/disasm/Bane.asm` for the raw IRA dump).
+radare2; see `data/wizardry6/amiga/disasm/Bane.asm` for the raw IRA dump).
 
 - Standard AmigaOS hunk executable (`HUNK_HEADER` magic `0x3F3` at file
   offset `0x0`). Not PowerPacker/RNC/XPK/Imploder-wrapped at any level (checked
@@ -179,7 +179,7 @@ radare2; see `docs/wizardry6/amiga/disasm/Bane.asm` for the raw IRA dump).
   `4E F9` scan), with `A4 = DATA_hunk_file_start + 0x7FFE`.
 - IRA's `-preproc` auto-detection largely fails on this binary (dense
   inline string literals confuse the code/data heuristic — only ~19 tiny
-  code islands auto-detected out of 351 KB). `docs/wizardry6/amiga/disasm/Bane.asm` exists but
+  code islands auto-detected out of 351 KB). `data/wizardry6/amiga/disasm/Bane.asm` exists but
   needs a hand-refined `.cnf` before it's useful for label-based search;
   all findings below came from targeted radare2 disassembly at
   string-xref-derived offsets, not from a full linear pass. **Flagged as
@@ -193,7 +193,7 @@ radare2; see `docs/wizardry6/amiga/disasm/Bane.asm` for the raw IRA dump).
 > `item-catalog-remaining-fields` false negative documented in §7.1's
 > "Final update" block). Fix applied: added
 > `CODE $00000000 - $00055032` to
-> `docs/wizardry6/amiga/disasm/Bane.cnf` (replacing the old
+> `data/wizardry6/amiga/disasm/Bane.cnf` (replacing the old
 > `CODE $00000000 - $00000006` entry, which only covered the header's
 > warm-jump instruction) and regenerated via
 > `ira -a -compat=bi -config -keepzh Bane Bane.asm`. IRA's own run log
@@ -2120,7 +2120,7 @@ Full trace and evidence (escalation report + independent re-verification):
 
 #### 4.7.6 `LAB_0506` — the perpendicular side-wall dispatcher, and the visibility/occlusion model
 
-**Confirmed** (disassembly, `docs/wizardry6/amiga/disasm/Bane.asm`; no
+**Confirmed** (disassembly, `data/wizardry6/amiga/disasm/Bane.asm`; no
 escalation needed — the arg-slot roles and dispatch structure resolved
 directly from a full instruction-by-instruction trace, and the compose-list
 cross-check in §4.7.6.4 gave a decisive, exact confirmation). Note on
@@ -3775,7 +3775,7 @@ spacing). Cross-verified byte-exact against `disk.hdr`'s offsets
 > **Final update (this session): a new consumer function found outside
 > the known 23 call sites resolves 29 of the 32 remaining gap bytes.**
 > The prior two sessions' sweeps searched only the ~5.5KB of the
-> 351,292-byte CODE hunk that `docs/wizardry6/amiga/disasm/Bane.cnf`
+> 351,292-byte CODE hunk that `data/wizardry6/amiga/disasm/Bane.cnf`
 > actually marks as `CODE` (a cluster near `0x55032`-`0x5658a`) — the
 > remaining ~345KB, including the function below, is emitted as
 > undifferentiated `DC.L` hex in `Bane.asm`, invisible to a text/regex

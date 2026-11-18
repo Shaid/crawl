@@ -137,7 +137,7 @@ bytes by hand** (as done throughout this document) rather than trusted
 verbatim. Filed as a durable pitfall — see
 `~/.claude/agents/game-re-lessons/r2-snes-flag-width-blind.md`.
 
-Given this, the linear dumps in `docs/wizardry6/snes/disasm/` (`ira`-style
+Given this, the linear dumps in `data/wizardry6/snes/disasm/` (`ira`-style
 raw output, not hand-corrected) should be read as a *starting point* for
 manual verification, not as ground truth on their own.
 
@@ -332,7 +332,7 @@ game's actual per-frame logic executes, are all still open.
 > whichever task is currently running (each task's own body, not traced
 > exhaustively this session beyond the boot/opening task above).
 
-Raw dumps: `docs/wizardry6/snes/disasm/reset_startup.txt` (file
+Raw dumps: `data/wizardry6/snes/disasm/reset_startup.txt` (file
 `0x8000`-`0x84xx`, ~500 lines, r2 output — **not hand-corrected for the
 §2.1 flag-width issue past the first ~40 instructions**, use with care).
 
@@ -3577,7 +3577,7 @@ NMI-driven idle loop. `0xF0A4A` falls **inside** the independently-found
 reset-flow trace and a register-access census) converged on the same
 routine, which is strong mutual confirmation for both findings.
 
-Raw disassembly: `docs/wizardry6/snes/disasm/spc_upload_handshake.txt`
+Raw disassembly: `data/wizardry6/snes/disasm/spc_upload_handshake.txt`
 (file `0xF06EC` onward, r2 output, same §2.1 flag-width caveat applies to
 anything past an 8-bit-immediate stretch).
 
@@ -4153,8 +4153,8 @@ font at §4.4).
 ## Files
 
 - Spec: `docs/wizardry6/snes/data-structure.md` (this file)
-- Disassembly dumps: `docs/wizardry6/snes/disasm/reset_startup.txt`,
-  `docs/wizardry6/snes/disasm/spc_upload_handshake.txt` (raw r2 output,
+- Disassembly dumps: `data/wizardry6/snes/disasm/reset_startup.txt`,
+  `data/wizardry6/snes/disasm/spc_upload_handshake.txt` (raw r2 output,
   **not** hand-corrected for the §2.1 flag-width issue past the first few
   dozen instructions in each — treat as a starting point, not ground
   truth)
