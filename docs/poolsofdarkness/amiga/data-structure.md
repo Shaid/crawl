@@ -34,7 +34,9 @@ byte-for-byte identical to Curse and Secret's (see
 (`ITEM.DAT` AND `ITEMS.DAT`, both present — not investigated which one is
 the real/active table).
 
-## 1. "GLIB" container — CONFIRMED, 19/24 real `.GLB`/`.TLB` files; 5 truncated
+## 1. "GLIB" container — CONFIRMED, 24/24 real `.GLB`/`.TLB` files (5 top-level compressed)
+
+> **Correction (2026-11-18, audit):** the "19/24 OK, 5 truncated" diagnosis below is retired — those 5 files are top-level compressed, not truncated. Shipped `container-directory.json`: 24/24 OK, `compressedTopLevel: 5`, 0 truncated; the audit's own decoder decompresses all to valid bodies. See `docs/goldbox-glib-format.md` §3 correction. Original text kept as a dead end.
 
 `container-directory.json`: `totalGlibFiles: 24`, `structurallyOk: 19`,
 `truncatedOrCorrupted: 5` — the highest truncation count of the three
@@ -74,6 +76,8 @@ level.
 
 ### 3a. `DISK1/8X8DA.TLB` — flat-scheme file (was misread as degenerate; it is compressed)
 
+> **Correction (2026-11-18, audit):** "6 raw 8-byte 1bpp tiles" below is wrong: bank 202 here is 20 glyphs of 48 B = 5 planes (UI/arrow glyphs, not wall art) plus a 104-byte **palette** block 0 (header + 32 RGB888 triplets). Wall banks (`Disk2/8X8D.TLB`) are 256 glyphs of 56 B = **6 planes** plus the same palette block 0. See `docs/goldbox-glib-format.md` §5.5a.
+
 > **Correction (2026-08-30, `re-codebreaker`):** this file is not degenerate.
 > Its id-202 nested sub-container is method-**5** compressed (`flags = 0x0500`
 > → method `5`, `docs/goldbox-glib-format.md` §5); reading it without
@@ -97,6 +101,8 @@ falling out of range. **No PNG render was produced for this title this
 pass** — see `tools/poolsofdarkness/amiga/export-data.ts`'s module doc.
 
 ### 3b. `Disk2/8X8D.TLB` — per-wall-id nested scheme (SOLVED — the payload is compressed)
+
+> **Correction (2026-11-18, audit):** every wall texture rendered before this date used the wrong 1bpp reading. Real layout: block 0 = palette, blocks 1..256 = 6-plane glyphs; there is **no universal bank and no leading "none" slot** — index n = glyph n (= block n+1). Seam-continuity lift 0.399 for this alignment vs 0.17-0.21 for the placeholder-shifted one (`tools/shared/__tests__/goldbox-glyph.test.ts`; glyph census 1536/1536). 90/90 views regenerated 2026-11-18, grey ramp of the 6-bit index; the palette block is not yet wired up (`goldbox-glib-palette`).
 
 > **Correction (2026-08-30, `re-codebreaker`):** the "identical boilerplate
 > header" symptom recorded below is not boilerplate. **The nested payload is
@@ -164,11 +170,11 @@ catalogued. `ITEM.DAT` vs `ITEMS.DAT`'s relationship is also unresolved
 
 ## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
 
-**CONFIRMED for wall/door connectivity, OPEN for wall-art selection.** 32
+**CONFIRMED for wall/door connectivity and wall-art TYPE (planes 0/1 decoded — `docs/goldbox-glib-format.md` §7.2 correction; the "remain open, escalated" sentence below is stale).** 32
 levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
 Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
 verified via a cross-title shared-wall self-consistency oracle at
-96.6%/95.1% (horizontal/vertical agreement) on this title specifically.
+96.6%/95.1% (horizontal/vertical agreement; audit's own metric 99.6%/99.5%, planes 0/1 nibbles 99.6%/99.7% — script-backed numbers pending, `goldbox-geo-verify-numbers`) on this title specifically.
 Planes 0/1 (candidate wall-art selectors) remain open, escalated to
 `re-oracle`. Full writeup and cross-title verification table:
 `docs/goldbox-glib-format.md` §7. Implementation:
@@ -237,11 +243,10 @@ npx tsx tools/poolsofdarkness/amiga/export-data.ts data/poolsofdarkness/amiga
 
 Writes to `public/assets/poolsofdarkness/amiga/`:
 
-- `data/container-directory.json` — 19/24 OK, 5 truncated.
+- `data/container-directory.json` — 24/24 OK (5 top-level compressed, 0 truncated).
 - `data/walldef-geometry.json` — 6/6 entries confirmed multiples of 156.
 - `textures/walldef2-<id>-wall<n>-view6.png` — 90 composited wall-view
-  renders (0 skipped), this title's first real texture output — see §3b's
-  update block.
+  renders (0 skipped), regenerated 2026-11-18 with the glyph decoder (§3b correction; grey ramp of the 6-bit index, no palette).
 
 - `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
   `dungeon/wall-index.json` — 32 decoded GEO levels (§5) + the level list and

@@ -34,7 +34,12 @@ same base filenames as Pool of Radiance's `.dax` files, but with `.TLB`
 
 **This is a genuinely different container AND codec from PoR's `.dax`** —
 checked directly against real bytes (see `docs/goldbox-glib-format.md` §0 for
-the full comparison table). Headline finding: **no compression at all**.
+the full comparison table). ~~Headline finding: **no compression at all**.~~
+
+> **Correction (2026-08-30, restated 2026-11-18 audit):** top-level GLIB files are stored, but the nested "TILE"
+> sub-containers are usually compressed (method 3 LZW / method 5 LZ77 — `docs/goldbox-glib-format.md` §5,
+> `tools/shared/goldbox-glib-codecs.ts`). "No compression at all" is retired; the original text follows as a dead end.
+
 Every payload in this corpus is raw, uncompressed bytes — confirmed by
 exact-multiple-of-known-stride byte-length checks (§2 below), not assumed.
 PoR's own backward-reading LZ77 codec (`tools/poolofradiance/amiga/dax.ts`)
@@ -85,6 +90,16 @@ with genuinely different internal schemes:
 
 ### 3a. `DISKA/8X8D.TLB` — the "flat universal+specific" scheme (CONFIRMED, rendered)
 
+> **Correction (2026-11-18, audit; supersedes this whole §3a and the §3b pixel claims):** the 8x8 tile is a multi-plane
+> **glyph** (8-byte header + P plane-major bitplanes, 48 B = 5 planes), not an 8-byte 1bpp tile — see
+> `docs/goldbox-glib-format.md` §5.5a. Bank 202 is a 4-plane UI/arrow glyph set (bytes `08 1c 3e 1c ...`), **not wall art**,
+> and the flat "crenellation + door/torch" render below was a plausibility check of a wrong decode: **retired** (the `walldef-*`
+> PNGs are no longer written). Real wall art = §3b's per-entry banks `[none, 45 universal glyphs (id 203), 70 glyphs per
+> wallset slot]`: Curse renders 90/90 views in range, seam-continuity lift 0.472 (shipped 1bpp reading 0.09, shifted-alignment
+> control 0.179; `tools/shared/__tests__/goldbox-glyph.test.ts`). Glyph census 20 + 45 + 18*70 = 1325/1325 parse. Palette blocks
+> (height 0, 16/32 RGB888 triplets, e.g. `DISKA/ALWAYS.TLB`) exist but are not wired up (`goldbox-glib-palette`). The text below
+> is kept as a documented dead end.
+
 Outer container: `flags=1` (has index), tag `"HLIB"`, 3 blocks (1 index + 2
 data). Index: `{id: 202, blockIndex: 1}, {id: 203, blockIndex: 2}` — a
 simple 2-bucket scheme, NOT keyed by `WALLDEF.GLB`'s own wall-type ids.
@@ -129,6 +144,9 @@ Labeled **rendered, not confirmed**, same confidence tier as PoR's own
 `8x8d.dax` pixel-format finding.
 
 ### 3b. `DISKB/8X8D.TLB` — the per-wall-id nested scheme (SOLVED — the payload is compressed)
+
+> **Correction (2026-11-18):** the "6 raw 8-byte 1bpp tiles" reading in the correction block below is superseded — each 48-byte
+> block is ONE 5-plane glyph (§3a correction); the tile-vs-block index question is settled as one byte = one glyph.
 
 > **Correction (2026-08-30, `re-codebreaker`):** the two hypotheses recorded
 > below were both defeated by one wrong shared premise — that a nested
@@ -240,13 +258,13 @@ NOT catalogued — only their outer GLIB container structure is validated
 
 ## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
 
-**CONFIRMED for wall/door connectivity and wall-art TYPE selection; the
+**CONFIRMED for wall/door connectivity and wall-art TYPE selection (planes 0/1 are decoded, see the 2026-08-31 correction in `docs/goldbox-glib-format.md` §7.2; the "remain open, escalated" sentence below is stale); the
 final indirection to a real WALLDEF texture id is CONFIRMED for 16/16
 levels via ECL bytecode (see below).**
 16 levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
 Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
 verified via a cross-title shared-wall self-consistency oracle at
-90.8%/91.6% (horizontal/vertical agreement) on this title specifically —
+90.8%/91.6% (horizontal/vertical agreement; audit's own metric "wall exists from both sides" 98.9%/98.9%, planes 0/1 nibbles 99.4%/99.5% — script-backed numbers pending, `goldbox-geo-verify-numbers`) on this title specifically —
 vastly above every wrong bit-permutation tried. Planes 0/1 (candidate
 wall-art selectors) remain open, escalated to `re-oracle`. Full writeup and
 cross-title verification table: `docs/goldbox-glib-format.md` §7 (this
@@ -307,19 +325,15 @@ Writes to `public/assets/curseoftheazurebonds/amiga/`:
   fields + structural-OK/truncated status (27/27 OK, 0 truncated).
 - `data/walldef-geometry.json` — `WALLDEF.GLB`'s per-id byte length + slice
   count, all confirmed multiples of 156 (16/16).
-- `textures/walldef-<id>-wall<n>-view6.png` — 90 composited wall-view
-  renders using §3a's confirmed 8x8-tile flat bank (view 6 = the 8×7 "front
-  face", same view PoR's own extractor renders).
+- ~~`textures/walldef-<id>-wall<n>-view6.png`~~ — retired 2026-11-18 (§3a correction).
 - `textures/walldef2-<id>-wall<n>-view6.png` — 90 composited wall-view
-  renders using §3b's now-decodable per-wall-id scheme, the pairing WALLDEF
-  is actually keyed to at runtime (0 skips: every entry resolves). Higher
-  confidence than the `walldef-*` set above, though still RENDERED not
-  CONFIRMED pending §3b's own open tile/block index-unit question.
+  renders (view 6 = the 8×7 "front face") from §3b's per-entry glyph banks, the pairing WALLDEF
+  is actually keyed to at runtime (0 skipped, 0 out of range). Grey ramp of the 5-bit index (no palette wired up). Regenerated 2026-11-18.
 
 - `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
   `dungeon/wall-index.json` — 16 decoded GEO levels (§5) + the level list and
   wall-texture index the walker (`tools/walker/games-goldbox.ts`) loads.
 
-`manifest.json` carries 182 entries (180 texture PNGs + 2 data JSON
-records) after a clean rebuild; the `dungeon/` outputs are consumed
+`manifest.json` carries 92 entries (90 texture PNGs + 2 data JSON
+records; was 182 before the scheme-1 retirement) after a clean rebuild; the `dungeon/` outputs are consumed
 directly by the walker and are not part of `manifest.json`.

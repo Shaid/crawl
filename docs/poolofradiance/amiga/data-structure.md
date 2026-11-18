@@ -4,8 +4,8 @@ Pool of Radiance, SSI Gold Box engine, Amiga port. First of four sibling Gold
 Box titles staged in this repo (Curse of the Azure Bonds, Secret of the
 Silver Blades, Pools of Darkness — see `data/curseoftheazurebonds/amiga/`,
 `data/secretofthesilverblades/amiga/`, `data/poolsofdarkness/amiga/`, all
-still raw un-renamed floppy dumps, not touched this pass beyond the
-correspondence note in §0).
+extracted since — see their own `data-structure.md` files and the shared
+`docs/goldbox-glib-format.md`; the original "not touched this pass" wording is stale).
 
 Codec/container implementation: `tools/poolofradiance/amiga/dax.ts`. Wall-tile
 decode: `tools/poolofradiance/amiga/walldef.ts`. Extractor:
@@ -222,8 +222,31 @@ real Amiga data, not on trusting the DOS source by analogy:
    All three predictions land exactly on real data — three independent,
    multi-valued predictions confirmed, not a coincidence.
 
+> **Correction (2026-11-18, audit `audit-2026-11-13.md`; code `tools/poolofradiance/amiga/walldef.ts`):** the pixel
+> format paragraph directly below (4-byte header + 1bpp 8-byte tiles) is **WRONG** and kept only as a documented dead
+> end; every 2026-08-30 texture and its "crenellation / door / herringbone" visual confirmation was a plausibility
+> check of a wrong decode (one bitplane of a multi-plane glyph looks like 1bpp art). Real format, **confirmed**
+> (len invariant 23/23, seam-continuity lift 0.448 vs null, `tools/shared/__tests__/goldbox-glyph.test.ts`):
+>
+> | Offset | Size | Field | Notes |
+> |---|---|---|---|
+> | 0 | 2 | height | 8 |
+> | 2 | 2 | wBytes | 2 (items are 16x8 px = two 8x8 glyphs) |
+> | 4 | 2+2 | x, y | 0 |
+> | 8 | 2 | count | items: 35 (wallsets), 16 (id 202, UI), 23 (id 203, universal) |
+> | 10 | 2 | bytesPerItem | 16 = h*even(wBytes) |
+> | 12 | 4*count*16 | planes | 4 planes, each holding the whole bank; item i row y = 2 bytes (left glyph, right glyph) |
+>
+> `len == 12 + count*16*4` on 23/23 entries. 4 planes = 16 colour indices; **no palette found** (`por-palette`; renders
+> are a grey ramp of the index). Index space: 0 = none, 1..45 = universal (203) glyphs 0..44 (glyph 45 is all-zero
+> padding, verified), then wallset slot `k` at `46 + 70*k`; `program+0x6D53E` holds the slot-base table
+> `0001 002E 0074 00BA 0100`. A multi-wallset entry (0 -> 1/2/3, 21 -> 211/212, 24 -> 241/242) loads its wallsets into
+> consecutive slots, so banks are built per entry (`buildEntryTileBank`). Also: the 156-byte slice geometry
+> (`VIEW_OFFSET`/`VIEW_COLS`/`VIEW_ROWS`) is **not** only a Gold Box Explorer import — the same 30 bytes match
+> byte-exact in this game's own `program+0x40E8B` (audit), as do `MapDirectionX/YDelta` at `+0x6D552`/`+0x6D55B`.
+
 **`8x8d.dax`** holds the actual 8×8 tiles referenced by index from the view
-grids above. Pixel format — **RENDERED, not disassembly-confirmed**: each
+grids above. ~~Pixel format~~ (superseded, see correction) — **RENDERED, not disassembly-confirmed**: each
 block's decompressed length is 4 bytes shorter than a clean multiple of 8
 (e.g. 2252 = 4 + 8×281, 1036 = 4 + 8×129, 1484 = 4 + 8×185 — exact for every
 sampled block), so the decoder skips a 4-byte per-block header (meaning not
@@ -286,6 +309,15 @@ answer — not just a byte-count argument.
 ## 4. `pic.dax` / `cpic.dax` — NOT a Gold Box Explorer picture-block format
    (negative finding)
 
+> **Correction (2026-11-18, audit; `tools/poolofradiance/amiga/image.ts`, test in `goldbox-glyph.test.ts`):** the "unknown
+> format" verdict was a wrong premise. One grammar covers **all 511 image-class entries of 16 `.dax` files, zero
+> remainder** (8x8d 23, pic 59, cpic 118, sprit 55, cbody 128, head 39, body 21, chead 28, comspr 25, final 3, icon 6,
+> plus dungcom, wildcom, randcom, bacpac, sqrpaci — re-verified: 511/511, null control (entry shifted one byte) rejected):
+> IMAGE = the 12-byte header of §3's correction (`h, wBytes, x, y, count, bpi = h*even(wBytes)`) + `bpi*4*count`
+> bytes of 4 planes; ANIMATION = `u16 0, u16 frames`, then per frame `u32 delay` + one IMAGE. The Gold Box Explorer
+> negative below came from the animation wrapper's leading `u16 0`. `pic.dax` = animated 88x88 4bpp pictures. **Open:** the
+> palette (`por-palette`); no PNG export is shipped until it is found. Original text kept as a dead end.
+
 These held the alternative "maybe these ARE the static scene library"
 hypothesis before §3 settled the question via `walldef.dax` instead. Checked
 directly against Gold Box Explorer's own DOS-side picture-block shape
@@ -330,6 +362,10 @@ this session would not have changed that answer).
 
 ## 5. `dungcom.dax` — decompresses cleanly; content not semantically decoded
 
+> **Correction (2026-11-18, audit):** `dungcom.dax` is one IMAGE (§4 correction) of **13 frames of 48x24, 4 planes**:
+> `12 + 13*144*4 = 7,500` bytes, exactly the entry size (re-verified). Content class (combat/dungeon-screen art) still
+> unconfirmed; palette open. The "no record stride" remark below was the same wrong premise.
+
 Single block, decompresses to ~7,500 bytes (see `dungcom.json`'s
 `decompressedLength`), passing the §2 checksum oracle. Dense, structured
 binary with no record stride found yet by a first byte-level look.
@@ -358,14 +394,14 @@ binary with no record stride found yet by a first byte-level look.
 
 ## 7. `geo.dax` — the dungeon/city 16x16 square grid (the maze data)
 
-**CONFIRMED for wall/door connectivity, OPEN for wall-art selection.**
+**CONFIRMED for wall/door connectivity and wall-art TYPE per direction** (the old "OPEN for wall-art selection / planes 0/1 remain open, escalated" wording is superseded by the §7 correction blocks below and `docs/goldbox-glib-format.md` §7.2; the final slot→WALLDEF indirection is §7.1).
 `geo.dax` — not `dungcom.dax` (§5) — is the maze/level-layout data: 29
 entries, each decompressing to exactly 1,026 bytes (a constant 2-byte
 `0x0004` tag, identical on every entry, plus a 1024-byte record: four
 consecutive 256-byte planes over a 16x16 square grid). Plane 3 is a
 confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code, verified via a
 cross-title shared-wall self-consistency oracle at 95.3%/95.4%
-(horizontal/vertical agreement) on this title specifically. Planes 0/1
+(horizontal/vertical agreement) on this title specifically (audit's own re-measurement, metric "does the wall exist from both sides": 99.5%/99.5%; planes 0/1 nibbles in N/E/S/W order 96.1%/95.9% — the documented "best of 23 other permutations 55.7%" does not reproduce, best wrong ordering <= 0.57 on the vertical axis and tying on the horizontal axis because a N/S swap is invisible to a horizontal check; script-backed numbers still to be committed, `goldbox-geo-verify-numbers`). The 2-byte `00 04` prefix read little-endian is 1024 = the record length, probably a length field rather than a constant tag (ECL prefix `88 13` = 5000 LE). Planes 0/1
 (candidate wall-art selectors) remain open, escalated to `re-oracle`. Full
 writeup, cross-title verification table, and the walker integration this
 enables: `docs/goldbox-glib-format.md` §7 (this format is shared
@@ -383,6 +419,8 @@ documented there rather than four times). Implementation:
 > source-cited derivation.
 
 ### 7.1 Wallset-slot binding — CONFIRMED, 26/29 levels (all 3 slots each where an ECL script exists)
+
+> **Correction (2026-11-18, audit):** "26/29, every one fully" and "5/7 DO resolve" count the engine's 127 "don't touch" placeholder as a resolved slot. Levels 0 and 7 bind `(127,127,127)` yet use slots 0-2 / 0-1, so PoR really has **24/29** working bindings and level 7's NEWECL chase resolves only to placeholders. Count 127/255 as unresolved; hypothesis (untested): loading a multi-wallset WALLDEF entry fills the following slots — `goldbox-ecl-multiwallset-slotfill`. The exporter's "26/29" log line still counts placeholders.
 
 `ecl.dax` (same `.dax` directory/codec as `geo.dax`, same 2-byte constant
 prefix convention, `0x8813` here) is decoded by the same bytecode VM
@@ -443,7 +481,8 @@ Writes to `public/assets/poolofradiance/amiga/`:
   (content not semantically decoded, see §5).
 - `textures/walldef-<id>-wall<n>-view6.png` — 105 composited wall-view
   renders (one per non-degenerate wall slice, view 6 = the 8×7 "front face"),
-  the visual evidence cited in §3.
+  regenerated 2026-11-18 with the glyph decoder (§3 correction; grey ramp of the 4-bit index, no palette). The
+  pre-2026-11-18 PNGs were wrong pixels.
 - `dungeon/level-<id>.json` — 29 decoded `geo.dax` levels (§7), each a
   16x16 grid of `{n,e,s,w,special,raw0,raw1}` cells.
   `dungeon/levels-index.json` and `dungeon/wall-index.json` — the level

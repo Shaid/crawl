@@ -31,7 +31,12 @@ the same "GLIB" container confirmed byte-for-byte identical to Curse's (see
 against Pool of Radiance's `.dax`). No new container/codec work was needed
 for this title — it reuses `tools/shared/goldbox-glib.ts` unmodified.
 
-## 1. "GLIB" container — CONFIRMED, 19/21 real `.GLB`/`.TLB` files; 2 truncated
+## 1. "GLIB" container — CONFIRMED, 21/21 real `.GLB`/`.TLB` files (2 top-level compressed)
+
+> **Correction (2026-11-18, audit):** the "19/21 OK, 2 truncated" diagnosis below is retired. `DISK1/ALWAYS.TLB` and `DISK2/TITLE.TLB` are
+> top-level compressed, not truncated; the shipped `container-directory.json` reports 21/21 OK, `compressedTopLevel: 2`,
+> `truncatedOrCorrupted: 0`, and the audit's own decoder decompresses both to valid bodies (0-1 leftover bytes). See
+> `docs/goldbox-glib-format.md` §3 correction. Original text kept as a dead end.
 
 `container-directory.json`: `totalGlibFiles: 21`, `structurallyOk: 19`,
 `truncatedOrCorrupted: 2`. The 2 truncated files
@@ -68,6 +73,13 @@ the index block (file order, not ascending id order — see
 
 ### 3a. `DISK1/8X8D.TLB` — flat universal(203)+specific(202) scheme, SMALLER bank than Curse's
 
+> **Correction (2026-11-18, audit; supersedes §3a and the §3b pixel claims):** the 8x8 tile is a multi-plane **glyph**, not a 1bpp
+> tile (`docs/goldbox-glib-format.md` §5.5a). Bank 202 is a 4-plane UI/arrow glyph set, not wall art; the flat-bank render is **retired** (`walldef-*` PNGs no longer
+> written, 95 stale ones removed). Real wall art = §3b's per-entry banks (`[none, 45 universal glyphs, 70 per wallset slot]`): 93/95
+> views render in range (seam-continuity lift 0.477, shifted-alignment control 0.155); the 2 skipped views are entries 7 and 13, which
+> reference a third slot (max index 233) that their two composite banks (71/72, 131/132) do not supply —
+> `goldbox-ecl-multiwallset-slotfill`. Glyph census 1395/1395. Text below kept as a dead end.
+
 Same 2-bucket structure as Curse's `DISKA/8X8D.TLB` (§3a in that title's
 doc), but a much smaller flat bank: 1 placeholder + tiles from ids 202/203 =
 **165 tiles total** (vs Curse's 371). This file is on `DISK1`, NOT
@@ -89,6 +101,8 @@ tile-to-wall pairing (unlike Curse's cross-disk pairing, which happened to
 produce clearly non-random structure).
 
 ### 3b. `DISK2/8X8D.TLB` — per-wall-id nested scheme (SOLVED — the payload is compressed)
+
+> **Correction (2026-11-18):** "70 blocks of exactly 48 bytes (6 raw 8-byte 1bpp tiles)" below is superseded: each block is ONE 5-plane glyph.
 
 > **Correction (2026-08-30, `re-codebreaker`):** the "identical boilerplate
 > header" symptom recorded below is not boilerplate. **The nested payload is
@@ -173,13 +187,13 @@ not catalogued.
 
 ## 5. `GEO.GLB` — the dungeon/city 16x16 square grid (the maze data)
 
-**CONFIRMED for wall/door connectivity and wall-art TYPE selection; the
+**CONFIRMED for wall/door connectivity and wall-art TYPE selection (planes 0/1 are decoded — see `docs/goldbox-glib-format.md` §7.2 correction; the "remain open, escalated" sentence below is stale); the
 final indirection to a real WALLDEF texture id is CONFIRMED for 17/17
 levels via ECL bytecode (see below).**
 17 levels, each a 1024-byte record (four 256-byte planes over a 16x16 grid).
 Plane 3 is a confirmed 2-bit-per-direction (N/E/S/W) wall/door/other code,
 verified via a cross-title shared-wall self-consistency oracle at
-96.5%/97.5% (horizontal/vertical agreement) on this title specifically.
+96.5%/97.5% (horizontal/vertical agreement; audit's own metric 99.6%/99.7%, planes 0/1 nibbles 100%/100% — script-backed numbers pending, `goldbox-geo-verify-numbers`) on this title specifically.
 Planes 0/1 (candidate wall-art selectors) remain open, escalated to
 `re-oracle`. Full writeup and cross-title verification table:
 `docs/goldbox-glib-format.md` §7. Implementation:
@@ -196,6 +210,8 @@ Planes 0/1 (candidate wall-art selectors) remain open, escalated to
 > source-cited derivation.
 
 ### 5.1 Wallset-slot binding — CONFIRMED, 17/17 levels (51 slots)
+
+> **Correction (2026-11-18, audit):** 15 of the 51 slots are the placeholder 127 ("don't touch"), not wallsets; levels 16 (`21,127,127`) and 80/81/82 (`3,127,127`) use those slots, so the walker falls back to its placeholder there. "17/17 levels, 51 slots" overstates real resolution — `goldbox-ecl-multiwallset-slotfill`.
 
 `ECL.GLB` (`DISK2/ECL.GLB`, same GLIB container) statically names which
 real WALLDEF id occupies each of a level's 3 ECL-loaded wallset slots for
@@ -225,19 +241,16 @@ npx tsx tools/secretofthesilverblades/amiga/export-data.ts data/secretofthesilve
 
 Writes to `public/assets/secretofthesilverblades/amiga/`:
 
-- `data/container-directory.json` — 19/21 OK, 2 truncated.
+- `data/container-directory.json` — 21/21 OK (2 top-level compressed, 0 truncated).
 - `data/walldef-geometry.json` — 10/10 entries confirmed multiples of 156.
-- `textures/walldef-<id>-wall<n>-view6.png` — 66 renders (29 candidates
-  skipped as out-of-bank-range) using the §3a flat tile bank — LOW
-  confidence, see §3a.
-- `textures/walldef2-<id>-wall<n>-view6.png` — 95 renders (0 skipped) using
-  §3b's now-decodable per-wall-id scheme, the pairing WALLDEF is actually
-  keyed to at runtime. Higher confidence than the `walldef-*` set.
+- ~~`textures/walldef-<id>-wall<n>-view6.png`~~ — retired 2026-11-18 (§3a correction).
+- `textures/walldef2-<id>-wall<n>-view6.png` — 93 renders (2 skipped, tile index out of range: entries 7/13 need a third slot) from §3b's per-entry glyph banks, the pairing WALLDEF is actually
+  keyed to at runtime. Grey ramp of the 5-bit index (no palette). Regenerated 2026-11-18.
 
 - `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
   `dungeon/wall-index.json` — 17 decoded GEO levels (§5) + the level list and
   wall-texture index the walker (`tools/walker/games-goldbox.ts`) loads.
 
-`manifest.json` carries 192 entries (190 texture PNGs + 2 data JSON
-records); the `dungeon/` outputs are consumed directly by the walker and
+`manifest.json` carries 95 entries (93 texture PNGs + 2 data JSON
+records; was 192 before the scheme-1 retirement); the `dungeon/` outputs are consumed directly by the walker and
 are not part of `manifest.json`.

@@ -41,10 +41,10 @@ their *nested* sub-containers are usually compressed with one of two codecs
 of their own. See §5 — this cost a whole pass, because the nested payload
 looks like a container with a broken header rather than like compressed data.
 
-## 1. Container layout — CONFIRMED, 65/72 real `.GLB`/`.TLB` files corpus-wide
+## 1. Container layout — CONFIRMED, 72/72 real `.GLB`/`.TLB` files corpus-wide
 
-(the remaining 7 are real truncated/corrupted floppy dumps, not a format
-divergence — see §3)
+(65 stored, 7 compressed at the top level — all 72 decode to a valid body, see
+§3's correction; the old "65/72, 7 truncated" wording is retired)
 
 ```
 offset 0   magic        "GLIB" (4 bytes)
@@ -72,10 +72,11 @@ offset 16  u32 BE[blockCount+1]      cumulative ABSOLUTE file offsets.
 **Verification** (`tools/shared/goldbox-glib-export.ts`'s
 `container-directory.json` output, run per title): across all `.GLB`/`.TLB`
 files in all three titles' raw floppy dumps (72 files total), **65/72**
-(90.3%) chain with zero deviation — `offsets[0]` matches the predicted
+chain as stored files (the other 7 are top-level compressed and decode to valid bodies — 72/72, §3 correction) — `offsets[0]` matches the predicted
 header-end position and the offset table is monotonically non-decreasing,
-in every one. The other 7 are a real, diagnosable data-integrity issue (§3),
-not a format variant.
+in every one. The other 7 were first diagnosed as truncated dumps (§3); that
+diagnosis is retired — they are top-level compressed (shipped
+`container-directory.json`: 21/21 Secret and 24/24 Pools OK, `compressedTopLevel` 2 and 5).
 
 A benign, non-fatal 1-byte edge case exists on a couple of files (Curse's
 `STRINGS.GLB`, Secret's `MONCHA.GLB`): their last cumulative offset is
@@ -200,7 +201,7 @@ The 156-byte wall-slice / 10-view-sub-array geometry (Pool of Radiance's
 sibling titles' own `WALLDEF.GLB` files, and their per-wall-id 8x8 tile-bank
 schemes reuse PoR's exact `10*id + n` multi-wallset composite-id arithmetic.
 See each title's own `data-structure.md` §2/§4/§5 for the full per-title
-verification counts and the still-open per-wall-id tile-pixel-layout puzzle.
+verification counts. The tile pixel layout is settled (glyph format, §5.5a).
 
 ## 5. Compression — `flags >> 8` selects the codec (CONFIRMED, code-derived + byte-exact oracle)
 
@@ -335,7 +336,50 @@ distances are 1024 (short) and 32768 (long); lengths 3-10 and 3-34.
 | Independent reimplementation | A from-scratch Python reference and the committed TypeScript port produce **SHA256-identical** output for all 326 containers. |
 | Render | Curse `DISKB/8X8D.TLB` id 1 (method 3) decompresses to 70 blocks of exactly 48 bytes = 6 raw 8-byte 1bpp tiles each, zero remainder, and `WALLDEF.GLB` wall 1's view grids render as a clean, regular, repeating decorative wall pattern across all 5 slices — decisively unlike the "salt and pepper" noise every pre-decompression hypothesis produced. |
 
-### 5.6 Still open — the tile-bank index unit
+### 5.5a Correction (2026-11-18): the 8x8 tile is a multi-plane GLYPH, not a 1bpp tile
+
+> **Correction (2026-11-18, audit `docs/*/audit-2026-11-13.md`):** the §5.5 "Render" row
+> ("70 blocks of exactly 48 bytes = 6 raw 8-byte 1bpp tiles each") and everything built on it
+> (§0/§4 "header-less 1bpp 8-byte tiles", the §5.7 renders, the per-title "crenellation / door /
+> herringbone" confirmations) were **wrong**. A single bitplane of a multi-plane glyph renders as
+> plausible 1bpp art, so those visual checks were circular. Real layout (all three GLIB titles):
+>
+> | Offset | Size | Field | Notes |
+> |---|---|---|---|
+> | 0 | 2 | height | 8; **0 = palette block** (see below) |
+> | 2 | 2 | x | 0 |
+> | 4 | 2 | y | 0 |
+> | 6 | 1 | widthBytes | 1 |
+> | 7 | 1 | flag | plane-count marker (`01`/`e0`/`e1` seen) |
+> | 8 | 8*P | planes | plane-major, one byte per row, MSB = leftmost pixel; P = (len-8)/8 |
+>
+> 48 B = 5 planes (Curse/Secret walls and the universal bank 203), 40 B = 4 planes (bank 202 —
+> UI/arrow glyphs, **not** wall art), 56 B = 6 planes (Pools wallsets). Grammar fits 1325/1325
+> (Curse), 1395/1395 (Secret), 1536/1536 (Pools) glyph blocks (audit; `goldbox-glyph.test.ts`
+> re-checks Curse). Palette blocks (`height = 0`): 56 B = header + 16 RGB888, 104 B = header + 32
+> RGB888 (Pools: block 0 of every bank). **Not yet wired up** (`goldbox-glib-palette`); renders use
+> a grey ramp of the colour index. **Index space:** one WALLDEF byte = one glyph: 0 = none,
+> 1..45 = universal glyphs 0..44, then wallset slot `k` at `46 + 70*k`
+> (1/46/116/186/256 are the slot bases; PoR's `program+0x6D53E` holds `0001 002E 0074 00BA 0100`).
+> Pools has no universal bank: index n = glyph n directly (block n+1, block 0 being the palette).
+> A multi-wallset WALLDEF entry loads its wallsets `10*id+n` into consecutive slots and its slices
+> mix glyphs from several slots, so the bank is built **per entry**
+> (`buildEntryTileBank`), not per slice.
+>
+> **Evidence (seam-continuity oracle, lift = (obs-null)/(1-null), null = random glyph pairs from the
+> same bank), re-measured 2026-11-18 by `tools/shared/__tests__/goldbox-glyph.test.ts`:** Curse
+> 0.472, Secret 0.477, Pools 0.399 (shifted alignment control: Curse 0.179, Secret 0.155, Pools
+> -0.62), PoR 0.448. Shipped 1bpp reading, Curse: 0.09 (audit). Cross-title: 31/45 PoR universal
+> glyphs share Curse's colour partition at the same index (audit).
+> Out-of-range after the fix: Curse 0/90 views, Pools 0/90, Secret 2/95 — Secret entries 7 and 13
+> reference a third slot (max index 233) that their own two composite banks do not supply
+> (`goldbox-ecl-multiwallset-slotfill`).
+
+### 5.6 ~~Still open~~ SETTLED (2026-11-18) — the tile-bank index unit
+
+> **Correction (2026-11-18):** one byte = one 8x8 **glyph** (§5.5a); the "block" reading below was right, the
+> "6 tiles per block" arithmetic was the wrong-decode artefact. The decoder was only updated 2026-11-18.
+> Original text kept as a documented dead end.
 
 Decompression settles the byte layout; one downstream question remains.
 Every per-wall-id bank has a striking uniform block structure — Curse and
@@ -358,6 +402,10 @@ counts their slice counts imply. Both readings render as plausible art
 repeating wall texture). Tracked as `caob-tile-bank-index-unit`.
 
 ### 5.7 Integration (2026-08-30, same session): scheme 2 wired up and shipped, using the "index = one 8x8 tile" reading
+
+> **Correction (2026-11-18):** this section describes the OLD 1bpp decode. The renders it lists were wrong pixels
+> and have been regenerated with the glyph decoder (§5.5a); scheme 1 (`walldef-*` from DISKA `8X8D.TLB`, ids 202+203) is retired
+> — bank 202 is UI/arrow glyphs. Per-entry banks replaced per-slice banks. Counts are now Curse 90/90, Pools 90/90, Secret 93/95.
 
 `decodeGlibTileBucket`, `resolveCompositeWallId`, and
 `buildWallSpecificTileBank` (`tools/shared/goldbox-walltiles.ts`) compose the
@@ -503,7 +551,7 @@ corpus-wide, zero deviation: PoR 29/29 entries, Curse 16/16 blocks, Secret
 >   (Bash/Knock only). Critically, this code is **only consulted where the
 >   matching direction's wall type (planes 0/1) is non-zero** — corpus-wide,
 >   a plane-3 code != 0 with no matching wall art is near-nonexistent
->   (88/16,896 fields in PoR, 3/5,168 in Secret, 13 in Pools, 59 in Curse).
+>   (88/29,696 fields in PoR (29 levels x 1024; the earlier 88/16,896 denominator was a typo), 3/5,168 in Secret, 13 in Pools, 59 in Curse).
 >   The original self-consistency oracle (§ below) is unaffected — it tested
 >   shared-wall PRESENCE agreement, which is value-symmetric and blind to
 >   which value means what; only the 0/1/2/3 *meaning* was inverted, not the
@@ -638,6 +686,14 @@ tint but are treated as passable (no key/lock mechanic implemented in the
 walker).
 
 ### 7.4 Wallset-slot binding — ECL bytecode CONFIRMED for all four titles (2026-09-01)
+
+> **Correction (2026-11-18, audit):** "every level that resolves at all resolves ALL 3 slots" is overstated: the value
+> 127 (and 255) is the engine's "don't touch" placeholder, not a wallset. Counting 127/255 as unresolved: PoR has 24/29
+> levels with working bindings (levels 0 and 7 bind `(127,127,127)` yet use slots 0-2 / 0-1); Secret has 15 of 51 slots
+> at 127 (level 16 `21,127,127`, levels 80/81/82 `3,127,127` use them). Hypothesis (untested): loading a multi-wallset
+> WALLDEF entry fills the following slots too (entries 21 and 3 each have 3 wallsets). Tracked as
+> `goldbox-ecl-multiwallset-slotfill`. The 2026-11-18 glyph work corroborates it: Secret entries 7 and 13 have 2
+> composite banks but reference a third slot.
 
 §7.2 identified the missing indirection: a 1-15 wall-art TYPE names a
 level-scoped `(wallsetSlot 0-2, slice 0-4)` pair, and which WALLDEF
