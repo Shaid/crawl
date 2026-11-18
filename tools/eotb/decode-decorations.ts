@@ -42,7 +42,16 @@ export interface DecorationProperty {
   shapeY: number[]; // length 10, signed
 }
 
-/** One `EoBRect8` shape-sheet crop rectangle (`scene_eob.cpp:452-461`) -- pixel coordinates into the paired decoration CPS's 320x200 canvas. */
+/**
+ * One `EoBRect8` shape-sheet crop rectangle (`scene_eob.cpp:452-461`), already
+ * converted to **pixels** in the paired decoration CPS's 320x200 canvas.
+ *
+ * > **Correction (2026-11):** the on-disk `x`/`w` are in **8-pixel column
+ * > units** (`Screen_EoB::encodeShape`, `screen_eob.cpp:629`: `src = page +
+ * > y*320 + (x << 3)`, `w <<= 3`; max on-disk `x+w` is 40 = 320/8 in 10 of 11
+ * > files). `y`/`h` are pixel rows. This module used to hand the raw values
+ * > on as pixels, drawing every decoration at 1/8 width from the wrong column.
+ */
 export interface DecorationRect {
   x: number;
   y: number;
@@ -91,14 +100,16 @@ export function decodeDecorations(data: Uint8Array): DecorationData {
   pos += 2;
   const rects: DecorationRect[] = [];
   for (let i = 0; i < rectCount; i++) {
-    const x = view.getUint16(pos, true);
+    const x = view.getUint16(pos, true) * 8; // 8-px column units on disk.
     pos += 2;
     const y = view.getUint16(pos, true);
     pos += 2;
-    const w = view.getUint16(pos, true);
+    const w = view.getUint16(pos, true) * 8; // 8-px column units on disk.
     pos += 2;
-    const h = view.getUint16(pos, true);
+    let h = view.getUint16(pos, true);
     pos += 2;
+    // EOB2 CRIMSON.DEC rect #152 (5,178,6,27) runs to y+h=205 > 200: clamp to the canvas.
+    if (y + h > 200) h = Math.max(0, 200 - y);
     rects.push({ x, y, w, h });
   }
 

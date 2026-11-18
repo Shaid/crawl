@@ -489,6 +489,20 @@ This wasn't obvious from the filename/extension alone — the previous pass
 treated `.INF` as raw data. Port: `EoBCoreEngine::loadLevel`/
 `readLevelFileData`/`initLevelData` (`engine/scene_eob.cpp:34-309`).
 
+> **Correction (2026-11-18):** the "4-byte `fileData` prefix" theory in this
+> section and in the VCN section is wrong. `Screen_EoB::loadBitmap`
+> (`screen_eob.cpp:405-470`) overrides the base version and calls
+> `Screen::loadBitmap(filename, ..., pal)` without passing `skip`; in EOB `skip`
+> only suppresses the Amiga palette and the PC98 planar post-processing. There
+> is no prefix. Parsing at offset 0 is correct; the stated reason was not.
+>
+> **Cross-port note (2026-11-18):** `LEVEL3.MAZ` differs between DOS and Amiga in
+> exactly 2 bytes, cell (x=4, y=30): E/W sides are 13/18 on DOS and 3/8 on Amiga
+> (both inside the default 3..22 door range, same VMP, but `_wllShapeMap` is -1 for
+> 3-7 and 13-17, so the door shape set differs). The other 11 levels (and all 15
+> EOB2 levels) are byte-identical across ports. Tracked as
+> `eotb1-level3-maz-4-30-xport`.
+
 **Important:** `readLevelFileData` (`scene_eob.cpp:115-152`) has a
 `skip=true` 4-byte-prefix-skip branch identical in spirit to the one noted
 for VCN — but for INF the *opposite* choice applies. The branch that

@@ -152,6 +152,11 @@ at offset 0x40 stored as 24-bit RGB (3 bytes per color, 96 bytes total). The
 first 3 colors are always black (RGB 0,0,0). This palette format uses 8-bit
 per channel values that need the correct interpretation (not yet fully decoded).
 
+> **Correction (2026-11-18):** superseded, and it contradicted the VCN section
+> below. A `.VCN` carries only **5** 12-bit big-endian colours at offset 0x02
+> (see "Palette (VCN offset 0x02, not 0x40)"); there is no 32-colour 24-bit
+> palette at 0x40.
+
 **Palette structure** (shared across all EOB palettes):
 - Colors 0–5: Wall-set or image-specific
 - Colors 6–7: Shared UI elements (`0x0A0A`, `0x0DC2`)
@@ -351,8 +356,8 @@ This closes `eotb1-amiga-vcn-palette`. Correction to the earlier text: the
 VCN file does **not** carry a full 32-colour palette at offset 0x40 in
 8-bit RGB — it carries only **5** colours (12-bit Amiga RGB, u16 BE) at
 offset 0x02, loaded into palette slots 1-5 as a small patch on top of
-whatever 32-colour palette is already active (the wall-set's `.PAL`,
-loaded separately — same "name-matched `<wallStem>.PAL`" mechanism
+whatever 32-colour palette is already active (~~the wall-set's `.PAL`~~ -- see
+the Correction below; loaded separately — same "name-matched `<wallStem>.PAL`" mechanism
 confirmed for DOS in `docs/eotb/dosvga/data-structure.md` § "VGA palette";
 not independently re-traced for the Amiga palette-load call site this
 pass, but the DOS mechanism's structural analogue — `.INF`'s embedded
@@ -360,12 +365,27 @@ wall-set stem — is shared code, `EoBCoreEngine::initLevelData`, so very
 likely identical). Not yet re-rendered with the corrected offset/scaling
 this pass — logged as confirmed-from-source, re-render is a follow-up.
 
+> **Correction (2026-11-18):** EOB1 Amiga ships **no `.PAL` files** (only EOB2
+> does). The base 32-colour palette the code uses is `INVENT.CPS`'s embedded
+> palette (`tools/eotb/export-dungeon.ts:34`), with each wall set's 5 VCN colours
+> patched into slots 1-5. That base is well supported: `INVENT.CPS` slots 1-5
+> equal `BRICK.VCN`'s 5 colours exactly (so it was captured with a brick level
+> loaded), and `CHARGEN` and `TUNNEL` agree with `INVENT` on 26/26 of slots 6-31.
+> Also: `tools/eotb/palette.ts` says the `(n*0x3F)/0xF` scaling is "NOT
+> `nibble*17`", but `round((n*63/15)*(255/63))` is exactly `n*17` for every
+> nibble; ScummVM's truncation to 6 bits first gives e.g. 134 vs our 136 for
+> nibble 8 (difference <= 3 per channel, comment fixed in `palette.ts`).
+
 ---
 
 ## VMP — Wall View Mapping Table
 
-5,834 bytes. Maps VCN tile indices to viewport positions. Identical across all
-wall sets within each game (BRICK.VMP = BLUE.VMP, etc.).
+5,834 bytes. Maps VCN tile indices to viewport positions. ~~Identical across all
+wall sets within each game (BRICK.VMP = BLUE.VMP, etc.).~~
+
+> **Correction (2026-11-18):** wrong. All 20 `.VMP` files (EOB1 + EOB2, DOS +
+> Amiga) have distinct md5s (the five EOB1 Amiga ones re-checked: all differ);
+> two files within a game share only 292-664 of 2,916 entries.
 
 Organizes the 22×15 tile viewport into 5 layers:
 - 330 backdrop tile indices
@@ -396,11 +416,13 @@ Organizes the 22×15 tile viewport into 5 layers:
 
 ### Additional Data
 
-After the cell grid:
-- Door state sequences (3–7, 8–12, etc.)
-- Stair connections
-- Pit/teleport destinations
-- Event scripts
+~~After the cell grid: door state sequences, stair connections, pit/teleport
+destinations, event scripts.~~
+
+> **Correction (2026-11-18):** there is **no** trailing data. Every `.MAZ` is
+> exactly 4102 = 6 + 32x32x4 bytes (header (32,32,4) + grid), confirmed for all
+> 27 levels across EOB1 (12) and EOB2 (15) on both ports, as the DOS doc already
+> showed. Door/stair/event data live in `.INF`.
 
 ---
 
@@ -445,7 +467,7 @@ sprites_eob.cpp:62-95`), against the real decompressed bytes:
 | 60 | 13 | monster shape 2: same shape |
 | 73 | variable | `(type, interval)*` pairs, terminated by a `0xFF` type byte |
 | (follows) | 420 | fixed 30-slot x 14-byte monster-placement array |
-| (follows) | 1 + 2 | 1 unused discriminator byte + `num` (u16 LE) decoration/wall-mapping record count |
+| (follows) | 2 | `num` (u16 LE) decoration/wall-mapping record count (~~preceded by "1 unused discriminator byte"~~ -- corrected 2026-11-18: `decode-inf.ts:178-183` nets `pos -= 1; pos += 1`, there is no extra byte, and parsing with one runs off the end of the buffer) |
 | (follows) | variable | `num` records: `0xEC` + two 12-byte names = decoration-load (25 bytes); anything else = **wall-mapping override** (6 bytes: 1 unused discriminator + `[wallIndex][vmpIndex][decIndex:int8][specialType][flags]`) |
 
 **Verified against the real corpus:** every one of `LEVEL{1..12}.INF`
@@ -555,6 +577,26 @@ nothing here reads raw block-index arithmetic directly; `CELL_OFFSETS`/
 `rotateOffset`/`roleSide` remain the implementation, now confirmed correct.
 
 ### Decoration overlays (`decIndex`) — real format, partial render (2026-08-29)
+
+> **Correction (2026-11-18):** `EoBRect8.x`/`.w` are stored in **8-pixel column
+> units**, not pixels (`Screen_EoB::encodeShape`, `graphics/screen_eob.cpp:629`:
+> `src = page + y*320 + (x << 3)`, `w <<= 3`; `y`/`h` are pixel rows).
+> Evidence: the maximum `x+w` is exactly 40 (= 320/8) in 10 of 11 `.DAT`/`.DEC`
+> files and 39 in the other (1,615 rects); BRICK rects 0-2 `(0,55,9,25)`,
+> `(9,55,6,17)`, `(15,55,4,11)` sit edge-to-edge in column units; and the rect
+> union (x/w x8) covers 90-100% of each Amiga decoration sheet's opaque pixels
+> (BRICK1 0.988, BRICK2 0.995, BRICK3 1.0, BLUE 0.983, DROW 0.948, GREEN 0.984,
+> XANATHA 0.901) against 1-23% when read as pixels (null control; the audit's
+> DOS VGA sheets gave the same split). `decodeDecorations` now converts `x`/`w`
+> to pixels (`tools/eotb/decode-decorations.ts`; test
+> `tools/eotb/__tests__/eotb-decoration-units.test.ts`) and clamps `h` so
+> `y+h <= 200` (EOB2 `CRIMSON.DEC` rect #152 `(5,178,6,27)` runs to y+h=205).
+> **Every "pixel-exact", "bbox ... matches the `w=N` rect exactly" and "9x25px"
+> statement below was circular**: the hand-computed expectation used the same
+> pixel assumption, and a 9-px-wide bbox for `w=9` is the *symptom* of the bug
+> (decorations were drawn at 1/8 width from the wrong source column), not
+> confirmation. Those renders and tables are retained as documented dead ends;
+> the placements need re-verifying against the corrected renderer.
 
 **Confirmed: EOB1 Amiga's `decIndex` resolves against the wall-set's own
 `.DAT` file** (`BRICK.DAT`, `BLUE.DAT`, etc — see "Wall Set DAT Files"
@@ -837,7 +879,7 @@ forced little-endian regardless of platform, decoded by
 | 0 | 2 | `numProperties` (u16 LE) |
 | 2 | `numProperties * 52` | `LevelDecorationProperty[]` — see below |
 | (follows) | 2 | `numRects` (u16 LE) |
-| (follows) | `numRects * 8` | `EoBRect8[]` — `{x:u16, y:u16, w:u16, h:u16}`, all LE |
+| (follows) | `numRects * 8` | `EoBRect8[]` — `{x:u16, y:u16, w:u16, h:u16}`, all LE; **`x`/`w` are 8-px column units**, `y`/`h` pixels (see the 2026-11-18 Correction under "Decoration overlays") |
 
 Each 52-byte `LevelDecorationProperty`:
 

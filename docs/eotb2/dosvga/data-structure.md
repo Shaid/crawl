@@ -307,7 +307,7 @@ if (*pos++ == 0xEC || _flags.gameID == GI_EOB1) {     // tag byte @ 0x004; *pos+
 `tools/eotb2/decode-inf.ts` and its test suite): tag byte is `0xEC` in
 every file; `mazStem`/`wallSetStem` decode to the exact same values the
 previous token-scan workaround already found (including both documented
-maze-reuse cases, `LEVEL16→level15.maz` and `LEVEL14→level12.maz`); the
+maze-reuse cases, `LEVEL16→level15.maz` and `LEVEL14→level12.maz`; a third, `LEVEL15→level14.maz`, was missed here and is documented in the Correction below); the
 optional second field is present (flag `0x01`) in exactly `LEVEL10`-
 `LEVEL14` and decodes to `"azure"` in all 5 — **this is the same discovery
 as `eotb2-dos-cps-palette-second-field`, confirmed from two angles at
@@ -361,6 +361,24 @@ sub1 → `ant`, `LEVEL7` sub1 → `wasp`, `LEVEL8` sub1 → `cleric1`,
 `LEVEL11` sub1 → `guardian`, `LEVEL16` sub1 → `dran`/`dragon` — raising
 the total resolved monster-stem count from 24 (sub==0 only) to 29.
 
+> **Correction (2026-11-18, source + bytes):** sub-levels are not just extra
+> monster slots. `EoBCoreEngine::loadLevel(level, sub)` (`scene_eob.cpp:35-53`)
+> calls `resetWallData()` then `for (i=0; i<=sub; i++) initLevelData(i)`, so
+> blocks **stack cumulatively** on the wall-mapping/decoration layer;
+> `initLevelData` (`:155-163`) walks `pos = data + READ_LE_UINT16(pos)` with
+> `data = page+2`, which source-confirms the chain arithmetic derived
+> empirically above. `sub` is the operand of the level-change script opcode
+> (`script_eob.cpp:1288-1319`), so sub 1 is a reachable game state. Levels 1, 3,
+> 7, 8, 11, 16 have a second block with 5-24 wall-mapping records each plus
+> extra decoration loads (`brown3` on L3, `crimson2` on L16); on L3 six of the
+> 16 wall indices mapped by both blocks are mapped differently in sub 1. Raw MAZ
+> values with no mapping in sub 0 but covered by sub 1: L1 59, 63 (24 sides); L3
+> 61, 62, 64, 67 (55 sides); L7 64, 65 (16 sides); L16 53 (1 side); DOS and
+> Amiga identical. `level5.maz` (shared by LEVEL5 and LEVEL6) has 14 values
+> (~100 sides) unmapped by LEVEL5.INF that only LEVEL6.INF maps. The walker shows
+> all of these as no wall (faithful for sub 0, wrong for sub 1). Tracked as
+> `eotb2-sublevel-wall-layers` and `eotb2-level5-maz-shared-mapping`.
+
 **Not (yet) ported to `tools/eotb2/decode-inf.ts`/the wall-decoration
 renderer.** This session's Python port only reads the sub-level chain far
 enough to reach each block's monster-shape slots (needed for the palette
@@ -404,6 +422,13 @@ same physical map, not a missing file). Likewise `LEVEL6.INF` reuses
 `"level5.maz"` and `LEVEL14.INF` reuses `"level12.maz"` — three confirmed
 maze-reuse pairs, all consistent with alternate/sub-level scenarios on a
 shared floor plan rather than data gaps.
+
+> **Correction (2026-11-18):** the reuse list is **four** pairs, not three:
+> LEVEL6->`level5.maz`, LEVEL14->`level12.maz`, **LEVEL15->`level14.maz`** (DOS
+> `LEVEL15.INF` mazStem is `level14.maz`, wall set `crimson`, identical to the
+> Amiga file -- re-verified by decoding all 16 DOS `.INF`), LEVEL16->`level15.maz`.
+> Only LEVEL16 names `level15.maz`; DOS has no "own `level15.maz`" use by LEVEL15.
+> Same chain on both ports.
 
 **Verified per wall set** (structural invariants, zero deviation):
 
@@ -501,6 +526,19 @@ non-tile area; not investigated further.) **Closes `eotb2-dos-dec-format`.**
 ---
 
 ## Wall decoration overlay rendering (INF wall-mapping/decoration-load record stream, 2026-08-29)
+
+> **Correction (2026-11-18):** the 8-byte `EoBRect8`'s `x` and `w` are in
+> **8-pixel column units** (`Screen_EoB::encodeShape`, `screen_eob.cpp:629`:
+> `src = page + y*320 + (x << 3)`, `w <<= 3`), `y`/`h` in pixels. Across the 6
+> EOB2 `.DEC` files (+ 5 EOB1 `.DAT`) the max `x+w` is 40 (= 320/8) in 10 of 11
+> files; ×8 rects cover 0.90-1.00 of each DOS VGA sheet's opaque pixels vs
+> 0.12-0.23 as pixels (AZURE2 0.74). The EOB2 walkers (`tools/eotb2/renderer.ts`)
+> consumed the raw values as pixels (decorations drawn at 1/8 width from the
+> wrong column); `decodeDecorations` (shared, `tools/eotb/decode-decorations.ts`)
+> now converts to pixels and clamps `CRIMSON.DEC` rect #152 `(5,178,6,27)`
+> (y+h=205 > 200). Earlier "visually confirmed" decoration renders below
+> predate this fix and were not units-checked. See
+> `docs/eotb/amiga/data-structure.md` § "Decoration overlays".
 
 Ports EOB1's just-shipped wall-decoration-overlay renderer
 (`docs/eotb/amiga/data-structure.md`'s equivalent section,

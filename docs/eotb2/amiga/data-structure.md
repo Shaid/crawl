@@ -262,6 +262,13 @@ all 16 files, resolving **308** total wall-decoration assignments — the
 exact same total DOS resolves — with every `decIndex` in-range against a
 real, byte-identical `.DEC` file.
 
+> **Correction (2026-11-18):** the "Amiga-only" claim in this paragraph, in the
+> table below and in the Verification summary is **wrong**. DOS `LEVEL15.INF`
+> decodes to `mazStem` = `level14.maz`, wall set `crimson` (re-verified by
+> decoding all 16 DOS and Amiga `.INF`), identical to the Amiga file; the DOS doc's
+> reuse list merely omitted it. The chain is the same on both ports:
+> LEVEL6->5, LEVEL14->12, LEVEL15->14, LEVEL16->15.
+
 **One new maze-reuse pair found this session, not present in the DOS
 corpus's documented list:** `LEVEL15.INF`'s `mazStem` is `"level14.maz"`,
 not `"level15.maz"` — a genuine Amiga-specific data variant (DOS's own
@@ -314,6 +321,19 @@ Modules: `tools/eotb2/amiga/decode-decorations.ts` (re-export of EOB1's
 ---
 
 ## Wall decoration overlay rendering (confirmed working, front/"Down" role)
+
+> **Correction (2026-11-18):** the 8-byte `EoBRect8`'s `x` and `w` are in
+> **8-pixel column units** (`Screen_EoB::encodeShape`, `screen_eob.cpp:629`:
+> `src = page + y*320 + (x << 3)`, `w <<= 3`), `y`/`h` in pixels. Across the 6
+> EOB2 `.DEC` files (+ 5 EOB1 `.DAT`) the max `x+w` is 40 (= 320/8) in 10 of 11
+> files; ×8 rects cover 0.90-1.00 of each DOS VGA sheet's opaque pixels vs
+> 0.12-0.23 as pixels (AZURE2 0.74). The EOB2 walkers (`tools/eotb2/renderer.ts`)
+> consumed the raw values as pixels (decorations drawn at 1/8 width from the
+> wrong column); `decodeDecorations` (shared, `tools/eotb/decode-decorations.ts`)
+> now converts to pixels and clamps `CRIMSON.DEC` rect #152 `(5,178,6,27)`
+> (y+h=205 > 200). Earlier "visually confirmed" decoration renders below
+> predate this fix and were not units-checked. See
+> `docs/eotb/amiga/data-structure.md` § "Decoration overlays".
 
 Reuses `tools/eotb2/renderer.ts`'s `drawWallDecorations` and EOB1's DSC
 render-geometry tables unmodified — the whole render pipeline is

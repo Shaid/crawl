@@ -66,12 +66,10 @@
  * A shape's real pixel width for the mirrored-draw formula (`176 -
  * shapeX[shpIx] - (shapeData[2] << 3)` in the real source, where
  * `shapeData[2]<<3` is the shape's own encoded-header pixel width) is
- * substituted here with `rect.w` directly -- this port never builds a
- * `shapeData`-style encoded runtime shape at all, it blits straight from
- * the decoded `.CPS` canvas using each `DecorationRect`'s own `w`/`h` as
- * literal pixel dimensions (already pixel-exact verified for the
- * non-mirrored case, see below), so `rect.w` and the source's
- * `shapeData[2]<<3` necessarily name the same real pixel width.
+ * substituted here with `rect.w`. `decodeDecorations` converts the on-disk
+ * 8-px column units (`x`/`w`) to pixels (2026-11 correction: the old text
+ * here said the raw values were already pixels, which drew every decoration
+ * at 1/8 width), so `rect.w` is the pixel width `shapeData[2]<<3` names.
  *
  * What's real and verified: the `.DAT` decoration-property/rect format
  * (`decode-decorations.ts`, 0 residue against all 5 real files), which
@@ -81,8 +79,8 @@
  * every table this rendering path reads (`DSC_SHAPE_INDEX`/`DSC_SHAPE_X`/
  * `DSC_SHAPE_COORDS`, all ScummVM's own literal Amiga-extracted
  * `create_kyradat` byte arrays). See `docs/eotb/amiga/data-structure.md`
- * § "Decoration overlays" for the pixel-diff verification evidence for
- * both roles.
+ * § "Decoration overlays" (its 2026-11 correction: the earlier pixel-diff
+ * "verification" there was circular and must be redone against the corrected units).
  */
 import { IndexedSurface, type BlitSource } from '@seer-project/dungeon';
 import type { VcnData } from './decode-vcn.ts';
