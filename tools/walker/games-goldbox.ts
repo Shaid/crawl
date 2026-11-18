@@ -50,7 +50,7 @@ import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/d
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
 import type { GeoLevel, GeoCell, Direction } from '../shared/goldbox-geo.ts';
-import { isBlocked, isDoor, hasWall, resolveWallFlatId } from '../shared/goldbox-geo.ts';
+import { isBlocked, isDoor, hasWall, resolveWallFlatId, resolveDirectWall } from '../shared/goldbox-geo.ts';
 import { resolveFlatWalldefId, SLICES_PER_WALLSET, type FlatWalldefEntry } from '../shared/goldbox-walltiles.ts';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -215,7 +215,12 @@ export class GoldBoxView implements GameView {
    * WALLDEF directory doesn't cover, e.g. a `0x7f`/`0xff` sentinel).
    */
   private wallTextureForCell(level: GeoLevel, cell: GeoCell, dir: Direction): WallTextureEntry | undefined {
-    const resolved = resolveWallFlatId(cell, dir, level.wallsetBinding);
+    const direct = resolveDirectWall(cell, dir, level.wallsetBinding);
+    if (direct) {
+      const tex = this.data.walls.find((w) => w.id === direct.walldefId && w.wallNumber === direct.wallNumber);
+      if (tex) return tex;
+    }
+    const resolved = direct ? undefined : resolveWallFlatId(cell, dir, level.wallsetBinding);
     if (resolved) {
       const entry = resolveFlatWalldefId(this.data.flatEntries, resolved.flatId);
       if (entry) {

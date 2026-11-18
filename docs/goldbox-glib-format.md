@@ -429,6 +429,13 @@ per-level data — followed by the same 1024-byte record). Verified
 corpus-wide, zero deviation: PoR 29/29 entries, Curse 16/16 blocks, Secret
 17/17, Pools 32/32, every one exactly 1024 (+2 for PoR) bytes.
 
+> **Correction (2026-11-18, audit): the Dark Queen header is (HEIGHT, WIDTH),
+> not (width, height), and the "98.8%/82.4%" figure below hid 8/20 scrambled
+> levels (every non-square one; dimensions run 10x10 to 39x20, not "8x8 to
+> 24x20").** Fixed in `decodeVariableGeoRecord`; per-level seam agreement is now
+> >= 0.90 on all 20 levels. See `docs/darkqueenofkrynn/amiga/data-structure.md`
+> §2. The text below is kept as a dead end.
+
 > **Update (2026-09-01): The Dark Queen of Krynn uses a VARIABLE-size record
 > shape instead of the fixed 1024-byte record above.** Its own `Disk3/GEO.GLB`
 > records don't divide evenly by 1024/256; each one instead opens with an

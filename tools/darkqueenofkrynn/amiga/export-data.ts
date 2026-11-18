@@ -25,25 +25,17 @@
  *    deviation, see `tools/shared/goldbox-geo.ts`'s module doc.
  *    `goldbox-glib-export.ts`'s `decodeGeoLevel` auto-detects this.
  *
- * NO `WALLDEF`/`WALLS`-named file exists anywhere in this WHDLoad rip's 3
- * disks (confirmed by an exhaustive `find` — see data-structure.md §4) —
- * `walldefPath` is deliberately omitted below. This is consistent with the
- * title's own distinct file families (`PICA`/`PICB`/`PICC`/`BIGPIC`/`FRAME`
- * — location-picture banks and a border frame — plus a `PICTURE` ECL
- * opcode, `0x0e`) and its own variable-size GEO shape: this engine
- * revision very likely renders dungeon exploration as static per-location
- * pictures rather than composited first-person wall textures, so there is
- * no wall-art format to find, not a decode failure. GEO connectivity/doors
- * still decode fully and drive the walker's movement/minimap exactly like
- * every sibling title; only first-person wall-texture rendering is
- * unavailable (the walker's existing "no rendered wall texture" placeholder
- * — a flat tinted rectangle — covers this gracefully with zero code
- * changes, same fallback path used for any level with a genuinely empty
- * `wall-index.json`).
+ * Wall art: there IS first-person wall art (corrected 2026-11-18; the old
+ * "no wall-art mechanism" verdict was wrong). Wallsets load via ECL `0x21`
+ * (LOAD FILES) as in Pools of Darkness, and the art lives in
+ * `Disk2/8X8DB.TLB` / `8X8DC.TLB` (48 pre-scaled sub-images per block).
+ * No `WALLDEF`-named file exists, and the piece banks are not rendered yet
+ * (TODO `dqok-wallpiece-render`), so `walldefPath` stays omitted.
  */
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { exportGoldBoxGlibData } from '../../shared/goldbox-glib-export.ts';
+import { OPCODE_TABLE_DQK } from '../../shared/goldbox-ecl.ts';
 
 const GAME = 'darkqueenofkrynn';
 const PLATFORM = 'amiga';
@@ -53,11 +45,15 @@ export async function exportTheDarkQueenOfKrynnData(dataDir: string) {
     // No walldefPath / tilesPath / specificTilesPath / universalTilesPath —
     // this title ships no wall-art format at all, see module doc.
     geoPath: 'Disk3/GEO.GLB',
-    // No eclPath: with no WALLDEF to resolve wallset-slot bindings AGAINST,
-    // decoding this title's ECL.GLB for that purpose specifically would be
-    // pure overhead — its own bytecode almost certainly drives the
-    // PICTURE-based renderer (opcode 0x0e) instead of LOAD PIECES/LOAD
-    // FILES, an open question for a future pass (see TODO.md).
+    // The exe's own v1.3-family ECL table + `0x21` wallset load (2026-11-18:
+    // 0 unknown / 0 desync, 19/20 levels bind wallsets 1-6 -- see
+    // `OPCODE_TABLE_DQK`). Bindings are exported; the 48-piece wall banks
+    // (Disk2/8X8DB.TLB, 8X8DC.TLB) are not rendered yet (TODO dqok-wallpiece-render).
+    eclPath: 'Disk3/ECL.GLB',
+    eclOptions: {
+      opcodeTable: OPCODE_TABLE_DQK,
+      wallsetLoad: { opcode: 0x21, mode: 'fill-all-from-second-operand' },
+    },
   });
 }
 

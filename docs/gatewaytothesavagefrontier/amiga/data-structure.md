@@ -61,6 +61,15 @@ grammar from the sibling titles.
 variable-size adaptation needed, unlike The Dark Queen of Krynn) — 30/30
 levels, zero deviation.
 
+> **Correction (2026-11-18, audit; re-run this pass):** "30/30 CONFIRMED" is
+> overstated. The shape/length check holds 30/30, but the wall-adjacency
+> oracle (agreement on cell edges where at least one side has a wall)
+> collapses on **levels 21-26: 0/377, 0/374, 0/370, 0/420, 0/311, 0/370** (the
+> other 24 levels are 100%). Their S/W planes are all zero and `doorN` is 1 in
+> ~236/256 cells, so these are not dungeon grids — likely overland/wilderness
+> data in a different encoding. The walker's maze for 21-26 is therefore
+> meaningless. Tracked as `gsf-geo-21-26-encoding`.
+
 ## 4. `ECL.GLB` wallset-slot binding — CONFIRMED, v1.1 opcode table UNCHANGED
 
 `DiskC/ECL.glb` uses the **v1.1 opcode table (`OPCODE_TABLE`) with no
@@ -71,7 +80,8 @@ following `GOTO`/`GOSUB`/`ON GOTO`/`ON GOSUB`/`NEWECL` targets) produced
 
 **Result: 22/30 levels resolved, 64 slots total.** Every level that resolves
 at all resolves all 3 slots (the same pattern established on every sibling
-title). The remaining 8 levels have no reachable static wallset-load hit and
+title). *(Overstated — 2026-11-18 audit: level 21 resolves only
+`{slot1: 18}`, and 21-26 are not dungeon grids at all, see §3.)* The remaining 8 levels have no reachable static wallset-load hit and
 no successful `NEWECL` chase target — the same "genuinely script-less"
 outcome Pool of Radiance's levels 30/31/32 already established as real, not
 an error.

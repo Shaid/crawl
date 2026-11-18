@@ -248,6 +248,26 @@ non-WALLDEF overland sky/terrain/random-encounter renderer.
 > explicit user permission per this project's standing amiberry policy and
 > was not attempted this session.
 
+> **Correction (2026-11-18, audit; block counts/sizes re-verified this
+> pass): the "wilderness renderer selector" framing above is wrong — the
+> selector registers combat-map ICON banks, not a wilderness view.**
+> `dungcom.tlb` = 25 blocks x 368 B, `wildcom.tlb` = 34 x 368 B, `randcom.tlb`
+> = 6 x 440 B; every block starts `0 24 0 0 0 0 3 224/225` — an 8-byte header
+> + 24 rows x 3 bytes x 5 planes (368 = 8 + 360) or x 6 planes with mask
+> (440 = 8 + 432), i.e. **24x24 icons**. The pushed counts match: `0x19` = 25
+> for DungCom, `6` for RandCom at base `0x22` = 34 (straight after WildCom's
+> 34 blocks; the `0x21` push for WildCom is one short of 34, unexplained).
+> Gateway's files have the same 25/34/6 shape, and Champions' DUNGCOM/WILDCOM/
+> RANDCOM headers declare 24x24 icons x 25/35/6. So the overlay trampoline is
+> irrelevant to wilderness rendering, and `blocked:live-capture` was the wrong
+> status. The real route: statically disassemble overlay #1 around its `"Sky"`
+> string (file `0x3A042`; `Sky.tlb` has 3 blocks of 998/278/2483 B). Also,
+> wilderness geos 51-57 fail the adjacency oracle in part (strict metric,
+> edges with a wall on either side: 60/92, 87/106, 15/43, 70/81, 67/85,
+> 48/75, 86/103 vs 100% on every dungeon geo), so the wilderness GEO is
+> probably a different encoding. Tracked as `tsf-wilderness-sky-render` and
+> `tsf-wilderness-geo-encoding`.
+
 ### Paths tried
 
 | Approach | Result | Why it failed / status |

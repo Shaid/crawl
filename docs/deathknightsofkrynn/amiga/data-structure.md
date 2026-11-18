@@ -53,6 +53,17 @@ CONFIRMED that the byte structure is a clean 3x SLICES_PER_WALLSET multiple.)
 ## 4. 8x8 tile pixel format — CONFIRMED (`8x8d1.daa`, an Amiga-native
 BIG-ENDIAN sibling of the DOS DaxFile container)
 
+> **Correction (2026-11-18, audit): the BE DAA container does NOT cover
+> "essentially every Amiga-native resource" — the SPRIT and PIC banks are a
+> third shape.** `SPRIT1.DAA`, `PIC1.DAA`, `PIC2.DAA` (and Champions'
+> SPRIT1/2, pic1/2) parse as 0 OK under `readAmigaDaaDirectory`. They use a
+> u16 BE header length, then 6-byte entries {id u8, 0 u8, offset u32 BE} with
+> no sizes; that fits 7/7 files (remainder 0, offsets monotonic, pad byte
+> always 0). Block payloads start `00 xx 03 00 58 00 0b fc ...`. Monster
+> sprites and location pictures are the largest undecoded asset class
+> (`globals.daa` and `pointers.daa`, with no directory, are also untracked).
+> Tracked as `dkok-sprit-pic-container`.
+
 > **Correction (2026-09-01, `re-oracle` escalation + independent
 > re-verification):** the earlier "OPEN, resists every hypothesis" verdict
 > below is superseded. `8x8d1.daa` is NOT the DOS DaxFile container
@@ -153,9 +164,31 @@ resolve real, varied `slot1` values (1 through 7 observed) while slot2/slot3
 mostly stay at the sentinel, consistent with most Death Knights levels using
 only one active wall material.
 
+> **Correction (2026-11-18, audit): the "CONFIRMED 16/19 wallset bindings" and
+> the one-wallset-group-per-bank model are wrong in what they imply.** Every
+> resolved level binds ONLY slot1; slots 2 and 3 are the 127 sentinel — yet
+> the GEO uses slot-2 wall types in 19/19 levels and slot-3 types in 13/19, so
+> the old model showed placeholders for ~35% of wall faces. Better model
+> ("rendered", coverage-only): one 15-slice walldef entry supplies all three
+> slot ranges (wall type t -> slice t-1) and `LOAD PIECES {W,127,127}` means
+> "don't touch slots 2/3". Wall faces in the 16 resolved levels (4 sides per
+> cell): direct model 7,961/7,961 resolve to a wall-index texture; the old
+> flat-id/slot model 5,166/7,961 (the audit counted 7,953/5,132; the small
+> difference is face-counting method). Bank-1 levels use slices 6-15, which
+> contradicts the per-bank reading. Implemented as
+> `WallsetBinding.directWalldefId` (exporter sets it to slot1, walker uses
+> `resolveDirectWall`); pinned by
+> `tools/shared/__tests__/goldbox-dkk-direct-slice.test.ts`. Coverage is NOT
+> correctness — open `dkok-direct-slice-verify`.
+> Also corrected: the unresolved GEO ids are **65, 80, 97** (the exported level
+> ids 2065/3080/3097), not "16, 65, 80" — 16 is not a level. The "20/105
+> degenerate renders are literally all-zero view-cell bytes" claim (§4, the "std < 2" note) is
+> overstated: only view 6 is zero for those (e.g. wall 2, slices 9-14); the
+> slices' other views carry data.
+
 **Verified**: 16/19 levels resolve at least one statically-known wallset
 slot (4/4 bank 1, 7/8 bank 2, 5/7 bank 3). The 3 unresolved levels (GEO ids
-16, 65, 80) have real code (19-79 visited instructions) but no wallset-load
+65, 80, 97 — corrected, see above) have real code (19-79 visited instructions) but no wallset-load
 call reachable from their own header entry points and no resolvable
 `NEWECL` target — plausibly non-dungeon (town/combat-only) scripts, not
 investigated further this pass.
@@ -168,6 +201,6 @@ investigated further this pass.
 | GEO | CONFIRMED | Unchanged decoder; 19/19 levels decode; wall-adjacency oracle 98.8-100% agreement (non-constant prefix doesn't affect decoding) |
 | WALLDEF geometry | CONFIRMED | 7 entries, all exactly 2340 = 156*15 bytes (3 bundled wallsets/entry) |
 | 8x8 tiles | CONFIRMED | `8x8d1.daa` (BE `.DAA` container), 31/31 entries byte-exact; 105 real wall-art PNGs shipped, 85/105 non-degenerate (the rest are genuinely-blank source filler for unused bank/wall combinations) |
-| ECL wallset bindings | CONFIRMED | 16/19 levels, base 0x8000, v1.1 table — v1.3 hypothesis tested and refuted by manual disassembly |
+| ECL wallset bindings | CONFIRMED for slot1 only | 16/19 levels, base 0x8000, v1.1 table; slots 2/3 are the 127 sentinel — see the 2026-11-18 direct-slice correction in §5 |
 
 See `docs/deathknightsofkrynn/TODO.md` for open items.

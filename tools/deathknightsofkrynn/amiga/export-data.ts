@@ -185,7 +185,12 @@ export async function exportDeathKnightsOfKrynnData(dataDir: string) {
       const { binding } = findWallsetBindings(raw, { base: 0x8000, resolveBlock });
       const n = (binding.slot1 !== undefined ? 1 : 0) + (binding.slot2 !== undefined ? 1 : 0) + (binding.slot3 !== undefined ? 1 : 0);
       if (n > 0) {
-        level.wallsetBinding = binding;
+        // Direct-slice model (2026-11-18 audit): every resolved level binds only
+        // slot1 (slots 2/3 = the 127 "don't touch" sentinel), yet the GEO uses
+        // slot-2/3 wall types; one 15-slice walldef entry supplies all three
+        // slot ranges (wall type t -> slice t-1). See data-structure.md.
+        level.wallsetBinding =
+          binding.slot1 !== undefined && wById.has(binding.slot1) ? { ...binding, directWalldefId: binding.slot1 } : binding;
         levelsWithAnyBinding++;
       }
     }

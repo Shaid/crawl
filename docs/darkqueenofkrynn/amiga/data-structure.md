@@ -62,8 +62,8 @@ is:
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | `width` (u8) |
-| 1 | 1 | `height` (u8) |
+| 0 | 1 | `height` (u8) — **corrected 2026-11-18, see below** |
+| 1 | 1 | `width` (u8) |
 | 2 | 6 | reserved (always `0` in this corpus) |
 | 8 | `width*height` | Plane 0 (wall-art type, N/E) |
 | 8+`w*h` | `width*height` | Plane 1 (wall-art type, S/W) |
@@ -81,13 +81,64 @@ corpus-wide: **98.8%/82.4%** horizontal/vertical agreement, comparable to
 every sibling title's confirmed grid, and strong evidence the bit-packing
 transfers unchanged despite the new variable header.
 
+> **Correction (2026-11-18, audit):** the header is **(height, width)**, not
+> (width, height), and the "98.8%/82.4%" oracle result was an average that
+> hid 8/20 scrambled levels (every non-square one). Per-level seam
+> agreement (wall-present vs wall-present across each cell edge; the
+> audit's stricter adjacency metric gave 0.06-0.51 -> 0.84-1.0 on the same
+> levels) with the old order -> corrected order, from this pass's re-run:
+> L14 0.72 -> 1.00 (20 wide x 39 tall), L38 0.77 -> 1.00 (39x20), L22
+> 0.76 -> 1.00 (24x27), L46 0.73 -> 0.91, L47 0.81 -> 1.00 (29 wide x 27
+> tall), L54 0.79 -> 0.98 (21x23), L18 / L66 likewise; all 20 levels are now
+> >= 0.90 (square levels unchanged). "Ranging to 24x20" above is also wrong:
+> real dimensions run from 10x10 up to 39x20 / 20x39, plus 34x22, 29x27 and
+> 28x28. Fixed in `decodeVariableGeoRecord`; pinned by
+> `tools/shared/__tests__/goldbox-geo.test.ts` (per-level >= 0.90 gate + a
+> null control that re-reads the swapped order and must score lower).
+> The old text above is retained as a documented dead end.
+
 Implementation: `decodeGeoLevel()` (`tools/shared/goldbox-geo.ts`)
 auto-detects fixed-vs-variable by checking `payload.length ===
 GEO_RECORD_SIZE` (1024) first, falling back to `decodeVariableGeoRecord()`
 otherwise — every sibling title's own extractor call is unaffected by this
 addition.
 
-## 3. `WALLDEF`/wall-art format — CONFIRMED ABSENT (see the two corrections below for the full history — an intermediate pass wrongly reopened this, then a disassembly pass closed it definitively)
+## 3. Wall art — SUPERSEDED: the art exists (see the 2026-11-18 correction first; everything below it is history)
+
+> **Correction (2026-11-18, audit) — the "Final verdict" below is WRONG.** The
+> executable's own ECL operand-count jump table (CODE hunk file +40, table at
+> CODE+0x13e64) is the v1.3 family: it equals `OPCODE_TABLE_POOLS_V13` on every
+> fixed-length opcode, except that `0x31` shares the ON GOTO / HORIZONTAL MENU
+> variable-length handler (`OPCODE_TABLE_DQK`). Wallsets therefore load via
+> `0x21` "LOAD FILES" (2nd operand fills all three slots), exactly as in Pools
+> of Darkness — the earlier passes only ever tested `0x37`, which is a
+> different opcode in a v1.3 engine (a mismatched-input refutation).
+> Result with the table wired in (`findWallsetBindings`, all 20 GEO levels):
+> **0 unknown / 0 desync over 36,829 visited instructions; 19/20 levels bind a
+> wallset (18 with ids 1-6, geo 26 = the 255 sentinel, geo 24 unresolved)**.
+> Null controls: v1.1 table 5.0% unknown opcodes; stock v1.3 0.72% (247
+> unknown). Pinned by `tools/shared/__tests__/goldbox-ecl-dqk.test.ts`.
+> Bindings per level (id: wallset): 2:1 4:2 10:2 14:3 18:1 22:1 30:1 34:1 38:1
+> 42:1 46:1 47:1 50:4 54:4 58:1 62:6 63:6 66:5.
+> **The art:** each block of `Disk2/8X8DB.TLB` (ids 1-9) and `8X8DC.TLB` (ids
+> 10-17) is a compressed TILE container of 48 pre-scaled sub-images; every one
+> fits `len = 8 + h * widthBytes * (5 + (flag&1))` (8-byte header: h at +0,
+> widthBytes at +6, flags at +7) — 799/799 (the flag-`e0` cases are the
+> 5-plane ones). Rendered in greyscale they show 56x56 cobblestone, brick and
+> cave-rock wall faces and a doorway with steps. The GEO agrees: 19/20 levels
+> use wall types in all three 5-slice slot ranges (max type 15). Mapping the 48
+> sub-images to views/distances and confirming plane order (sequential
+> 5 planes renders cleanly) is open: TODO `dqok-wallpiece-render`. The wall
+> bindings are now exported (`wallsetBinding` in `dungeon/level-*.json`);
+> textures are not.
+> The "no first-person wall-art compositing mechanism" conclusion, the
+> `walldefPath`/`eclPath` omission, and §4's "ECL not wired" are superseded
+> (the extractor now passes `eclPath` + `OPCODE_TABLE_DQK`; `walldefPath`
+> stays omitted because no WALLDEF-named file exists). The "§3:213-221 / §4
+> still call the gap open" contradiction in the old text is resolved by this
+> block.
+
+### (history, superseded) WALLDEF/wall-art — "CONFIRMED ABSENT" and its two corrections
 
 > **Correction (2026-09-01, personal re-verification before commit):** this
 > section originally claimed "CONFIRMED ABSENT" on the strength of a `find
@@ -173,7 +224,7 @@ addition.
 > A third check this pass ran (per the original task brief, "check whether
 > `ECL.GLB`'s own directory has extra non-script blocks"): `Disk3/ECL.GLB`
 > has 47 data blocks (ids `1-67`, sparse) against `Disk3/GEO.GLB`'s 20
-> level ids (`2,4,10,14,18,22,26,30,34,38,42,46,47,50,54,58,62,63,66`) — a
+> level ids (`2,4,10,14,18,22,24,26,30,34,38,42,46,47,50,54,58,62,63,66` — the original text listed 19 and omitted 24) — a
 > superset, same "extra ECL blocks are non-dungeon (town/combat/story)
 > scripts" pattern every sibling title already shows, confirmed by id-set
 > containment alone (every GEO level id present in ECL's id list). No
@@ -235,8 +286,8 @@ npx tsx tools/darkqueenofkrynn/amiga/export-data.ts
   top-level-compressed), 0 truncated.
 - `dungeon/level-<id>.json`, `dungeon/levels-index.json`,
   `dungeon/wall-index.json` — 20 decoded GEO levels (§2), an empty wall
-  index (0 entries — NOT confirmed correct, see §3's correction: ECL/tile
-  decoding for this title simply isn't wired into the extractor yet).
+  index (0 entries — the tile banks are not rendered yet, TODO
+  `dqok-wallpiece-render`; ECL wallset bindings ARE exported since 2026-11-18).
 
 No `textures/` PNGs are produced for this title (0 wall textures — a real
 gap, not a confirmed-correct absence; see §3). `manifest.json` carries the

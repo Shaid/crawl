@@ -405,6 +405,26 @@ export const OPCODE_TABLE_POOLS_V13: Record<number, OpcodeInfo> = (() => {
 })();
 
 /**
+ * The Dark Queen of Krynn's engine revision (2026-11-18 audit): the exe's own
+ * ECL operand-count jump table (CODE hunk file +40, table at CODE+0x13e64)
+ * matches `OPCODE_TABLE_POOLS_V13` on every fixed-length opcode; the one
+ * difference is `0x31`, which shares the ON GOTO / HORIZONTAL MENU
+ * variable-length handler (head count 2). Wallsets load via `0x21` in
+ * `'fill-all-from-second-operand'` mode, as in Pools of Darkness. Verified
+ * with `findWallsetBindings` over all 20 GEO levels: 0 unknown opcodes /
+ * 0 desyncs over 36,829 visited instructions; 19/20 levels resolve to
+ * wallset ids 1-6 (geo 26 resolves to the 255 sentinel). Null controls: the
+ * v1.1 table gives a 5.0% unknown ratio, stock v1.3 gives 0.72% (247 unknown).
+ * Pinned by `__tests__/goldbox-ecl-dqk.test.ts`.
+ */
+export const OPCODE_TABLE_DQK: Record<number, OpcodeInfo> = (() => {
+  const table: Record<number, OpcodeInfo> = {};
+  for (const [k, v] of Object.entries(OPCODE_TABLE_POOLS_V13)) table[Number(k)] = { ...v };
+  table[0x31] = { n: 0, name: 'DQK 0x31 (shares ON GOTO handler)', dynamicTailHeadCount: 2 };
+  return table;
+})();
+
+/**
  * Treasures of the Savage Frontier's own engine revision: `OPCODE_TABLE_POOLS_V13`
  * plus three new opcodes this title's executable registers (`0x42`-`0x44`) —
  * see the module doc's "Treasures of the Savage Frontier" section for the

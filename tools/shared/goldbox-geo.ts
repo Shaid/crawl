@@ -139,12 +139,12 @@
  *
  * Dark Queen of Krynn's `GEO.GLB` (the only one of the sibling titles staged
  * so far that does NOT use the fixed 1024-byte/16x16 shape) uses an 8-byte
- * header -- `u8 width`, `u8 height`, 6 bytes of unknown/reserved content --
+ * header -- `u8 height`, `u8 width` (see the 2026-11-18 correction on `decodeVariableGeoRecord`), 6 bytes of unknown/reserved content --
  * followed by the SAME four consecutive `width*height`-byte planes in the
  * SAME order (wall-type N/E, wall-type S/W, `mapWallRoof`, door/passability)
  * with IDENTICAL bit-packing. Confirmed 20/20 zero deviation: every one of
  * this title's GEO.GLB entries' raw block length equals exactly
- * `8 + 4*raw[0]*raw[1]` (widths/heights observed: 10-39, never 16x16, so
+ * `8 + 4*raw[0]*raw[1]` (dimensions observed: 10x10 to 39x20, plus 22x34/27x29, never 16x16, so
  * genuinely variable per level, not a fixed-size format in disguise), and
  * the SAME adjacent-cell wall-presence self-consistency oracle used to
  * confirm the fixed-size format scores 98.8% horizontal / 82.4% vertical
@@ -199,6 +199,14 @@ export interface WallsetBinding {
   slot1?: number;
   slot2?: number;
   slot3?: number;
+  /**
+   * Death Knights of Krynn only (2026-11-18 audit, "rendered", not
+   * oracle-confirmed): the real WALLDEF directory id of the ONE 15-slice
+   * entry that supplies all three slot ranges (wall type t -> slice t-1);
+   * `LOAD PIECES {W,127,127}` means "don't touch slots 2/3". When set, use
+   * `resolveDirectWall` instead of the flat-id/slot arithmetic.
+   */
+  directWalldefId?: number;
 }
 
 export interface GeoLevel {
@@ -250,17 +258,22 @@ export function decodeGeoRecord(payload: Uint8Array, id: number): GeoLevel {
 export const GEO_VARIABLE_HEADER_SIZE = 8;
 
 /**
- * Decode a Dark Queen of Krynn-style variable-size GEO record: `u8 width`,
- * `u8 height`, 6 reserved bytes, then four `width*height`-byte planes in the
- * same order/packing as the fixed 16x16 shape. Returns `undefined` if
- * `payload.length` doesn't exactly equal `8 + 4*width*height` for the
- * declared width/height (the self-consistency check that confirmed this
- * shape corpus-wide -- see module doc).
+ * Decode a Dark Queen of Krynn-style variable-size GEO record: `u8 height`,
+ * `u8 width`, 6 reserved bytes, then four `width*height`-byte row-major
+ * planes in the same order/packing as the fixed 16x16 shape. Returns
+ * `undefined` if `payload.length` doesn't exactly equal `8 + 4*width*height`.
+ *
+ * > **Correction (2026-11-18):** the header was previously read as
+ * > (width, height). It is (HEIGHT, WIDTH): with the old order every
+ * > non-square level came out scrambled (vertical wall adjacency 0.06-0.51
+ * > on L14/18/22/38/47/54/66); swapped, the same levels score 0.92-1.0.
+ * > Square levels are unaffected. Pinned by `__tests__/goldbox-geo.test.ts`
+ * > (per-level seam test with a null control).
  */
 export function decodeVariableGeoRecord(payload: Uint8Array, id: number): GeoLevel | undefined {
   if (payload.length < GEO_VARIABLE_HEADER_SIZE) return undefined;
-  const width = payload[0];
-  const height = payload[1];
+  const height = payload[0];
+  const width = payload[1];
   const planeSize = width * height;
   if (width === 0 || height === 0 || GEO_VARIABLE_HEADER_SIZE + 4 * planeSize !== payload.length) return undefined;
   const base = GEO_VARIABLE_HEADER_SIZE;
@@ -348,6 +361,22 @@ export function wallSlotSlice(wallType: number): { slot: 0 | 1 | 2; slice: 0 | 1
   if (wallType <= 0) return undefined;
   const n = wallType - 1;
   return { slot: Math.floor(n / 5) as 0 | 1 | 2, slice: (n % 5) as 0 | 1 | 2 | 3 | 4 };
+}
+
+/**
+ * Direct-slice model (see `WallsetBinding.directWalldefId`): wall type t of a
+ * cell side -> `{walldefId, wallNumber: t-1}`. `undefined` if no wall or the
+ * binding has no `directWalldefId`.
+ */
+export function resolveDirectWall(
+  cell: GeoCell,
+  dir: Direction,
+  binding: WallsetBinding | undefined,
+): { walldefId: number; wallNumber: number } | undefined {
+  if (binding?.directWalldefId === undefined) return undefined;
+  const t = wallTypeFor(cell, dir);
+  if (t <= 0) return undefined;
+  return { walldefId: binding.directWalldefId, wallNumber: t - 1 };
 }
 
 /**
