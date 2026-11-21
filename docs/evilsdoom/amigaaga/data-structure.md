@@ -14,7 +14,7 @@ identity are **confirmed**. Open work: `docs/evilsdoom/TODO.md`.
 | Install | WHDLoad, Psygore v1.1 (12 Oct 2025); slave loads `prg/int.dat` first; refuses a depacked `OMD/PCH.DAT` |
 | Chipset | AGA (copper lists write `FMODE` `$1FC` and `BPLCON3` `$106`; 768-B CMAPs = 256 colours) |
 | Language of internal names | Croatian (`PATULJAK` dwarf, `ROGATI DEMON` horned demon, `KNJIZNICA` library, `BUSOLA` compass, `KOCKICE` cubes, `SPILJAROK`, `ANIMACIJA`); some save names Czech (testers) |
-| Location | `data/evilsdoom/amigaaga/` (not yet promoted to `data/evilsdoom/amigaaga/`) |
+| Location | `data/evilsdoom/amigaaga/` (moved there in commit 59b2d29; game files under `data/`) |
 
 sha1 (packed, as shipped):
 
@@ -53,7 +53,7 @@ below describes the **unpacked** bytes.
 | `PRG/*.chip`, `GO.chip` | 7 | Chip-RAM part of each module (copper lists etc.) | `0C01 FFFE 01FC 0000 0106 …` = copper `WAIT`/`MOVE` | structured-unknown |
 | `SAVE/<slot>/.{BEL,CLL,IOW,MIN,MYT}` | 5 × 18 slots | **Dungeon map state** (memory dump), the map source for us | see § Dungeon maps | structured-unknown (grid visible) |
 | `SAVE/<slot>/{CHAR,DATA,FACE}` | 3 × 18 | Party records (10,060 B), game state (4,208 B), portraits (10,240 B) | — | structured-unknown |
-| `SAVE/Dir` | 1 | 22 × 32-B slot names (`-jsa/beginning`, `-ufo.belcoon2` …) | ASCII | trivial |
+| `SAVE/Dir` | 1 | 16 × 44-byte slot names (704 B exactly; names start at every 44-byte boundary), against 18 `SAVE/<slot>/` directories (`-jsa/beginning`, `-ufo.belcoon2` …). An earlier reading of 22 × 32 B also totals 704 B but puts names mid-record | ASCII | trivial |
 | `WAL/<dungeon>.DT0` / `.DT1` | 5 + 5 | Wall art banks, **fixed sizes in every dungeon** (63,072 / 26,910 B) | no header; raw planar | structured-unknown |
 | `DOR/*` | 6 | Door art, each exactly 24,536 B | no header; raw planar | structured-unknown |
 | `EVE/<dng>.<n>`, `<dng>.MAIN` | 10 | Per-level wall-decoration ("event") banks: 14-B blit descriptors then pixels; `.MAIN` per-dungeon | § View | structured-unknown |
@@ -95,7 +95,11 @@ offsets, no hunk header):
 **Which file seeds a new game is not yet known** (`evilsdoom-newgame-state`).
 For decoding, the pristine copies are enough: 12 of 18 slots carry a
 byte-identical `.BEL` (sha1 `63eeda17…`), likewise `.IOW` 12, `.MIN` 11,
-`.MYT` 10 — those slots never entered the dungeon.
+`.MYT` 10 — those slots never entered the dungeon. `.CLL` has **no** such
+majority copy: its largest byte-identical group is 6 of 18 slots
+(`a`/`G`/`J`/`K`/`L`/`n`, sha1 `777fe544…`), and slot `B`'s `.CLL` is unique,
+so no `.CLL` can be called pristine from slot agreement alone (counted
+2026-11-21 over `data/SAVE/*/.CLL`, packed-file sha1).
 
 ### Grid (rendered, semantics hypothesis)
 

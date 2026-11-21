@@ -2,24 +2,25 @@
 
 Spec: `docs/abandonedplaces2/amiga/data-structure.md`. Open work: `docs/abandonedplaces2/TODO.md`.
 The container and packer are shared with AP1 (spec: `docs/abandonedplaces/amiga/data-structure.md`
-§2–§3). Do AP1's `ap-artgame-unpacker` first; AP2 reuses it unchanged.
+§2–§3). The shared unpacker is done (`tools/shared/artgame-kernel.ts`, commit 09a59a1).
 
-## Phase 0 — scaffold (not done by recon)
-- Register `abandonedplaces2` / `amiga` in `src/game-id.ts` and the game config with
-  the first extractor. Data stays at `data/abandonedplaces2/amiga/` until moved.
+## Phase 0 — scaffold (done)
+- `abandonedplaces2` / `amiga` registered in `src/game-id.ts` and
+  `tools/shared/game-config.ts`; data at `data/abandonedplaces2/amiga/` (commit 59b2d29).
 
 ## Phase 1 — unpack (trivial once the AP1 tool lands)
-- Parse `ap2.dir` (5 sections; sections 0–3 map to `ap2.000`–`.003`) and unpack all
-  617 records. Oracle: 262/262 checksum + consumption, 4/4 section-end = file size.
+- Done (commit 09a59a1, `tools/abandonedplaces/unpack.ts`): parse `ap2.dir` (5 sections;
+  sections 0–3 map to `ap2.000`–`.003`) and unpack all 617 records (593 distinct names). Oracle: 262/262 checksum + consumption, 4/4 section-end = file size.
 
 ## Phase 2 — palettes (easy)
 - `set_NN.clr` / `*.clr` = 32 × 12-bit words. Pair each tileset with its set's
   palette. Oracle: screenshots; colours on `pic_NN.bpl` should look natural.
 
 ## Phase 3 — tileset triplets → atlases (easy-medium; self-describing)
-- Decode `.bpl` with `.def` geometry: colour planes plus a trailing mask plane (spec §5,
-  1,476/1,520 invariant). Work out the plane order (mask last vs first) and the UI
-  triplets without a mask. Pitfall:
+- Done (commit 09a59a1, `tools/abandonedplaces2/amiga/export-tilesets.ts`): `.bpl` with
+  `.def` geometry, colour planes then a trailing mask plane (mask-last confirmed; flags bit 0
+  marks masked records), 1,962/1,962 invariant — supersedes the recon's 1,476/1,520
+  (spec §5). Pitfall:
   `fixed-stride-record-count-unverified.md` does not apply, because sizes come from
   the records. But check for a stored-plane-order surprise: render greyscale first.
 

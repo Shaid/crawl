@@ -1,12 +1,12 @@
 # Zombi — plan
 
 Format detail lives in `amiga/data-structure.md`; open items in `TODO.md`.
-Retail files: `data/zombi/amiga/data/` (leave in place until the
-user promotes the title).
+Retail files: `data/zombi/amiga/data/`.
 
 ## Shape of the game (recon answer)
 
-- **Map:** 90 locations on a 6-floor 7×8 grid (`plan`), each location
+- **Map:** 90 locations (`i-lieux`); `plan` places ids 1–86 on a 6-floor
+  7×8 grid, and ids 87–90 are off-grid vehicle views. Each location
   storing its own four horizontal exits plus up/down (`i-lieux`) —
   **per-cell** faces, values open/door/wall/edge. Converts straight into the
   `@seer-project/dungeon` per-cell model; the grid file is only placement.
@@ -18,20 +18,18 @@ user promotes the title).
 
 ## Phases
 
-0. **Scaffold** — register `zombi` in `src/game-id.ts`, add a
-   `defineGameConfig` entry, move retail files to `data/zombi/amiga/`
-   (user decision; recon did not touch code or data).
-1. **SEQ extractor** (`seq-cyberpaint`) — the format is already decoded
-   (spec § SEQ); promote the probe into a shared decoder and emit PNG
-   atlases for all 12 files. Oracle: structural closure (already 100%) +
-   one public screenshot of the Amiga game for palette scaling. Upstream
-   candidate: a Cyber Paint SEQ decoder belongs in `@seer-project/gfx`
-   (ST-era art shipped unconverted in other ports too).
+0. **Scaffold** — done (commit 59b2d29): `zombi` registered in
+   `src/game-id.ts` and `tools/shared/game-config.ts`.
+1. **SEQ extractor** (`seq-cyberpaint`) — done (commit fa5decf):
+   `tools/shared/cyberpaint-seq.ts` + `npm run zombi:export` emit atlases and
+   screens for all 11 files. Upstream candidate still open: a Cyber Paint SEQ
+   decoder belongs in `@seer-project/gfx` (ST-era art shipped unconverted in
+   other ports too).
 2. **Map export** (`zombi-map`) — `plan` + `i-lieux` → per-cell level JSON.
-   Needs the compass orientation (`zombi-exit-orientation`) and the
-   location→picture table (`zombi-picture-map`), both from the executable
-   (`Agent: amiga-disasm` on `zombi`; find the `i-lieux`/`plan` loaders via
-   their filename strings).
+   Needs the compass orientation (`zombi-exit-orientation`) from the
+   executable (the location→picture table is done, commit fa5decf:
+   `data/location-pictures.json`). Use `Agent: amiga-disasm` on `zombi`; find the `i-lieux`/`plan` loaders via
+   their filename strings.
 3. **Objects/zombies** — `i-objets`, `i-lieux` slot bytes 10..41, sprite
    placement over the picture. Oracle: rendered pictures with obvious
    object positions + in-game screenshot.

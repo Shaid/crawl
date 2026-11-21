@@ -11,7 +11,7 @@ from cheap probes. The exceptions are labelled. Open work is tracked in
   and the files already unpacked from the floppies. WHDLoad says it supports
   both the full game and the demo, and this tree is the full game: it has 41 maps and 5
   languages.
-- Retail files stay at `data/hiredguns/amiga/` (gitignored, not moved).
+- Retail files live at `data/hiredguns/amiga/` (gitignored; moved there in commit 59b2d29).
 
 | File | Size | sha1 |
 |---|---|---|
@@ -187,8 +187,8 @@ extra slots. That needs the view routine traced in the exe.
 - **Original development archive (July 2021, Internet Archive)**: per The
   Cutting Room Floor, it holds Amiga game source, Map Editor builds + source, the
   empty editor map and three Amiga Format demo levels. If the user can supply it,
-  it is the authoritative oracle for every format here. Not fetched; the
-  `tcrf.net` pages returned unusable content to the fetcher.
+  it is the authoritative oracle for every format here. Fetched 2026-11-21
+  (see the Update below and TODO `hg-dev-archive`).
 - A community map viewer ("Hired Guns Map Viewer", PlayCanvas, forum post 22102)
   and an EAB thread (p=1514678) both claim to have decoded the full map
   structure. Neither publishes a spec that this session could read.
@@ -210,6 +210,12 @@ extra slots. That needs the view routine traced in the exe.
 > variant, aux) — independent confirmation of the grid shape above. It is the
 > unreleased CD32 build, so treat it as a strong guide, not proof, for the floppy
 > retail files.
+
+> **Correction (2026-11-21):** `Sources/` does not hold ≈300 source files. The
+> archive as a whole holds **301** `.s`/`.i`/`.c` files (288 / 8 / 5, plus 6
+> `.h`); only 34 of them sit under `Sources/` — the rest are mostly under
+> `Graphics/` (175), `Data/` (53), `Takeover/` (24) and `MapEditor/` (12).
+> Counted with `find` over `extracted/HiredGunsCD32_DevFiles/`.
 
 ## Paths tried — packer (`CharactersGfx` / `MonstersGfx`)
 

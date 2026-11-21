@@ -940,7 +940,7 @@ recon-level — mostly structural or rendered, not traced through the game's cod
 | Game | Wall storage | View | Confidence |
 |---|---|---|---|
 | Abandoned Places | Type-derived (32×32 grid, `1` = wall) | Probably slot table | Grid structural; view hypothesis |
-| Abandoned Places 2 | Type-derived (32×32 × 8-B cells, solid bit) | Slot table; `.def`/`.ofs` describe each piece's geometry | Grid structural; geometry 1,476/1,520 records |
+| Abandoned Places 2 | Type-derived (32×32 × 8-B cells, solid bit) | Slot table; `.def`/`.ofs` describe each piece's geometry | Grid structural; geometry 1,962/1,962 records |
 | Crystal Dragon | Type-derived (cell type 5 = wall, 6 = door) | Probably slot table (per-slot frame/position tables follow each graphic set) | Rendered |
 | Evil's Doom | Type-derived (30×30 × 1 B, bit 7 = solid; maps live in the save-state block, not in files) | Probably slot table | Rendered; view strong hypothesis |
 | Perihelion | Dungeons probably type-derived (grid not yet located); overhead towns are 40×40 tile + passability planes | Piece atlases per dungeon; slot table not found | Towns structural; dungeons hypothesis |

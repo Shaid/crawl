@@ -1,7 +1,6 @@
 # Abandoned Places 2 (Amiga) — open work
 
 Single status surface. Spec: `docs/abandonedplaces2/amiga/data-structure.md`. Plan: `docs/abandonedplaces2/plan.md`.
-The shared unpacker row lives in `docs/abandonedplaces/TODO.md` (`ap-artgame-unpacker`).
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|

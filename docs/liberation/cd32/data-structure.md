@@ -3,7 +3,7 @@
 **Title:** Liberation: Captive II (a.k.a. "CaptiveII"), Mindscape 1994, Tony
 Crowther & Ross Goodley ("The Byte Engineers"). CD32 release, as shipped in the
 JOTD WHDLoad install v1.0 (2020, "floppy & cd32 versions supported").
-**Source tree:** `data/liberation/cd32/` (not moved; 179 files,
+**Source tree:** `data/liberation/cd32/` (moved there in commit 59b2d29; 179 files,
 15.4 MB). Game files under `data/`, WHDLoad slave + `Manual` (plain-text CD32
 manual) + `ReadMe` at the root.
 **Recon date:** 2026-11-21. Everything here is **hypothesis** unless marked
@@ -87,6 +87,13 @@ under the project's 68k emulator (`scripts/m68k_emu.py` /
   `0x2C92(A5)` and splits the file into **4 banks at +0, +0xA226, +0xEC0A,
   +0x70BA** (= 41,510 / 60,426 / 28,858, the exact bank sizes the structural
   walk finds), then builds a per-bank sprite table (`+0x251DE`). **confirmed**.
+
+  > **Correction (2026-11-21):** `+0xA226`, `+0xEC0A`, `+0x70BA` are bank
+  > **sizes**, not offsets (the parenthesis above already gives them as
+  > sizes). Re-scanned `data/Wall01.VGM` (167,766 B): the four `AmSp` headers
+  > sit at **0 / 41,510 / 101,936 / 130,794** (`0x0`/`0xA226`/`0x18E30`/
+  > `0x1FEEA`), holding 42/45/24/41 sprites; the fourth bank is **36,972 B**
+  > (`0x906C`) and ends at EOF.
 - **Vector/polygon objects** for everything else: `*.x3g` = IFF `FORM O3DG`
   banks of `FORM VCDO` objects (bank, bar, shop, room furniture, city
   buildings in 4 architectural styles `0`–`3`, droids, monsters, people,

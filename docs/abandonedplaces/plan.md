@@ -4,19 +4,18 @@ Spec: `docs/abandonedplaces/amiga/data-structure.md`. Open work: `docs/abandoned
 Sibling: Abandoned Places 2 (`docs/abandonedplaces2/plan.md`) shares the container and
 packer. Build both games' unpacker once, as one shared tool.
 
-## Phase 0 — scaffold (not done by recon)
-- Register the game id `abandonedplaces` (platform `amiga`) in `src/game-id.ts` and the
-  game config, when the first extractor lands.
-- The data stays under `data/abandonedplaces/amiga/` until the user moves it to
-  `data/abandonedplaces/amiga/`. Extractors should take the directory as an argument.
+## Phase 0 — scaffold (done)
+- Game id `abandonedplaces` (platform `amiga`) registered in `src/game-id.ts` and
+  `tools/shared/game-config.ts`; data at `data/abandonedplaces/amiga/` (commit 59b2d29).
+  Extractors should take the directory as an argument.
 
-## Phase 1 — container + packer (easy; the spec is complete)
-- Commit one shared ArtGame directory parser + unpacker, e.g.
-  `tools/shared/artgame-kernel.ts` (+ a Python twin only if a Python pipeline needs
-  it), used by both games. Spec §2–§3.
+## Phase 1 — container + packer — done (commit 09a59a1)
+- Committed: one shared ArtGame directory parser + unpacker,
+  `tools/shared/artgame-kernel.ts` (CLI `tools/abandonedplaces/unpack.ts`), used by both
+  games. Spec §2–§3.
 - Oracle: the packer's own XOR checksum, plus input consumption, plus the directory's
-  unpacked size. 427/427 already pass in the recon probe. Regression-test against those
-  counts. Pitfall: `decoder-output-length-check-is-tautological-assert-input-consumption.md`.
+  unpacked size. 427/427 pass, regression-tested in
+  `tools/shared/__tests__/artgame-kernel.test.ts`. Pitfall: `decoder-output-length-check-is-tautological-assert-input-consumption.md`.
 - Output: unpacked files into `build/cache/abandonedplaces/` (intermediates, not web assets).
 
 ## Phase 2 — palettes

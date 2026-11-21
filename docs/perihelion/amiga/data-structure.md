@@ -7,7 +7,7 @@ Recon 2026-11-21 (re-recon). Nothing here is decoded by a committed extractor ye
 | | |
 |---|---|
 | Game | Perihelion: The Prophecy, Morbid Visions (Sweden) / Psygnosis, 1993, Amiga OCS, 4 disks, 1 MB chip |
-| Media | **WHDLoad install** (Dark Angel & Wepl, slave V1.3/1.4 2009), not disk images. Retail files live at `data/perihelion/amiga/` (not under `data/perihelion/`) |
+| Media | **WHDLoad install** (Dark Angel & Wepl, slave V1.3/1.4 2009), not disk images. Retail files live at `data/perihelion/amiga/`, game files under `PerihelionData/` |
 | `Perihelion.Slave` | sha1 `6cac8e50c9d01c8c7b40fedd73bb4390742b69af` |
 | `PerihelionData/Boot.Exe` | sha1 `792717e8b6d9d975006f7f1ea8be7f12e844ca5b` — the game's own boot loader (strings: "please wait ... loading prophecy-sequence / intro-sequence / game") |
 | `PerihelionData/Table.Dat` | sha1 `63d156ffc5dde0a1f9485a066a21493df73bc944` — on-disk file directory (below) |

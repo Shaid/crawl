@@ -1,7 +1,7 @@
 # Zombi (Amiga) — data structure
 
-Recon 2026-11-21 (re-recon). Game id `zombi` (not yet registered in
-`src/game-id.ts`). Retail files stay at `data/zombi/amiga/data/`
+Recon 2026-11-21 (re-recon). Game id `zombi` (registered in
+`src/game-id.ts` and `tools/shared/game-config.ts`). Retail files live at `data/zombi/amiga/data/`
 (WHDLoad install by Sting, 24-Dec-2013; slave supports EN/FR/DE, this copy
 carries `francais.txt` but its strings are English).
 
@@ -113,7 +113,7 @@ up/down), placed on a grid from a separate file. Converts directly to the
 
 ## SEQ — Atari ST Cyber Paint sequence (decoded, standard)
 
-All 12 `.seq` files share one format (no sibling coverage in crawl or other
+All 11 `.seq` files share one format (no sibling coverage in crawl or other
 seer projects — grep for `FEDB`/Cyber Paint found nothing; public spec:
 the ST picture-format notes, and RECOIL decodes `.SEQ`).
 
@@ -137,8 +137,8 @@ Raw (storage 0) frames are `ceil(w/16) × h × 8` bytes, laid out as
 frames render as clean pictures; reading them column-major gives noise).
 
 Verification: compressed-token walk yields exactly `4·ceil(w/16)·h` words
-on **every** compressed frame of all 12 files (LIEUX 82/82, objet 53, z 22,
-skins 22, tetes 6, singles 7); the 14 objet + 5 tetes frames that do not
+on **every** compressed frame of all 11 files (LIEUX 82/82, objet 53, z 22,
+skins 22, tetes 6, singles 6 — 191 in all); the 14 objet + 5 tetes frames that do not
 are exactly the `storage=0` frames, whose length equals `ceil(w/16)·h·8`.
 Each frame's stored length equals the gap to the next offset (LIEUX 81/81;
 last frame +26 B file padding). The plane-major column order renders all
@@ -167,9 +167,10 @@ frames (191/191). Palette is one per file (same 16 words in every frame).
 
 
 `LIEUX.SEQ` frame catalogue (rendered): 0–16 brick basement corridors;
-17–60 mall interiors (shops "Mac Gropak", "Opticiens Rissac", "Atari",
+17–59 mall interiors (shops "Mac Gropak", "Opticiens Rissac", "Atari",
 "Sports 3000", "Contact Ubi Soft", escalators "Niveau 1/2/3", lifts);
-60 terrace; 61 helicopter; 62–73 car park (grass, walls); 74–77 vehicle
+60 terrace (escalator landing under a "TERRASSE" sign; id 61's picture in
+`data/location-pictures.json`); 61 helicopter; 62–73 car park (grass, walls); 74–77 vehicle
 views (truck cab, truck "Marché transport", car); 78–79 binocular masks;
 80–81 zombie horde. 
 

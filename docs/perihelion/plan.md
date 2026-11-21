@@ -2,10 +2,9 @@
 
 Format detail lives in `docs/perihelion/amiga/data-structure.md`; open work in `docs/perihelion/TODO.md`. This file only orders the work.
 
-## Step 0 — scaffold (not done; recon touches no code)
+## Step 0 — scaffold
 
-- Register game id `perihelion` (platform `amiga`) in `src/game-id.ts` and add a `defineGameConfig` entry in `tools/shared/game-config.ts`.
-- Data location: the retail files stay at `data/perihelion/amiga/` until the user moves them to `data/perihelion/amiga/`. Extractors should take the directory as an argument.
+- Done (2026-11-21, commit 59b2d29): game id `perihelion` (platform `amiga`) registered in `src/game-id.ts` and `tools/shared/game-config.ts`; retail files at `data/perihelion/amiga/` (game files under `PerihelionData/`). Extractors should take the directory as an argument.
 - The file-naming scheme is solved (`Table.Dat` records). The first extractor should parse `Table.Dat` and label every file by disk/track/type, instead of hard-coding hex names.
 
 ## Phase 1 — standard formats (easy, no oracle needed beyond the format itself)

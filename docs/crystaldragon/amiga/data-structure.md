@@ -10,7 +10,7 @@ otherwise. Format details live here; status lives in `docs/crystaldragon/TODO.md
 | Title | Crystal Dragon (Black Legend, 1994; developer credited as Magnetic Fields in the project triage — **not** confirmed from the files, which carry no credits string) |
 | Platform | Amiga OCS/ECS (A500, KS 1.3; up to 6 bitplanes) |
 | Language | English (`Crystal_Dragon` text strings); the WHDLoad slave also supports a German version, not present here |
-| Media | WHDLoad install v1.3 (Psygore, 2012) at `data/crystaldragon/amiga/` (not moved into `data/`). Original disks were a trackloader-free AmigaDOS game; files are flat under `data/` |
+| Media | WHDLoad install v1.3 (Psygore, 2012) at `data/crystaldragon/amiga/` (slave + docs); the game files are flat under its `data/` subfolder (`data/crystaldragon/amiga/data/`). Original disks were a trackloader-free AmigaDOS game |
 | Protection | Removed by the slave (disk check; level-10 "reset level number" check). The data files are unaffected |
 
 sha1 (file-relative, whole file):
@@ -60,7 +60,7 @@ absolute `$70E`. `ancient identify` rejects all of them as unknown
 
 | Tag | Count | Header (big-endian) | Role (hypothesis) | Status |
 |---|---|---|---|---|
-| `SF` | 31 | `'SF'` u32 unpacked, u32 packed, then payload | generic file: backward bit-stream LZ77 | **decoded by probe, structural invariant** (below) |
+| `SF` | 31 | `'SF'` u32 unpacked, u32 packed, then payload | generic file: backward bit-stream LZ77 | **decoded, structural invariant** (`scripts/cdlib/sf.py`, below) |
 | `SA` | ~110 | `'SA'` u16 planes, u16 frameCount, u32 unpacked, u32 packed, then frameCount × variable frame headers, then a planar image codec | `.SCR` graphic sets (walls, floors, doors, monsters) | opaque, needs the reader |
 | `SP` | 2 (`09`, `0d`) | `'SP'` u16 planes, u32 bytesPerPlane (`0x1F40` = 8,000 = 320×200/8), u32 packed | full-screen picture, same image codec as `SA` | opaque |
 | `SC` | 0 in data | as `SP` plus `2^planes` palette words copied to `d1` | picture plus palette | — |
@@ -124,10 +124,19 @@ all 23 levels, 40,183 non-empty cells, and uses `word0 & 0x7F` plus bit 7:
 - wall-type cells sometimes carry high bits (`0x02D5`, `0x01F5`…). These are
   probably the `PASTEONS.WALL` decoration index.
 
+> **Correction (2026-11-21):** this census keys on `word0 & 0x7F`, but the
+> game reads the cell type as `word0 & 7` (see the region-table Correction
+> below), so "types" 8/15/16/21/53/… are low-3-bit types plus flag bits, not
+> distinct types (15 → 7, 8/16 → 0, 21/53/85/117 → 5). Re-counted with `& 7`
+> over the 83 decoded regions (`scripts/cdlib/level.py`, 38,141 non-zero
+> cells): 5 = 23,773, 0 = 11,280, 1 = 10,943, 2 = 659, 6 = 506, 3 = 259,
+> 7 = 165, 4 = 17. The old 40,183 figure counted the whole 32 KB grid area,
+> not just region cells.
+
 Rendering `cc` at width 47 from `0x3140` gives a clean dungeon: rooms,
 corridors, door pairs, and a solid `#` border with no shear for 33+ rows (see
-the TODO evidence; reproduce with the probe). Other levels shear at their
-header width, so the true width/height source is still open.
+the TODO evidence). Other levels shear at their header width — superseded:
+each region carries its own `W`,`H` in the region table (Correction below).
 
 > **Correction (2026-11-21):** the "single 64×64 grid, width from header `+0x3136`" model was wrong. A level is **several regions** (sub-maps, e.g. `cc` = 47×33 + 16×9 + 3×3) packed back to back in the 32 KB grid, each with its own `W`,`H`; the old "header (rows,width)" was just the *last* region's `H,W`, which is why it fitted ~half the levels. Evidence: `scripts/cdlib/level.py`, `scripts/cdlib/test_level.py` — over 23/23 levels (83 regions, widths 3…66, `H` up to 91) the regions tile from `off=2` with **0 bytes of gap**, each ending exactly at the next offset; changing any non-last region's width by 1 breaks the tiling (null control, all regions). Cell type is `word0 & 7` (`+0xC8C8`/`+0xC4FE`: 5 = wall, bit 7 = a flag the door/blocked tests read). Quick-look renders: `scripts/render_cd_maps.py` → `build/cache/crystaldragon/maps/` (`102` renders as a clean cave system; `15c` as nested rectangles — still unconfirmed against the game, view only).
 

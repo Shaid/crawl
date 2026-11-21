@@ -5,10 +5,8 @@ Recon 2026-11-21.
 
 ## Phase 0 — scaffold
 
-- Promote `data/evilsdoom/amigaaga/` to `data/evilsdoom/amigaaga/`
-  (user's call; recon did not move it).
-- Register `evilsdoom` in `src/game-id.ts` (platform `amigaaga` already
-  exists) and add a `defineGameConfig` entry.
+- Done (commit 59b2d29): data at `data/evilsdoom/amigaaga/`; `evilsdoom`
+  registered in `src/game-id.ts` and `tools/shared/game-config.ts`.
 - Depack layer: every file is RNC1 (`@seer-project/pipeline`
   `decompressRnc1`) except `OMD/PCH.DAT` (CrM2 — `ancient`, or upstream a
   CrM2 decoder). Unpacked cache → `build/cache/evilsdoom/`.

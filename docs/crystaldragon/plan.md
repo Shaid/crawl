@@ -4,25 +4,24 @@ Spec: `docs/crystaldragon/amiga/data-structure.md`. Open work:
 `docs/crystaldragon/TODO.md`. This file holds the order of work and never
 restates format detail.
 
-Retail files stay at `data/crystaldragon/amiga/` (WHDLoad install) until
-the user promotes the title.
+Retail files live at `data/crystaldragon/amiga/` (WHDLoad install; game
+files under its `data/` subfolder).
 
 ## Phase 0 — scaffold
 
-- When the user promotes the title, move or copy `data/crystaldragon/amiga/data/*`
-  to `data/crystaldragon/amiga/`.
-- Register `crystaldragon` in `src/game-id.ts` and add a `defineGameConfig`
-  entry. Recon leaves this undone on purpose.
-- Shared lib: create `scripts/cdlib/` (Python) following the `scripts/bclib/`
+- Done: data at `data/crystaldragon/amiga/` (commit 59b2d29; extractors read
+  its `data/` subfolder); `crystaldragon` registered in `src/game-id.ts` and
+  `tools/shared/game-config.ts`.
+- Shared lib: `scripts/cdlib/` (Python, created) follows the `scripts/bclib/`
   pattern. Planar decode goes through `@seer-project/gfx` /
   `tools/shared/amiga-planar.ts`.
 
 ## Phase 1 — container codecs (everything depends on this)
 
-1. **`SF` decoder → committed** (`cd-sf-codec`). It is already ported in a
-   scratch probe and holds 31/31 exact. Commit it to the shared lib, add a
-   regression check (exact size plus 0 bytes left over), and dump every `SF`
-   file to `build/cache/crystaldragon/`. Easy.
+1. **`SF` decoder — done** (commit 867d6ce): `scripts/cdlib/sf.py`, 31/31
+   exact with 0 bytes left over (`scripts/cdlib/test_sf.py`);
+   `scripts/extract_cd_sf.py` dumps every `SF` file to
+   `build/cache/crystaldragon/`.
 2. **`SA`/`SP`/`SC` image codec via emulation** (`cd-sa-codec`). Run
    `Crystal_Dragon` hunk 0 `+0x0004` (`Unpack`) under musashi. Reuse the
    `tools/bcdft_decompress/` harness pattern (C + musashi) or

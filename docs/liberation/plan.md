@@ -4,11 +4,10 @@ Spec: [`cd32/data-structure.md`](cd32/data-structure.md). Open items:
 [`TODO.md`](TODO.md). This file only orders the work.
 
 ## Step 0 — scaffold
-- Files stay in `data/liberation/cd32/` until the user moves them
-  to `data/liberation/cd32/` (recon does not move data). Already a plain file
-  tree (WHDLoad install) — no disk-image extraction needed.
-- Register `liberation` / `cd32` in `src/game-id.ts` and a
-  `defineGameConfig` entry when the first extractor lands (not done at recon).
+- Done (commit 59b2d29): files at `data/liberation/cd32/` (game files under
+  `data/`), already a plain file tree (WHDLoad install) — no disk-image
+  extraction needed; `liberation` / `cd32` registered in `src/game-id.ts` and
+  `tools/shared/game-config.ts`.
 
 ## Phase 1 — generators → map grid (the walker blocker)
 The world is not stored; `CityGen`/`BuildingGen`/`PlotGen` build it from

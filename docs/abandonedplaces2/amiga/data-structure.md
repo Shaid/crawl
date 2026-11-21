@@ -31,7 +31,16 @@ differs.
 
 The record format is the same as AP1's (32 B: name[16], offset, stored, unpacked,
 u16 packed flag, u16 group = 0). There are 5 sections, each starting with a 2-byte
-`0000`, and the file ends with 4 zero bytes. Sections 0–3 hold 63 / 160 / 194 / 200
+`0000`, and the file ends with 4 zero bytes.
+
+> **Correction (2026-11-21):** section 0 has **no** leading `0000` — `ap2.dir` starts
+> with a record (`mod.ab2v2` at byte 0); the 2-byte `0000` separates sections, so
+> there are 4 separators (619 × 32 + 4 × 2 + 4 = 19,820 B, walked 2026-11-21). This
+> agrees with the AP1 note's "AP2's `ap2.dir` starts with a record".
+> The 617 shipped records carry **593 distinct names**: 12 names
+> (`chtin.bpl`, `sp_00`–`sp_07.ani`, `obj_99.bpl/.def/.ofs`) appear once in each of
+> sections 1–3, with byte-identical stored data, so the unpacker's 593 files in
+> `build/cache/abandonedplaces2/` are the 617 records minus 24 repeats. Sections 0–3 hold 63 / 160 / 194 / 200
 records, and **each section ends exactly at the size of `ap2.00k`** (861,872 /
 878,337 / 704,375 / 815,986; 4/4, zero deviation, 0 breaks in contiguity). Offsets
 are byte offsets into `ap2.00k`. Section 4 lists `save_00.dat` and `save_01.dat`

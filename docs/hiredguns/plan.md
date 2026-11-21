@@ -5,15 +5,14 @@ Open items live in [`TODO.md`](TODO.md). This file only orders the work.
 
 ## Phase 0 — scaffold
 
-- Register `hiredguns` / `amiga` in `src/game-id.ts` and add a `defineGameConfig`
-  entry in `tools/shared/game-config.ts`. Recon did not touch code.
-- The data currently lives at `data/hiredguns/amiga/`. When the title is
-  promoted, move it to `data/hiredguns/amiga/` (the user decides).
+- Done (commit 59b2d29): `hiredguns` / `amiga` registered in `src/game-id.ts`
+  and `tools/shared/game-config.ts`; data at `data/hiredguns/amiga/`.
 - Add a pipeline step that unpacks RNC1 with `ancient` into `build/cache/hiredguns/`
   (all 108 RNC files unpack cleanly). Check whether `@seer-project/*` already has
   RNC1 before writing a TS decoder (ask `seer-guide`).
-- **Ask the user for the 2021 dev archive** (Internet Archive). It contains source
-  for the game and the map editor, and would settle phases 2–4 outright.
+- The 2021 dev archive (Internet Archive) is fetched to `data/hiredguns/devarchive/`
+  (TODO `hg-dev-archive`). It contains source for the game and the map editor;
+  mine it for phases 2–4, checking each finding against the floppy retail files.
 
 ## Phase 1 — cheap standard wins
 
