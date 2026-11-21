@@ -68,6 +68,17 @@ block:
   `(34,A0)` (`EORI #2` = turn around ⇒ facing 0–3). Hypothesis (one read of
   the entry code).
 
+> **Correction (2026-11-21):** the three 4 KB planes are **not** three
+> height layers. They are three attribute planes of **one** 64x64 cell grid
+> (index `y*64+x`): plane 0 = cell type (`& 0x3F`, 1..27 seen) + 2 flag bits
+> (`& 0xC0`), plane 1 = per-type aux (for buildings: high nibble = floors - 2),
+> plane 2 = per-type aux (building index into the `(16,A0)` table). The
+> underworld / street / roof layers are **derived** per view from the same
+> cell by four 28-byte tables and the building-height rule (see "City view
+> composer" below). Street = layer z=1 (CityGen's start word has `z<<12` = 1).
+> Confirmed by running CityGen under musashi (byte-identical on repeat runs,
+> TS consumers byte-exact against the game's own decode).
+
 So the walker grid is **"something new" for this corpus**: a byte-plane
 cell grid (3 planes) produced by code, not a file. Per-cell faces vs.
 shared-edge vs. type-derived is **not yet known** — that is the first job of
@@ -100,6 +111,12 @@ under the project's 68k emulator (`scripts/m68k_emu.py` /
   police), drawn by `tridee.library`/`vector.library`. The manual's "Vector
   Preferences → Reduce points / Reduce fill — a special textured fill is used
   on many 3D objects" matches the `VFTX` chunk.
+> **Correction (2026-11-21):** the outdoor city **does** use `.VGM` wall art:
+> `+0x36A0E` picks the city wall set from the list at `+0x37010`
+> (`Wall01`..`Wall10`, LCG on world/zone), and the static view draws bank 0
+> through the slot table at `+0x2B22E`. Vector objects come on top (doors,
+> signs, people, droids). See "City view composer".
+
 - Which of the two the **outdoor city** uses (vector buildings only, or VGM
   pieces too) is **open** — `0CityVectors` has 33 objects, which reads like
   building façades. Hypothesis: interiors = VGM slots + vector props; city =
@@ -169,3 +186,80 @@ fill textures) are hypotheses from the names.
 script), `DTE.txt` (location descriptions), `CTE.txt` (conversation) — plain
 text with a `^X…[ ]` macro/condition language consumed by PlotGen and the
 main exe. `*Liberation.FNT` = `'CHAR'` bitmap font.
+
+## City generation oracle (2026-11-21) — **confirmed**
+
+`tools/liberation/cd32/emu/gen.c` (musashi; `emu/build.sh` -> `build/cache/liberation/gen`)
+loads `captiveII`, `PlotGen`, `CityGen`, `BuildingGen` with their own HUNK
+relocations, stubs exec (AllocMem, OpenLibrary) and dos (Open/Read/Lock/
+Examine for PlotGen's `PGE.TXT`/`DTE.TXT`/`CTE.TXT`), and runs:
+
+| Step | Code | Shape |
+|---|---|---|
+| PlotGen | entry hunk+2 | A0 = `'MM'`, world, flag block; A1 = `+0x3365E`; D0 = 0 (`+0x22C46`) |
+| param block | `+0x22AAC` | A5+0x1D7A: `+12` grid (`(1986,A5)`), `+16` = grid+0x3000, `+20` = +0x31CC, `+24` = `+0x3365E`, `+28` = plot, `+72/76` = callback `+0x5FC0` / main A5 |
+| CityGen | entry hunk+2 | A0 = A5+0x1D7A (`+0x22BBA`); `(1066,A0)` = -1 (no saved cell) -> CityGen picks the start cell `(32,A0)` and facing `(34,A0)` |
+| wall set | `+0x36A0E` | D0 = city VGM number |
+| wall CMAP | `+0x36A68` | `(32302,A5)` -> one of the 18 CMAPs at `+0x36AAE` |
+
+- **CityGen depends on PlotGen's output** (`(28,A0)`, read at CityGen `+0x2A28`)
+  and on the main exe's callback (game time/state bytes; zero for a new game).
+- Zones **0..8** generate; zone 9+ does not terminate (CityGen's 9-entry zone
+  tables at its `LAB_1186`). A new game starts in **zone 8** (`+0x227A0`) with
+  world = the BSS default 0 unless the `(12944,A5)` restore path loads one.
+- Determinism: same (world, zone) -> byte-identical grid (checked).
+- **Exported zones** (walker): world 0, zones 0..8 (walls 3,4,5,6,7,9,10,1,2).
+
+## City view composer (2026-11-21) — **confirmed** (byte-exact port)
+
+Ported to `tools/liberation/cd32/view-model.ts`; tables read by
+`engine-tables.ts`. `verify-view.ts` compares the TS window and the full
+6 x 2400-byte planar view against the game's code run in the harness:
+**3,300+/3,300+ poses byte-exact over 10 zones** (world 0 zones 0-8,
+world 1 zone 0, world 37 zone 4), vector objects disabled on both sides.
+
+- View: **192x100, 6 sequential planes of 2400 B** (24 B/row), `(1198,A5)`.
+- **Backdrop**: `+0x1D794` copies the DATA hunk's own AmSp sprite (DATA +0,
+  192x100x6, pixels at DATA+0x10) into the view first (+12 B when turning).
+- **Window** (`+0x27F8E`): 3 layers (z-1, z, z+1) x 5x5 cells, index
+  `row*5+col` with the player at row 4 col 2; per facing origin/steps:
+  f0 N (x-2,y-4,+1,+5), f1 E (x,y-2,-5,+1), f2 S (x-2,y,-1,-5), f3 W
+  (x-4,y-2,+5,-1). Out-of-map cells = 0x06. Standing on 0x1A (z=0) / 0x1B
+  (z=1) raises the layer base by one.
+- **Cell decode** (`+0x2835A`): layer -1 table `+0x285BA`; layer 0 `+0x285D6`,
+  layer 1 `+0x285F2`, layer 2 `+0x2860E`, >=3 `+0x2862A`. Table bit 7 = special
+  (bit 6 sub-cases: 6 -> 21 if plane1 bit 7, 0x18 -> 0x18+(p1&3), 0x0B and
+  plain -> building height `floors = (p1>>4)+2` -> 12/15/16). Non-special
+  entries get plane 0's `& 0xC0` bits.
+- **Visibility** (`+0x28646`): script at slot table + word 0: `0` end; `b>=0x80`
+  -> next `(~b)+1` indices := 8; else `idx, n`: skip `n` bytes when that cell is
+  open (> 8) in a pre-pass copy.
+- **Slot walk** (`+0x2564E`, static view uses bank 0 + table `+0x2B230`):
+  `{idx, occluder, s16 rel}`; rel < 0 = vector-object handler (via `(2012)`
+  table `+0x26C16`); else drawn when `win[idx] <= 7` and (occluder < 0 or
+  `win[occ] > 8`). Moving/turning frames use banks 1-3 (`+0x2BC62`,
+  `+0x2C58A`, `+0x2CC84`) — not needed for a step walker.
+- **Type handlers** (`+0x27BBA`, city): 1 -> mode 0 (+ door/sign objects),
+  6 -> texture mode via `+0x27DF2` (cell table at slot table + word 4;
+  textures `+0x2E220` / `+0x2D5D0`, 6 planes x 512 B, 8 rows x 4 B, animated
+  by the frame counter `(2836,A5)`), others -> mode -1.
+- **Draw record** (4 B): x byte, y row, sprite (`& 0x3F`, top 2 bits = facing
+  hint), flags: bit 3 mirror (bit-reverse table `+0x2542E`), bits 0-2 vertical
+  code (0 normal; 1-6 = flipped, rows `h - {1,3,4,6,10,11}[c] + 1`, table
+  `+0x25A62`; 7 = flipped from row 99-y), bit 4 = row runs (+4 count, then
+  count+1 bytes; bit 7 = masked rows, else opaque), bit 5 byte/word path
+  (same pixels).
+- **Colour modes**: AmSp colour planes 0-3 go to view planes 0,1,2,5; mode 0
+  sets planes 3+4 (colours 24-31 / 56-63), mode -1 clears them (0-7 / 32-39).
+- **Palette** (`+0x1CA8A`, AGA path): base CMAP body at DATA +0x389C (64 x
+  RGB8) for 0-23 / 32-55; the wall CMAP's 2 x 24 B (CMAP + 12) for 24-31 /
+  56-63. Closes TODO `lib-vgm-palette` for the city.
+- **Collision** (`+0x24628` / `+0x282DA`): flags word = `(2012)` table +2 for
+  the cell's window value at the player's layer: bits 1-2 solid, bit 3
+  stairs/ramp (layer change), bit 4 drop (refused unless a ramp below), value
+  bit 7 = door/object cell (`+0x246F4`).
+
+| Approach | Result | Why it failed |
+|---|---|---|
+| TS window without the `+0x28646` visibility pass | windows 0/5 | the game blanks hidden cells to 8 after the fill |
+| texture mode bit-reversing texture bytes when mirrored, phase from x | 6/40 views off | mirrored path reverses only the mask; phase starts at x+width |
