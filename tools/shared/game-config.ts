@@ -336,9 +336,16 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['abandonedplaces/amiga'],
       executable: undefined,
       expectedFiles: ['Disk.1'],
-      supported: false,
+      supported: true,
       assetDir: 'abandonedplaces',
       features: {},
+
+      async buildAssets() {
+        // ArtGame unpack (build/cache/abandonedplaces) + dungeon walker data (module pieces, backdrops, levels).
+        const { exportWalker } = await import('../abandonedplaces/amiga/export-walker.ts');
+        const w = exportWalker();
+        console.log(`  abandonedplaces/amiga walker: ${w.levels} levels, ${w.modules} modules, ${w.backdrops} backdrops`);
+      },
     }],
   },
   {

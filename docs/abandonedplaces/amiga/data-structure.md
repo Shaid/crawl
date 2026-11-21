@@ -143,8 +143,8 @@ Sizes are unpacked. "sec" is the directory section, so the disk is sec+1.
 | Offset | Size | Field | Notes |
 |---|---|---|---|
 | +0 | 2048 | grid | **32 × 32 big-endian words**, row-major. `0x0001` = solid wall square, `0x0000` = open. `0x4000`, `0x2000` and `0x4001` are the only other values seen across all 44 records |
-| +2048 | 2 | wallset id | Hypothesis. dungeon1/2 use {1,3,4,7} and dungeon3 uses {2,5,6,8,9}; the art for those sets sits exactly on Disk.4 and Disk.5 respectively. Forest levels use 10/11 (`module10/11`, `block10/11.x`, `backgnd10/11` on Disk.3) |
-| +2050… | 8,866 | unknown | Object, monster and event tables. The second word looks like a start position |
+| +2048 | 256 | **4 theme areas x 0x40 B** | **confirmed (2026-11-21), see section 7.** Each area = 17 words: 1-based picks into the per-family file-name lists (`backgnd`, `monster` x2, `module`, `door` x2, `carpet` x2, `cupboard`, `stairs`, `block` x2, `wall`, `switch`, `button`, `gate`, music). A level has up to 4 areas; teleports carry the destination area |
+| +2304 (0x900) | 8,612 | 10 object lists | **confirmed (2026-11-21):** records of 0xA/0xE/0xC/0xC/0xA/0x10/0xA/0x40/0x20/0x14 bytes, each list ends with a `0xFFFF` word; the walk lands exactly on 10,916 for 36/36 dungeon levels (loader `module` 0x10D76) |
 
 Evidence:
 - All 44 records (36 dungeon + 8 forest) have a fully solid border (124/124 cells).
@@ -161,7 +161,13 @@ feature flag (hypothesis).
 |---|---|---|
 | Word grid at width 64 | Two half-mazes per line | Wrong width; 32 is right |
 
-## 6. First-person renderer — hypothesis
+> **Correction (2026-11-21):** the row "+2048 wallset id" above was a misreading of the first word of the 256-byte
+> theme-area header; the hypothesis "second word looks like a start position" is wrong too (the words at +2048 are
+> file picks, not coordinates). Section 7 holds the confirmed layout. The cell value set is confirmed as
+> `0x0001` solid / `0x2000` illusory / `0x4000` monster-only barrier (the loader masks every stored cell with
+> `0x6001`, `module` 0x11290).
+
+## 6. First-person renderer — superseded by section 7
 
 The art is prepared per wallset, per depth and per side (`wallN.1–.4`, `blockN.1–.3`,
 `doorN.1/.2`, `carpetN.1/.2`, plus single-file `gateN`/`stairsN`/`switchN`/`buttonN`/
@@ -180,3 +186,70 @@ reader is traced.
 | `bpl.*` header | — | — | |
 | `ABIC.*` pictures | — | — | |
 | palettes | — | — | |
+
+
+## 7. Dungeon renderer (2026-11-21) — from disassembly of `module`
+
+Offsets are **hunk offsets in `module`** (= unpacked file offset − 0x20; absolute operands equal hunk offsets).
+Disassembly = r2 linear sweep of the flat image (scratch only). Extractor
+`tools/abandonedplaces/amiga/export-walker.ts`, port `view-model.ts`, view `tools/walker/games-abandonedplaces.ts`.
+`module` is the dungeon engine (the file names it loads sit at +0x11CE6..+0x12730; lists at 0x11C22 simple /
+0x11CE6 themed: `(name-list ptr, destination variable)`).
+
+### 7.1 Theme loading — **confirmed** (structure)
+Loader `0x1150A`: per area (d4 = 0..3) reads the 17-word header words in the order of the table at `0x11CE6`:
+backgnd, monster1, monster2, **module**, door1, door2, carpet1, carpet2, cupboard, stairs, block1, block2, wall,
+switch, button, gate; word 17 picks the music pair. Value = 1-based index into the name list (`word-1`).
+`moduleN`/`backgndN` file number = the word (lists are in numeric order).
+
+### 7.2 Art formats — **confirmed** (renders; pieces self-consistent)
+| File | Format |
+|---|---|
+| `moduleN` (21,330 B) | **25 wall pieces**, geometry table in `module`: width bytes/height words at `0xD5DE` (25 x `w,h`), screen x / y at `0xD642` (y gets +4 at draw, 0xD5D4), source offset longs at `0xD6A6`. Each piece = 4 colour planes then 1 mask plane, `w*h` bytes each (blitter 0xD740: minterm 0x0FCA, A = mask, B = planes). The pieces tile the file **exactly** (last ends at 21,330; three pieces share offsets 16570 / 19330). |
+| `backgndN` (13,824 B) | **two** 144x96 4-plane images (6,912 B each, plane stride 1,728, 18 B/row): ceiling + floor perspective. Blit 0xDDE4 to screen (32,4); half chosen by table `0xDE96[(x&1)+2*(y&1)+4*facing]` = `((x^y)&1) ^ (facing&1)`. |
+| other wall-set files | `wallN.M`/`blockN.M`/`doorN.M`/`stairsN`/`gateN`/`switchN`/`buttonN`/`carpetN.M`/`cupboardN`: **not decoded** (`wallN.M` is NOT the wall; see 7.4) |
+
+Screen = 320x198, 5 planes (plane stride 7,920). View window (32,4)-(176,100): `display1` (4 planes, 31,680 B) shows it empty.
+**Palette** (confirmed): one 16-colour table for all sets, the final step of the fade table at `0xDBE4` (16 colours x 16
+steps; fade-in routine 0xDBC0 runs steps 0..15): `000 cff 9bb 687 344 520 0d0 080 ff0 f80 465 c02 830 0cf 00f b50`
+(Amiga 12-bit). Colours 17..31 (sprites / 5th plane) are the copper-list constants at `0x101A2` and agree on 12 of 15 entries.
+Indices 5/8/15 differ between the two tables (`520`/`ff0`/`b50` vs `000`/`dd0`/`d50`); which applies to the 5th plane is untested.
+
+### 7.3 View — **confirmed** (reader) / **rendered** (pixels)
+Entry `0xAE3A` (called from the main loop at 0x31C). View = 4 rows x (7,5,3,3) cells = 18 cells; per-facing (dx,dy) signed-byte
+tables via pointer table `0xAF54` (facing 0 = north = -y, 1 = east): row -3 x -3..3, row -2 x -2..2, row -1 x -1..1, row 0 x -1..1.
+Draw list `0xAFF4`: 41 entries of 2 bytes, far -> near. `byte0 < 0x80`: `(piece, cell-index 1..18)` — piece drawn when the
+cell word is solid (`bit0`) or illusory (`bit13` = 0x2000, skipped when flag `0x8ED8` is set); `byte0 = 0xFF`: an *object group*
+entry (calls the handler table `0xB046`: wall-mounted objects, doors, monsters, items — not decoded). There are no mirrored pieces:
+left and right walls are separate pieces. Out-of-map cells read as 0.
+Cell address `0x5DA4`: `base + (y*32 + x)*2` (32 x 32 words). Movement (`0x5C0C`): blocked by runtime flags solid (word bit 0) and
+monster (bit 3); bit 7 = teleport record, bit 4 = closed door (`list6.state & 7 < 2`). `0x2000` and `0x4000` do **not** block the
+party; monsters are blocked by `0x4000` always and by `0x2000` unless the monster flag `0x16(a0)&0x10` (0x6890).
+Move tables `0xAD62/72/82/92` = forward / strafe right / back / strafe left, `(dx,dy)` per facing N,E,S,W; turn left = facing-1 (0x5BC0).
+Pose variables: x `0x1072E`, y `0x10730`, facing `0x10732`.
+
+### 7.4 Object lists (level +0x900) — partly decoded
+| List | Record | Runtime flag set (0x112A0..) | Notes |
+|---|---|---|---|
+| 0 | 0xA | low byte bit 6 | wall-mounted objects (`x@2 y@4 side@6 slot@7`), art from `item` (54 x 1,330 B) via table `0xB349` |
+| 1 | 0xE | low bit 5 | ? |
+| 2 | 0xC | high bit 1 | ? |
+| 3 | 0xC | high bit 0 | draws via 0xB1F8 only on solid cells |
+| 4 | 0xA | high bit 2 | ? |
+| 5 | 0x10 | low bit 2 | ? |
+| 6 | 0xA | low bit 4 | **doors**: `type,x,y,orient,state` (closed when `state&7 < 2`, moving party is blocked) |
+| 7 | 0x40 | low bit 7 | **teleports / events**: types 5/6 = `x@2 y@4 side@6 dest x@8 y@10 facing@12 (4 = keep) area@14 level@16 (0 = same, -1 = leave dungeon)` (loader 0x5C7A); types 1-4/7 = other triggers |
+| 8 | 0x20 | low bit 3 | monsters (block movement) |
+| 9 | 0x14 | high bit 3 | ? |
+
+Verification: 146/146 teleport source cells are open; 110/122 destinations are open on the *same* level and, for the 24
+cross-level records, `level-1` lands on an open cell 23/24 times (null control: `level` as index 7/24). One shipped record
+(dungeon1 level 6 -> 5, dest 26,18) lands on a wall.
+The dungeon entrance is level 1's `level = -1` record: dest (2,25) facing 0, area 0 (used as the start pose; hypothesis).
+
+### 7.5 Paths tried
+| Approach | Result | Why |
+|---|---|---|
+| `wallN.M` as the wall art | Wrong | The `0xC41A` table indexes var `0x1DC` (wall file) from the *object* draw (type 6, `8(a3)` 0/1): it is an on-wall decoration bank; the walls are `moduleN` |
+| `icons` bank 0x81 as palette | Wrong | Sprite data (0x102AC copies 4 sprite sets); palette is the fade table at 0xDBE4 |
+| Window 192x144 (from `backgndN` size guess) | Wrong | 144x96 at (32,4): backdrop blit BLTSIZE 0x1809 + `display1` layout |

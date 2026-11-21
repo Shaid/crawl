@@ -57,6 +57,7 @@ import { loadEotb1View, eotbLevelList } from './games-eotb.ts';
 import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
 import { loadEotb3View, eotb3LevelList } from './games-eotb3.ts';
 import { loadAp2View, ap2LevelList } from './games-abandonedplaces2.ts';
+import { loadAp1View, ap1LevelList } from './games-abandonedplaces.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
 import {
   loadPoolOfRadianceView,
@@ -376,6 +377,7 @@ const GAMES = [
   { id: 'eotb', label: 'Eye of the Beholder', loader: loadEotb1View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'eotb2amiga', label: 'Eye of the Beholder II (Amiga)', loader: loadEotb2View, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'abandonedplaces', label: 'Abandoned Places', loader: loadAp1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'abandonedplaces2', label: 'Abandoned Places 2', loader: loadAp2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'eotb3', label: 'Eye of the Beholder III', loader: loadEotb3View, defaultLevel: 3, platform: 'dosvga' as const },
   { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
@@ -423,6 +425,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
   bardstale2: 'walls/doors/secret doors, collision and wrap: the view-row builder and move routine are verified identical to BT1 in data/bard; the table-driven compositor (incl. the right-half mirror) is ported from the game code and renders recognisable corridors, but is not screenshot-checked against the real game; the start pose is a heuristic (not the game\'s stairs/arrival point), the palette is big_dung\'s own header (dung_blank is unused by the BT2 executable), the lamp/light distance is fixed at 4; special squares, stairs, monsters and the city are not implemented -- see docs/bardstale2/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
+  abandonedplaces:
+    'wall pieces, draw order, backdrop parity, palette (fade-table step 15), grid flags, collision and teleports ported from the game\'s own `module` (view 0xAE3A, blits 0xD740/0xDDE4); 36 dungeon levels. Not drawn: wall-mounted objects, doors/gates, stairs art, monsters, items (closed doors do not block); forest levels unsupported; start pose of levels >1 and the view-window clip are hypotheses -- docs/abandonedplaces/TODO.md.',
   abandonedplaces2:
     'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Monsters, items, objects, chests, water, fire and switches are not drawn; palette indices 12-15 (the lime/teal speckle) are unresolved; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
   eotb3:
@@ -458,6 +462,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'eotb') return eotbLevelList(assetBase);
   if (game === 'eotb2' || game === 'eotb2amiga') return eotb2LevelList(assetBase);
   if (game === 'eotb3') return eotb3LevelList(assetBase);
+  if (game === 'abandonedplaces') return ap1LevelList(assetBase);
   if (game === 'abandonedplaces2') return ap2LevelList(assetBase);
   if (game === 'landsoflore') return landsofloreLevelList(assetBase);
   if (game === 'ishar') return isharLevelLists.ishar();
