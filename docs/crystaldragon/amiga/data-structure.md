@@ -128,8 +128,8 @@ all 23 levels, 40,183 non-empty cells, and uses `word0 & 0x7F` plus bit 7:
 > game reads the cell type as `word0 & 7` (see the region-table Correction
 > below), so "types" 8/15/16/21/53/… are low-3-bit types plus flag bits, not
 > distinct types (15 → 7, 8/16 → 0, 21/53/85/117 → 5). Re-counted with `& 7`
-> over the 83 decoded regions (`scripts/cdlib/level.py`, 38,141 non-zero
-> cells): 5 = 23,773, 0 = 11,280, 1 = 10,943, 2 = 659, 6 = 506, 3 = 259,
+> over the 83 decoded regions (`scripts/cdlib/level.py`, 47,602 region
+> cells, 36,896 with a non-zero `word0`): 5 = 23,773, 0 = 11,280, 1 = 10,943, 2 = 659, 6 = 506, 3 = 259,
 > 7 = 165, 4 = 17. The old 40,183 figure counted the whole 32 KB grid area,
 > not just region cells.
 
