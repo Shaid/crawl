@@ -104,7 +104,19 @@ The match is copied first, `out[p] = out[p + dist]` with the output written
 downward, and then the literals, copied byte by byte downward from the source. The
 loop stops when the output pointer reaches the start of the buffer.
 
-**Verification:** a probe port (scratch, not committed) decodes **427/427 AP1 and
+> **Committed (2026-11-21):** `tools/shared/artgame-kernel.ts` (`parseArtDirectory`,
+> `unpackArtGame`, `unpackArtGameStrict`, `loadArtVolume`), test
+> `tools/shared/__tests__/artgame-kernel.test.ts`, CLI `tools/abandonedplaces/unpack.ts`
+> (→ `build/cache/<game>/`: AP1 443 files / 8.7 MB, AP2 593 files / 5.9 MB; the 11 AP1
+> names repeated across disks are byte-identical). AP1's directory is parsed from
+> `Disk.1+0x5800` up to `0x9800`; AP2's `ap2.dir` starts with a record (no leading
+> separator); AP2 section 4 (save files) has no shipped image and is skipped.
+> AP2 totals: 617 shipped records in sections 0–3 (63/160/194/200). Null controls in the
+> test: flipping the first control byte, or dropping the last byte (trailer shift), fails
+> every sampled record. (Flipping a *literal* byte is not detectable — chk covers
+> control bytes only.)
+
+**Verification:** the port decodes **427/427 AP1 and
 262/262 AP2** packed records. Each passes with `chk == 0`, all stored bytes consumed
 and output length equal to the directory's unpacked size. Null controls: flipping
 one byte gives `chk = 0x55`, and shifting the stream by one byte leaves input

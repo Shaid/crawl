@@ -117,12 +117,52 @@ gt 7, obj 11, mon 14, pit 16, swp 20, sww 36, fl 2.
 The view is 192×135 (`fl_*` = 2 full-frame floor/ceiling images). Wall records come
 as near/mid/far front faces plus left/right side faces in mirrored pairs.
 **Renderer = slot table** (pre-drawn bitmaps per view position, cookie-cut with
-their mask). **Invariant check:** `plane size = bytes/row × h`, `colour size =
-planes × plane size`, and `ofs[i+1]−ofs[i] = (planes+1) × plane size` (or 0) hold for
-**1,476/1,520** non-empty records across every `.def`/`.ofs`/`.bpl` triplet. All 44
-failures are UI triplets (`plheads` 40, `dispadd` 2, `menu` 2), which presumably have
-no mask plane; every dungeon tileset triplet passes. Confidence: rendered (structural). The slot destination table itself
-is still to be found in `main`.
+their mask). The slot destination table itself is still to be found in `main`.
+
+> **Correction (2026-11-21):** the recon's "1,476/1,520, 44 UI failures (presumably no
+> mask plane)" is now explained and closed. **Flags word 6**: high byte + 1 = colour
+> planes; **bit 0 = a mask plane follows** (`0x0307`/`0x0407`/`0x0405`/`0x0403` masked;
+> `0x0302` floor, `0x0402` `plheads`/`menu`/`dispadd`'s two, and `0x0000` `chrset1` are
+> unmasked). Unmasked records store `colour size = 0` (word 13) and step
+> `planes × plane size`, which is what the old check mis-flagged. Also: `fl_01`–`fl_07`,
+> `fl_50`, `chrset0/1` and `icons` have **no `.ofs`** — offsets are implicit (records back to
+> back), and `chrset0/1` + `icons` carry a **single `.def` record describing one cell
+> repeated** through the whole `.bpl` (128 glyphs 8×13×(3+mask), 128 glyphs 8×10×1,
+> 168 icons 16×16×(3+mask); sizes divide exactly). With these, **1,962/1,962** non-empty
+> records pass (`plane size = bpr×h`, `colour size ∈ {0, planes×plane size}`,
+> `bpr×8 ≥ w`, and next offset − offset = stride; `.bpl` end = last record end for every
+> triplet). Code: `tools/shared/artgame-tileset.ts` (`checkGeometry`), test
+> `tools/shared/__tests__/artgame-tileset.test.ts`.
+
+### Export + palettes (2026-11-21) — **confirmed** (layout), **hypothesis** (colours)
+
+- **Plane layout: sequential planar, colour planes first (plane 0 = bit 0), mask plane
+  last — confirmed.** Null control: across wl/mon/obj/gt/strd_00 (≈110k px outside the
+  mask), **0** non-zero colour pixels fall outside the mask with mask-last, while
+  treating plane 0 as the mask leaks 25–85 % of pixels per family.
+- `npx tsx tools/abandonedplaces2/amiga/export-tilesets.ts` (also `buildAssets`,
+  `supported: true`) writes **149 atlases / 1,962 frames** to
+  `public/assets/abandonedplaces2/amiga/sprites/<triplet>.png|json`: every triplet (sets
+  00–07 and 50–53 of wl/onwl/fl/strd/stru/gt/pit/swg/swp/sww/obj/mon, plus `chest`, `fire`,
+  `fspells`, `items`, `icons`, `chrset0/1`, `plheads`, `menu`, `dispadd`, `pleffect`).
+  Sidecars list per frame `x,y,w,h` (atlas) plus `slotX/slotY/slotW/slotH` (def words 2–5),
+  `planes`, `masked`, and the palette used. `data/tileset-geometry.json` has the per-triplet
+  check.
+- Palettes: `set_NN.clr` (32 × 0RGB). Dungeon-set families (4-plane) use indices 0–15 of
+  their own `set_NN`; `set_NN` upper halves are black but for 16–18, so 5-plane images
+  borrow `display.clr[16..31]` (the shared UI half) — **hypothesis, and the skeleton
+  monster comes out with odd orange/blue bones, so it is probably wrong**. `mon_NN`/`obj_NN`
+  are not tied to a set (mon goes to 17/53); they are rendered with `set_NN` when
+  NN < 8, else `set_00`. Indices 12–15 of the set palettes are a lime→teal ramp; walls
+  render with lime speckle that is probably a per-depth/torch ramp rewritten at run time
+  (cf. Black Crypt COLOR26–31). Tracked as `ap2-image-palettes`.
+- **In-game checks (user):** (1) a first-person corridor view in dungeon 0 (set 00): wall
+  front/side tints at each depth, floor/ceiling colours and whether the lime pixels are
+  real; (2) a corridor in a level using another set (e.g. set 03, whose palette is the
+  only one using indices 16–31) to compare tints; (3) any skeleton (`mon_00`) at near
+  range for the true monster colours; (4) a door/gate (`gt_`), stairs (`strd_`/`stru_`),
+  a pit and an on-wall decoration to confirm slot placement against `slotX/slotY`
+  (x offset inside the frame, y measured from the top of the 135-row view).
 
 ## Open families — paths tried
 

@@ -349,9 +349,16 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['abandonedplaces2/amiga'],
       executable: undefined,
       expectedFiles: ['data/ap2.dir'],
-      supported: false,
+      supported: true,
       assetDir: 'abandonedplaces2',
       features: {},
+
+      async buildAssets() {
+        // ArtGame unpack (build/cache/abandonedplaces2) + .bpl/.def/.ofs tileset atlases.
+        const { exportTilesets } = await import('../abandonedplaces2/amiga/export-tilesets.ts');
+        const r = exportTilesets();
+        console.log(`  abandonedplaces2/amiga: ${r.atlases} atlases, ${r.frames} frames, geometry ${r.geometry.ok}/${r.geometry.checked}`);
+      },
     }],
   },
   {
