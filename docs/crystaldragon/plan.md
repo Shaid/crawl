@@ -22,7 +22,9 @@ files under its `data/` subfolder).
    exact with 0 bytes left over (`scripts/cdlib/test_sf.py`);
    `scripts/extract_cd_sf.py` dumps every `SF` file to
    `build/cache/crystaldragon/`.
-2. **`SA`/`SP`/`SC` image codec via emulation** (`cd-sa-codec`). Run
+2. **`SA` done (2026-11-21)**: emulated `Unpack` under musashi (`tools/crystaldragon/amiga/emu/`), then
+   ported to `tools/crystaldragon/amiga/codec.ts` — 86/86 byte-exact. `SP`/`SC` still open (`cd-sp-codec`).
+   Original plan text: Run
    `Crystal_Dragon` hunk 0 `+0x0004` (`Unpack`) under musashi. Reuse the
    `tools/bcdft_decompress/` harness pattern (C + musashi) or
    `scripts/m68k_emu.py`. Load hunk 0 at its base, workspace at `$70E`; inputs
@@ -39,6 +41,9 @@ code starts at file `+0x24`), `check-that-cannot-fail-is-not-evidence.md`.
 
 ## Phase 2 — palette
 
+Done 2026-11-21 for the dungeon view (`A5+500`); colours 12-15 open (`cd-palette-12-15`).
+
+
 `cd-palette`: the `SC` path carries a palette, but no `SC` file ships. Find
 the dungeon palette in the exe or in the level tail (grep for 32-word 12-bit
 tables) or in an overlay. Oracle: public Amiga screenshots of Crystal Dragon
@@ -54,6 +59,11 @@ stairs linking level N↔N+1 at matching coordinates) and the `Solution`
 walkthrough. Agent: `amiga-disasm` on `Crystal_Dragon`.
 
 ## Phase 4 — view renderer (walker question 2)
+
+Done 2026-11-21 for walls, pillars, floors, ceilings: `tools/crystaldragon/amiga/view-model.ts`,
+walker `tools/walker/games-crystaldragon.ts`. Doors, decorations, stairs and occlusion are open
+(`cd-doors`, `cd-pasteons`, `cd-area-links`, `cd-occlusion`).
+
 
 `cd-view-slots`: confirm that the `.SCR` companion tables are view-slot tables
 (slot → frame, x, y) by tracing the draw loop that reads the level name table

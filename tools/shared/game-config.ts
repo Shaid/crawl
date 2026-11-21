@@ -388,9 +388,16 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['crystaldragon/amiga'],
       executable: undefined,
       expectedFiles: ['data/Crystal_Dragon'],
-      supported: false,
+      supported: true,
       assetDir: 'crystaldragon',
       features: {},
+
+      async buildAssets() {
+        // SF level maps + SA .SCR sets (codecs ported from Crystal_Dragon `Unpack`) -> walker data.
+        const { exportWalker } = await import('../crystaldragon/amiga/export-walker.ts');
+        const w = exportWalker();
+        console.log(`  crystaldragon/amiga walker: ${w.levels} levels, ${w.areas} areas, ${w.sets} sets`);
+      },
     }],
   },
   {

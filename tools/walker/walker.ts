@@ -58,6 +58,7 @@ import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
 import { loadEotb3View, eotb3LevelList } from './games-eotb3.ts';
 import { loadAp2View, ap2LevelList } from './games-abandonedplaces2.ts';
 import { loadAp1View, ap1LevelList } from './games-abandonedplaces.ts';
+import { loadCrystalDragonView, crystalDragonLevelList } from './games-crystaldragon.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
 import {
   loadPoolOfRadianceView,
@@ -398,6 +399,7 @@ const GAMES = [
   { id: 'ishar3', label: 'Ishar 3', loader: loadIshar3View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
+  { id: 'crystaldragon', label: 'Crystal Dragon', loader: loadCrystalDragonView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'waxworks', label: 'Waxworks', loader: loadWaxworksView, defaultLevel: 4, platform: 'amiga' as const },
   { id: 'elvira2', label: 'Elvira II: The Jaws of Cerberus', loader: loadElvira2View, defaultLevel: 0, platform: 'amiga' as const },
@@ -434,6 +436,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   waxworks: 'one pre-composed picture per room and facing: the game\'s own room scripts + VC draw scripts replayed offline (360 maze rooms of the 15 shared-graphics zones + 1,000 more rooms in 5 worlds); room graph, exits and door states from gameamiga (2,890/2,890 exits reciprocal). Left/right turn direction, compass names, object-gated pictures (default state shown), animated sprites and closed/locked doors are not implemented -- docs/waxworks/TODO.md',
   elvira2: 'one pre-composed picture per room and facing (the game\'s own room scripts + VC draw scripts replayed offline; Waxworks pipeline): 144 ordinary rooms in 3 connected areas (exits/door states from gameamiga, 280/283 reciprocal) + the two super-room grid mazes (744: 30x30x4, 760: 20x20x6) as one level per floor, cell/facing pictures from the maze scripts (1300/1499) run by an offline interpreter. Maze walls/openings follow the real grid (cell numbers are 1-based); 22 cave rooms are linked to maze cells from the game\'s own table (sub 1286). HYPOTHESES: room 452 <-> maze 744 cell 3240 (the game\'s dev-verb entry cell), maze doors (state 2/3) and room-side doorway states treated as plain; down-state 3 treated as a pit (blocked, no fall); the room-world start is a guess; object-gated pictures show their default state, animated sprites not drawn; turn direction/compass names are conventions -- docs/elvira2/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
+  crystaldragon:
+    'SA/SF codecs byte-exact vs the game\'s own Unpack (86/86 sets); walls, pillars, floors and ceilings from the real .SCR sets + slot tables, view-cell layout, facings, face variants, step parity and palette read from Crystal_Dragon. HYPOTHESES: painter order (not the game\'s occlusion masks), open/blocked cell types, start pose, black beyond 3 cells. Not drawn: doors, stairs, teleports, barriers, wall decorations, monsters, items; stairs/teleports not followed -- docs/crystaldragon/TODO.md.',
   abandonedplaces:
     'wall pieces, draw order, backdrop parity, palette (fade-table step 15), grid flags, collision and teleports ported from the game\'s own `module` (view 0xAE3A, blits 0xD740/0xDDE4); 36 dungeon levels. Not drawn: wall-mounted objects, doors/gates, stairs art, monsters, items (closed doors do not block); forest levels unsupported; start pose of levels >1 and the view-window clip are hypotheses -- docs/abandonedplaces/TODO.md.',
   abandonedplaces2:
@@ -479,6 +483,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'ishar3') return isharLevelLists.ishar3();
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
+  if (game === 'crystaldragon') return crystalDragonLevelList(assetBase);
   if (game === 'waxworks') return waxworksLevelListFromAssets(assetBase);
   if (game === 'elvira2') return elvira2LevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
