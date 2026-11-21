@@ -196,6 +196,21 @@ extra slots. That needs the view routine traced in the exe.
   Character source art is plain ILBM (`tools/shared/ilbm.ts`, `@seer-project/iff`).
   The music is MMD0 (OctaMED; Black Crypt's `bcdfq` also uses OctaMED).
 
+
+> **Update (2026-11-21):** the DMA development archive is now on disk at
+> `data/hiredguns/devarchive/` (gitignored): Internet Archive item
+> `hired-guns-cd-32-dev-files` ("Hired Guns Amiga CD32 Beta and Development Files",
+> uploaded 2021-07-21, public-domain mark), files `HiredGunsCD32_DevFiles.tar.xz`
+> (sha1 `621d17bf34a9d60387dc5f6b529efc4058e05c12`) and `HiredGunsCD32_Beta.iso`
+> (sha1 `cc44afbe5b637256bbf3bddbbf53f3a2a0e20131`), both matching the item's own
+> checksums, extracted under `extracted/HiredGunsCD32_DevFiles/`. It holds the game's
+> `Sources/` (≈300 `.s`/`.i`/`.c` files), `MapEditor/` and `Maps/`.
+> `MapEditor/HGmapstructure.h` defines `MAP_HEIGHT 20`, `MAP_WIDTH 23`, `MAP_DEPTH 23`,
+> `FLOOR_SIZE 529` and the per-cell bitfields (floor, block, water, panel, explosion,
+> variant, aux) — independent confirmation of the grid shape above. It is the
+> unreleased CD32 build, so treat it as a strong guide, not proof, for the floppy
+> retail files.
+
 ## Paths tried — packer (`CharactersGfx` / `MonstersGfx`)
 
 | Approach | Result | Why it failed |
