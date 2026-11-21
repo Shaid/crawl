@@ -2,8 +2,9 @@
  * Abandoned Places 2 (Amiga): walker data. Emits to public/assets/abandonedplaces2/amiga/walker/:
  *   tables.json      view/slot tables read from the unpacked `main` (HUNK offsets = code offsets)
  *   levels.json      28 levels: theme, palette set, per-family tileset names, cells, decor/gate/stairs lists
- *   res/<base>.json  per-triplet record images (indexed, padded to 8*bytesPerRow, 255 = transparent)
- *   pal/set_NN.json  32-entry palettes
+ *   res/<base>.json  per-triplet record images as SCREEN values 0..63 (image planes remapped the way the
+ *                    game's view-buffer descriptors do it; padded to 8*bytesPerRow, 255 = transparent)
+ *   pal/set_NN.json  64-entry screen palettes: set_NN[0..15] + display.clr[16..31] + EHB halves (§5.1)
  *   npx tsx tools/abandonedplaces2/amiga/export-walker.ts
  * Spec: docs/abandonedplaces2/amiga/data-structure.md §6 (renderer).
  */
@@ -12,6 +13,7 @@ import { resolve } from 'node:path';
 import { assetRoot, writeJson } from '../../shared/asset-paths.ts';
 import { decodeRecord, parseDef, readClr } from '../../shared/artgame-tileset.ts';
 import { unpackAll } from '../../abandonedplaces/unpack.ts';
+import { planeMapFor, screenPalette, toScreenIndex } from './screen-palette.ts';
 
 const GAME = 'abandonedplaces2';
 const PLATFORM = 'amiga';
@@ -100,19 +102,23 @@ export function exportWalker(): { levels: number; res: number } {
   for (const base of needed) {
     if (base.startsWith('set:')) {
       const nn = base.slice(4).padStart(2, '0');
-      const pal = readClr(new Uint8Array(readFileSync(resolve(cache, `set_${nn}.clr`))));
+      const pal = screenPalette(
+        readClr(new Uint8Array(readFileSync(resolve(cache, `set_${nn}.clr`)))),
+        readClr(new Uint8Array(readFileSync(resolve(cache, 'display.clr')))),
+      );
       writeJson(resolve(root, 'pal', `set_${nn}.json`), pal.map((c) => [c.r, c.g, c.b]), false);
       continue;
     }
     const bpl = new Uint8Array(readFileSync(resolve(cache, `${base}.bpl`)));
     const ofsP = resolve(cache, `${base}.ofs`);
     const recs = parseDef(new Uint8Array(readFileSync(resolve(cache, `${base}.def`))), existsSync(ofsP) ? new Uint8Array(readFileSync(ofsP)) : null, bpl.length);
+    const map = planeMapFor(base);
     const out = recs.map((r) => {
       if (r.empty || r.offset + r.planeSize * (r.planes + (r.hasMask ? 1 : 0)) > bpl.length) return null;
       const pw = r.bytesPerRow * 8;
       const img = decodeRecord(bpl, { ...r, w: pw });
       const pix = new Uint8Array(pw * r.h);
-      for (let i = 0; i < pix.length; i++) pix[i] = img.mask && !img.mask[i] ? 255 : img.indices[i] & 31;
+      for (let i = 0; i < pix.length; i++) pix[i] = img.mask && !img.mask[i] ? 255 : toScreenIndex(img.indices[i] & 31, map);
       return { w: r.w, h: r.h, pw, x: r.x, y: r.y, fw: r.frameW, fh: r.frameH, masked: r.hasMask, pix: b64(pix) };
     });
     writeJson(resolve(root, 'res', `${base}.json`), { recs: out }, false);

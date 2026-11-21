@@ -3,7 +3,8 @@
  * `tools/abandonedplaces2/amiga/view-model.ts` (192x135 indexed view) via `renderCanvas`.
  * Confidence: map, collision rules, wall/decoration/pit/stairs/gate placement are read from the
  * game's own tables (spec section 6). NOT drawn: monsters, items, objects, chests, water, fire,
- * switches. Palette indices 12-15 are shown raw from set_NN.clr (hypothesis; TODO ap2-image-palettes).
+ * switches. Palette: 64-entry screen palette (set_NN 0-15, display.clr 16-31, EHB 32-63); the exporter
+ * stores pixels as screen values after the game's view-buffer plane remap (screen-palette.ts, spec §5.1).
  * Stairs are not followed between levels yet.
  */
 import type { KeyStateLike, Pose, DrawItem, RGBAColor, PieceBankLookup } from '@seer-project/dungeon';

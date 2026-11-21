@@ -167,6 +167,12 @@ their mask). The slot destination tables are decoded: see §6.
   NN < 8, else `set_00`. Indices 12–15 of the set palettes are a lime→teal ramp; walls
   render with lime speckle that is probably a per-depth/torch ramp rewritten at run time
   (cf. Black Crypt COLOR26–31). Tracked as `ap2-image-palettes`.
+> **Correction (2026-11-21, palette pass):** both palette hypotheses above are replaced by §5.1. Colours
+> 16–31 really are `display.clr[16..31]` (now confirmed from code), but 5-plane dungeon images do **not**
+> index them: their 5th plane is the EHB half-bright plane. And the lime→teal "ramp" 12–15 is not a
+> runtime ramp — wall pixels never reach those registers, because a 4-plane wall's plane 3 is the EHB
+> plane too. Wall value 12 shows as half-bright colour 4 (`555`→`222`), 14 as half-bright 6.
+
 - **In-game checks (user):** (1) a first-person corridor view in dungeon 0 (set 00): wall
   front/side tints at each depth, floor/ceiling colours and whether the lime pixels are
   real; (2) a corridor in a level using another set (e.g. set 03, whose palette is the
@@ -174,6 +180,49 @@ their mask). The slot destination tables are decoded: see §6.
   range for the true monster colours; (4) a door/gate (`gt_`), stairs (`strd_`/`stru_`),
   a pit and an on-wall decoration to confirm slot placement against `slotX/slotY`
   (x offset inside the frame, y measured from the top of the 135-row view).
+
+### 5.1 Screen palette and plane remap (2026-11-21) — **confirmed** (code), **rendered**
+
+Offsets are hunk offsets in `main` (= file offset − 0x20). Code: `tools/abandonedplaces2/amiga/screen-palette.ts`.
+
+- **The screen is 6 planes, EHB.** One copper list for the game (`+0x14E80`, copied by `+0x3C3E`):
+  BPLCON0 = `0x6200` (6 planes, no HAM, no dual playfield = Extra Half-Brite), interleaved (BPL1MOD 200),
+  no mid-screen WAITs (the list ends after the 32 colour MOVEs). So screen values 32–63 show colour
+  `v−32` with each 4-bit gun shifted right by one.
+- **Colour registers 0–31 = buffer `$5346`.** The startup loader (names `+0x168B6`, destinations `+0x16A66`)
+  reads `display.clr` into `$5346`. The level loader (`+0x12396`, theme → set via `+0x17088`) reads
+  `set_NN.clr` into `$5342` (or `$534E` for levels ≥ 28). `+0x47E4` copies **16 words** `$5342 → $5346`
+  (`move.w #15,d0` loop), then `+0x486E` fades from black to `$5346` (`+0x4944`, linear, `+0x13E24`;
+  the last step equals the target). Copper colours are written only by `+0x5848` (from `$5346`/`$534A`).
+  Result: **0–15 = `set_NN[0..15]`, 16–31 = `display.clr[16..31]`**; `set_NN[16..31]` is never shown in
+  the dungeon. No code rewrites individual registers (every reference to `$5342/$5346/$534A/$534E` and
+  every `$DFF18x` write checked; the four `move.w d0,$DFF180` are debug flashes).
+- **Images are drawn through view-buffer descriptors with swapped plane pointers.** Bitmap descriptors
+  (`$628E` table, 0x2C B each, selected by `+0x56F6`) hold a plane-pointer list at +0x14; the blitter
+  `+0x5F6E` writes image plane *k* through pointer slot *k* and fills the remaining slots under the mask
+  from def word 9 (0 for every dungeon family). The set-up code swaps pointers right after building three
+  192×135×6 view descriptors over the same buffer:
+
+  | Descriptor | Swap | Set-up | Used by |
+  |---|---|---|---|
+  | 4 | slots 3 ↔ 5 | `+0x3A84` | walls `+0x7D2C`, floor/ceiling `+0x7282`, pits `+0x68EE/+0x6928`, ceiling objects `+0x6A34`, gates `+0x6B14`, stairs `+0x6CC6`, `+0x6D4C`, `+0x6E1E`, `+0x6E88` |
+  | 8 | slots 4 ↔ 5 | `+0x3AE4` | on-wall decorations `+0x6C4C`, `+0x6E9A` |
+  | 9 | slots 4 ↔ 5 | `+0x3B44` | water `+0x68B2`, chests `+0x6962`, fire `+0x699C`, monsters `+0x70CA`, `+0x6FA0/+0x700E/+0x71C0` |
+  | 2 | none | `+0x3972` | the same buffer, used to copy the finished view to the screen |
+
+  So a 4-plane wall/floor/pit/gate/stairs/object value *v* lands on screen as `(v & 7) | (v & 8 ? 32 : 0)`
+  (values 8–15 = half-bright 0–7), and a 5-plane monster/decoration/chest/fire value as
+  `(v & 15) | (v & 16 ? 32 : 0)` (values 16–31 = half-bright 0–15).
+- **Evidence beyond the code:** `onwl_00` uses values 0–6 and 18–22 = the wall greys and their half-bright
+  copies, and renders as a shaded stone wall; the `mon_00` skeleton uses 7–11 (`set_00`'s tan ramp) and
+  22–27 (its halves) and renders as one coherent bone ramp; level-0 corridors are grey stone with depth
+  shading. The old pipeline (raw `set_00` + `display.clr[16..31]`) put 17–50 % lime/teal on walls and
+  orange/blue on the skeleton. Pinned by `tools/walker/__tests__/games-abandonedplaces2.test.ts`
+  (byte signatures of the swaps/BPLCON0/16-word copy, plus a no-lime check with a raw-palette null control).
+- **Exports:** the walker's `pal/set_NN.json` is now the 64-entry screen palette and `res/*.json` stores
+  screen values; the atlases under `sprites/` are rendered the same way. UI-only images (`items`, `icons`,
+  `fspells`, fonts, `menu`, `dispadd`, `plheads`, `pleffect`) keep the identity plane map — their
+  in-inventory draw descriptors are not traced (`ap2-ui-palettes`).
 
 ## Open families — paths tried
 
@@ -258,7 +307,7 @@ Facing: 0 = north (−y), 1 = east, 2 = south, 3 = west; step deltas at `+0x115C
 ### 6.4 Paths tried / honesty
 | Item | Result |
 |---|---|
-| Palette indices 12–15 (lime/teal in `set_00`) | wl records use 12/14 for 17–50 % of pixels (far walls mostly 14); no routine found that rewrites them (the `$3584` writes are UI rectangles, not colours). Still `ap2-image-palettes`. |
+| Palette indices 12–15 (lime/teal in `set_00`) | wl records use 12/14 for 17–50 % of pixels (far walls mostly 14); no routine found that rewrites them (the `$3584` writes are UI rectangles, not colours). Still `ap2-image-palettes`. **Solved 2026-11-21 (§5.1):** nothing rewrites them — walls never index them; plane 3 of a wall is the EHB plane (view descriptor 4 swaps plane pointers 3↔5). |
 | Level 0 (16,12) N "scrambled" front wall (2026-11-21 re-check) | Not a renderer bug: slot 33 (kind 2, id 0/0, parity flip) draws `wl_00[0]` flipped, 16100/16100 pixels match; neighbours (15,11)/(17,11) draw the same record unflipped, so mirrored seams + `set_00` lime/teal 12/14 speckle make the stone look noisy. Level 2 (11,2) N draws a coherent stone wall. |
 | Level 13 (16,17) N black band | Not a bug: every standard `fl_NN` image has an all-index-0 horizon band (rows 38–63); with 8 open cells ahead nothing covers it. |
 | IRA on `main` | `ReadSymbol error` on this HUNK; used a flat-image r2 sweep (entry +0x1B0). |

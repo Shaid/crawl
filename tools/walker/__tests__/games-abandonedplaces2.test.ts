@@ -7,6 +7,7 @@ import {
 } from '../../abandonedplaces2/amiga/view-model.ts';
 import { stepPose } from '../games-abandonedplaces2.ts';
 import { parseLevel } from '../../abandonedplaces2/amiga/export-walker.ts';
+import { halfBright, planeMapFor, screenPalette, toScreenIndex } from '../../abandonedplaces2/amiga/screen-palette.ts';
 
 function synth(w: number, h: number, set: (x: number, y: number) => Partial<Record<number, number>>): ApLevel {
   const cells = new Uint8Array(w * h * 8);
@@ -126,5 +127,62 @@ describe.skipIf(!have)('AP2 real data', () => {
     cells[(15 * l13.w + 16) * 8 + 5] = 1; // wall 2 cells ahead of (16,17)
     const walled = renderView({ ...l13, cells }, tables, th, 16, 17, 0 as Facing);
     expect(Array.from({ length: 26 }, (_, i) => walled[(38 + i) * VIEW_W + 96]).filter((v) => v !== 0).length).toBeGreaterThan(20);
+  });
+});
+
+describe('AP2 screen palette: plane remap + EHB (spec §5.1)', () => {
+  it('desc 4 sends image plane 3 to the EHB plane; desc 8/9 send plane 4 there', () => {
+    expect(toScreenIndex(12, 'desc4')).toBe(32 + 4);
+    expect(toScreenIndex(14, 'desc4')).toBe(32 + 6);
+    expect(toScreenIndex(7, 'desc4')).toBe(7);
+    expect(toScreenIndex(22, 'desc8')).toBe(32 + 6);
+    expect(toScreenIndex(12, 'desc8')).toBe(12);
+    expect(toScreenIndex(22, 'identity')).toBe(22);
+    expect(planeMapFor('wl_00')).toBe('desc4');
+    expect(planeMapFor('mon_17')).toBe('desc8');
+    expect(planeMapFor('items')).toBe('identity');
+  });
+  it('64-entry palette: set 0-15, display 16-31, half-bright on the nibble', () => {
+    const c = (n: number) => ({ r: ((n >> 8) & 15) * 17, g: ((n >> 4) & 15) * 17, b: (n & 15) * 17 });
+    const set = Array.from({ length: 32 }, (_, i) => c(i === 5 ? 0x777 : 0x111 * (i & 15)));
+    const disp = Array.from({ length: 32 }, () => c(0xf00));
+    const p = screenPalette(set, disp);
+    expect(p.length).toBe(64);
+    expect(p[5]).toEqual(c(0x777));
+    expect(p[16]).toEqual(c(0xf00)); // set_NN[16..31] never reaches the screen
+    expect(p[32 + 5]).toEqual(c(0x333)); // 7>>1 = 3, not round(0x77/2)
+    expect(halfBright(c(0xf00))).toEqual(c(0x700));
+  });
+});
+
+const MAIN = resolve('build/cache/abandonedplaces2/main');
+describe.skipIf(!have || !existsSync(MAIN))('AP2 screen palette (real data)', () => {
+  const main = new Uint8Array(readFileSync(MAIN)).subarray(0x20);
+  const hex = (a: number, n: number) => Buffer.from(main.subarray(a, a + n)).toString('hex');
+  it('main carries the facts the remap rests on', () => {
+    expect(hex(0x14e90, 4)).toBe('01006200'); // copper BPLCON0: 6 planes, no HAM/DPF = EHB
+    expect(hex(0x3a8c, 16)).toBe('2028000c222800142141000c21400014'); // desc 4: swap plane ptr 3 <-> 5
+    expect(hex(0x3aec, 16)).toBe('20280010222800142141001021400014'); // desc 8: swap 4 <-> 5
+    expect(hex(0x3b4c, 16)).toBe('20280010222800142141001021400014'); // desc 9: swap 4 <-> 5
+    expect(hex(0x47e4, 12)).toBe('207a0b5c227a0b5c303c000f'); // $5342 -> $5346, 16 words only
+  });
+  it('level 0 corridor has no lime/teal speckle; the old raw set_00 lookup would (null control)', () => {
+    const levels = J('levels.json');
+    const lv = decodeLevel(levels[0]);
+    const th = { res: Object.fromEntries(resNamesFor(lv).map((n) => [n, decodeRes(J(`res/${n}.json`))])) };
+    const pal = J('pal/set_00.json') as [number, number, number][];
+    expect(pal.length).toBe(64);
+    const px = renderView(lv, J('tables.json'), th, 2, 1, 1 as Facing);
+    const greenish = ([r, g, b]: [number, number, number]) => g - r > 40 && g >= b;
+    const share = (look: (v: number) => [number, number, number]) => Array.from(px).filter((v) => greenish(look(v))).length / px.length;
+    expect(share((v) => pal[v])).toBe(0);
+    // Undo the desc-4 remap and look the image value up in raw set_00.clr, as the old exporter did.
+    const raw = new Uint8Array(readFileSync(resolve('build/cache/abandonedplaces2/set_00.clr')));
+    const rawPal = Array.from({ length: 32 }, (_, i) => {
+      const w = (raw[i * 2] << 8) | raw[i * 2 + 1];
+      return [((w >> 8) & 15) * 17, ((w >> 4) & 15) * 17, (w & 15) * 17] as [number, number, number];
+    });
+    const unmap = (v: number) => (v & 7) | (v & 32 ? 8 : 0) | (v & 16);
+    expect(share((v) => rawPal[unmap(v)])).toBeGreaterThan(0.1);
   });
 });

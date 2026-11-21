@@ -13,6 +13,7 @@ import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex, 
 import { checkGeometry, decodeRecord, imageToRGBA, parseDef, readClr } from '../../shared/artgame-tileset.ts';
 import { unpackAll } from '../../abandonedplaces/unpack.ts';
 import type { RGB } from '../../shared/amiga-planar.ts';
+import { planeMapFor, screenPalette, toScreenIndex, type PlaneMapName } from './screen-palette.ts';
 
 const GAME = 'abandonedplaces2';
 const PLATFORM = 'amiga';
@@ -22,7 +23,7 @@ const FAMILY_LABEL: Record<string, string> = {
   gt: 'gates/doors', pit: 'pits', swg: 'switch-g', swp: 'switch-p', sww: 'switch-w', obj: 'objects', mon: 'monsters',
 };
 
-export interface PaletteChoice { name: string; rgb: RGB[]; basis: string }
+export interface PaletteChoice { name: string; rgb: RGB[]; basis: string; map: PlaneMapName }
 
 function readPal(cache: string, name: string): RGB[] | null {
   const p = resolve(cache, `${name}.clr`);
@@ -30,11 +31,12 @@ function readPal(cache: string, name: string): RGB[] | null {
 }
 
 /**
- * Palette for a triplet. Dungeon-set families take `set_NN.clr` (indices 0–15); 5-plane images
- * additionally index 16–31, which the set palettes leave (almost) black, so those take the
- * shared UI half of `display.clr`. The second half is a hypothesis (see spec §5).
+ * Palette for a triplet, as a 64-entry SCREEN palette (spec §5.1, `screen-palette.ts`): colours 0-15
+ * from `set_NN.clr`, 16-31 from `display.clr` (the game copies only set words 0-15 into the live
+ * palette), 32-63 the EHB half-bright copies. Dungeon families are remapped to screen values with
+ * their view-buffer plane map before lookup (walls: plane 3 = EHB plane; monsters/decor: plane 4).
  */
-export function choosePalette(cache: string, base: string, planes: number): PaletteChoice {
+export function choosePalette(cache: string, base: string, _planes: number): PaletteChoice {
   const m = /^([a-z]+)_(\d\d)$/.exec(base);
   const display = readPal(cache, 'display') ?? [];
   let low: RGB[] | null = null;
@@ -47,13 +49,9 @@ export function choosePalette(cache: string, base: string, planes: number): Pale
     else if (direct && nn < 8) { low = direct; name = `set_${m[2]}`; basis = 'set-number-matches-index'; }
   }
   if (!low) { low = readPal(cache, 'set_00')!; basis = 'fallback-set_00-unconfirmed'; name = 'set_00'; }
-  const rgb = low.slice(0, 16);
-  if (planes > 4) {
-    const hi = base === 'items' || !m ? display : display; // shared UI palette half
-    for (let i = 16; i < 32; i++) rgb[i] = hi[i] ?? { r: 0, g: 0, b: 0 };
-    basis += '+display.clr[16..31]';
-  }
-  return { name, rgb, basis };
+  const map = planeMapFor(base);
+  basis += `+display.clr[16..31]+EHB; planes ${map}`;
+  return { name, rgb: screenPalette(low, display), basis, map };
 }
 
 function exportTriplet(cache: string, base: string, outSprites: string, outData: string): ManifestEntry | null {
@@ -72,7 +70,8 @@ function exportTriplet(cache: string, base: string, outSprites: string, outData:
   for (const slot of packed.frames) {
     const idx = Number(slot.name.split('.').pop());
     const r = recs[idx];
-    const rgba = imageToRGBA(decodeRecord(bpl, r), pal.rgb);
+    const img = decodeRecord(bpl, r);
+    const rgba = imageToRGBA({ ...img, indices: img.indices.map((v) => toScreenIndex(v, pal.map)) }, pal.rgb);
     for (let y = 0; y < r.h; y++) atlas.set(rgba.subarray(y * r.w * 4, (y + 1) * r.w * 4), ((slot.y + y) * packed.width + slot.x) * 4);
     frames.push({
       name: slot.name, index: idx, x: slot.x, y: slot.y, w: r.w, h: r.h,
