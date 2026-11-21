@@ -68,7 +68,9 @@ absolute `$70E`. `ancient identify` rejects all of them as unknown
 
 ### `SF` codec — decoded (confirmed structural)
 
-A probe port of `+0x5F2…+0x708` (scratch `probe/sf.py`, not committed) decodes
+> **Update (2026-11-21):** committed as `scripts/cdlib/sf.py` (`unsf`, plus `file_name`/`level_id`/`level_of_id`); `scripts/extract_cd_sf.py` dumps all 31 to `build/cache/crystaldragon/`; tests `scripts/cdlib/test_sf.py` (31/31 header size, 0 left over; null controls: flipped byte 31/31 differ or error, payload shifted by one byte 31/31 differ or error, extra byte at the decode start 31/31 differ or error). Note: dropping the *last* payload byte still decodes identically on 16/31 files with 0 left over, so the first-read byte can be redundant — the exact-consumption check constrains the stream front, not that byte.
+
+A probe port of `+0x5F2…+0x708` decodes
 **31/31** `SF` files to exactly the header's unpacked size. In every one the
 backward reader consumes **exactly** the packed payload, with 0 bytes left over.
 That double-exact invariant would not hold under a wrong bit grammar.
@@ -104,8 +106,9 @@ level `cc`:
 | `0x0000` | 27 × 32 | Graphic-set name table: NUL-padded 32-byte slots. Some slots are empty. `WALL1.SCR`, `pillar1.scr`, `FLOOR1.1-3.SCR`, `CEILING1.1-2.SCR`, `DOORFRAME1.1.SCR`, `DOOR1-3.SCR`, `DOOR4.1.SCR`, `STAIRS1.SCR`, `BARRIER.SCR`, `TELEPORT.SCR`, `PASTEONS.WALL1/FLOOR1.1/DOOR1.1.SCR`, `LOCKS.SCR`. The slot order varies per level (`14a` inserts `SPWALL2.SCR`). The exe holds a default copy at hunk 0 `+0x23390` | rendered |
 | `0x0360` | ~10 | small flag block (`0000 ff04 00c4 0901 07e3` in `cc`; varies) | hypothesis |
 | `0x0B00`–`0x2B00` | | 32-byte records (`0b01 1700 …`, `0c02 …`, `1018 …`); probably the object, door and event lists | hypothesis |
-| `0x3128` | 8 words | level header. The last two words (`+0x3134`, `+0x3136`) = (rows?, **width**) — `cc` (33, 47). The width matches the autocorrelation-best stride on about 12 of 23 levels, but not all (`d5` hdr 18 vs best 21; `102` 30 vs 60; `14a` 66 vs 64) | hypothesis |
-| `0x3140` | 0x8000 | **Map grid: up to 64×64 cells × 8 bytes, row-major.** The region ends exactly at `0xB140`, where the next block starts | rendered (below) |
+| `0x3000`–`0x313E` | | **Region table**: 12-byte records `[off, H, W, y0, x0, id]` (BE words, `y0`/`x0` signed) stored just *before* the base word at `0x313E`, read backward from it; `0x313E` holds the record count minus 1 (one extra all-zero record is read and skipped). Hunk 0 `+0xC1C6…+0xC1F8` | **confirmed** (below) |
+| `0x313E` | 2 | Grid base word (count) = `0x6E8(A5)`: `0x990(A5)` + `0x2DDE` with the block copied from `+0x360` (loader `+0x3D2E`; allocation `+0x2FF8`) | confirmed |
+| `0x3140` + … | up to `0x8000` | **Map grid**: each region is a `W×H` row-major array of 8-byte cells at byte `0x313E + off` (first region `off=2` = `0x3140`). Cell address `((y-y0)*W + (x-x0))*8 + off` (`+0xC4FE`) | **confirmed** |
 | `0xB140` | ~0x150 | level tail: `00ff ffff …`, then a word table (`0x32`/`0x64`/`0x3C` values; probably monster or level stats) | hypothesis |
 
 **Cell record (8 bytes):** word 0 = cell type and flags; words 1–3 are mostly
@@ -126,13 +129,15 @@ corridors, door pairs, and a solid `#` border with no shear for 33+ rows (see
 the TODO evidence; reproduce with the probe). Other levels shear at their
 header width, so the true width/height source is still open.
 
+> **Correction (2026-11-21):** the "single 64×64 grid, width from header `+0x3136`" model was wrong. A level is **several regions** (sub-maps, e.g. `cc` = 47×33 + 16×9 + 3×3) packed back to back in the 32 KB grid, each with its own `W`,`H`; the old "header (rows,width)" was just the *last* region's `H,W`, which is why it fitted ~half the levels. Evidence: `scripts/cdlib/level.py`, `scripts/cdlib/test_level.py` — over 23/23 levels (83 regions, widths 3…66, `H` up to 91) the regions tile from `off=2` with **0 bytes of gap**, each ending exactly at the next offset; changing any non-last region's width by 1 breaks the tiling (null control, all regions). Cell type is `word0 & 7` (`+0xC8C8`/`+0xC4FE`: 5 = wall, bit 7 = a flag the door/blocked tests read). Quick-look renders: `scripts/render_cd_maps.py` → `build/cache/crystaldragon/maps/` (`102` renders as a clean cave system; `15c` as nested rectangles — still unconfirmed against the game, view only).
+
 ### Paths tried (grid geometry)
 
 | Approach | Result | Why it isn't enough |
 |---|---|---|
 | Fixed width 48 from `0x3140` | `cc` sheared by −1 column per row | true `cc` width is 47 |
 | Header `+0x3136` as width | `cc`, `de`, `10b`, `11d`, `12f`, `165`, `16e`, `177`, `189` coherent | `d5`, `f9`, `102`, `141`, `14a`, `192` disagree with autocorrelation. Either a different field holds the width or rows are padded |
-| Lag autocorrelation of `word0` | picks 47 for `cc`, matches the header on about half the levels | not an oracle; need the game's grid-index code (`y*W+x` with a `MULU` by a stored width) |
+| Lag autocorrelation of `word0` (superseded, see Correction above) | picks 47 for `cc`, matches the header on about half the levels | not an oracle; need the game's grid-index code (`y*W+x` with a `MULU` by a stored width) |
 
 ## `.SCR` graphic sets — `SA` files + companion slot tables
 
