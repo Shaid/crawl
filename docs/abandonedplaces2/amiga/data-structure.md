@@ -259,6 +259,8 @@ Facing: 0 = north (−y), 1 = east, 2 = south, 3 = west; step deltas at `+0x115C
 | Item | Result |
 |---|---|
 | Palette indices 12–15 (lime/teal in `set_00`) | wl records use 12/14 for 17–50 % of pixels (far walls mostly 14); no routine found that rewrites them (the `$3584` writes are UI rectangles, not colours). Still `ap2-image-palettes`. |
+| Level 0 (16,12) N "scrambled" front wall (2026-11-21 re-check) | Not a renderer bug: slot 33 (kind 2, id 0/0, parity flip) draws `wl_00[0]` flipped, 16100/16100 pixels match; neighbours (15,11)/(17,11) draw the same record unflipped, so mirrored seams + `set_00` lime/teal 12/14 speckle make the stone look noisy. Level 2 (11,2) N draws a coherent stone wall. |
+| Level 13 (16,17) N black band | Not a bug: every standard `fl_NN` image has an all-index-0 horizon band (rows 38–63); with 8 open cells ahead nothing covers it. |
 | IRA on `main` | `ReadSymbol error` on this HUNK; used a flat-image r2 sweep (entry +0x1B0). |
 
 ### 6.5 What transfers to AP1 (hypothesis, not checked)
