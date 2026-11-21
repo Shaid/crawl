@@ -79,6 +79,8 @@ export interface MapDefinition {
 }
 
 export interface Square {
+  /** Raw square byte: type<<5 | hasObject<<4 | attr. */
+  raw: number;
   type: SquareType;
   hasObject: boolean;
   /** Raw low nibble (type-dependent attribute bits) — see the doc for per-type meaning. */
@@ -222,7 +224,7 @@ function parseMapDefs(d: Uint8Array, count: number): MapDefinition[] {
 
 function decodeSquare(byte: number): Square {
   const type = SQUARE_TYPES[(byte >> 5) & 0x7];
-  return { type, hasObject: ((byte >> 4) & 1) === 1, attr: byte & 0xf };
+  return { raw: byte, type, hasObject: ((byte >> 4) & 1) === 1, attr: byte & 0xf };
 }
 
 /**
@@ -332,4 +334,74 @@ export function parseDungeon(d: Uint8Array): ParsedDungeon {
   }
 
   return { header, maps, mapDataOffset, hasChecksum, checksum, forwardTilingExact, mapOffsetsMatchCursor };
+}
+
+/** Per-door info for a door square (resolved from the thing lists). */
+export interface DoorInfo {
+  /** 0/1 -> the map's doorType0Index / doorType1Index door set. */
+  type: number;
+  /** Door record attribute bit 5 (ScummVM `Door::opensVertically`). */
+  vertical: boolean;
+  /** Door record attribute bit 6 (`hasButton`). */
+  hasButton: boolean;
+  /** Door record ornament ordinal, bits 1-4. */
+  ornament: number;
+}
+
+const THING_RECORD_SIZES = [4, 6, 4, 8, 16, 4, 4, 4, 4, 8, 4, 0, 0, 0, 8, 4];
+const THING_COUNT_KEYS = [
+  'doors', 'teleporters', 'texts', 'sensors', 'creatures', 'weapons', 'armours', 'scrolls', 'potions',
+  'containers', 'misc', null, null, null, 'projectiles', 'explosions',
+] as const;
+
+/**
+ * Resolve the door record of every door square, per map: `result[mapIndex]`
+ * is `Map<y*width+x, DoorInfo>`. Walks the per-square first-thing list
+ * (`objectList`, one word per hasObject square in map/column-major order) and
+ * each square's `next` chain (word 0 of every thing record) until a door
+ * (thing type 0) is found. Thing word: cell[15:14] type[13:10] index[9:0].
+ */
+export function resolveDoors(d: Uint8Array, parsed: ParsedDungeon): Array<Map<number, DoorInfo>> {
+  const h = parsed.header;
+  const defs = parsed.maps.map((m) => m.def);
+  const sumW = defs.reduce((s, m) => s + m.width, 0);
+  const objListStart = 44 + h.mapCount * 16 + sumW * 2;
+  const textStart = objListStart + h.objectListSizeWords * 2;
+  const listsStart = textStart + h.textDataSizeWords * 2;
+  const starts: number[] = [];
+  let cur = listsStart;
+  for (let t = 0; t < 16; t++) {
+    starts.push(cur);
+    const key = THING_COUNT_KEYS[t];
+    cur += key ? h.counts[key] * THING_RECORD_SIZES[t]! : 0;
+  }
+  const out: Array<Map<number, DoorInfo>> = [];
+  let objIdx = 0;
+  for (const m of parsed.maps) {
+    const doors = new Map<number, DoorInfo>();
+    const { width, height } = m.def;
+    // object list order = column-major (see `parseDungeon`)
+    for (let x = 0; x < width; x++) {
+      for (let y = 0; y < height; y++) {
+        const sq = m.squares[y]![x]!;
+        if (!sq.hasObject) continue;
+        let thing = r16(d, objListStart + objIdx * 2, 'be');
+        objIdx++;
+        if (sq.type !== 'door') continue;
+        for (let guard = 0; guard < 64 && thing < 0xfffe; guard++) {
+          const type = (thing >> 10) & 0xf;
+          const index = thing & 0x3ff;
+          const rec = starts[type]! + index * THING_RECORD_SIZES[type]!;
+          if (type === 0) {
+            const attr = r16(d, rec + 2, 'be');
+            doors.set(y * width + x, { type: attr & 1, ornament: (attr >> 1) & 0xf, vertical: ((attr >> 5) & 1) === 1, hasButton: ((attr >> 6) & 1) === 1 });
+            break;
+          }
+          thing = r16(d, rec, 'be');
+        }
+      }
+    }
+    out.push(doors);
+  }
+  return out;
 }

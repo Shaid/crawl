@@ -4,7 +4,7 @@ import type { ParsedMap, Square } from '../dungeonmaster-dungeon.ts';
 import type { DecodedImage } from '../dungeonmaster-codec.ts';
 
 function sq(type: Square['type'], hasObject = false): Square {
-  return { type, hasObject, attr: 0 };
+  return { raw: 0, type, hasObject, attr: 0 };
 }
 
 describe('renderMapTopDown', () => {

@@ -49,6 +49,8 @@
     "ishar2:regions": "npx tsx tools/ishar2/amigaaga/regions.ts",
     "ishar3:regions": "npx tsx tools/ishar3/amigaaga/regions.ts",
     "dungeonmaster:export": "npx tsx tools/dungeonmaster/amiga/export-data.ts",
+    "dungeonmaster:walker": "npx tsx tools/dungeonmaster/amiga/export-walker.ts dm",
+    "chaosstrikesback:walker": "npx tsx tools/dungeonmaster/amiga/export-walker.ts csb",
     "chaosstrikesback:extract-adf": "npx tsx tools/chaosstrikesback/amiga/extract-adf.ts",
     "chaosstrikesback:export": "npx tsx tools/chaosstrikesback/amiga/export-data.ts",
     "dungeonmaster2:export": "npx tsx tools/dungeonmaster2/amiga/export-data.ts",

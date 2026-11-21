@@ -75,6 +75,48 @@ status icons with "FOOD WATER POISONED" text, brick and stone wall textures,
 staircases, wooden doors, torches, weapon icons, and a compass/direction
 indicator.
 
+## Viewport composition (walker, 2026-11-21)
+
+> **Correction (2026-11-21):** `Graphics.DAT` here is **DOS-numbered**, not
+> the ST/"Amiga" numbering ScummVM's non-DOS path assumes. Evidence: item
+> dims match the DOS tables (floor 78 = 224x97, ceiling 79 = 224x39, which sum
+> to the 136-row viewport; wall set 86-107; stairs 108-125; door sets 246-257
+> = 44x38 / 64x61 / 96x88 per set; pits 50-69, centre-pit widths increase
+> D3C 64 < D2C 92 < D1C 139 < D0C 170 under the +1 DOS shift). **confirmed**
+> (dimension fit across ~110 items; the ST numbering fails on item 77/86).
+
+* **Item 696 = zone layout** (`0xFC0D` magic, big-endian here): 23 ranges,
+  1,135 x 8-byte records `{type,parent,d1,d2}`; consumed bytes == item
+  length (9,176/9,176). Zones 700-749 viewport, 800-833 stairs, 850-872 pits,
+  3700-3809 door frames. Resolved by `getCoord`
+  (`tools/dungeonmaster/amiga/viewport.ts`, port of ScummVM
+  `DisplayMan::getCoord`). **confirmed** structurally; placement **rendered**.
+* Compositor: `viewport.ts` (ScummVM `engines/dm/gfx.cpp` DOS path). Draw
+  order D3L2/R2 walls, then D3 L/R/C, D2L2/R2, D2, D1, D0. Mirror parity
+  `(x+y+dir)&1` flips floor/ceiling/walls (the original's anti-tiling trick).
+  Doors: closed = zone base; vertical partial states = base+state;
+  horizontal = left base+3+state, right base+6+state (**rendered**: iron door
+  splits correctly, portcullis rises correctly). Transparent key = colour 10.
+* Map model (`model.ts`): DM's type-derived squares converted on import to
+  per-cell faces (0 open, 1 solid, 2 door edge, 3 stairs edge, 4 side of
+  door/stairs). Oracle: faces symmetric across every shared edge on 14/14 DM
+  maps, CSB 11 + 2 (the check initially caught a door/stairs ordering bug;
+  null control = a flipped face is detected). Every door square resolves to a
+  door record via the object list / `next` chain (`resolveDoors`; 14/14 maps
+  count-equal).
+* **Palette (dungeon view)** — **confirmed**: `KAOS.FTL`+0xFBC holds the
+  16-word table `0000 0666 0888 0620 00CC 0840 0080 00C0 0F00 0FA0 0C86 0FF0
+  0444 0AAA 000F 0FFF`, identical (16/16) to ScummVM's
+  `G0021_aaui_Graphic562_Palette_DungeonView[0]` (independent source); also
+  at +0x79A/+0x7BC; CSB `disk1/KAOS.FTL`+0x100A is the same. Variant 1
+  (+0xFDE) matches 15/16; variants 2-5 are stored packed and are used from the
+  prior art unverified. Rendered frames show DM's grey stone, brown stair
+  rails, grey portcullis (`build/cache/dungeonmaster/walker-frames/`).
+  Credits palette also located at `KAOS.FTL`+0xF54.
+* CSB: items 49-125, 246-257 and 696 are byte-identical to DM's
+  (80 of 749 items differ overall, none in these ranges).
+* Not drawn: see `dm1-walker-ornaments`.
+
 ## TODO
 
 See `docs/dungeonmaster/TODO.md`.

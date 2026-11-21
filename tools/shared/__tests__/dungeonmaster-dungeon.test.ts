@@ -57,7 +57,7 @@ describe('parseDungeon', () => {
     expect(map.squares).toHaveLength(4); // 4 rows
     for (const row of map.squares) {
       expect(row).toHaveLength(4); // 4 columns
-      for (const sq of row) expect(sq).toEqual({ type: 'floor', hasObject: false, attr: 0 });
+      for (const sq of row) expect(sq).toMatchObject({ type: 'floor', hasObject: false, attr: 0 });
     }
   });
 

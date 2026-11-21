@@ -365,7 +365,15 @@ it without any hardcoded offset or seed list:
 > (0x7CC6). Null control: flipping one byte inside the dungeon removes the hit.
 > The older heuristic (97 false positives with a weaker version) is retired.
 
-## Palette — open
+## Palette — dungeon view SOLVED (2026-11-21); others open
+
+> **Correction (2026-11-21):** the `KAOS.FTL`+0x79A lead below is the real
+> dungeon-view palette. The table is at +0xFBC / +0x79A (entry 0 is the
+> preceding zero word) and equals ScummVM's `G0021` palette 0 (16/16 words);
+> CSB `disk1/KAOS.FTL`+0x100A likewise. See
+> `docs/dungeonmaster/amiga/data-structure.md` § "Viewport composition". Only
+> the non-dungeon-view palettes remain open (`dm1-palette`).
+
 
 > **2026-11-18 leads (hypothesis, not yet rendered/verified):** (a) DM1
 > `KAOS.FTL` holds a run of 15-16 words at about +0x79A (`0666 0888 0620
