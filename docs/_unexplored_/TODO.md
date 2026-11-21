@@ -15,7 +15,7 @@ they're already decoded (`docs/dungeonmaster*`, `docs/chaosstrikesback`,
 |----|--------|----------|----------|---------|
 | unx-abandonedplaces | open | Recon Abandoned Places (ArtGame 1992, "plays like Dungeon Master"): mount the 5 standard `DOS\0` ADFs, inventory, find the dungeon grid and wall model | `probe-recon.md` § Per-game profiles | 2026-11-21 |
 | unx-abandonedplaces2 | open | Recon Abandoned Places 2 (ICE 1993): are the `.000`–`.003` files disk images? Same engine as AP1? | `probe-recon.md` § Per-game profiles | 2026-11-21 |
-| unx-crystaldragon | open | Recon Crystal Dragon (Magnetic Fields 1994): 221 hex-named extensionless files (index/archive pattern, unprobed) | `probe-recon.md` § Per-game profiles | 2026-11-21 |
+| unx-crystaldragon | moved | Recon done 2026-11-21: map is type-derived (64×64 × 8-B cells; type 5 wall, 1 floor, 6 door — rendered, not confirmed); view likely slot-table pieces. One unpacker, `SF` codec decodes 31/31 exactly. Open work: `docs/crystaldragon/TODO.md` | `docs/crystaldragon/amiga/data-structure.md` | 2026-11-21 |
 | unx-evilsdoom-aga | open | Recon Evil's Doom (Olympia 1996, AGA): 394 files, extensionless + `.bin`/`.dat`, 3 plain ILBMs | `probe-recon.md` § Per-game profiles | 2026-11-21 |
 | unx-hiredguns | open | Recon Hired Guns (DMA Design 1993): grid map format behind its 4 viewports; `.gfx` ×38 + character ILBMs | `probe-recon.md` § Per-game profiles | 2026-11-21 |
 | unx-liberation-cd32 | open | Recon Liberation: Captive II (CD32 1994): grid-stepped but vector-rendered (`FORM O3DG` objects, `AmSp` wall graphics, `.sty` packed) — which renderer shape is it? | `probe-recon.md` § Cross-corpus wins, § Per-game profiles | 2026-11-21 |
