@@ -82,7 +82,7 @@ Vertical links (from `i-lieux` bytes 4/5, below) all join cells at the
 | 6 | 1 | ? | values 0/1/2 (42/40/8) — hypothesis: zombie density or light |
 | 7 | 1 | flags | `00`/`FF`/`80`/`A0`; `FF` on ids 2–17 (basement), `80` mall, `A0` exterior + vehicles — looks like an area class |
 | 8 | 1 | always 0 | |
-| 9 | 1 | ? | `0x4D` on ids 72, 77, 82 only |
+| 9 | 1 | picture override | non-zero = 1-based `LIEUX.SEQ` picture used instead of the default (`0x4D` on ids 72, 77, 82) — **confirmed** (§ SEQ, picture map) |
 | 10..41 | 32 | slot table | mostly `FF`; values recur in pairs exactly 10 B apart (e.g. id 20: `+11=0x36`, `+21=0x37`) — hypothesis: object/hotspot slots, two parallel arrays |
 | 42..49 | 8 | ? | mostly 0; a few small values |
 
@@ -131,8 +131,10 @@ Compressed data: word stream, token `c`: `c & 0x8000` → copy `c & 0x7FFF`
 literal words; else → repeat the next word `c` times. Output is
 **column-major**: `4 × ceil(w/16)` word-columns of `h` words, ordered
 plane-major (`col = plane × wordsWide + x`). Bit 15 = leftmost pixel.
-Raw (storage 0) frames are `ceil(w/16) × h × 8` bytes (layout still to
-confirm on a raw frame).
+Raw (storage 0) frames are `ceil(w/16) × h × 8` bytes, laid out as
+**ST screen words: row-major, 4 interleaved plane words per 16 px**
+(confirmed 2026-11-21: the 5 raw `tetes.seq` heads and 14 raw `objet.seq`
+frames render as clean pictures; reading them column-major gives noise).
 
 Verification: compressed-token walk yields exactly `4·ceil(w/16)·h` words
 on **every** compressed frame of all 12 files (LIEUX 82/82, objet 53, z 22,
@@ -141,17 +143,60 @@ are exactly the `storage=0` frames, whose length equals `ceil(w/16)·h·8`.
 Each frame's stored length equals the gap to the next offset (LIEUX 81/81;
 last frame +26 B file padding). The plane-major column order renders all
 82 LIEUX frames as clean pictures (the interleaved order gives
-recognisable-but-shredded images — that was the null). Palette scaling
-(×36 per 3-bit step) is provisional — **rendered**, not oracle-checked.
+recognisable-but-shredded images — that was the null). 
+> **Correction (2026-11-21):** the earlier "×36 per 3-bit step" scaling was
+> provisional and wrong for the Amiga. The executable stores `PRESENT.SEQ`'s
+> and `SCREEN.SEQ`'s 16-word palettes (and the `echec`/`victoire` ones, bar
+> entry 0) with every 3-bit channel **doubled** (`n → 2n`, i.e. Amiga nibble
+> `0x0..0xE`, so ST white `777` → Amiga `EEE`); an exact 32-byte search finds
+> that scaling at `zombi+0x13BB8`-ish for both pictures and finds the raw ST
+> words nowhere (**confirmed**; null = unscaled words absent). Exporter
+> colours = `2n × 17`. LIEUX/objet/z/skins frames use the same ST palette,
+> whose entry 0 is `222` (Amiga `444`) rather than SCREEN's `111`.
+
+Committed decoder: `tools/shared/cyberpaint-seq.ts` (reusable, public format);
+exporter `tools/zombi/amiga/export-data.ts` (`npm run zombi:export`) →
+`sprites/{lieux,objet,z,skins,tetes}.png+json`, `screens/{present,screen,mask,
+button,echec,victoire}.png`, `palettes/*.json`. **Only 11 `.seq` files exist
+in the retail data** (210 frames: LIEUX 82, objet 67, z 22, skins 22, tetes 11,
+six singles), not 12. Verification (test `cyberpaint-seq.test.ts`): every
+compressed frame decodes to exactly `4·ceil(w/16)·h` words with every input
+byte consumed (comp. frames: 0 failures); raw frames match their size exactly;
+null control — starting the stream 2 bytes late — fails on **all** compressed
+frames (191/191). Palette is one per file (same 16 words in every frame).
+
 
 `LIEUX.SEQ` frame catalogue (rendered): 0–16 brick basement corridors;
 17–60 mall interiors (shops "Mac Gropak", "Opticiens Rissac", "Atari",
 "Sports 3000", "Contact Ubi Soft", escalators "Niveau 1/2/3", lifts);
 60 terrace; 61 helicopter; 62–73 car park (grass, walls); 74–77 vehicle
 views (truck cab, truck "Marché transport", car); 78–79 binocular masks;
-80–81 zombie horde. 78 location pictures for 90 location records → the
-id→picture map is **not** identity for the car park (24 cells, ~12
-pictures) — the table is probably in the executable (open).
+80–81 zombie horde. 
+
+### Location id → picture (solved from the executable, 2026-11-21)
+
+`LAB_0139` (`zombi` S_0 `+0x2B72`, opens `lieux.seq` via `25282(A4)`)
+loads frame `n−1` for a **1-based picture number `n`** (offset table
+`25140(A4)[n−1]`). The per-location picture number is built in `LAB_0275`
+(`+0x5088`) and kept at `25085(A4)`:
+
+1. start with the location id (1-based; `i-lieux` is read as ids 1..90
+   into 65-byte memory records at `18716(A4)`, file record `id−1`);
+2. an 18-entry id table at `+0x50B4` remaps the car park: 71→`0x46`;
+   72–74→`0x47`; 75,76→`0x48`; 77–81→`0x49`; 82–86→`0x4A` (ids 62 and 34
+   take special branches but keep their own number, 62 = helicopter);
+3. ids 87–89 → `0x4B`, id 90 → `0x4C` (vehicle views, `+0x5F4A`..`+0x5F7A`);
+4. **`i-lieux` record byte 9, when non-zero, overrides** (`LAB_0284`
+   `+0x51C8`) — this is what the `0x4D` on ids 72, 77, 82 is (picture 77,
+   frame 76).
+
+So 24 car-park cells share 12 pictures (frames 62–73, 76), exactly as the
+exit pattern suggests. Table emitted as `data/location-pictures.json`
+(`frames[id−1]`, 77 distinct frames). Other fixed calls: `LAB_0139(62)` at
+start (helicopter), `81` (horde), `71`/`78` (`+0x4760`/`+0x476C`, frames 70/77).
+Confidence: **confirmed from code**; not yet cross-checked against live play.
+`i-lieux` bytes 10..41 are read as four 10-byte pieces into memory
+offsets 22/33/44/55 (`+0x0626`..), with +10..21 filled at run time.
 
 ## i-objets (hypothesis)
 

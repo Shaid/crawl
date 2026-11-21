@@ -427,9 +427,14 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['zombi/amiga'],
       executable: undefined,
       expectedFiles: ['data/zombi'],
-      supported: false,
+      supported: true,
       assetDir: 'zombi',
       features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { exportZombiData } = await import('../zombi/amiga/export-data.ts');
+        await exportZombiData(dataDir);
+      },
     }],
   },
   {
