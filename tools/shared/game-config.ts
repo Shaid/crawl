@@ -457,6 +457,28 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'waxworks',
+    displayName: 'Waxworks',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['waxworks/amiga'],
+      executable: undefined,
+      expectedFiles: ['data/gameamiga'],
+      supported: true,
+      assetDir: 'waxworks',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { resolve } = await import('node:path');
+        const files = resolve(dataDir, 'data');
+        const { exportWaxworksData } = await import('../waxworks/amiga/export-data.ts');
+        await exportWaxworksData(files);
+        const { exportWaxworksMaze } = await import('../waxworks/amiga/export-maze.ts');
+        await exportWaxworksMaze(files);
+      },
+    }],
+  },
+  {
     id: 'bardstale1',
     displayName: "The Bard's Tale: Tales of the Unknown",
     platforms: [{

@@ -324,7 +324,7 @@ so ScummVM is a valid reference for all of them.
   ScummVM's `amigaWaxworksOffs` sub-tune offsets (`res_snd.cpp:350-379`).
   Song names present ("elvira loader", "catacombs", "pyramid-theme").
   Extractor pending (`*-tune-music`).
-- **`gameamiga` is the game database, not the AmigaOS executable.** It is
+- **`gameamiga` is the game database, not the AmigaOS executable** (decoded for Waxworks + Elvira II 2026-11-21: `docs/waxworks/amiga/data-structure.md` §5). It is
   `GAME_BASEFILE` (`res.cpp:107-145,183-209`, `loadGamePcFile` /
   `allocGamePcVars`); headers carry the "runtime database" marker `0x80`
   (Elvira 1 `36b 80 … 2b1`, Elvira II `355 80 … 45c`, Waxworks

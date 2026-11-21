@@ -74,6 +74,7 @@ import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from 
 import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
 import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
 import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
+import { loadWaxworksView, waxworksLevelListFromAssets } from './games-waxworks.ts';
 import { loadBardsTale2View, bardsTale2LevelList } from './games-bardstale2.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
 import { loadDungeonMaster2View, dungeonMaster2LevelList } from './games-dungeonmaster2.ts';
@@ -396,6 +397,7 @@ const GAMES = [
   { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'waxworks', label: 'Waxworks', loader: loadWaxworksView, defaultLevel: 4, platform: 'amiga' as const },
   { id: 'bardstale2', label: "The Bard's Tale II", loader: loadBardsTale2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
@@ -424,6 +426,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
   bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
   bardstale2: 'walls/doors/secret doors, collision and wrap: the view-row builder and move routine are verified identical to BT1 in data/bard; the table-driven compositor (incl. the right-half mirror) is ported from the game code and renders recognisable corridors, but is not screenshot-checked against the real game; the start pose is a heuristic (not the game\'s stairs/arrival point), the palette is big_dung\'s own header (dung_blank is unused by the BT2 executable), the lamp/light distance is fixed at 4; special squares, stairs, monsters and the city are not implemented -- see docs/bardstale2/TODO.md',
+  waxworks: 'one pre-composed picture per room and facing: the game\'s own room scripts + VC draw scripts replayed offline (360 maze rooms of the 15 shared-graphics zones + 1,000 more rooms in 5 worlds); room graph, exits and door states from gameamiga (2,890/2,890 exits reciprocal). Left/right turn direction, compass names, object-gated pictures (default state shown), animated sprites and closed/locked doors are not implemented -- docs/waxworks/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
   abandonedplaces:
     'wall pieces, draw order, backdrop parity, palette (fade-table step 15), grid flags, collision and teleports ported from the game\'s own `module` (view 0xAE3A, blits 0xD740/0xDDE4); 36 dungeon levels. Not drawn: wall-mounted objects, doors/gates, stairs art, monsters, items (closed doors do not block); forest levels unsupported; start pose of levels >1 and the view-window clip are hypotheses -- docs/abandonedplaces/TODO.md.',
@@ -470,6 +473,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'ishar3') return isharLevelLists.ishar3();
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
+  if (game === 'waxworks') return waxworksLevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'bardstale2') return bardsTale2LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
