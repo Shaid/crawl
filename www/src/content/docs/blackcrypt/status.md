@@ -5,6 +5,11 @@ description: What's solved and what's still open.
 
 # Status & Open Work
 
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/blackcrypt/amiga/screens/title.png" alt="Black Crypt title screen" width="320" height="200" style="display:block;width:100%;max-width:640px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption>Extracted Amiga title screen.</figcaption>
+</figure>
+
 This page mirrors the repo's single status surface, `docs/blackcrypt/TODO.md`.
 Every genuinely open item gets one row here; the full evidence and paths-tried
 tables live in the raw notes.

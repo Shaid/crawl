@@ -1,0 +1,202 @@
+---
+title: Evil's Doom
+description: Recon overview of Evil's Doom (Amiga AGA, 1996) — RNC1/CrM2 packing, 236 files in 20 families, 30×30 type-derived dungeon grids that live in the save-state block, and a mirrored view-slot blit table.
+---
+
+Evil's Doom is a 1996 Croatian Amiga AGA dungeon crawler. This project has done
+**first-contact reconnaissance only** (2026-11-21). The packing layer and three
+plain IFF pictures are confirmed. The dungeon grid has been rendered from save
+files. Everything else on this page is a structural hypothesis that nobody has
+yet traced through the game's code. No extractor is committed, and no assets are
+published.
+
+This page summarises
+[`docs/evilsdoom/amigaaga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/evilsdoom/amigaaga/data-structure.md).
+Where the two disagree, the raw notes win.
+
+> **Pitfall: there is no map file.** No dungeon map is opened by name. The
+> dungeon module's file table (`PRG/BEL.dat` `+0x12E18`…`+0x13237`) lists art,
+> monsters, doors, decorations, walls, music and the other modules, and none of
+> them is map-shaped. A sliding search for the save grid across every unpacked
+> file, with masks `&0x80`, `&0x7F` and `&0xFF`, scored no better than chance
+> (best 0.69, 0.62 and 0.95, for masks that are mostly zero anyway). The maps
+> are in the **per-dungeon state block** that the game saves as
+> `SAVE/<slot>/.BEL` and its siblings.
+
+## Identification
+
+| Field | Value |
+|---|---|
+| Title | Evil's Doom (1996) |
+| Developer / publisher | Olympia Software / Olympia Team with Titan Computer (Croatia) |
+| Credits (`InfoVersion`) | Code Mladan Tripalo; graphics Hrvoje Colic, Tripalo, Bernard Kos, Bojan Pecnik; music Vlado Tomic, Tripalo |
+| Build | Fan-fixed **"final CD version 1.8"**: based on 1.0/1.7/1.7b, protection removed, bugs fixed, savegames for every level added (`InfoVersion`). This is **not** a pristine retail build. |
+| Install | WHDLoad, Psygore v1.1 (12 Oct 2025). The slave loads `prg/int.dat` first and refuses a depacked `OMD/PCH.DAT`. |
+| Chipset | AGA. Copper lists write `FMODE` (`$1FC`) and `BPLCON3` (`$106`), and the 768-byte CMAPs hold 256 colours. |
+| Internal names | Croatian: `PATULJAK` (dwarf), `ROGATI DEMON` (horned demon), `KNJIZNICA` (library), `BUSOLA` (compass), `KOCKICE` (cubes). Some save names are Czech, which suggests testers. |
+| Engine lineage | No public RE and no sibling corpus for Olympia Software. The grid model is Dungeon Master's, and the view looks like Black Crypt's (see below). |
+
+Two hashes are useful for matching a copy. `EvilsDoomAGA.slave` is sha1
+`9be35026275456b32562fe8bd6147d8a2822f114`. The pristine dungeon state
+`SAVE/B/.BEL` is `63eeda17daba665fda735559502e509af5a0f5fa`. The full table is
+in the raw notes.
+
+## Packing (confirmed)
+
+Every file under `data/` is **RNC ProPack method 1** (`RNC\x01`, then the
+big-endian unpacked and packed sizes), except `SAVE/` and `OMD/PCH.DAT`. The
+exception, `OMD/PCH.DAT`, is **Crunch-Mania `CrM2`**. `ancient decompress`
+unpacked **all 236 files with zero failures**, producing 14.8 MB.
+`@seer-project/pipeline` already has `decompressRnc1`. CrM2 still needs
+`ancient`, or an upstream decoder. Everything below describes the unpacked bytes.
+
+## File families
+
+| Family | Files | Role | Evidence | Status |
+|---|---|---|---|---|
+| `PRG/INT.DAT` | 1 | Boot/intro program | HUNK `000003F3`, 5 hunks; opens `int/*.bin` and `PRG/OUT.DAT` | standard (HUNK) |
+| `PRG/{BEL,CLL,IOW,MIN,MYT}.dat` | 5 | One program module per dungeon: code, strings, view tables | `DCLL` header + 10 BE longs (entry offsets), code from `+0x744`, A6-relative globals | structured-unknown |
+| `PRG/OUT.DAT` | 1 | Overland/town module | magic `12345678` | structured-unknown |
+| `PRG/*.chip`, `GO.chip` | 7 | Chip-RAM half of each module | `0C01 FFFE 01FC 0000 0106 …` = copper `WAIT`/`MOVE` | structured-unknown |
+| `SAVE/<slot>/.{BEL,CLL,IOW,MIN,MYT}` | 5 × 18 slots | **Dungeon map state** (memory dump) | see [the grid](#the-dungeon-grid) | grid rendered |
+| `SAVE/<slot>/{CHAR,DATA,FACE}` | 3 × 18 | Party records (10,060 B), game state (4,208 B), portraits (10,240 B) | sizes only | structured-unknown |
+| `SAVE/Dir` | 1 | 16 × 44-byte slot names (704 B exactly; names start at every 44-byte boundary), against 18 `SAVE/<slot>/` directories (`-jsa/beginning`, `-ufo.belcoon2` …). An earlier reading of 22 × 32 B also totals 704 B but puts names mid-record | ASCII | trivial |
+| `WAL/<dungeon>.DT0` / `.DT1` | 5 + 5 | Wall art banks, **the same size in every dungeon** (63,072 / 26,910 B) | no header, raw planar | structured-unknown |
+| `DOR/*` | 6 | Door art, each exactly 24,536 B | no header, raw planar | structured-unknown |
+| `EVE/<dng>.<n>`, `<dng>.MAIN` | 10 | Wall-decoration ("event") banks per level: 14-byte blit descriptors, then pixels | see [the view](#the-first-person-view) | structured-unknown |
+| `MON/*` | 24 | Monster sprite banks | word `$8003`/`$8004`, then counts/offsets | structured-unknown |
+| `PIC/*` | 36 | Location, shop and NPC pictures (256 colours) | headerless IFF chunks: `CMAP` (768) + `BODY`, **no `FORM`, no `BMHD`** | variant |
+| `INT/*.bin`, `X/FAILED.BIN`, `THEEND/ENDPIC.BIN` | 15 | Intro and end screens; most unpack to 286,720 B | raw | structured-unknown |
+| `THEEND/ANIMACIJA1-3` | 3 | End animations | `FORM ANIM` / `ILBM` | standard |
+| `MUZ/P60.*` | 31 | Music: The Player 6.0A (P60A) modules **with no signature** | packed header words | variant (solved in a sibling project) |
+| `DMD/SAMPLES.*.CHIPMOD` | 3 | Sample banks with a replay stub (`6002 …` BRA) | code + PCM | structured-unknown |
+| `DUNDAT/*` | 9 | Full-panel art inside the dungeon: stairs, scroll, rope, `.NOTE` pages (12,604 / 37,812 / 50,416 B) | raw planar | structured-unknown |
+| `OMD/*` | 12 | Overland data: `TXT.DAT` (offset table + text), `MapPointer.DAT`, faces, icons, `PCH.DAT` | offset tables | structured-unknown |
+| `CT/CT01-46` | 44 | Small text/script records (1–5 KB unpacked) | not probed | structured-unknown |
+| `Runecasting`, `Secret`, `Spells` | 3 | Manual pages | **`FORM ILBM`** 640×400×3, 640×200×8, 640×512×3 | **confirmed** |
+
+The notes count two smaller families only approximately: about 8 replay-code
+and small module files (`THEEND/PLAYER*.BIN`, `*.MOD`, `OMD/*PLAYmod.dat`), and
+about 14 UI files in `DMD/*.DAT`/`*.CRM` (icons, fonts, inventory pages, the
+`BUSOLA` compass). Those counts are the raw notes' own approximations.
+
+## The dungeon grid
+
+**Where it is (from code).** The offsets below are in `PRG/BEL.dat`, which has
+no hunk header, so file offsets equal module offsets.
+
+- `+0xF0D4`: `LEA $455C(A6),A0` / `MOVE.L #'.BEL',(A3)` / `MOVE.L #$3B18,D0` /
+  `BSR` write. The `.BEL` file is the **15,128-byte (`$3B18`) block at
+  `A6+$455C`**.
+- `+0x1308`: `MOVEA.L 8(A6),A0` / `ADDA.L #$EB38,A0`, then a copy of `$3B18`
+  bytes to `A6+$455C`. On module entry, the state is copied in from a
+  cross-module buffer (`8(A6)`). The exit path at `+0x1326` copies it back.
+- `SAGA:SAVE/` (`+0xEEA2`) and `SAGA:SAVE/DIR` (`+0xF3F0`) are the save paths.
+
+Pristine copies are enough to decode the grid without knowing how a new game is
+seeded. Slots that never entered a dungeon carry byte-identical state: **12 of
+18** slots for `.BEL`, 12 for `.IOW`, 11 for `.MIN` and 10 for `.MYT`.
+
+**Its shape (rendered).**
+
+- **30 × 30 cells, 1 byte per cell, row-major.** Wall-bit autocorrelation
+  peaks at lags 30, 60 and 120. Every grid has a solid border on all four sides.
+- **Bit 7 = solid block.** Solid cells are `0x80` in BEL, CLL and IOW, and
+  `0xAE` in MIN and MYT, where `0x20` fills unused rock. So the low 7 bits of a
+  solid cell are a type, texture or decoration code, not padding.
+- Open cells are mostly `0x00`, with sparse `0x02`, `0x04`, `0x08` and `0x40`.
+  Solid cells also carry `0x10`, `0x20` and `0x40` (`0x90`/`0xA0`/`0xC0`), which
+  may mark a decorated face or a secret wall. Neither meaning is confirmed.
+- Each file holds more than one grid, and each grid is preceded by a
+  variable-length list of word records, terminated by `FFFF FFFF` and zero
+  padded. A bordered-grid scan finds **at least 6 grids in BEL, 10 in CLL, 4 in
+  IOW, 9 in MIN and 5 in MYT**. BEL also has an unbordered grid at `+0xAE4`.
+
+Rows 0–9 of the first grid in pristine `.BEL` (`SAVE/B/.BEL+0x418`), with `#` =
+`0x80`, `+` = another bit-7 value, `o` = a non-zero open cell, `.` = `0x00`:
+
+```
+##############################
+#...........#o....#..#+..#...#
+#..........#.#..o.oo.+...#...#
+#.........#.+.#####..#.#o#...#
+#.........###.o.o.o..+.#.#...#
+#........#...##.###...o#.#...#
+#.......##o#.##+o.o..+.#.#...#
+#..##.##...#.####o#..#.#.#...#
+#.#..#..o..#o#+##.######o#...#
+#+.o.o....+......####.....#..#
+```
+
+### Walker answer 1: wall storage is type-derived
+
+A face is a wall because the neighbouring cell is solid, which is the Dungeon
+Master model, and each cell carries extra type bits.
+
+- **Rendered:** the grid shape and the bit-7-solid reading. Borders and
+  corridors are clean in all 5 dungeons.
+- **Hypothesis:** whether the open-cell codes `0x02`/`0x04`/`0x08` add thin
+  per-cell faces, such as doors, on top.
+
+The grid converts to the repository's per-cell model by the existing
+type-derived rule. This is the "Evil's Doom" row of the
+[walker map-format decision](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md),
+in the addendum dated 2026-11-21 (later).
+
+## The first-person view
+
+### Walker answer 2: the renderer is a slot table
+
+The view looks like Black Crypt's: pre-drawn pieces blitted into fixed view
+slots. It does not look like a mosaic or a picture per location.
+**Confidence: strong hypothesis, not rendered.** Three pieces of evidence
+support it.
+
+1. **The file sizes are fixed.** `WAL/*.DT0` (63,072 B), `.DT1` (26,910 B) and
+   `DOR/*` (24,536 B) are the same size in every dungeon. That fits one fixed
+   set of pieces at fixed geometry, re-skinned per dungeon.
+2. **A mirrored slot table checks itself.** A scan looked for 7-word blit
+   records `(src, src2, x, y, words, h, flags)` that satisfy
+   `src2 − src = 3 · words · 2 · h`. It found a table at **`BEL.dat+0x16834`**:
+   `(0, 3348, x64, y38, 3w, 186)`, `(4464, 5820, x112, y70, 2w, 113)`,
+   `(6272, 7232, x134/28/240, y84, 2w, 80)` and more. A mirror block at
+   `+0x168D4` has x = 256/224/218/112/325. Together these are the near, mid
+   and far side walls, left, centre and right. A second cluster at `+0x16AEE`
+   (x 128/0/272, y 172/56) may be floor/ceiling or a UI strip.
+3. **The decoration banks use the same record.** `EVE/BEL.0` opens with the
+   same 14-byte record at file offset 6: `(9064, 10804, x144, y88, 80×58)`,
+   `(11384, 12464, x144, y98, 80×36)`, `(12824, 14720, x56, y81, 64×79)` …. The
+   entries at x = 0/320 are off-screen halves.
+
+Two things are still open. `src2 − src` is three planes' worth of bytes, so
+either `src`→`src2` spans 3 planes or `src2` is a mask that follows a colour
+block. The AGA plane depth (8 or 5) is not pinned either.
+
+## Other findings
+
+- **`PIC/*` is ILBM in pieces.** The file is `CMAP` (768 B), then `BODY`, with
+  no `FORM` or `BMHD`. The chunk walk ends exactly at EOF in 36/36 files. A
+  plain ByteRun1 unpack of `BODY` gives 103,692–106,187 B per file, and no
+  common width × height × planes explains those sizes. Either the body is not
+  ByteRun1, or it is ByteRun1 per row with the geometry supplied by code.
+- **`INT/*.bin` screens** mostly unpack to 286,720 B. That is not a clean
+  multiple of a 320×256 plane: it is 3.5 × 81,920.
+- **Music** is signature-less P60A. A sibling project (`hunter`, Embryo recon)
+  already decodes this structurally, and libxmp/ProWizard read P60A too.
+
+## Paths tried
+
+| Approach | Result | Notes |
+|---|---|---|
+| Exact 32-byte windows of save `.BEL` searched in `PRG/BEL.dat` | 3 hits, all header-like | The map is not a static table in the module |
+| 30-byte grid rows searched in every unpacked file | 0 hits (plus 2 in `MON/WORM` on all-`0x80` rows) | There is no packed or raw map file on disk |
+| Masked sliding match (`&0x80` / `&0x7F` / `&0xFF`) vs `BEL.dat`, `BEL.chip`, `EVE/BEL.MAIN` | at or below chance | — |
+| Whole-`BODY` ByteRun1 on `PIC/*` | sizes vary per file, no common geometry | wrong codec or wrong unit |
+
+## Raw notes
+
+- [Format notes: `docs/evilsdoom/amigaaga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/evilsdoom/amigaaga/data-structure.md)
+- [Plan: `docs/evilsdoom/plan.md`](https://github.com/Shaid/crawl/blob/main/docs/evilsdoom/plan.md)
+- [Open work: `docs/evilsdoom/TODO.md`](https://github.com/Shaid/crawl/blob/main/docs/evilsdoom/TODO.md)
+
+Next: [Status & open work](status/).

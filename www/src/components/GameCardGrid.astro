@@ -1,0 +1,53 @@
+---
+interface Game {
+	id: string;
+	title: string;
+	tagline: string;
+	status: string;
+	statusLabel: string;
+	hero?: { src: string; width: number; height: number; alt: string };
+	href: string;
+}
+
+interface Props { games: Game[] }
+const { games } = Astro.props;
+---
+
+<div class="game-grid">
+	{games.map((game) => (
+		<a class={`game-card game-card-${game.status}`} href={game.href}>
+			<div class="game-card-image">
+				{game.hero ? (
+					<img src={game.hero.src} width={game.hero.width} height={game.hero.height} alt={game.hero.alt} loading="lazy" />
+				) : (
+					<span class="game-card-mark" aria-hidden="true">{game.id.slice(0, 2).toUpperCase()}</span>
+				)}
+			</div>
+			<div class="game-card-body">
+				<div class="game-card-heading">
+					<strong>{game.title}</strong>
+					<span class="game-card-status">{game.statusLabel}</span>
+				</div>
+				<p>{game.tagline}</p>
+			</div>
+		</a>
+	))}
+</div>
+
+<style>
+	.game-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); margin: 1.5rem 0; }
+	.game-card { background: var(--sl-color-gray-6); border: 1px solid var(--sl-color-gray-5); border-radius: 0.6rem; color: var(--sl-color-white, var(--sl-color-gray-1)); display: flex; flex-direction: column; overflow: hidden; text-decoration: none; transition: border-color 0.15s ease, transform 0.15s ease; }
+	.game-card:hover, .game-card:focus-visible { border-color: var(--sl-color-accent); transform: translateY(-2px); }
+	.game-card-image { align-items: center; aspect-ratio: 4 / 3; background: linear-gradient(135deg, #16151b, #302535); display: flex; justify-content: center; overflow: hidden; }
+	.game-card-image img { display: block; height: 100%; image-rendering: pixelated; object-fit: cover; width: 100%; }
+	.game-card-mark { color: #f3d38a; font-family: var(--sl-font-system-mono); font-size: clamp(2rem, 8vw, 4rem); font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 0 2rem rgb(243 211 138 / 0.3); }
+	.game-card-body { padding: 0.85rem 1rem 1.1rem; }
+	.game-card-heading { align-items: baseline; display: flex; gap: 0.6rem; justify-content: space-between; }
+	.game-card-body strong { display: block; font-size: 1.05rem; margin-bottom: 0.35rem; }
+	.game-card-body p { color: var(--sl-color-gray-2); font-size: 0.85rem; line-height: 1.4; margin: 0; }
+	.game-card-status { border: 1px solid currentColor; border-radius: 99px; color: var(--sl-color-gray-2); font-size: 0.68rem; letter-spacing: 0.04em; padding: 0.16rem 0.42rem; text-transform: uppercase; white-space: nowrap; }
+	.game-card-reference .game-card-status { color: #f3d38a; }
+	.game-card-active .game-card-status { color: #9ed7bd; }
+	.game-card-extracted .game-card-status { color: #9fc8ec; }
+	.game-card-research .game-card-status { color: #d2b2e8; }
+</style>

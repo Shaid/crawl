@@ -1,0 +1,210 @@
+---
+title: Crystal Dragon
+description: Crystal Dragon (Amiga, 1994) — file-id naming, the S? packer family, the SF codec (31/31 exact) and the per-level region table (23/23 levels, 83 regions).
+---
+
+Crystal Dragon is a 1994 Amiga first-person dungeon crawler. This project has a
+recon, one committed codec (`SF`) and the level-grid geometry. The image codec
+(`SA`), the palette and the renderer are not decoded yet, so **no assets are
+published** for this title.
+
+This page is a curated summary of the raw notes in
+[`docs/crystaldragon/`](https://github.com/Shaid/crawl/blob/main/docs/crystaldragon/amiga/data-structure.md).
+Where the two disagree, the raw notes win.
+
+> **Pitfall: a level is not one 64×64 grid.** The recon model read the map as
+> one grid whose width sat in a header word at `+0x3136`. That model was wrong.
+> Each level is **several regions** packed back to back, each with its own
+> width and height. The old "header width" was only the last region's `W`,
+> which is why it fitted about half the levels. See
+> [the correction](#correction-the-single-grid-model-was-wrong) below.
+
+## Identification
+
+| Item | Value | Source |
+|---|---|---|
+| Title | Crystal Dragon | `ReadMe`, game text strings |
+| Publisher, year | Black Legend, 1994 | data-structure.md § Title / version |
+| Developer | Magnetic Fields, per the project triage. **Not confirmed** from the files, which carry no credits string | same |
+| Platform | Amiga OCS/ECS (A500, Kickstart 1.3, up to 6 bitplanes) | same |
+| Language | English. The WHDLoad slave also supports a German version, which is not present | same |
+| Media | WHDLoad install v1.3 (Psygore, 2012); 220 data files flat under `data/`. The original was an AmigaDOS game with no trackloader | same |
+| Protection | Removed by the slave: a disk check, and a level-10 "reset level number" check. The data files are unaffected | same |
+| Main program | `Crystal_Dragon`, 248,836 B, sha1 `b6ee25e070c3fd16cf33e1e6e7666b73db28d92f`. HUNK format, 2 hunks: hunk 0 CODE+DATA (`0xE120` longs), hunk 1 CHIP BSS (`0xD8D` longs). Not crunched | § Executables |
+| Engine lineage | Private engine. `ancient identify` rejects every `S?` file, and the codecs look unique to this game. The renderer is **probably** the slot-table family (Black Crypt / EOB), not confirmed | § Container layer; § First-person view |
+
+`ReadMe` and `Solution` (a walkthrough of the starting party and items) are
+plain text and serve as naming oracles.
+
+## File naming is the game's own (confirmed)
+
+The 220 data files are named by **file id in lowercase hex**: no leading zero
+below `0x100`, and a literal `1` prefix at or above it. The game builds the
+name itself: `BuildFileName` at `Crystal_Dragon` hunk 0 `+0x388A` (file
+`+0x38AE`, since hunk 0 starts at file `+0x24`) writes `'1'` if `d0 >= 0x100`,
+then two hex nibbles into `$4DC(A5)`. File ids are an engine concept, so id
+arithmetic lives in code, not in a directory.
+
+Level maps follow `id = level × 9 + 0xCC` (`MULU.W #9` / `ADDI.W #$CC` at hunk 0
+`+0x3222`, `+0x3FE4`, `+0xEF8A`). That gives 23 files: `cc`, `d5`, `de` … `192`.
+The 8 ids between each pair never ship (open: `cd-level-ids`). After loading a
+level the game opens the name at absolute `$22EC0` with `MODE_NEWFILE` and
+writes `0xB4AE` bytes, so it keeps a working copy of the level.
+
+## File families
+
+Every packed file starts with a 2-byte ASCII tag. `Unpack` at hunk 0 `+0x0004`
+(file `+0x28`) dispatches on it: `SQ`→`+0x746`, `SA`→`+0x86`, `SP`→`+0x296`,
+`SC`→`+0x29C`, `SF`→`+0x5F2`. Any other tag is copied raw.
+
+| Family | Files | Header (big-endian) | Role | Status |
+|---|---|---|---|---|
+| `SF` | 31 | `'SF'`, u32 unpacked, u32 packed, payload | General files: screens, level maps | **Decoded**, 31/31 exact (`scripts/cdlib/sf.py`) |
+| `SA` | about 110 | `'SA'`, u16 planes, u16 frameCount, u32 unpacked, u32 packed, frame headers, image codec | `.SCR` graphic sets: walls, floors, doors, monsters | Open (`cd-sa-codec`) |
+| `SP` | 2 (`09`, `0d`) | `'SP'`, u16 planes, u32 bytesPerPlane (`0x1F40` = 8,000 = 320×200/8), u32 packed | Full-screen pictures, same codec as `SA` | Open |
+| `SC` | 0 shipped | as `SP`, plus `2^planes` palette words | Picture plus palette | No file uses it |
+| `SQ` | 3 (`01`, `06`, `0b`) | `'SQ'`, u32 unpacked, u32 `mode<<24 \| packedLongs`, backward bit-stream, delta-undo mode 1/2/3 | Delta-coded 8-bit data, probably samples or music | Open (`cd-sq-codec`) |
+| Slot tables | 1 raw file at id+1 after most `SA` sets; 92 to 2,576 B | 16-bit words: frame offsets or `-1` per slot, then coordinate-like words | Probably view-slot → frame and x/y tables | Hypothesis (`cd-view-slots`) |
+| Sound effects | 10 (`88`–`91`), 992–4,966 B | u16 id (`0x15`–`0x27`), u16 length, then signed-8-bit-looking data | SFX | Hypothesis (`cd-audio`) |
+| `12` | 1, 61,858 B | small signed deltas | Music or a sample bank | Hypothesis |
+| Overlays | `0a` (246,008 B), `c0` (212,480 B), `c1` (2,264 B) | single-hunk executables | `0a`/`c0` probably intro, character generator and ending; `c1` hooks CPU vector `$10` (probably the "CDFC" protection) | Hypothesis (`cd-overlays`) |
+
+`SF` decoded sizes: `00`, `02`, `1a` and `c2` are 40,000 B each (320×200×5 raw
+screens, not yet rendered for lack of a palette); `03` is 6,210 B; `0c` 2,678 B;
+`1b` 8,366 B; `c4` 41,314 B; and the 23 level maps are 46,254 B (`0xB4AE`) each.
+
+### `SA` graphic sets by class
+
+The companion table's length tracks the set's class. Class names come from the
+order of the level's name table; they are not confirmed.
+
+| SA ids | Planes / frames | Table | Likely class |
+|---|---|---|---|
+| `32`, `4c`, `78` | 4 / 78, 42, 44 | 470 B | `WALL1/2/3.SCR` |
+| `34`–`3c`, `50`–`58`, `7a`–`82` (5 each) | 4 / about 24 | 146 B | `FLOOR n.1-3` + `CEILING n.1-2` |
+| `1e`, `3e` | 4 / 27 | 308 B | `DOORFRAME` |
+| `20`–`26`, `40`–`46`, `5a`–`6a` | 4–5 / 9 | 92 B (first 16 words = slot → frame) | `DOOR1…15` |
+| `92`–`be` (even) | 5–6 / 13–17 | 260 B | Monsters or large features |
+| `13`/`14`/`16`/`19`, `2e`, `48`, `6c`–`74`, `84` | 5–6 / 100–180 | 1,196–2,576 B | Monster or animation sets |
+
+The `SA` decoder (`+0x86`…`+0x250`) walks the frame headers, then decodes pixels
+through a jump-table, context-modelled bitplane codec (tables at `+0x360`,
+`+0x498`). The plan is to emulate it under musashi, not hand-port it.
+
+## The `SF` codec (decoded)
+
+A port of `Unpack`'s `SF` branch (`+0x5F2`…`+0x708`) decodes **31/31** `SF` files
+to exactly the header's unpacked size, and in every file the backward reader
+consumes **exactly** the packed payload, with 0 bytes left over.
+
+- The payload is first shifted down 10 bytes, over the header.
+- The reader runs **backward** from the payload end and fills the output
+  backward from `dst + unpacked` down to `dst`.
+- Bit `0` is a literal run with a gamma-like count. `10` is a length-2 match
+  with a 9-bit offset; `110` length 3 with 10 bits; `1110` length 4 with 12
+  bits; `1111 b` takes a 9-bit (b=1) or 14-bit (b=0) offset and a gamma length
+  starting at 5.
+
+Tests (`scripts/cdlib/test_sf.py`) pair the exact-size check with null
+controls. A flipped byte, a payload shifted by one byte, or an extra byte at the
+decode start each makes 31/31 files differ or error.
+
+> **Caveat on the invariant.** Dropping the *last* payload byte still decodes
+> identically on 16/31 files with 0 bytes left over. The first-read byte can be
+> redundant, so the exact-consumption check constrains the front of the
+> stream, not that byte.
+
+## Level maps (`SF` → 46,254 B)
+
+Loader: hunk 0 `+0x3206`…`+0x325E` (id → name → read).
+
+| Offset | Field | Confidence |
+|---|---|---|
+| `0x0000` | 27 × 32-byte graphic-set name slots (`WALL1.SCR`, `FLOOR1.1-3.SCR`, `DOOR1-3.SCR`, `STAIRS1.SCR`, `TELEPORT.SCR`, `PASTEONS.*.SCR`, `LOCKS.SCR` …). Slot order varies per level; `14a` inserts `SPWALL2.SCR`. The exe holds a default copy at hunk 0 `+0x23390` | Rendered |
+| `0x0360` | About 10 bytes of flags | Hypothesis |
+| `0x0B00`–`0x2B00` | 32-byte records, probably objects, doors and events | Hypothesis (`cd-level-objects`) |
+| `0x3000`–`0x313E` | **Region table**: 12-byte records `[off, H, W, y0, x0, id]`, read backward from `0x313E` | **Confirmed** |
+| `0x313E` | Region count minus 1; this is the grid base `0x6E8(A5)` | Confirmed |
+| `0x3140`… | **Map grid**: each region is a `W × H` row-major array of 8-byte cells at `0x313E + off` | **Confirmed** |
+| `0xB140` | Level tail: `00ff ffff`, then a word table (`0x32`/`0x64`/`0x3C`) | Hypothesis |
+
+The region table is read by hunk 0 `+0xC1C6`…`+0xC1F8`. The cell lookup at
+`+0xC4FE` is:
+
+```
+cell = 0x313E + off + ((y - y0) * W + (x - x0)) * 8
+```
+
+The extra all-zero record that the count word implies is read and skipped.
+
+### Correction: the single-grid model was wrong
+
+The recon published a "single 64×64 grid, width from header `+0x3136`" model.
+It is wrong, and commit `867d6ce` replaced it.
+
+- **What it got wrong.** `+0x3136` is the *last* region's `H, W`, not a level
+  width. Under that model `cc`, `de`, `10b`, `11d`, `12f`, `165`, `16e`, `177`
+  and `189` rendered cleanly, but `d5`, `f9`, `102`, `141`, `14a` and `192`
+  sheared.
+- **What replaces it.** Level `cc`, for example, is three regions: 47×33, 16×9
+  and 3×3. Over 23/23 levels (83 regions, widths 3 to 66, `H` up to 91), the
+  regions tile the grid from `off = 2` with **0 bytes of gap**, each ending
+  exactly at the next region's offset (`scripts/cdlib/level.py`,
+  `scripts/cdlib/test_level.py`).
+- **Null control.** Changing any non-last region's width by 1 breaks the
+  tiling, on every such region.
+
+Earlier dead ends, kept so nobody repeats them: a fixed width of 48 shears `cc`
+by −1 column per row (its first region is 47 wide), and lag autocorrelation of
+`word0` picked 47 for `cc` but matched the header on only about half the levels.
+
+### Cells
+
+Each cell is 8 bytes. Word 0 holds type and flags; words 1–3 are mostly zero
+(per-cell extras). The game takes the type as `word0 & 7` (`+0xC8C8`, `+0xC4FE`):
+**5 = wall**. Bit 7 is a flag that the door and blocked tests read.
+
+Counted with the game's own `word0 & 7` over the 83 decoded regions
+(47,602 cells across 23 levels; `scripts/cdlib/level.py`): 23,773 walls
+(type 5), 11,280 type 0, 10,943 floors (type 1), 659 type 2, 506 type 6,
+259 type 3, 165 type 7 and 17 type 4. Type 6 splits about evenly on bit 7
+(249/255 in the recon census), which is what a door with an orientation bit
+looks like.
+
+> **Correction (2026-11-21):** the recon census keyed on `word0 & 0x7F` and
+> counted 40,183 cells over the whole 32 KB grid area, so it reported flag
+> combinations (15, 16, 21, 53 …) as separate types and included bytes outside
+> any region. Under `& 7` those fold into types 0, 5 and 7. Wall cells sometimes carry
+high bits (`0x02D5`, `0x01F5`), probably a `PASTEONS.WALL` decoration index.
+
+## The two walker answers
+
+| Question | Answer | Confidence |
+|---|---|---|
+| Wall storage | **Type-derived.** A cell is a wall when `word0 & 7 == 5`; type 6 is probably a door, with an orientation bit in bit 7 | The wall test is from the game's code (`+0xC8C8`). The door reading is a census pattern, a hypothesis |
+| Renderer shape | **Probably a slot-table blitter.** Each `.SCR` set holds pre-drawn frames, its companion table maps view slot → frame and screen x/y, and the level's name table picks the live sets. `PASTEONS.*` would overlay decorations on wall, floor and door slots | Hypothesis from layout. The draw loop has not been traced (`cd-view-slots`) |
+
+The repository's walker decision log lists Crystal Dragon among four likely
+slot-table members, at "rendered" confidence
+([addendum](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md)).
+
+## What is committed
+
+| Commit | Content |
+|---|---|
+| `a73aec8` | Recon: `S?` packer dispatch, `SF` codec, level map grid, `.SCR` slot tables |
+| `59b2d29` | Title registered; data moved |
+| `867d6ce` | `scripts/cdlib/sf.py` + `test_sf.py` (31/31 exact), `scripts/cdlib/level.py` + `test_level.py` (23/23 levels, 83 regions), `scripts/extract_cd_sf.py`, `scripts/render_cd_maps.py` |
+
+`render_cd_maps.py` writes quick-look map renders to
+`build/cache/crystaldragon/maps/`. Level `102` renders as a clean cave system
+and `15c` as nested rectangles; neither has been checked against the game, so
+they are not published.
+
+## Raw notes
+
+- [Format notes: `amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/crystaldragon/amiga/data-structure.md)
+- [Plan: `plan.md`](https://github.com/Shaid/crawl/blob/main/docs/crystaldragon/plan.md)
+- [Open work: `TODO.md`](https://github.com/Shaid/crawl/blob/main/docs/crystaldragon/TODO.md)
+
+Next: [Status & open work](status/).

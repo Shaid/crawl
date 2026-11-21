@@ -1,0 +1,270 @@
+{
+  "frames": [
+    {
+      "name": "m2_panel",
+      "x": 1,
+      "y": 1,
+      "w": 80,
+      "h": 72,
+      "level": 2,
+      "file": "bcdfc",
+      "kind": "panel"
+    },
+    {
+      "name": "m2_inset0",
+      "x": 589,
+      "y": 1,
+      "w": 32,
+      "h": 3,
+      "level": 2,
+      "file": "bcdfc",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 0,
+          "x": 92,
+          "y": 78
+        },
+        {
+          "k": 1,
+          "x": 92,
+          "y": 78
+        },
+        {
+          "k": 2,
+          "x": 92,
+          "y": 78
+        },
+        {
+          "k": 3,
+          "x": 92,
+          "y": 78
+        }
+      ]
+    },
+    {
+      "name": "m3_panel",
+      "x": 82,
+      "y": 1,
+      "w": 80,
+      "h": 72,
+      "level": 3,
+      "file": "bcdfd",
+      "kind": "panel"
+    },
+    {
+      "name": "m3_inset0",
+      "x": 555,
+      "y": 1,
+      "w": 16,
+      "h": 7,
+      "level": 3,
+      "file": "bcdfd",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 0,
+          "x": 132,
+          "y": 43
+        }
+      ]
+    },
+    {
+      "name": "m3_inset1",
+      "x": 521,
+      "y": 1,
+      "w": 16,
+      "h": 11,
+      "level": 3,
+      "file": "bcdfd",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 1,
+          "x": 67,
+          "y": 41
+        },
+        {
+          "k": 2,
+          "x": 67,
+          "y": 41
+        },
+        {
+          "k": 3,
+          "x": 67,
+          "y": 41
+        }
+      ]
+    },
+    {
+      "name": "m4_panel",
+      "x": 163,
+      "y": 1,
+      "w": 80,
+      "h": 72,
+      "level": 4,
+      "file": "bcdfe",
+      "kind": "panel"
+    },
+    {
+      "name": "m4_inset0",
+      "x": 487,
+      "y": 1,
+      "w": 16,
+      "h": 16,
+      "level": 4,
+      "file": "bcdfe",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 0,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 1,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 2,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 3,
+          "x": 0,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "name": "m6_panel",
+      "x": 244,
+      "y": 1,
+      "w": 80,
+      "h": 72,
+      "level": 6,
+      "file": "bcdfg",
+      "kind": "panel"
+    },
+    {
+      "name": "m6_inset0",
+      "x": 538,
+      "y": 1,
+      "w": 16,
+      "h": 10,
+      "level": 6,
+      "file": "bcdfg",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 0,
+          "x": 97,
+          "y": 47
+        },
+        {
+          "k": 1,
+          "x": 72,
+          "y": 65
+        },
+        {
+          "k": 2,
+          "x": 121,
+          "y": 65
+        },
+        {
+          "k": 3,
+          "x": 0,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "name": "m9_panel",
+      "x": 325,
+      "y": 1,
+      "w": 80,
+      "h": 72,
+      "level": 9,
+      "file": "bcdfj",
+      "kind": "panel"
+    },
+    {
+      "name": "m9_inset0",
+      "x": 572,
+      "y": 1,
+      "w": 16,
+      "h": 5,
+      "level": 9,
+      "file": "bcdfj",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 0,
+          "x": 95,
+          "y": 79
+        },
+        {
+          "k": 1,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 2,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 3,
+          "x": 0,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "name": "m11_panel",
+      "x": 406,
+      "y": 1,
+      "w": 80,
+      "h": 72,
+      "level": 11,
+      "file": "bcdfl",
+      "kind": "panel"
+    },
+    {
+      "name": "m11_inset0",
+      "x": 504,
+      "y": 1,
+      "w": 16,
+      "h": 16,
+      "level": 11,
+      "file": "bcdfl",
+      "kind": "inset",
+      "placements": [
+        {
+          "k": 0,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 1,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 2,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "k": 3,
+          "x": 0,
+          "y": 0
+        }
+      ]
+    }
+  ],
+  "width": 1024,
+  "height": 74
+}

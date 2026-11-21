@@ -1,51 +1,128 @@
 ---
-title: Black Crypt Data Formats
+title: Crawl — Game Data Formats
+description: A status board and curated guide to reverse-engineered classic dungeon crawlers.
 template: splash
 hero:
   image:
-    html: <img src="/hero-title.png" alt="Black Crypt — the game's title screen, composited with its logo banner" width="320" height="200" style="width:100%;max-width:640px;height:auto;image-rendering:pixelated;border-radius:0.35rem;" />
-  tagline: A reverse-engineering field guide to Black Crypt, the 1992 Amiga dungeon crawler from Raven Software and Electronic Arts.
+    html: <img src="/hero-title.png" alt="Black Crypt title screen, the reference project for Crawl" width="320" height="200" style="width:100%;max-width:640px;height:auto;image-rendering:pixelated;border-radius:0.35rem;" />
+  tagline: Byte-level research into the files, graphics, maps and engines of classic first-person RPGs.
   actions:
-    - text: Enter the documentation
-      link: /blackcrypt/
+    - text: See all project status
+      link: /status/
       icon: right-arrow
-    - text: Browse the asset galleries
-      link: /blackcrypt/assets/sprites/
+    - text: Read Black Crypt
+      link: /blackcrypt/
       icon: external
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import GameCardGrid from '../../components/GameCardGrid.astro';
 
-The documentation site for the Black Crypt reverse-engineering project.
+**Crawl** is a reverse-engineering workspace for classic dungeon crawlers and
+adjacent RPGs. The site turns the repository's byte-level research into a
+readable map of what is solved, what is extracted, and what still needs an
+oracle or an implementation pass.
 
-<CardGrid>
-	<Card title="Read the formats" icon="document">
-		Understand the Amiga file inventory, graphics formats, maps, palettes,
-		sound and code overlays.
-		[Open the guide](/blackcrypt/)
-	</Card>
-	<Card title="See the extracted game" icon="image">
-		Browse individual monsters, item icons, floor items, spell effects,
-		portraits and more.
-		[Open the galleries](/blackcrypt/assets/sprites/)
-	</Card>
-</CardGrid>
+<GameCardGrid
+	games={[
+		{
+			id: 'blackcrypt', title: 'Black Crypt', status: 'reference', statusLabel: 'Reference',
+			tagline: '1992, Raven Software / Electronic Arts — the watermark: Amiga formats, maps, sound, DOS comparison, full galleries and a playable dungeon view.',
+			hero: { src: '/hero-title.png', width: 320, height: 200, alt: 'Black Crypt title screen' }, href: '/blackcrypt/'
+		},
+		{
+			id: 'wizardry6', title: 'Wizardry 6', status: 'active', statusLabel: 'Active',
+			tagline: 'Bane of the Cosmic Forge — Amiga, DOS/EGA and SNES data are in one project, with the Amiga dungeon view now largely decoded.', href: '/wizardry6/'
+		},
+		{
+			id: 'mm2', title: 'Might & Magic II', status: 'active', statusLabel: 'Active',
+			tagline: 'Gates to Another World — retail Amiga and DOS graphics/data codecs integrated from a finished ground-truth RE.', href: '/mm2/'
+		},
+		{
+			id: 'mm1', title: 'Might & Magic I', status: 'extracted', statusLabel: 'Extracted',
+			tagline: 'The Secret of the Inner Sanctum — 55 maps, wall sets, monster portraits, tables and overlay behaviour decoded.', href: '/mm1/'
+		},
+		{
+			id: 'mm3', title: 'Might & Magic III', status: 'active', statusLabel: 'Active',
+			tagline: 'Isles of Terra — Amiga and DOS containers, sprites, screens and maze records are decoded; viewer polish remains.', href: '/mm3/'
+		},
+		{
+			id: 'eotb', title: 'Eye of the Beholder', status: 'active', statusLabel: 'Active',
+			tagline: 'EOB1 — Amiga and DOS formats are substantially mapped, with the first-person renderer wired into the shared viewer.', href: '/eotb/'
+		},
+		{
+			id: 'eotb2', title: 'Eye of the Beholder II', status: 'extracted', statusLabel: 'Extracted',
+			tagline: 'The Legend of Darkmoon — DOS/VGA formats and a working walker are in place; the Amiga side is deliberately unstarted.', href: '/eotb2/'
+		},
+		{
+			id: 'eotb3', title: 'Eye of the Beholder III', status: 'research', statusLabel: 'Research',
+			tagline: 'Assault on Myth Drannor — the AESOP dungeon-view mechanism is identified, but its bytecode dispatch still blocks a walker.', href: '/eotb3/'
+		},
+		{
+			id: 'dungeonhack', title: 'Dungeon Hack', status: 'research', statusLabel: 'Research',
+			tagline: '1993, DreamForge / SSI — shared AESOP containers and bitmap formats are confirmed against the interpreter; palette and music work remains.', href: '/dungeonhack/'
+		},
+		{
+			id: 'landsoflore', title: 'Lands of Lore', status: 'active', statusLabel: 'Active',
+			tagline: 'The Throne of Chaos — Kyra resources, level data, EMC2 scripts and a real-art first-person renderer are underway.', href: '/landsoflore/'
+		},
+		{
+			id: 'zombi', title: 'Zombi', status: 'extracted', statusLabel: 'Extracted',
+			tagline: '1990, Ubi Soft — a shopping-mall map stored per location and drawn as one Atari ST Cyber Paint picture per location; art, sounds and the picture map are extracted.',
+			hero: { src: '/assets/zombi/amiga/screens/present.png', width: 320, height: 195, alt: 'Zombi title screen' }, href: '/zombi/'
+		},
+		{
+			id: 'abandonedplaces2', title: 'Abandoned Places 2', status: 'extracted', statusLabel: 'Extracted',
+			tagline: '1993, ICE — self-describing tilesets exported as 149 atlases; the 32×32 level grid renders, palettes are still a hypothesis.', href: '/abandonedplaces2/'
+		},
+		{
+			id: 'abandonedplaces', title: 'Abandoned Places', status: 'research', statusLabel: 'Research',
+			tagline: 'A Time for Heroes, 1992, ArtGame — the ArtKernal container and backward-LZ packer are solved (427/427); the 32×32 levels render.', href: '/abandonedplaces/'
+		},
+		{
+			id: 'crystaldragon', title: 'Crystal Dragon', status: 'research', statusLabel: 'Research',
+			tagline: 'Amiga — the SF codec decodes 31/31 files exactly and every level resolves into a table of 83 packed regions.', href: '/crystaldragon/'
+		},
+		{
+			id: 'evilsdoom', title: 'Evil\'s Doom', status: 'research', statusLabel: 'Research',
+			tagline: '1996 AGA crawler — RNC-packed data unpacks 236/236; its 30×30 maps live inside save-state blocks.', href: '/evilsdoom/'
+		},
+		{
+			id: 'hiredguns', title: 'Hired Guns', status: 'research', statusLabel: 'Research',
+			tagline: '1993, DMA Design — each of 41 maps is a 20×23×23 voxel cube, confirmed by the developer\'s own map header.', href: '/hiredguns/'
+		},
+		{
+			id: 'liberation', title: 'Liberation: Captive II', status: 'research', statusLabel: 'Research',
+			tagline: '1994, Mindscape, CD32 — the world is generated from a seed, not stored; drawn with bitmap wall banks plus vector objects.', href: '/liberation/'
+		},
+		{
+			id: 'perihelion', title: 'Perihelion', status: 'research', statusLabel: 'Research',
+			tagline: '1993, Morbid Visions / Psygnosis — Table.Dat file naming solved (96/96) and 16 overhead maps confirmed; the dungeon grid is not yet located.', href: '/perihelion/'
+		}
+	]}
+/>
 
-The exhaustive source notes remain in `docs/blackcrypt/`; this site presents a
-more approachable version of that research.
+## How to read the status
 
-<style>
-	{`
-	.hero-title {
-		margin-top: 1rem;
-		margin-bottom: 2rem;
-	}
-	.hero-title img {
-		display: block;
-		width: 100%;
-		height: auto;
-		image-rendering: pixelated;
-		border-radius: 0.35rem;
-	}
-	`}
-</style>
+The labels are intentionally uneven. **Reference** means the project has the
+deepest curated documentation and is the standard this site is working toward.
+**Active** means the extraction and/or viewer pipeline is substantial but has
+known follow-on work. **Extracted** means the important shipped data is decoded
+and browsable, while the remaining work is mostly coverage or verification.
+**Research** means the format work is real and useful, but a major engine or
+palette question still gates the next layer.
+
+The [all-games status board](/status/) is the compact snapshot. Each card then
+opens that game's page, with its own open-work list and links back to the raw
+`docs/<game>/` notes in the repository. Black Crypt retains the full format and
+asset guide; the other sections will grow toward that watermark as their
+extractors and renderers mature.
+
+## The wider corpus
+
+The repository also contains an uncurated backlog: the Ishar trilogy and an SSI
+Gold Box collection. They are intentionally not presented as active
+reverse-engineering projects until they have the same kind of status surface as
+the projects above. The eight Amiga-family crawlers that sat in
+`data/_unexplored_/` were registered on 2026-11-21 and now have their own
+pages; Dungeon Master: Theron's Quest (PC Engine CD) is the one title still
+waiting there.

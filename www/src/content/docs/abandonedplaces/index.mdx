@@ -1,0 +1,209 @@
+---
+title: Abandoned Places
+description: Abandoned Places - A Time for Heroes (ArtGame, Amiga 1992) - the ArtKernal disk directory and backward-LZ packer shared with Abandoned Places 2, the 32×32 level grid, and what is still unread.
+---
+
+*Abandoned Places: A Time for Heroes* is a Dungeon Master-style party crawler
+from the Hungarian studio ArtGame, published on the Amiga by Electronic Zoo in
+1992. This project has done a **recon pass** on it (2026-11-21). The container
+and the packer are fully solved and committed. The level grid renders. The art,
+the palettes and the renderer have not been decoded yet. This page also carries
+the **only copy of the ArtGame container and packer spec**. The
+[Abandoned Places 2 page](/abandonedplaces2/) links here rather than repeating it.
+
+This page is a curated summary of the raw notes in
+[`docs/abandonedplaces/`](https://github.com/Shaid/crawl/tree/main/docs/abandonedplaces).
+Where the two disagree, the raw notes win.
+
+> **Before you write a reader: these disks are not AmigaDOS volumes.**
+> `Disk.1`–`Disk.5` are 901,120-byte DIC sector images. Only `Disk.1` has a
+> `DOS\0` bootblock, and none of the five has a root block at block 880, so
+> AmigaDOS tools see nothing on them. Every file is found through the game's own
+> directory (below), and every directory offset is a **byte offset into that
+> disk's image file**. The ArtGame packer is also unknown to `ancient`, which
+> reports it as "Unknown".
+
+## Identification
+
+| Item | Value |
+|---|---|
+| Title | *Abandoned Places: A Time for Heroes*. The English release was checked; the WHDLoad ReadMe says the German one was tested too |
+| Developer / publisher | ArtGame (Hungary) / Electronic Zoo, 1992 |
+| Engine | **ArtKernal V1.1**, a trackloader kernel launched from the bootblock with its own file directory. The string "Developed & (C)by Steve Fabian" is at `Disk.1+0x554` |
+| Install | WHDLoad install by Wepl (slave v1.3, 1998; `AbandonedPlaces.slave`, 3,344 B) |
+| Media | Five DIC sector images, `Disk.1`–`Disk.5`, 901,120 B each. Each carries a 4-byte disk tag `AP10`–`AP14` at `+0x400` (5/5) |
+| Unpacked game code | `code` (68,380 B, HUNK, directory section 1) and `module` (120,104 B, HUNK, section 2; probably the dungeon engine) |
+| Naming oracle | The English and German manuals (PDF), held locally |
+
+### Disk layout
+
+| Disk offset | Content | Confidence |
+|---|---|---|
+| `Disk.1+0x000` | Bootblock (`DOS\0`, "BOOT BY ARTGAME...") | confirmed |
+| `Disk.N+0x400` | 4-byte disk tag `AP1n` | confirmed, 5/5 |
+| `Disk.1+0x404` | The kernel. It is a HUNK_HEADER whose `0x3F3` magic has been overwritten by the tag. It has 1 hunk of `0x1452` longs (20,808 B), and the code body starts at `Disk.1+0x420` | rendered |
+| `Disk.1+0x5800`–`0x90C8` | The file directory. The kernel reads it as the file `"DIRECTORY OF AP1"` (string at `Disk.1+0x1164`) | confirmed |
+| `Disk.1+0x9800`…, `Disk.2–5+0x404`… | File bodies, packed back to back | confirmed |
+
+`Disk.3` and `Disk.4` share 611 identical 512-byte sectors. That is expected,
+because the directory places the same files on more than one disk
+(`smpl.effect`, `mdat.effect`, `block1.1`). Eleven names repeat across disks,
+and each repeat is byte-identical.
+
+## The ArtGame directory (shared with AP2): confirmed
+
+The directory is a list of 32-byte big-endian records. A 2-byte `0000`
+separator starts each disk's section.
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| +0x00 | 16 | name | ASCII, NUL-padded (`bpl.city0`, `monster26`, `ABIC.CASTLE`) |
+| +0x10 | 4 | offset | Byte offset into **that section's disk image** |
+| +0x14 | 4 | stored size | |
+| +0x18 | 4 | unpacked size | Equals the stored size when the record is not packed |
+| +0x1C | 2 | packed flag | `1` = ArtGame packer, `0` = stored |
+| +0x1E | 2 | group | AP1 uses 0–9. It looks like a load/purge class (9 = intro/cut-scene `ABIC.*`, 1 = wallset art, 2 = monsters/walls/stairs, 4/5 = TFMX audio). **Hypothesis.** AP2 stores 0 in every record |
+
+AP1 has **454 records in 5 sections** (90 / 96 / 76 / 92 / 100). Section *k*
+lives on `Disk.(k+1)`. Every section is contiguous: each `offset` equals the
+previous `offset + stored`, with 0 breaks. Section 0 starts at `0x9800`, after
+the kernel and the directory. Sections 1–4 start at `0x404`, just after the
+disk tag.
+
+**Verification: 454/454.** All 427 packed records unpack with checksum 0, with
+the input fully consumed and the output exactly the directory's unpacked size.
+The other 27 records are stored, and for each one stored = unpacked. The count
+only works out if the offsets are disk-image byte offsets and the
+section-to-disk mapping is right.
+
+## The ArtGame packer (shared with AP2): confirmed
+
+The packer is a **backward**, byte-oriented LZ. It reads from the end of the
+packed data and writes from the end of the output buffer.
+
+The reference reader is the AP2 kernel, hunk 0 `+0x22BE` (`LAB_01C2` in an IRA
+dump of `AP2`; file offset `+0x22E6`). AP1's kernel has an older version of the
+same grammar at about `Disk.1+0xA20`. It dispatches on `D3>>3` through a byte
+table, and it does not have AP2's Duff's-device copy.
+
+**Trailer.** The last 4 bytes of the stored data are a checksum byte `chk`,
+then the unpacked size as a 24-bit value in little-endian order:
+`size = b[n-1]<<16 | b[n-2]<<8 | b[n-3]`. `chk` is XORed with every control
+byte, and a valid stream ends with `chk == 0`. Otherwise the kernel returns 0,
+which means failure.
+
+**Loop.** Peek the next control byte `c` and up to 3 operand bytes `d4 d5 d6`,
+reading backward from just below the current source pointer, after any pending
+literals. `c>>3` selects the handler:
+
+| `c` | Bytes consumed | Match length | Distance − 1 | Literals after the match |
+|---|---|---|---|---|
+| `00–1F` | 1 | — | — | `(c&0x1F)+1` |
+| `20–3F` | 2 | — | — | `((c&0x1F)<<8 \| d4) + 0x21` |
+| `40–5F` | 2 | `((c>>2)&7)+3` | `(c&3)<<8 \| d4` | 0 |
+| `60–6F` | 1 | 2 | `c&0xF` | 0 |
+| `70–77` | 3 | `(c&7) + (d4&0x80 ? 12 : 4)` | `(d4&0x7F)<<8 \| d5` | 0 |
+| `78–7F` | 4 | `((c&7)<<8 \| d4) + 5` | `d5<<8 \| d6` | 0 |
+| `80–BF` | 2 | `((c>>2)&3)+3` | `(c&3)<<8 \| d4` | `((c>>4)&3)+1` |
+| `C0–FF` | 3 | `((c&3) \| ((d4&0xC0)>>4)) + 4` | `(d4&0x3F)<<8 \| d5` | `((c>>2)&0xF)+1` |
+
+The match is copied first (`out[p] = out[p + dist]`, with the output written
+downward). The literals follow, copied byte by byte downward from the source.
+The loop stops when the output pointer reaches the start of the buffer.
+
+**Verification: 427/427 AP1 and 262/262 AP2 packed records.** Each one ends with
+`chk == 0`, consumes every stored byte, and produces exactly the directory's
+unpacked size. Two null controls fail every sampled record: flipping the first
+control byte (it leaves `chk = 0x55`), and dropping the last byte, which shifts
+the trailer and leaves input unconsumed.
+
+> **Limit of the checksum.** `chk` covers control bytes only. A corrupted
+> *literal* byte still passes, so a clean checksum does not prove the literals
+> are intact. The size and consumption checks are what catch a mis-parse.
+
+**Committed code** (commit `09a59a1`):
+[`tools/shared/artgame-kernel.ts`](https://github.com/Shaid/crawl/blob/main/tools/shared/artgame-kernel.ts)
+(`parseArtDirectory`, `unpackArtGame`, `unpackArtGameStrict`, `loadArtVolume`)
+with its test `tools/shared/__tests__/artgame-kernel.test.ts`, and the CLI
+`tools/abandonedplaces/unpack.ts`. The CLI writes AP1's 443 distinct files
+(8.7 MB) to `build/cache/abandonedplaces/`. That is 454 records minus the 11
+byte-identical repeats. The files are intermediates, not web assets.
+
+## File families (unpacked)
+
+Sizes are unpacked sizes. "Section" is the directory section, so the disk is
+section + 1.
+
+| Family | Members | Evidence | Status |
+|---|---|---|---|
+| Code | `code` (section 1, 68,380 B), `module` (section 2, 120,104 B), plus small cut-scene players: `intro`, `title`, `start`, `main`, `selection`, `gameover`, `theend`, `templeruins`, `vulcan`, `crown`, `*assem` | `000003F3` at +0 | standard (HUNK) |
+| **Dungeon levels** | `dungeon1`/`2`/`3` (section 2, 131,072 B each = 12 × 10,916-B level records + 80 zero bytes), `level_forest1`–`8` (10,916 B each) | See below | grid rendered, rest unknown |
+| Wallset art, per set N = 1–11 | `wallN.M` (12,215 B), `blockN.M` (18,490), `doorN.M` (9,120), `gateN` (10,040), `stairsN` (42,890), `switchN` (6,550), `buttonN` (1,200), `carpetN.M` (5,595), `cupboardN` (14,470), `backgndN` (13,824; 192×144×4 planes?), `moduleN` (21,330; contents unknown, possibly geometry) | Headerless (leading zero rows); every member of a family has the same size | structured, undecoded |
+| Monsters | `monster1`–`38` (22,040 B each, spread over sections 2–4) | Fixed size | structured, undecoded |
+| Town / UI | `bpl.city0–12`, `bpl.village0/1`, `bpl.tower0/1`, `bpl.church0–2`, `bpl.graveyard` (25,606 B each); `bpl.council`/`herbal`/`pub`/`smith`/`train`/`jewelry`/`shop`/`temple` (12,006 B each); `bpl.panel`, `bpl.map` (204,806), `bpl.pergamen`, `bob.*`, `spr.*`, `icon0/1`, `sp0`–`sp20` (10,336), `dat.font*` | `bpl.city0` starts `0480 0014 0080 …`, a small header | structured, undecoded |
+| Intro / cut-scene pictures | `ABIC.*` / `abic.*` (77 records, sections 0, 1 and 4). Many are 40,064 B = 64 + 40,000, which would be a palette plus 320×200×5 | `ABIC.CHURCHDATA`, `crowndata` and `STARTDAT` are 64-B palettes stored beside the picture | hypothesis |
+| Text | `ABIC.TXTTITLE` ("A Time for Heroes"), `ABIC.OLDMANTXT*`, `ABIC.STARTTXT*`, `ABIC.DEATHTXT0` | Plain ASCII once unpacked | standard |
+| Music / SFX | `mdat.*` + `smpl.*` pairs (L1–L6, city1–3, outer1/2, part1.x/2.x, Temple, effect, encounter) | `TFMX-SONG ` magic: Chris Hülsbeck's TFMX | standard |
+| Map item | `map` (640 B) | Looks like 8×8 1bpp tiles, possibly automap glyphs | hypothesis |
+
+## Dungeon levels: the grid renders
+
+Every level is a 10,916-byte record. `dungeon1`–`3` hold 12 each and the 8
+forest levels are one file each, which gives **44 records**.
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| +0 | 2,048 | grid | **32 × 32 big-endian words**, row-major. `0x0001` = solid wall square, `0x0000` = open. Across all 44 records the only other values are `0x4000`, `0x2000` and `0x4001` |
+| +2048 | 2 | wallset id | **Hypothesis.** `dungeon1`/`2` use sets 1, 3, 4 and 7, and that art sits on `Disk.4`. `dungeon3` uses sets 2, 5, 6, 8 and 9, and that art sits on `Disk.5`. Forest levels use 10/11, whose `module10/11`, `block10/11.x` and `backgnd10/11` are on `Disk.3`. The split holds for 36/36 dungeon levels |
+| +2050 | 8,866 | unknown | Probably object, monster and event tables. The second word looks like a start position |
+
+The evidence for the grid:
+
+- All 44 records have a fully solid border (124/124 edge cells each).
+- At width 32 the grid draws as coherent corridors and rooms.
+- **Pitfall:** at width 64 each line holds two half-mazes side by side. 32 is the
+  right width.
+
+The `0x4000` cells line room edges and pillar rows. They are probably a
+per-square decoration or feature flag, but that is a hypothesis.
+
+## The two walker answers
+
+| Question | Answer | Confidence |
+|---|---|---|
+| **Wall storage** | **Type-derived**, as in Dungeon Master. A square is solid (`0x0001`) or open, and a wall face exists wherever the neighbouring square is solid. It converts to per-cell faces on import | Grid **rendered** (44/44 solid borders, coherent at width 32). The loader has not been traced |
+| **Renderer shape** | **Probably a slot table**: pre-drawn bitmaps per wallset, per depth and per side (`wallN.1–.4`, `blockN.1–.3`, `doorN.1/.2`, `carpetN.1/.2`, single-file `gateN`/`stairsN`/`switchN`/`buttonN`/`cupboardN`), blitted at fixed positions over a 192×144 `backgndN` backdrop | **Hypothesis, medium-low.** AP1's art files carry no geometry header, so the slot positions must come from code (`module`) or from the 21,330-byte `moduleN` files, and neither has been read. The guess rests on [Abandoned Places 2](/abandonedplaces2/), whose `.def` files carry the slot geometry explicitly |
+
+The cross-project table is in
+[`docs/walker-map-format-future-decision.md`](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md),
+in "Addendum (2026-11-21, later)".
+
+## How AP1 relates to AP2
+
+AP2 reuses AP1's directory record, its per-disk section separators and its
+packer grammar unchanged, and one decoder unpacks both games. Beyond that, the
+two games share no files: 0 sha1 matches over every unpacked file of 64 B or
+more. A 32-byte window comparison finds 184 windows shared between the AP1 and
+AP2 kernels, 211 between AP1 `code` and AP2 `main`, and 63 between the AP1
+kernel and AP2 `main`. The code lineage is shared, but the game engine was
+substantially rewritten. The full comparison is on the
+[AP2 page](/abandonedplaces2/#how-ap2-differs-from-ap1).
+
+## What is not known yet
+
+Five areas are open, and each is a row in the [status page](status/). The
+largest are the level record past the grid (8,866 B per level), the renderer's
+slot table, and the palettes. No AP1 image family has been decoded, so this
+title has **no published assets**.
+
+## Raw notes
+
+- [`docs/abandonedplaces/amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces/amiga/data-structure.md):
+  the format spec, including the shared container (§2) and packer (§3).
+- [`docs/abandonedplaces/plan.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces/plan.md):
+  the phased plan.
+- [`docs/abandonedplaces/TODO.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces/TODO.md):
+  open work.
+
+Next: [Status and open work](status/), or the sibling
+[Abandoned Places 2](/abandonedplaces2/).

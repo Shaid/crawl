@@ -1,0 +1,37 @@
+[
+	{
+		"label": "Wizardry 6",
+		"items": [
+			{ "label": "Home", "slug": "wizardry6" },
+			{ "label": "Status & Open Work", "slug": "wizardry6/status" },
+			{ "label": "Game & Platforms", "slug": "wizardry6/game/overview" },
+			{ "label": "Graphics Formats", "slug": "wizardry6/graphics" },
+			{ "label": "Dungeon & Walker", "slug": "wizardry6/dungeon" },
+			{ "label": "Data Tables", "slug": "wizardry6/data" },
+			{ "label": "Extracted Assets", "slug": "wizardry6/assets" }
+		]
+	},
+	{
+		"label": "Project Status",
+		"items": [
+			{ "label": "All Games", "slug": "status" },
+			{ "label": "Wizardry 6", "slug": "wizardry6/status" },
+			{ "label": "Might & Magic II", "slug": "mm2/status" },
+			{ "label": "Might & Magic I", "slug": "mm1/status" },
+			{ "label": "Might & Magic III", "slug": "mm3/status" },
+			{ "label": "Eye of the Beholder", "slug": "eotb/status" },
+			{ "label": "Eye of the Beholder II", "slug": "eotb2/status" },
+			{ "label": "Eye of the Beholder III", "slug": "eotb3/status" },
+			{ "label": "Dungeon Hack", "slug": "dungeonhack/status" },
+			{ "label": "Lands of Lore", "slug": "landsoflore/status" },
+			{ "label": "Zombi", "slug": "zombi/status" },
+			{ "label": "Abandoned Places", "slug": "abandonedplaces/status" },
+			{ "label": "Abandoned Places 2", "slug": "abandonedplaces2/status" },
+			{ "label": "Crystal Dragon", "slug": "crystaldragon/status" },
+			{ "label": "Evil's Doom", "slug": "evilsdoom/status" },
+			{ "label": "Hired Guns", "slug": "hiredguns/status" },
+			{ "label": "Liberation: Captive II", "slug": "liberation/status" },
+			{ "label": "Perihelion", "slug": "perihelion/status" }
+		]
+	}
+]

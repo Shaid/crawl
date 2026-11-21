@@ -1,0 +1,247 @@
+---
+title: Abandoned Places 2
+description: Abandoned Places 2 (ICE, Amiga 1993) - ArtGame-lineage crawler whose tilesets describe their own geometry; 1,962/1,962 records decoded to 149 atlases, a 32×32 × 8-byte level grid, and palettes that are still a hypothesis.
+---
+
+*Abandoned Places 2* is the 1993 sequel to
+[Abandoned Places](/abandonedplaces/), released by ICE Ltd on the Amiga in
+English and German. It uses the same ArtGame kernel directory and packer as the
+first game, but it rewrote the engine and moved the renderer's piece geometry
+into data. Every piece of wall, gate, stairs and monster art ships with a
+`.def` file that gives its size and position in its view slot. This project has
+done a recon pass and an export pass on it (2026-11-21). The container,
+packer and tileset geometry are solved. The tilesets are exported as atlases,
+with palettes that are a stated hypothesis.
+
+This page is a curated summary of the raw notes in
+[`docs/abandonedplaces2/`](https://github.com/Shaid/crawl/tree/main/docs/abandonedplaces2).
+Where the two disagree, the raw notes win.
+
+> **The container and packer are specified on the
+> [Abandoned Places page](/abandonedplaces/#the-artgame-directory-shared-with-ap2-confirmed)**
+> ([packer section](/abandonedplaces/#the-artgame-packer-shared-with-ap2-confirmed)).
+> This page covers only what AP2 does differently.
+
+> **Pitfall: the colours below are not confirmed.** The plane layout of every
+> image is confirmed. Which palette each image uses is a hypothesis, and for
+> monsters it is probably wrong (see [Palettes](#palettes-a-hypothesis)).
+> Judge the shapes, not the colours.
+
+## Identification
+
+| Item | Value |
+|---|---|
+| Title | *Abandoned Places 2* (EN/DE), ICE Ltd, 1993; ArtGame lineage |
+| Install | JOTD WHDLoad install v2.0 (2006), built with RawDIC (`AbandonedPlaces2.Slave`, 4,640 B) |
+| Media | `data/ap2.000`–`ap2.003` are **one file blob per original disk**, not disk images. `data/ap2.dir` (19,820 B) is the kernel directory. `data/AP2` (10,676 B) is the kernel, a standard AmigaDOS HUNK |
+| Game code | `main` (104,416 B unpacked, stored in `ap2.001`) |
+| Manual | A plain-text `Manual` in the install, plus the EN/DE PDF held locally. `Codes` is the copy-protection table |
+
+| Blob | Size | Directory records |
+|---|---|---|
+| `ap2.000` | 861,872 | 63 |
+| `ap2.001` | 878,337 | 160 |
+| `ap2.002` | 704,375 | 194 |
+| `ap2.003` | 815,986 | 200 |
+
+## `ap2.dir`: confirmed
+
+The record is AP1's 32-byte record, with the group field 0 in every record.
+There are 5 sections, separated by a 2-byte `0000`, and the file ends with 4
+zero bytes. The file opens directly with section 0's first record, with no
+leading separator.
+Offsets are byte offsets into `ap2.00k`, and **each of sections 0–3 ends exactly
+at the size of its blob**: 4/4, zero deviation, 0 contiguity breaks. Section 4
+lists `save_00.dat` and `save_01.dat` (401,408 B each), which live on the save
+disk and are not shipped, so the unpacker skips that section.
+
+**Verification: 617/617 shipped records.** All 262 packed records unpack with
+checksum 0, input fully consumed and size exact. The other 355 are stored
+(including the 0-byte `*_99.bpl` placeholders), and for each one stored =
+unpacked. The shared unpacker
+([`tools/shared/artgame-kernel.ts`](https://github.com/Shaid/crawl/blob/main/tools/shared/artgame-kernel.ts),
+commit `09a59a1`) writes 593 files (5.9 MB) to `build/cache/abandonedplaces2/`. The 24-file gap
+to 617 is repeated names: 12 files (`chtin.bpl`, `sp_00`–`sp_07.ani` and the
+`obj_99` triplet) appear once on each of disks 1–3 with byte-identical data.
+
+## File families (unpacked)
+
+| Family | Members | Evidence | Status |
+|---|---|---|---|
+| Code | `main` (104,416), `boot`, `language`, `menu`, `chargen`, `intro`, `gameover`, `theend` | HUNK | standard |
+| **Dungeon levels** | `dng_00`–`dng_27.dat` (28 levels, 8.5–15 KB each, in `ap2.000`) | See below | grid rendered |
+| **Tileset triplets** per set NN | `wl_` walls, `onwl_` on-wall decorations, `fl_` floor/ceiling, `strd_`/`stru_` stairs down/up, `gt_` gates, `pit_`, `swg_`/`swp_`/`sww_` (switches?), `obj_`, `mon_`. Each is `.bpl` + `.def` + `.ofs`, plus `set_NN.clr`. Sets 00–07 are on `ap2.002`/`.003`; sets 50–53 and 99 are on `ap2.001` (`_99` = empty placeholder) | See below | **geometry confirmed, exported** |
+| Palettes | `set_NN.clr`, `menu.clr`, `display.clr`, `pic_NN.clr`: 64 B = 32 Amiga `0RGB` words | `set_50.clr` = `0000 06AC 05C5 …` | standard 12-bit; image pairing is a hypothesis |
+| Pictures | `pic_00`–`07.bpl` (19,440 B), `chtin.bpl`, `gendispl.bpl` (40,000 = 320×200×5), `banki_0x.bpl` + `.cfs`, `bankg_00`, `bankt_00` | Sizes; `.cfs` holds 48–336 B, possibly colour or frame tables | hypothesis |
+| Animations | `sp_00`–`07.ani` (37,260 B each) | Fixed size | undecoded |
+| Items | `item.dat` (40,960), `itemdesc.dat` (38,912), `items.bpl`/`.def`/`.ofs` | | `items` exported; tables undecoded |
+| Text | `Game_0x.txt`, `Play_0x.txt`, `Gen_0x.txt`, `menu_0x.txt` (x = language 0/1/2) | Plain ASCII with `\l` line codes | standard |
+| Fonts | `chrset0/1.bpl` + `.def`, `chrset1.fnt` | | `chrset0/1` exported |
+| Music / SFX | `mod.ab2v2`, `mod.GameOver2`, `mod.win` (ProTracker `M.K.`); `mdat.effects` + `smpl.effects` (TFMX), `tfmx.dat` | Magic | standard |
+| Misc tables | `rnd.dat` (512), `mirror.dat` (256; a bit-reverse table for mirrored blits?), `dseffect.dat`, `button.dat` | | hypothesis |
+
+## Tileset triplets: self-describing geometry
+
+Each art file is a triplet. `.def` is N records of 28 bytes (14 big-endian
+words). `.ofs` is N `u32` offsets into `.bpl`. N is the same for every set of a
+family: `wl` 15, `onwl`/`strd`/`stru`/`swg` 9, `gt` 7, `obj` 11, `mon` 14,
+`pit` 16, `swp` 20, `sww` 36, `fl` 2. A record whose x offset is `0xFF..` is
+an empty slot, which is why some exported atlases hold fewer frames than N.
+
+| Word | Field | Notes |
+|---|---|---|
+| 0 | w | pixels |
+| 1 | h | |
+| 2 | x offset inside the slot frame | `0xFF..` = empty slot |
+| 3 | y offset | measured from the top of the frame |
+| 4 | slot frame width | `wl`: front walls 140/74/46 by depth, sides 27/34/15/8, in mirrored pairs |
+| 5 | slot frame height | 135 = the view height |
+| 6 | flags | High byte + 1 = colour planes. **Bit 0 = a mask plane follows** |
+| 7 | bytes per row | |
+| 8 | words per row | |
+| 9–10 | 0 | |
+| 11 | plane size | `= bytes/row × h` (e.g. 18 × 115 = 2,070) |
+| 12 | 0 | |
+| 13 | colour data size | `= planes × plane size` for masked records, `0` for unmasked |
+
+The view is 192×135: each `fl_*` triplet is 2 full-frame 192×135 images. A
+masked record stores one extra plane, so the step to the next record is
+`(planes + 1) × plane size` (`wl_00` record 0: 5 × 2,070 = 10,350).
+
+**Plane layout: sequential planar, colour planes first (plane 0 = bit 0), the
+mask plane last. Confirmed.** Null control: across `wl`/`mon`/`obj`/`gt`/`strd_00`,
+about 110,000 pixels lie outside the mask, and **0** of them have a non-zero
+colour with mask-last. Treating plane 0 as the mask instead leaks 25–85% of the
+pixels per family.
+
+> **Correction (2026-11-21).** The recon reported 1,476/1,520 records passing,
+> with 44 failures put down to UI art "presumably with no mask plane". That was
+> half right. The failures were the unmasked records, which store
+> `colour size = 0` and step `planes × plane size`. The old check mis-flagged
+> them. Two more cases close the count. `fl_01`–`fl_07`, `fl_50`, `chrset0/1`
+> and `icons` have **no `.ofs`**; their records sit back to back. And `chrset0/1`
+> and `icons` carry a **single `.def` record that describes one cell repeated**
+> through the whole `.bpl`: 128 glyphs 8×13 (3 planes + mask), 128 glyphs 8×10
+> (1 plane), and 168 icons 16×16 (3 planes + mask). With those rules,
+> **1,962/1,962** non-empty records pass every check, and every `.bpl` ends
+> exactly at its last record. Code:
+> [`tools/shared/artgame-tileset.ts`](https://github.com/Shaid/crawl/blob/main/tools/shared/artgame-tileset.ts)
+> (`checkGeometry`), with test `tools/shared/__tests__/artgame-tileset.test.ts`.
+> The masked flag values are `0x0307`, `0x0407`, `0x0405` and `0x0403`. The
+> unmasked ones are `0x0302` (floor), `0x0402` (`plheads`, `menu`, two `dispadd`
+> records) and `0x0000` (`chrset1`).
+
+### Exported atlases
+
+`npx tsx tools/abandonedplaces2/amiga/export-tilesets.ts` writes **149 atlases
+holding 1,962 frames** to `public/assets/abandonedplaces2/amiga/sprites/`. It
+covers every triplet of sets 00–07 and 50–53, plus `chest`, `fire`, `fspells`,
+`items`, `icons`, `chrset0/1`, `plheads`, `menu`, `dispadd` and `pleffect`.
+Each atlas has a JSON sidecar listing, per frame, its atlas rectangle, its
+`slotX/slotY/slotW/slotH` (`.def` words 2–5), its plane count, whether it is
+masked, and the palette used. `data/tileset-geometry.json` holds the
+per-triplet check: 1,962 checked, 1,962 ok.
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/abandonedplaces2/amiga/sprites/wl_00.png" alt="Abandoned Places 2 wall set 00 atlas: front faces at three depths and mirrored side faces" width="538" height="135" style="display:block;width:100%;max-width:538px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>wl_00</code>: 15 wall records. Front faces 140, 74 and 46 px wide by depth, then the side faces in mirrored pairs. Shapes confirmed; colours are <code>set_00.clr</code> indices 0–15, a <b>hypothesis</b>. The lime speckle is probably a depth or torch ramp in indices 12–15 that the game rewrites at run time.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/abandonedplaces2/amiga/sprites/fl_00.png" alt="Abandoned Places 2 floor and ceiling images for set 00" width="385" height="135" style="display:block;width:100%;max-width:385px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>fl_00</code>: the 2 full-view 192×135 floor/ceiling images, unmasked 4-plane (flags <code>0x0302</code>). Palette <code>set_00</code>, a <b>hypothesis</b>; the same lime ramp appears.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/abandonedplaces2/amiga/sprites/gt_03.png" alt="Abandoned Places 2 gate set 03 atlas: door frames and closed doors at three depths" width="364" height="121" style="display:block;width:100%;max-width:364px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>gt_03</code>: 7 gate records, door frames and closed leaves at three depths. Palette <code>set_03.clr</code>, a <b>hypothesis</b>.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/abandonedplaces2/amiga/sprites/strd_03.png" alt="Abandoned Places 2 stairs-down set 03 atlas at three depths" width="262" height="115" style="display:block;width:100%;max-width:262px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>strd_03</code>: stairs down, the 3 non-empty records of 9, at three depths. Palette <code>set_03.clr</code>, a <b>hypothesis</b>.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/abandonedplaces2/amiga/sprites/mon_10.png" alt="Abandoned Places 2 monster 10 atlas: an armoured figure in a blue robe, front, side and back views at several depths" width="495" height="116" style="display:block;width:100%;max-width:495px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>mon_10</code>: 14 records, 5 colour planes plus mask. Monsters are not tied to a set, so this one is drawn with the <b>unconfirmed fallback</b> <code>set_00</code> for indices 0–15 and <code>display.clr[16..31]</code> above them (sidecar <code>paletteBasis</code>: <code>fallback-set_00-unconfirmed+display.clr[16..31]</code>).</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/abandonedplaces2/amiga/sprites/mon_00.png" alt="Abandoned Places 2 monster 00 atlas: a skeleton at several depths and facings" width="487" height="115" style="display:block;width:100%;max-width:487px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>mon_00</code>, the skeleton: shown as the evidence <b>against</b> the current palette rule. Its bones come out orange and blue under <code>set_00</code> + <code>display.clr[16..31]</code>, which the notes call probably wrong. Open as <code>ap2-image-palettes</code>.</figcaption>
+</figure>
+
+## Palettes: a hypothesis
+
+The `.clr` files are 32 Amiga `0RGB` words. The exporter's pairing rule:
+
+- Dungeon-set families (4 planes) use indices 0–15 of their own `set_NN.clr`.
+- The upper half of each `set_NN` is black except indices 16–18, so 5-plane
+  images take indices 16–31 from `display.clr`, the shared UI half.
+- `mon_NN` and `obj_NN` are not tied to a set (`mon` goes up to 17, then 50–53).
+  They use `set_NN` when NN is below 8, and `set_00` otherwise.
+
+**This is a hypothesis, and the monster half of it is probably wrong.** The
+skeleton above is the evidence. Indices 12–15 of the set palettes form a
+lime-to-teal ramp, which gives the walls their lime speckle. That ramp is
+probably rewritten per depth or per torch level at run time, as Black Crypt
+does with its accent ramp (`COLOR26`–`31`). The fix needs either the colour
+code in `main` or in-game screenshots (below).
+
+## Dungeon levels: the grid renders
+
+`dng_NN.dat`, 28 levels:
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| +0 | 2 | width | `0x20` in 28/28 |
+| +2 | 2 | height | `0x20` in 28/28 |
+| +4 | 40 | 10 × `u32` block offsets | `offs[0] = 0x2C` and `offs[1] − offs[0] = W·H·8` in 28/28; `offs[9] = file size − 2` in 28/28 |
+| +0x2C | 8,192 | cell grid | 32 × 32 cells × **8 bytes**, row-major. **Byte 5 bit 0 = solid wall square.** Bytes 0–4 and the `0x40`/`0x80` bits of byte 5 carry per-cell features (doors, decorations, objects?); not decoded |
+| `offs[1]`… | varies | 8 more blocks | Probably object, monster and event lists. The `offs[3]` and `offs[6]` blocks are 2-byte `FFFF` terminators |
+
+`dng_00` renders as a coherent 32×32 maze with a solid border. 11 of the 28
+levels have a fully solid border. The other 17 (11–15 and 24–27 among them)
+have open edges, which would fit outdoor or edge-connected areas. That reading
+is a hypothesis.
+
+## The two walker answers
+
+| Question | Answer | Confidence |
+|---|---|---|
+| **Wall storage** | **Type-derived**: a cell is solid (byte 5 bit 0) or open, and a face is a wall where the neighbour is solid. The same family as AP1, with a cell 4× larger (8 B vs 2 B) that carries more per-cell state. Converts to per-cell faces on import | Grid **rendered** (28/28 header invariants, coherent maze). The loader in `main` has not been traced |
+| **Renderer shape** | **Slot table**: pre-drawn bitmaps per view position, cookie-cut with their own mask. The view is 192×135. Walls come as near/mid/far front faces plus left/right side faces in mirrored pairs | Piece geometry **confirmed** (1,962/1,962). The **destination table** (where each slot frame lands in the view) is not found yet; it should be in `main` |
+
+The cross-project table is in
+[`docs/walker-map-format-future-decision.md`](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md),
+in "Addendum (2026-11-21, later)". Its AP2 row still cites the recon's
+1,476/1,520 figure; the corrected count is 1,962/1,962.
+
+## How AP2 differs from AP1
+
+- **Identical:** the directory record, the per-disk section separators and the
+  packer grammar. One decoder unpacks both games.
+- **No identical files:** 0 cross-game sha1 matches over every unpacked file of
+  64 B or more.
+- **Shared code:** a 32-byte window comparison finds 184 windows shared between
+  the AP1 kernel and the `AP2` kernel, 211 between AP1 `code` and AP2 `main`, and
+  63 between the AP1 kernel and AP2 `main`. The kernel, I/O, packer and some
+  engine routines descend from AP1; the game engine was substantially rewritten.
+- **Different asset grammar:** AP2 moved the slot geometry into data (a `.def`
+  and `.ofs` beside every `.bpl`). AP1's art files are headerless. The level
+  cell grew from 2 bytes to 8, on the same 32×32 grid.
+
+## Raw notes
+
+- [`docs/abandonedplaces2/amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces2/amiga/data-structure.md):
+  the format spec, including the correction and the export notes.
+- [`docs/abandonedplaces/amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces/amiga/data-structure.md)
+  §2–§3: the shared container and packer.
+- [`docs/abandonedplaces2/plan.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces2/plan.md):
+  the phased plan.
+- [`docs/abandonedplaces2/TODO.md`](https://github.com/Shaid/crawl/blob/main/docs/abandonedplaces2/TODO.md):
+  open work.
+
+Next: [Status and open work](status/), or the sibling
+[Abandoned Places](/abandonedplaces/).

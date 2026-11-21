@@ -1,0 +1,165 @@
+---
+title: "Liberation: Captive II"
+description: "Liberation: Captive II (Mindscape, CD32 1994) — a world generated from a (world, zone) seed rather than stored, drawn with bitmap wall banks plus vector 3D objects."
+---
+
+Liberation: Captive II (Mindscape, 1994; Tony Crowther and Ross Goodley, "The
+Byte Engineers") ships **no map files**. Three small generator executables
+rebuild the world on demand from a seed. The first-person view mixes two
+techniques: pre-drawn bitmap wall pieces and vector polygon objects. Both
+answers are new shapes for this corpus.
+
+This page summarises the raw notes in
+[`docs/liberation/`](https://github.com/Shaid/crawl/blob/main/docs/liberation/).
+If this page and those notes disagree, the notes are right. **The research is
+thin: one recon pass (2026-11-21, commit `ddd5759`), no extractor, no
+published assets.** Everything below is hypothesis unless it is marked
+confirmed. Confirmed means either a structural invariant across a whole file
+family or a reading of the game's own code.
+
+> **Before you go looking for the map:** there is none on disk. The city is a
+> pure function of two small integers, `world * 16 + zone`, fed to a 16-bit
+> LCG. Don't search the data files for a grid. Run the generator. And when
+> you read offsets in `captiveII`, `+0x…` addresses here are relative to the
+> CODE hunk body: file offset = `0x2C` + value.
+
+## Identification
+
+| Item | Value |
+|---|---|
+| Title | Liberation: Captive II (also "CaptiveII"). Mindscape, 1994 |
+| Platform / install | Amiga CD32, as shipped in JOTD's WHDLoad install v1.0 (2020, "floppy & cd32 versions supported"). 179 files, 15.4 MB, plus the plain-text CD32 `Manual` |
+| Main executable | `data/captiveII`, 245,628 B, sha1 `cdce4d20…22434f8d88c`. `$VER: Liberation : Ratt V2.02 : Wyvern V2.00c`, built 08-Apr-94 |
+| Generators | `CityGen 1.12 (03-Jan-94)` 10,896 B; `BuildingGen 1.3 (12-Jan-94)` 23,324 B; `PlotGen` 12,476 B |
+| Libraries | `math.library` 3,724 B, `tridee.library` 7,232 B, `vector.library` 11,236 B: Crowther's 3D maths and polygon code |
+| Launcher | `c/Liberation` (1,984 B) plays `StartUp.asp` + `Intro.sty` through `c/PlayASP`, then runs `CaptiveII` |
+| Disassembly note | All 4 HUNK executables are plain `HUNK_HEADER` + CODE/DATA/BSS with **no** `HUNK_SYMBOL`/`HUNK_DEBUG`. IRA 2.11 `-a` aborts with "ReadSymbol error"; plain `ira -M68020 <exe> <out>` works |
+
+## File families
+
+| Family | Files | Format | Status |
+|---|---|---|---|
+| Generators | `CityGen`, `BuildingGen`, `PlotGen` | 68020 HUNK, entered with A0 = a parameter block | entry and seed **confirmed** from disassembly |
+| `AmSp` planar sprite banks | `Wall01..71.VGM` (167,766 B each), `gamemenu.spr` | `'AmSp'` + u16 count + per-sprite header + sequential planes | **confirmed**, 72/72 files |
+| `ImgA` indexed sprite banks | `MainSp.img` (158 entries), `MainSp16.img`, `3dView.img` (23), `taxi.img` (4), `backpack.img` (176) | `'ImgA'` + u16 count + u16 0 + u32 offsets | offset table read; entries not decoded |
+| IFF 3D objects | 38 `*.x3g` (`FORM O3DG`), 2 `*.x3d` (`Demo11`, `FatAnt`, bare `FORM VCDO`), `Demo.vfx` (`VFTX`) | IFF | chunk tiling **confirmed** (walk ends at EOF); chunk meaning hypothesis |
+| Audio | `Samples.BIN`, `Samples0/1.BIN`, `EndGame/*/Voice*.SAM` | u16 count + `FORM 8SVX` ×n; concatenated 8SVX with 28-byte `.LOG` sidecars | standard |
+| Animation | `*.asp`, `*.sty` (`intro.sty` 526,285 B) | RNC2-packed custom `FORM ANIM` (`NAME`, 320×200×6 `BUFF`); `.sty` = `FORM HEAD` + `STRY` directory of sub-ASPs | standard pieces; not needed for the walker |
+| Text / fonts | `ObjText.txt`, `Dossier.txt`, `PGE.txt`, `DTE.txt`, `CTE.txt`; `*Liberation.FNT` | plain text with a `^X…[ ]` macro language; `'CHAR'` bitmap font | plain |
+
+`mod.ingame` is referenced by the game but is not on disk. It may be CD audio,
+or it may have been cut.
+
+## The two walker answers
+
+### Wall storage: unknown, because the map is generated (confidence: generator mechanism from code; grid shape hypothesis)
+
+How the world gets built:
+
+- `captiveII +0x22B90` `LoadSeg`s `:CityGen` (falling back to
+  `:backup/CityGen`) and calls its entry (`jsr 6(a6)`) with **A0 =
+  A5+0x1D7A**. PlotGen is called the same way at `+0x22C46`, with a
+  parameter block stamped `'MM'`. **Confirmed** from disassembly.
+- The PRNG is a 16-bit LCG, `s = s·0x05E5 + 0x0029 (mod 2^16)`. It appears in
+  CityGen `LAB_01AC`, BuildingGen `LAB_0060`, PlotGen, and at 6 or more sites
+  in `captiveII`. CityGen's seed (`LAB_0014`) is **`world·16 + zone`**.
+  **Confirmed.**
+- `world` is word 0 & `$3FFF` of the game record at `A5+0x626C`, unpacked at
+  `captiveII +0x12E6`. `zone` is byte 2 & `$0F`. The same `world` value seeds
+  the main executable's own LCG at 5 sites (`+0x69EE`, `+0x9FD8`, `+0x9FFA`,
+  `+0xDFDA`, `+0xE752`).
+- CityGen clears its output buffer `(12,A0)` as `$3000` bytes, which is
+  **three 4,096-byte planes**. Coordinates are masked `ANDI #$3F` / `ASL #6`
+  throughout, so the strong hypothesis is a **64×64 grid per zone with 3 byte
+  planes**. That fits the manual's three levels per zone: underworld, street
+  and roof tops. CityGen skips regeneration when `(2,A0) == (1072,A0)`, which
+  acts as a cache.
+- BuildingGen reads the city cell at `(12,A0)+(32,A0)`. The plane 1 high
+  nibble + 2 gives the floor count. The plane 2 byte is an index into a 4-byte
+  building table at `(16,A0)`. BuildingGen writes the interior **into the same
+  buffer**, with a variable row width, and puts facing at `(34,A0)` (0–3:
+  `EORI #2` turns around). Hypothesis, from one read of the entry code.
+
+So the grid is a byte-plane cell grid built by code. Whether walls are stored
+per cell, on shared edges or derived from cell type is **not yet known**
+(`lib-gen-grid-format`). Dungeon Hack has the same problem
+([walker map-format decision, addendum 2026-11-21](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md)):
+its importer has to run the generator, or replay a recorded instance, because
+there is no file to read. Here the generators are 11–23 KB, self-contained
+68020 blobs with a documented in-register parameter block. Running them under
+the project's existing 68k emulator harness is a cheap, exact oracle
+(`lib-gen-harness`).
+
+### Renderer: bitmap wall pieces plus vector 3D objects (confidence: wall-bank loader confirmed; overall mix hypothesis)
+
+- **Bitmap wall pieces.** Each `WallNN.VGM` holds pre-perspective wall pieces:
+  trapezoidal side walls, floor and ceiling wedges, and front faces at several
+  depths, each piece with its own mask. The loader (`captiveII +0x250D6`)
+  builds the name `:WALLnn.VGM` from the wall-set byte `0x2C92(A5)`, splits the
+  file into 4 banks and builds a sprite table per bank (`+0x251DE`).
+  **Confirmed.** This points to a slot-table renderer like Black Crypt's. The
+  slot table itself has not been found (`lib-vgm-slot-table`).
+- **Vector objects.** Everything else is drawn as polygons by
+  `tridee.library`/`vector.library`: bank, bar, shop, furniture, city
+  buildings in 4 architectural styles (`0`–`3`), droids, monsters, people and
+  police. The manual's "Vector Preferences → Reduce fill — a special textured
+  fill is used on many 3D objects" matches the `VFTX` chunk.
+- Open: does the **outdoor city** use only vector buildings, or VGM pieces as
+  well (`lib-city-view-mix`)? `0CityVectors.x3g` holds 33 objects, which reads
+  like building façades. The current hypothesis is VGM slots plus vector props
+  for interiors, and vector buildings plus ground for the city.
+
+## Headline findings
+
+**`AmSp`: confirmed structurally on 72/72 files.**
+
+```
+'AmSp'  u16 count
+count × { u16 w, u16 h, u16 planes, u16 flags, u16 zero, pixels }
+```
+
+- `w` is the width in words. If bit 15 is set, each row is one byte short:
+  `bytesPerRow = (w & 0x7FFF)·2 − (w >> 15)`.
+- `flags & 0x8000` adds one mask plane. The pixel block is
+  `bytesPerRow · h · (planes + mask)`, padded to an even length.
+- Planes are **sequential**: colour planes 0–3 first, then the **mask last**.
+  Across Wall01's 152 sprites, the last plane covers every colour bit with
+  **0 violations**. Planes 0–3 each have 85K–144K set bits outside their own
+  extent. Row-interleaved order renders as garbage.
+- Every `.VGM` is **4 `AmSp` banks back to back**, holding 42 + 45 + 24 + 41 =
+  152 sprites and ending exactly at EOF (167,766 B). The geometry is identical
+  in **71/71** files; only the pixels differ, giving 71 wall styles. In
+  `Wall01.VGM` the bank headers sit at file offsets 0, 41,510 (`0xA226`),
+  101,936 and 130,794. The bank sizes are 41,510 / 60,426 / 28,858 / 36,972 B.
+- `gamemenu.spr` is 1 sprite, 320×109 × 5 planes, no mask. It is followed by a
+  64-byte trailer of 32 `0RGB` words, which is probably its palette.
+
+**`FORM O3DG`: confirmed IFF tiling.**
+`FORM O3DG { OFFS, n × FORM VCDO { EXVL, PLST, [VSPR] }, VFTX }`. The leading
+digit `0`–`3` picks the architectural style. `captiveII` opens files such as
+`:0CityVectors.x3g` and `:%Liberation.FNT` with the digit substituted. Reading
+the chunks as vertex list, polygon list, sprite attachments and fill textures
+is a guess from their names.
+
+## Pitfalls and corrections
+
+- **Seeded is not random.** The LCG output is stable for a given `(world,
+  zone)`, so generated maps can be reproduced exactly. They are not "random
+  levels" that can't be documented.
+- **Segment-relative offsets.** `captiveII +0x…` addresses are CODE-body
+  relative. Add `0x2C` to get the file offset.
+- **The wall palette is missing.** The 16 colours for the 4-plane wall art are
+  not in the `.VGM` files (`lib-vgm-palette`). Greyscale renders show coherent
+  stone and panel textures with heavy ordered dither. Colours published before
+  the palette is found would be guesses.
+- **Bank "offsets" are sizes.** The spec lists the loader's split as "4 banks
+  at +0, +0xA226, +0xEC0A, +0x70BA". Those hex values are the bank *sizes*
+  (41,510 / 60,426 / 28,858), not file offsets. The real bank starts are given
+  above, and match the `AmSp` magic in `Wall01.VGM`.
+
+## Raw notes
+
+- [CD32 format notes (`data-structure.md`)](https://github.com/Shaid/crawl/blob/main/docs/liberation/cd32/data-structure.md)
+- [Plan](https://github.com/Shaid/crawl/blob/main/docs/liberation/plan.md)
+- [Open work (`TODO.md`)](https://github.com/Shaid/crawl/blob/main/docs/liberation/TODO.md)
+- [Status page](status/)

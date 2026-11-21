@@ -121,7 +121,7 @@
     "note": "Only side=1 (party right), $51A=0 (direct) is reachable; art is per-map (wall-decorations bank), resolved at runtime from the entity gfxNumber and the level unit id."
   },
   "floorPlate": {
-    "note": "Geometry confirmed; art source resolved this pass -- bcdfa UI panel bank (sprites/ui-panel.json), frames pressure_plate_{1,2}_{up,down}. Not yet wired into buildViewList (the 13-near/11-far fixed sub-tile grid positions need their own placement-index derivation, beyond this pass's scope) -- see docs/blackcrypt/TODO.md blackcrypt-floorplate-art-source.",
+    "note": "Wired into buildViewList this pass (blackcrypt-floorplate-placement-wiring): the renderer +0x21732 stamps the same descriptor at every entry of the fixed 13-near/11-far grid -- no per-plate sub-position selection. Art is the bcdfa UI panel bank (sprites/ui-panel.json), frames pressure_plate_{1,2}_{up,down}.",
     "bank": "ui-panel",
     "nearPositionsDirect": [
       [

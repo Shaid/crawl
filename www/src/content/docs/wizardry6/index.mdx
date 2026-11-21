@@ -1,0 +1,88 @@
+---
+title: Wizardry 6 — Bane of the Cosmic Forge
+description: A human-readable guide to the Amiga, DOS/EGA and SNES data formats of Wizardry 6.
+template: splash
+hero:
+  tagline: Three platform variants, one game family — from Amiga resource files to the SNES dungeon composer.
+  actions:
+    - text: Start with the game layout
+      link: /wizardry6/game/overview/
+      icon: right-arrow
+    - text: See the extracted assets
+      link: /wizardry6/assets/
+      icon: external
+    - text: Open work
+      link: /wizardry6/status/
+      icon: open-book
+      variant: minimal
+---
+
+<img
+	src="/assets/wizardry6/amiga/screens/titlepag.png"
+	width="320"
+	height="200"
+	alt="Wizardry 6 Amiga title screen"
+	style="display:block;width:100%;max-width:640px;margin:0 auto 1.5rem;image-rendering:pixelated;border-radius:0.35rem;"
+/>
+
+**Wizardry 6: Bane of the Cosmic Forge** is the second full documentation
+section in Crawl, alongside Black Crypt. It follows the data across three
+different releases rather than treating one platform as the universal oracle:
+the Amiga port, the DOS/EGA build and the Super Nintendo version.
+
+The research began from a deliberately difficult position: no useful public
+format documentation was found for the Amiga corpus. The formats below are
+therefore derived from the shipped files, the game's own loaders and targeted
+disassembly, with confidence called out as **confirmed**, **rendered** or
+**hypothesis** where that distinction matters.
+
+## What is already solved
+
+- The Amiga corpus is structurally accounted for: one `Bane` executable, 60
+  `.PIC` files, 12 `.EGA` files, 5 `.HDR` files, 4 `.DBS` files and 35 sound
+  files — 117 files in total.
+- Amiga `.PIC` cels, `.EGA` screens, `mazedata.ega`, fonts, portraits, headers,
+  messages and the major database sections have confirmed readers and render
+  or tile with zero-deviation structural checks.
+- The Amiga dungeon view is now a real cell-driven renderer: 14 levels decode,
+  per-cell wall evaluation is traced, and the shared walker has real corridor,
+  door, side-wall and ceiling/floor assets.
+- The SNES opening sequence, palettes, dungeon-art libraries, maze records,
+  creature bank, spell animations and dungeon-view composer are extracted.
+- The DOS/EGA side inherits and independently confirms most of the Amiga
+  resource formats, while its endian conversion and overlay architecture are
+  documented separately.
+
+## Read this section
+
+<div class="section-links">
+	<a href="/wizardry6/game/overview/"><strong>Game & Platforms</strong><span>How the three releases fit together and where each file family lives.</span></a>
+	<a href="/wizardry6/graphics/"><strong>Graphics Formats</strong><span>`.PIC`, `.EGA`, `mazedata`, SNES tiles, fonts, portraits and palettes.</span></a>
+	<a href="/wizardry6/dungeon/"><strong>Dungeon & Walker</strong><span>The Amiga and SNES maze data, compose lists and first-person draw paths.</span></a>
+	<a href="/wizardry6/data/"><strong>Data Tables</strong><span>Headers, messages, monsters, items, XP, characters and platform variants.</span></a>
+	<a href="/wizardry6/assets/"><strong>Extracted Assets</strong><span>Rendered screens, maps, monsters, portraits, spells and view samples.</span></a>
+	<a href="/wizardry6/status/"><strong>Status & Open Work</strong><span>The honest boundary between confirmed research and the next pass.</span></a>
+</div>
+
+## Source of truth
+
+These pages are a curated companion to the repository notes. The authoritative
+documents are:
+
+- `docs/wizardry6/amiga/data-structure.md`
+- `docs/wizardry6/dosega/data-structure.md`
+- `docs/wizardry6/snes/data-structure.md`
+- `docs/wizardry6/TODO.md`
+
+When a gallery or summary is less precise than those documents, the raw notes
+win. The extraction commands live under `tools/wizardry6/` and are run from the
+repository root.
+
+<style>
+{`
+.section-links { display:grid; gap:.75rem; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); margin:1.5rem 0; }
+.section-links a { background:var(--sl-color-gray-6); border:1px solid var(--sl-color-gray-5); border-radius:.45rem; color:inherit; display:flex; flex-direction:column; gap:.3rem; padding:.85rem 1rem; text-decoration:none; }
+.section-links a:hover { border-color:var(--sl-color-accent); }
+.section-links span { color:var(--sl-color-gray-2); font-size:.88rem; line-height:1.4; }
+`}
+</style>

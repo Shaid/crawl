@@ -1,10 +1,10 @@
-// Build helper for the Black Crypt docs site.
+// Build helper for the Crawl multi-game docs site.
 //
 // Two jobs:
 //   1. Copy the repo's extracted assets (public/assets/blackcrypt) into this
 //      site's public/ so the site is self-contained and images render.
-//   2. Generate the Starlight sidebar (generated/sidebar.mjs) from the curated
-//      page manifest (src/content/docs/blackcrypt/_sidebar.json).
+//   2. Generate the Starlight sidebar (generated/sidebar.mjs) from the project
+//      status manifest plus Black Crypt's detailed page manifest.
 //
 // Locally, extracted assets are copied from the repo's public/assets directory.
 // In CI, the committed www/public build assets are reused instead. Run with:
@@ -20,7 +20,55 @@ const repo = resolve(root, '..');
 
 const ASSET_SRC = join(repo, 'public', 'assets', 'blackcrypt');
 const ASSET_DST = join(root, 'public', 'assets', 'blackcrypt');
-const MANIFEST = join(root, 'src', 'content', 'docs', 'blackcrypt', '_sidebar.json');
+const W6_ASSET_SRC = join(repo, 'public', 'assets', 'wizardry6');
+const W6_ASSET_DST = join(root, 'public', 'assets', 'wizardry6');
+const W6_SITE_FILES = [
+	'amiga/screens/titlepag.png',
+	'amiga/screens/dragonsc.png',
+	'amiga/screens/graveyrd.png',
+	'amiga/maps/mazedata-indexed.png',
+	'amiga/maps/through-dungeon-16-10-f0.png',
+	'amiga/maps/through-dungeon-30-4-f0.png',
+	'amiga/maps/maze-level07.png',
+	'amiga/sprites/monsters.png',
+	'amiga/sprites/wport1.png',
+	'snes/screens/title-backdrop.png',
+	'snes/screens/dungeon-view-sample.png',
+	'snes/screens/logo.png',
+	'snes/sprites/portraits.png',
+	'snes/sprites/spell-animations.png',
+	'snes/sprites/ui-icons.png',
+	'snes/sprites/creature-sprites.png',
+];
+// The status pages use one representative title/title-adjacent screen per
+// project. Keep this list deliberately small; the game's full extracted asset
+// tree remains outside the site bundle unless a page actually uses it.
+const TITLE_SITE_FILES = [
+	['mm1', 'dosega/screens/title-0.png'],
+	['mm2', 'amiga/textures/intro.png'],
+	['mm3', 'amiga/screens/intro.cc_e1.png'],
+	['eotb', 'dosvga/screens/title-v.png'],
+	['eotb2', 'dosvga/screens/intro.png'],
+	['eotb3', 'dosvga/screens/chargen.png'],
+	['dungeonhack', 'dosvga/screens/hack-Main_Screen.png'],
+	['landsoflore', 'dosvga/screens/title.png'],
+	// Overview-page images for the 2026-11-21 Amiga titles (only these two
+	// have published assets yet).
+	['zombi', 'amiga/screens/present.png'],
+	['zombi', 'amiga/screens/screen.png'],
+	['zombi', 'amiga/screens/victoire.png'],
+	['zombi', 'amiga/sprites/lieux.png'],
+	['zombi', 'amiga/sprites/z.png'],
+	['zombi', 'amiga/sprites/objet.png'],
+	['abandonedplaces2', 'amiga/sprites/wl_00.png'],
+	['abandonedplaces2', 'amiga/sprites/fl_00.png'],
+	['abandonedplaces2', 'amiga/sprites/gt_03.png'],
+	['abandonedplaces2', 'amiga/sprites/strd_03.png'],
+	['abandonedplaces2', 'amiga/sprites/mon_10.png'],
+	['abandonedplaces2', 'amiga/sprites/mon_00.png'],
+];
+const PROJECT_MANIFEST = join(root, 'src', 'content', 'docs', '_sidebar.json');
+const BLACKCRYPT_MANIFEST = join(root, 'src', 'content', 'docs', 'blackcrypt', '_sidebar.json');
 const OUT_DIR = join(root, 'generated');
 const OUT_SIDEBAR = join(OUT_DIR, 'sidebar.mjs');
 
@@ -45,6 +93,36 @@ if (hasLiveAssetSrc) {
 } else {
 	throw new Error(`Missing extracted assets and committed site assets: ${ASSET_SRC}`);
 }
+
+// Wizardry 6 has its own full documentation section. Keep the same local
+// source / committed fallback behaviour as Black Crypt, but copy only the
+// curated images used by these pages rather than the whole 37 MB asset tree.
+const hasLiveW6Assets = existsSync(W6_ASSET_SRC);
+const w6SourceRoot = hasLiveW6Assets ? W6_ASSET_SRC : W6_ASSET_DST;
+if (!existsSync(w6SourceRoot)) {
+	throw new Error(`Missing extracted assets and committed site assets: ${W6_ASSET_SRC}`);
+}
+if (hasLiveW6Assets) rmSync(W6_ASSET_DST, { recursive: true, force: true });
+for (const file of W6_SITE_FILES) {
+	const source = join(w6SourceRoot, file);
+	const destination = join(W6_ASSET_DST, file);
+	if (!existsSync(source)) throw new Error(`Missing Wizardry 6 site asset: ${source}`);
+	mkdirSync(dirname(destination), { recursive: true });
+	cpSync(source, destination);
+}
+console.log(`Copied ${W6_SITE_FILES.length} curated Wizardry 6 assets into ${W6_ASSET_DST}`);
+
+for (const [game, file] of TITLE_SITE_FILES) {
+	const source = join(repo, 'public', 'assets', game, file);
+	const destination = join(root, 'public', 'assets', game, file);
+	if (existsSync(source)) {
+		mkdirSync(dirname(destination), { recursive: true });
+		cpSync(source, destination);
+	} else if (!existsSync(destination)) {
+		throw new Error(`Missing title asset for ${game}: ${source}`);
+	}
+}
+console.log(`Copied ${TITLE_SITE_FILES.length} curated status-page title assets`);
 
 // Reuse the committed browser fonts in CI. Regenerate them locally only when
 // either artifact is absent, so the deployment does not need Python/fontTools.
@@ -129,7 +207,10 @@ if (existsSync(join(screenDir, 'title.png')) && existsSync(join(screenDir, 'logo
 
 // --- 2. Generate sidebar ----------------------------------------------------
 
-const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+const manifest = [
+	...JSON.parse(readFileSync(BLACKCRYPT_MANIFEST, 'utf8')),
+	...JSON.parse(readFileSync(PROJECT_MANIFEST, 'utf8')),
+];
 
 const toSidebar = (entry) => {
 	if (entry.items) {
@@ -147,7 +228,7 @@ mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(
 	OUT_SIDEBAR,
 	`// Generated by scripts/build.mjs — do not edit by hand.\n` +
-		`// Source manifest: src/content/docs/blackcrypt/_sidebar.json\n` +
+	`// Source manifests: src/content/docs/_sidebar.json + blackcrypt/_sidebar.json\n` +
 		`export const sidebar = ${JSON.stringify(sidebar, null, 2)};\n`,
 );
 console.log(`[sidebar] wrote ${OUT_SIDEBAR} (${sidebar.length} top-level groups)`);

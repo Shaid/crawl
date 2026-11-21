@@ -1,0 +1,49 @@
+---
+title: All Games — Status
+description: The current reverse-engineering status of every curated game project in Crawl.
+---
+
+# All Games — Status
+
+This is the project-level status board. Black Crypt is the current documentation
+watermark; Wizardry 6 is the second full section. The remaining projects have
+honest status-first pages and will gain deeper format guides as their research
+stabilises.
+
+| Game | Platforms in the repo | Current status | Next boundary |
+|------|------------------------|----------------|---------------|
+| [Black Crypt](../blackcrypt/) | Amiga, DOS/VGA | **Reference** | A handful of narrow format questions and the DOS restoration injection remain. |
+| [Wizardry 6](../wizardry6/) | Amiga, DOS/EGA, SNES | **Active** | Finish the last walker entity/overlay semantics and unresolved record fields. |
+| [Might & Magic II](../mm2/) | Amiga, DOS/EGA | **Active** | Resolve remaining opaque fields and sequence-selection semantics. |
+| [Might & Magic I](../mm1/) | DOS/EGA, NES | **Extracted** | Improve live visual capture and resolve the `MM.RSM` address encoding. |
+| [Might & Magic III](../mm3/) | Amiga, DOS/VGA | **Active** | Browser verification and the remaining outdoor-view promotion. |
+| [Eye of the Beholder](../eotb/) | Amiga, DOS/VGA | **Active** | Finish palette/item pipelines and Amiga wall/decoration mapping. |
+| [Eye of the Beholder II](../eotb2/) | Amiga reference material, DOS/VGA | **Extracted** | DOS pipeline wiring and the deferred Amiga pass. |
+| [Eye of the Beholder III](../eotb3/) | DOS/Windows | **Research** | Decompile the AESOP dungeon-view handlers that gate a walker. |
+| [Dungeon Hack](../dungeonhack/) | DOS/Windows | **Research** | Resolve palette assignment, sound/music payloads and generated-maze scope. |
+| [Lands of Lore](../landsoflore/) | DOS/VGA | **Active** | Recolour SHP monsters and finish extraction breadth/VCN semantics. |
+| [Zombi](../zombi/) | Amiga | **Extracted** | Compass orientation of the `i-lieux` exits; object and zombie placement over the pictures. |
+| [Abandoned Places 2](../abandonedplaces2/) | Amiga | **Extracted** | 149 tileset atlases out (1,962/1,962 records); palettes, cell bytes and slot destinations open. |
+| [Abandoned Places](../abandonedplaces/) | Amiga | **Research** | Container and packer solved (454/454); level record, slot table and palettes open. |
+| [Crystal Dragon](../crystaldragon/) | Amiga | **Research** | `SF` codec and level region table solved; image codec, palette and renderer open. |
+| [Evil's Doom](../evilsdoom/) | Amiga AGA | **Research** | Decode the save-state grid framing and the view-slot table. |
+| [Hired Guns](../hiredguns/) | Amiga (+ CD32 dev archive) | **Research** | Decode the voxel cell fields and z direction; crack the `.gfx` packer. |
+| [Liberation: Captive II](../liberation/) | CD32 | **Research** | Run the map generators statically and decode the three grid planes. |
+| [Perihelion](../perihelion/) | Amiga | **Research** | Find the palette, the dungeon grid in the main program and the wall-atlas slot table. |
+
+## Status vocabulary
+
+- **Reference** — the deepest curated docs and extraction evidence in the site.
+- **Active** — core formats and/or a viewer are working, with bounded follow-on
+  research still in progress.
+- **Extracted** — the important shipped data is decoded and browsable; the next
+  work is coverage, visual verification or a narrow unresolved format question.
+- **Research** — substantial real evidence exists, but a major engine or
+  palette question still blocks the next layer.
+
+The bottom eight rows are the Amiga-family crawlers first explored on
+2026-11-21: each has had one reconnaissance pass, and Zombi, both Abandoned
+Places games and Crystal Dragon have had a first extractor. The repository
+also has an uncurated backlog — Ishar and the SSI collection. Those are
+intentionally not represented as active projects until they have their own
+status surfaces.

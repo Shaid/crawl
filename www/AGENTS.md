@@ -10,16 +10,20 @@ Manage the background server with `astro dev stop`, `astro dev status`, and `ast
 
 ## Build & asset wiring
 
-This site is a curated, human-readable companion to the repo's Black Crypt
-reverse-engineering notes. Two things are **generated**, never edited by hand:
+This site is a curated, human-readable companion to the repo's multi-game
+reverse-engineering notes. Black Crypt and Wizardry 6 have full documentation
+sections; the other curated projects have status-first pages. Three things are
+**generated**, never edited by hand:
 
 - `public/assets/blackcrypt/` — copied from the repo's `public/assets/blackcrypt`
   by `scripts/build.mjs`, so the site is self-contained.
+- `public/assets/wizardry6/` — the curated screen/atlas subset copied from the
+  repo's Wizardry 6 extraction tree by `scripts/build.mjs`.
 - `public/fonts/` — committed WOFF2/TTF outputs generated from the extracted
   `font-big` bitmap atlas. `scripts/build.mjs` only regenerates them when an
   artifact is missing, so CI does not need Python/fontTools.
-- `generated/sidebar.mjs` — the Starlight sidebar, generated from
-  `src/content/docs/blackcrypt/_sidebar.json`.
+- `generated/sidebar.mjs` — the Starlight sidebar, generated from the global
+  project manifest and Black Crypt's detailed manifest.
 
 `npm run dev` and `npm run build` run `scripts/build.mjs` first, so assets,
 fonts and the sidebar stay in sync automatically. Run it manually with
@@ -27,13 +31,12 @@ fonts and the sidebar stay in sync automatically. Run it manually with
 
 ### Editing the site
 
-- **Curated pages** live in `src/content/docs/blackcrypt/`. They summarise the
-  raw notes in `docs/blackcrypt/` (the source of truth). When a page disagrees
-  with the raw notes, the raw notes win.
-- **Sidebar order/labels**: edit `src/content/docs/blackcrypt/_sidebar.json`,
-  then re-run the build script. Slugs are the content file paths under
-  `src/content/docs/` (the home page's slug is `blackcrypt`, not
-  `blackcrypt/index`).
+- **Curated pages** live under `src/content/docs/`. Black Crypt and Wizardry 6
+  summarise `docs/blackcrypt/` and `docs/wizardry6/`; the status-first game
+  pages point to each project's raw notes as the source of truth.
+- **Sidebar order/labels**: edit `src/content/docs/_sidebar.json` for the
+  project sections or `src/content/docs/blackcrypt/_sidebar.json` for the
+  Black Crypt reference section, then re-run the build script.
 - **Images**: reference the copied assets by URL path, e.g.
   `/assets/blackcrypt/amiga/screens/title.png`. Re-run the build script after
   the repo's `public/assets` changes.

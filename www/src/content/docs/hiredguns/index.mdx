@@ -1,0 +1,220 @@
+---
+title: Hired Guns
+description: Recon overview of Hired Guns (DMA Design, Amiga, 1993) — RNC1 layer, 41 maps that each hold a 20×23×23 voxel cube in three planes, a custom figure packer with DMA's own toolchain as the oracle, and the CD32 dev archive's map header.
+---
+
+Hired Guns is DMA Design's four-player first-person game for the Amiga
+(Psygnosis, 1993). This project has done **first-contact reconnaissance only**
+(2026-11-21). The RNC1 layer is confirmed. The map geometry is confirmed from
+the executable's own address maths, and the developer's map-editor header
+confirms it independently. Cell meanings, graphics and the view are still
+hypotheses. No extractor is committed, and no assets are published.
+
+This page summarises
+[`docs/hiredguns/amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/hiredguns/amiga/data-structure.md).
+Where the two disagree, the raw notes win.
+
+> **Pitfall: this is not a stack of 2D floor maps.** Each map is **one
+> 23×23×20 voxel cube**, and the engine indexes z directly. A walker that
+> imports one 2D grid per floor loses the vertical links (stairs, lifts, open
+> space above or below). The repository's walker schema has no slot for those
+> links yet.
+
+## Identification
+
+| Field | Value |
+|---|---|
+| Title | Hired Guns (1993) |
+| Developer / publisher | DMA Design / Psygnosis |
+| Platform | Amiga OCS (PAL) |
+| Install | WHDLoad, Psygore v1.0 (2004, `ReadMe`). The game tree is under `game/`, already unpacked from the floppies. |
+| Build | Full game, not the demo the slave also supports: it has 41 maps and 5 languages. |
+| Main exe | `game/Hired Guns`, RNC1-packed HUNK, 67,809 B, sha1 `cb13148b92611b27a1a592529da47781eb34de0a` |
+| Engine lineage | No sibling seer corpus covers DMA Design. The music is OctaMED `MMD0`, which Black Crypt's `bcdfq` also uses. |
+
+## Packing (confirmed)
+
+**108 files** under `game/` start with `RNC\x01` (Rob Northen method 1),
+including the main executable. `ancient decompress` unpacks all 108 without
+error, and each output length equals the header's unpacked-size field.
+
+The files that are not RNC1 are these: the 31 `CharactersGfx/*.gfx` and
+`MonstersGfx/*.gfx` files, which use a second, custom packer; the IFF ILBMs; the
+`.info` icons; and the dev tools.
+
+The unpacked exe holds the path templates `Maps/xx.map` and
+`Styles/Stylexx.gfx`. The game patches the digits at runtime, as Black Crypt
+does with its `"bcdf?"` template, so the exe has no literal `01.map` string.
+
+## File families
+
+| Family | Files | Unpacked | Role (hypothesis unless noted) |
+|---|---|---|---|
+| `Maps/NN.map` | 41 (01–47, gaps at 13/16/22/24/32/36) | **157,738 B each** | Level: briefing text, object tables, 3 voxel planes |
+| `World/Locations.dat` | 1 | 25,474 B | Same header and briefing grammar as the maps (`LAT 01.69] LGN 37.83]`); probably the location-select bank |
+| `World/WorldForeign.dat` | 1 | 74,636 B | Foreign-language briefing text (`0xFB yy xx 0xFC` records) |
+| `World/World.dat`, `Static/StaticNN.mod` | 1 + 5 | — | **`MMD0`** (OctaMED) modules, magic at offset 0 |
+| `Styles/StyleNN.gfx` | 5 | 217–235 KB | Wall/scenery style banks: a 48-longword offset table at `+0`, then figure records |
+| `CharactersGfx/*.gfx` | 12 | 15,350 B each (header field) | Party-member figures, custom packer |
+| `MonstersGfx/MonsterNN.gfx` | 19 | 19,302 B each (header field) | Monster figures, same packer |
+| `Characters/*` | 12 | — | **Plain IFF ILBM** 320×256×5, ByteRun1, with `CRNG`/`DPPS`/`CAMG`: the *source art* for `CharactersGfx` |
+| `Game/Items.gfx`, `Game/Misc.gfx` | 2 | 34,660 / 128,860 B | Offset-table banks of figure records |
+| `Game/Items.*`, `Messages.*`, `Languages/Phrasebook.*`, `Front/Outro.*` | 21 | — | Text per language (fre/ger/ita/spa) |
+| `Game/GameFast.dat`, `GameChip.dat`, `ExtraSfx.dat` | 3 | 155 / 39 / 414 KB | Offset-table banks of IFF `FORM`s (sound and graphics, split by fast/chip RAM) |
+| `Atmos/*.sfx` | 9 | — | IFF **8SVX** ambient loops |
+| `Front/*.dat`, `ChSelect/*.dat`, `Static/Static.dat`, `Static/StaticNN.pic` | — | `StaticNN.pic` = 48,032 B each | Front-end screens; most start with a copper list |
+| `Game/Game.cpr`, `Game3.cpr` | 2 | 4,524 B | Raw copper lists (`0x0096 8020` DMACON …) |
+| `Game/Foreign.font` | 1 | 1,676 B | Bitmap font |
+| `MakeFigure/`, `C/Crunch`, `C/Display`, `Convert/*` | — | — | **DMA's own figure-conversion toolchain, shipped on the disk** |
+
+## The map: one voxel cube per level
+
+Each map is a fixed 157,738-byte memory image. All 41 files share the same
+layout, down to the byte boundaries of their zero and non-zero spans.
+
+| File offset | Size | Content | Confidence |
+|---|---|---|---|
+| `+0x0000` | 10 | 5 BE words: `w0`,`w1` vary per map (57,142 / 256,194 …); `w2 = w3 = 10`; `w4` = `0x0100` … `0x0401` (the high byte may be the style number) | hypothesis |
+| `+0x000A` | about `0x1AE6` | Briefing/log text records `FB 00 yy 00 xx FC <text>` with `~` padding, plus a 26-word block at `+0x20A` | rendered |
+| `+0x22EC`–`+0x65F7` | 17 KB | 28-byte object/event records whose long fields look like offsets into the map image (all below `0x2682A`) | hypothesis |
+| `+0x6F40` | 42,320 | **Voxel plane 0**: 20 × 23 × 23 cells × 4 B | **structural-confirmed** |
+| `+0x11828` | 42,320 | **Voxel plane 1** (plane 0 + `0xA8E8`) | structural-confirmed |
+| `+0x1C110` | 42,320 | **Voxel plane 2** (plane 0 + 2 × `0xA8E8`) | structural-confirmed |
+
+The planes sit 43,240 B (`0xA8E8`) apart: 42,320 B of cells plus 920 B
+(10 rows × 92) that are zero in all 41 maps.
+
+### Evidence from the executable
+
+The unpacked exe addresses a cell as **`z·0x844 + y·0x5C + x·4`**: a layer is
+2,116 B (23×23×4), a row is 92 B (23×4) and a cell is 4 B. It reaches the other
+planes of the same cell with `ADDA.L #$0000A8E8`, which appears **41 times**.
+The offsets below are file-relative to the unpacked `Hired Guns` image, with the
+HUNK header included.
+
+- `+0x1629C`: `MULS #4,D1 / MULS #$5C,D2 / MULS #$844,D3` and the adds. This is
+  a full (x, y, z) → offset computation.
+- `+0x783E`, `+0x165C0`, `+0x17382`: `MOVE.B 4(A0),D0 / MULU #$844,D0`,
+  followed by `MOVE.B 3(A0)|1(A0) … MULU #$17|#$5C`. An entity record carries
+  its z, y and x as bytes.
+- `+0x8518`: `ADDA.L #$A8E8,A4 / MOVE.W #$42,D0`. This steps to plane 1 and
+  tests `0x42`, the value that fills solid rock in plane 0.
+
+### Evidence from the data
+
+- Reshaping plane 0 as `(20, 23, 23)` gives the highest neighbour agreement of
+  every candidate shape: **0.72 / 0.84 / 0.84** per axis, averaged over 41 maps.
+- In map 01, each upper layer is a 23×23 square framed by `0x40` on all four
+  edges. The lower layers are `0x42` rock with carved cavities.
+- On the outer axis, **143,802 of 188,460** open cells (all maps) sit directly
+  above or below another open cell.
+
+### The developer's own header agrees
+
+The DMA development archive is the Internet Archive item
+`hired-guns-cd-32-dev-files` ("Hired Guns Amiga CD32 Beta and Development
+Files", uploaded 2021-07-21, public-domain mark). It is now on disk under
+`data/hiredguns/devarchive/`, gitignored. Its `MapEditor/HGmapstructure.h`
+defines `MAP_HEIGHT 20`, `MAP_WIDTH 23`, `MAP_DEPTH 23` and `FLOOR_SIZE 529`
+(= 23 × 23). It also defines per-cell bitfields for floor, block, water, panel,
+explosion, variant and aux. Those constants match the shape derived above from
+the retail exe. The archive is the **unreleased CD32 build**, so it is a strong
+guide, not proof, for the floppy retail files.
+
+Both archive files match the item's own checksums. The tarball
+`HiredGunsCD32_DevFiles.tar.xz` is sha1
+`621d17bf34a9d60387dc5f6b529efc4058e05c12`, and the ISO `HiredGunsCD32_Beta.iso`
+is sha1 `cc44afbe5b637256bbf3bddbbf53f3a2a0e20131`. The archive holds 301 source
+files (288 `.s`, 8 `.i`, 5 `.c`) plus 6 `.h` headers. Only 34 of them are under
+`Sources/`; the rest sit in `Graphics/` (175), `Data/` (53), `Takeover/` (24) and
+`MapEditor/` (12).
+
+### Cell words (hypothesis)
+
+- **Plane 0**, 4 B: byte 1 is a flag/type byte. `0x42` is solid rock, with
+  179,694 such cells where plane 1 = `0x0C`. `0x40` is layer frame or open air,
+  `0x00` is empty, and there are low values too (`0x01`–`0x05`, `0x20`, `0x21`,
+  `0x43`, `0x4A`). Bytes 0, 2 and 3 carry more fields, possibly object and door
+  links.
+- **Plane 1**, 4 B: byte 1 takes **53 values**, and `0x0C` is solid interior.
+  Around open space it takes a different value on each side of a void: `0x0D`
+  west of an opening, `0x0B` east, `0x14` north and `0x04` south. This looks
+  like a **per-cell block-shape or graphic index**, choosing which Style figure
+  to draw.
+- **Plane 2**, 4 B: mostly `0x0000 0F00` or `0`, with sparse other values. It
+  may be lighting or a second graphic layer.
+
+### Walker answer 1: wall storage is a new kind, a voxel block with a shape code
+
+Whether a face exists is type-derived, as in Dungeon Master, but in three
+dimensions: a block is solid or open. In addition, each block carries an
+authored shape/graphic index in plane 1 that picks its artwork. Converting each
+z-layer to the per-cell model is mechanical (a face exists where the neighbour is
+solid). The vertical links need a z-adjacency plane that the walker schema does
+not have yet (the "Hired Guns" row of the
+[walker map-format decision](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md),
+addendum dated 2026-11-21, later).
+
+**Confidence:** the geometry is **structural-confirmed** by the exe and the dev
+header. The face semantics are a **hypothesis**. Which way z runs (index 0 =
+top or bottom) is **not known**.
+
+## Figures and the view
+
+### A custom packer, with ground truth on the disk
+
+Character and monster `.gfx` files have this header:
+
+- `+0`: a word that varies.
+- `+2`: a long, the unpacked size. It is `0x3BF6` (15,350) for every character
+  and `0x4B66` (19,302) for every monster.
+- `+6`: a long, the packed size. It equals the file length in **31/31** files.
+
+A packed stream follows, and it always begins `0x7790`. `ancient` does not
+recognise it. The likely packer is DMA's own `C/Crunch`, which ships on the
+disk.
+
+`MakeFigure/Filters` is a plain-text **cut list** that turns a
+`Characters/<name>` ILBM into its `.gfx`. It gives every figure **4 facings**
+(`:Left`, `:Right`, `:Front`, `:Back`) at **4 pre-scaled depth sizes**: 32×64,
+32×42, 16×28 and 16×20. It also gives a `:Dead` pose and a `:Face`. Once the
+packer is solved, the decoded frames must equal these rectangles cut from the
+ILBM, byte for byte.
+
+`MakeFigure/Figure.dump`, `Face.dump`, and the record headers in
+`Styles/*.gfx` and `Game/Misc.gfx` appear to share one record shape: a size
+long, width/height/plane-count words, then 12-byte frame entries
+`w, h, x, y, 0, 0, data-offset` (for example `0010 0014 0018 000E 0000 0000
+0D1C`). This is a hypothesis. Each frame entry carries its own geometry, so a
+fixed-stride scan would miss records.
+
+### Walker answer 2: pre-scaled pieces blitted into depth slots
+
+**Hypothesis, medium confidence.** Figures exist at exactly four pre-drawn
+sizes, which fixes the depth steps at 4. The Style banks hold figure records
+that carry their own x/y placement. That is the Black Crypt / Dungeon Master
+family (depth-slot composites of pre-drawn pieces), not texture mapping or
+vectors. The open part is the third dimension: the renderer may draw blocks
+above and below the eye layer (ceiling holes, ledges, stairs) as extra slots.
+Settling that needs the view routine traced in the exe.
+
+## Paths tried
+
+| Approach | Result | Why it isn't an answer |
+|---|---|---|
+| Plane-1 byte 1 as a function of the 4- and 8-neighbour solid mask (bits `0x02`, `0x40`, `== 0x42`) | 0.86 / 0.86 / 0.79 functional | Too low to call derived, and no null control was run, so the value is treated as authored |
+| `ancient identify` on the `.gfx` packer | "Unknown or invalid compression format" | Not a known packer. The packer is `C/Crunch` and the unpacker is in the game exe |
+
+## Other leads
+
+- A community "Hired Guns Map Viewer" (PlayCanvas, forum post 22102) and an EAB
+  thread (p=1514678) both claim to have decoded the full map structure. Neither
+  publishes a spec that the recon could read.
+
+## Raw notes
+
+- [Format notes: `docs/hiredguns/amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/hiredguns/amiga/data-structure.md)
+- [Plan: `docs/hiredguns/plan.md`](https://github.com/Shaid/crawl/blob/main/docs/hiredguns/plan.md)
+- [Open work: `docs/hiredguns/TODO.md`](https://github.com/Shaid/crawl/blob/main/docs/hiredguns/TODO.md)
+
+Next: [Status & open work](status/).

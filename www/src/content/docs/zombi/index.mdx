@@ -1,0 +1,223 @@
+---
+title: Zombi
+description: Zombi (Ubi Soft, Amiga 1990) — a 90-location shopping-mall map stored per cell, drawn as one pre-painted Atari ST Cyber Paint picture per location.
+---
+
+Zombi is the 1990 Amiga conversion, published by Ubi Soft, of a 1986 zombie-mall
+adventure. It is the odd one out among the crawlers on this site. It has no wall
+mosaic and no depth slots. Each of its locations is **one pre-drawn 160×80
+picture**, and the map is a list of locations that each store their own exits.
+
+This page summarises the raw notes in
+[`docs/zombi/`](https://github.com/Shaid/crawl/blob/main/docs/zombi/). If this
+page and those notes disagree, the notes are right. The research is one recon
+pass plus one extraction commit, both dated 2026-11-21. The map, the picture
+format, the sounds and the location-to-picture table are solved. The object
+layer is not.
+
+> **Before you write a decoder:** the `.seq` art is **Atari ST Cyber Paint**
+> data, shipped to the Amiga unconverted. Its compressed frames are stored
+> **column-major, plane-major** (`col = plane × wordsWide + x`). Reading them
+> plane-interleaved gives pictures you can recognise but that are shredded.
+> Its *raw* frames are the opposite: ordinary ST screen words, row-major.
+> Palettes need a ×2 per channel before they match what the Amiga shows. See
+> [Pitfalls](#pitfalls-and-corrections).
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/zombi/amiga/screens/present.png" alt="Zombi title picture, decoded from PRESENT.SEQ" width="320" height="195" style="display:block;width:100%;max-width:640px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>PRESENT.SEQ</code>, 320×195: the title picture, decoded by the shipped Cyber Paint decoder with the Amiga's doubled palette.</figcaption>
+</figure>
+
+## Identification
+
+| Item | Value |
+|---|---|
+| Title | Zombi. Ubi Soft, 1990 Amiga conversion of the 1986 original |
+| Credits (`francais.txt`) | Game: Yannick Cadin. Graphics: Patrick Daher. Scenario: Alexandre Bonan. Music: Alain Da Silva. SFX: David Peres. Conversion: Alexander Yarmitsky |
+| Platform / install | Amiga, WHDLoad install by Sting (24-Dec-2013). The slave supports EN/FR/DE. This copy carries `francais.txt`, but its strings are in English |
+| Executable | `zombi`, an AmigaOS HUNK (`0x3F3`) with 8 hunks, sha1 `b2c125bf…faac367afd3`. Every data filename appears in it as a literal string, along with `!!CopyRights : PERES DAVID !!` (the sound driver) |
+| Engine lineage | Art drawn on the Atari ST. All 11 `.seq` files are Cyber Paint sequences (magic `0xFEDB`, frame names `FLICKERS.n`). No sibling title in this repo shares the format |
+
+## File families
+
+42 files in `data/zombi/amiga/data/`, counting the executable.
+
+| File(s) | Size (B) | Family | Role | Status |
+|---|---|---|---|---|
+| `plan` | 336 | map | 6 floors × 7 rows × 8 columns of location ids | **confirmed** structure |
+| `i-lieux` | 4,500 | map | 90 × 50-byte location records | exits **confirmed**, other fields hypothesis |
+| `LIEUX.SEQ` | 334,400 | Cyber Paint SEQ | 82 frames of 160×80: location pictures, 2 binocular masks, 2 horde shots | **decoded**, 82/82 |
+| `objet.seq` | 18,022 | SEQ | 67 object sprites (3×5 to 46×46) | decoded, 67/67 |
+| `i-objets` | 264 | table | 66 × 4-byte object records | hypothesis |
+| `z.seq`, `skins.seq` | 19,932 / 19,198 | SEQ | 22 + 22 zombie / "skins" figures, 23–76 px | decoded, 22/22 each |
+| `tetes.seq` | 6,448 | SEQ | 11 heads, about 32×31 (party portraits?) | decoded, 11/11 |
+| `SCREEN.SEQ`, `PRESENT.SEQ` | 7,314 / 16,874 | SEQ | 320×200 main UI frame, 320×195 title | decoded |
+| `MASK.SEQ`, `button.seq` | 2,684 / 918 | SEQ | 176×160 mask, 17×89 button strip | decoded |
+| `echec.seq`, `victoire.seq` | 9,718 / 9,794 | SEQ | 288×112 lose / win pictures | decoded |
+| `*.SON` / `*.son` (21) | 608–18,656 | PCM | BE u32 length + BE u16 rate in Hz + signed 8-bit mono | **confirmed**, 21/21 |
+| `zombi.mus`, `zombi2.mus` | 58,806 / 65,398 | MOD | ProTracker `M.K.` | standard |
+| `zombi.sys` | 6,960 | state | holds a copy of `plan`'s ids from `+0x68`, with a different row stride | hypothesis: initial/saved game state |
+| `francais.txt`, `keymap` | 869 / 854 | text | credits and UI strings; `#0xNN = \|a \|b` keyboard table | plain |
+| `system-configuration` | 232 | Amiga prefs | the standard AmigaOS file | ignored |
+
+## The two walker answers
+
+### Wall storage: per-cell (confidence: structural)
+
+The map is split into two files:
+
+- **`plan`** (336 B = 6 floors × 56 B) places the locations. Each floor is 7 rows
+  × 8 columns, one byte per cell, and `0` means no location. Ids 1–86 each
+  appear exactly once. Row 0 of every floor is empty.
+- **`i-lieux`** (4,500 B = 90 × 50 B) holds the locations. Record `i` describes
+  id `i+1`. Bytes 0–3 are its four horizontal exits and bytes 4–5 its two
+  vertical exits. Ids 87–90 are not in `plan`. Their pictures are vehicle
+  views.
+
+Exit values: `00` open (120 faces), `14` open, door-like (42), `0A` blocked
+(151), `FE` map edge facing outdoors (27). Four one-off values remain: `F0` ×2
+on ids 36/39, `FA` on id 46 and `1E` on id 59.
+
+Bytes 0, 1, 2, 3 lead to the plan cells (row+1, col), (row, col+1),
+(row−1, col) and (row, col−1). The evidence:
+
+- **162/162** open exits (`00` or `14`) land on an occupied `plan` cell. In a
+  shuffled-position null, 85–101 of 162 do.
+- **162/162** open exits are matched by the neighbour, with the same value. In
+  the null, 20–28 do.
+- All **6/6** vertical links join cells at the same (row, col) on adjacent
+  floors: 1↔18 at (5,1), plus the elevator shaft 25↔45↔57↔60↔61 at (4,5).
+- Two adjacent cells are often separated by `0A` (34 walled faces between neighbours), so adjacency
+  in `plan` does not mean you can pass. The exit byte decides.
+
+So every location stores all four of its own faces, plus up and down. This
+converts straight into the `@seer-project/dungeon` per-cell model. Up/down
+exits are a new requirement for that schema, which Hired Guns shares
+([walker map-format decision, addendum 2026-11-21](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md)).
+Which compass names apply is **not yet known**. If `plan` rows count upward,
+the order is N, E, S, W. If they count downward, it is S, E, N, W.
+
+### Renderer: one pre-drawn picture per location (confidence: confirmed from code)
+
+This is a renderer shape new to the corpus. There are no per-facing views: a
+picture per facing would need 86 × 4 = 344 frames, and `LIEUX.SEQ` holds 82.
+The executable chooses the picture like this:
+
+1. `LAB_0139` (`zombi` S_0 `+0x2B72`) opens `lieux.seq` and loads frame `n−1`
+   for a 1-based picture number `n`.
+2. `LAB_0275` (`+0x5088`) builds `n` from the location id. An 18-entry table at
+   `+0x50B4` maps the outdoor car park onto shared pictures: 71→`0x46`;
+   72–74→`0x47`; 75, 76→`0x48`; 77–81→`0x49`; 82–86→`0x4A`. Ids 87–89 map to
+   `0x4B` and id 90 to `0x4C` (`+0x5F4A`..`+0x5F7A`).
+3. A non-zero `i-lieux` byte 9 overrides the result (`LAB_0284`, `+0x51C8`).
+   This is the `0x4D` on ids 72, 77 and 82.
+
+The result covers 90 ids using 77 distinct frames
+(exported as `public/assets/zombi/amiga/data/location-pictures.json`, `frames[id−1]`).
+24 car-park cells share 12 pictures. This has not yet been checked against live
+play. A Zombi walker is therefore a picture viewer with compass exits, not a
+frustum renderer. Objects and zombies are presumably blitted over the picture
+(open: `zombi-objects`).
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/zombi/amiga/sprites/lieux.png" alt="All 82 LIEUX.SEQ frames in a 6-column atlas" width="965" height="1133" style="display:block;width:100%;max-width:965px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>LIEUX.SEQ</code>, all 82 frames (each 160×80). Read the atlas in order from top left. Frames 0–16 are the brick basement, then the mall interiors, 60 the terrace, 61 the helicopter, 62–73 the car park and 74–77 the vehicle views. 78–79 are the binocular masks and 80–81 the zombie horde.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/zombi/amiga/screens/screen.png" alt="Zombi main UI frame, decoded from SCREEN.SEQ" width="320" height="200" style="display:block;width:100%;max-width:640px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>SCREEN.SEQ</code>, 320×200: the main UI frame. The location picture fills the window with the arrows.</figcaption>
+</figure>
+
+## Headline findings
+
+**The map: 86 locations on 6 floors.**
+
+| Floor (`plan` bytes) | Ids | Pictures show |
+|---|---|---|
+| 0 (`0x00`–`0x37`) | 1–17 | brick service corridors and the basement (id 1 is a room with a staircase) |
+| 1 (`0x38`–`0x6F`) | 18–34, 63–86 | mall ground level (18–34) and the outdoor car-park ring (63–86) |
+| 2 (`0x70`–`0xA7`) | 35–47 | mall level ("Niveau 1/2" escalators) |
+| 3 (`0xA8`–`0xDF`) | 48–58 | upper mall level |
+| 4 (`0xE0`–`0x117`) | 59, 60 | escalator top / landing |
+| 5 (`0x118`–`0x14F`) | 61, 62 | terrace and helicopter (roof) |
+
+The "pictures show" column comes from reading the rendered frames, and assumes
+frame ≈ id−1. The picture map above refines that assumption for ids 71–90.
+
+**The Cyber Paint SEQ format.** All 11 files share one 128-byte file header:
+`+0` magic `0xFEDB`, `+4` u32 frame count, `+8` speed. A u32 table of absolute
+frame offsets starts at `+0x80`. Each frame has a 128-byte header holding a
+16-word ST palette (`+4`), a 12-byte name (`+0x24`), x/y/width/height
+(`+0x36`..`+0x3C`) and a storage byte at `+0x3F` (0 raw, 1 compressed). The
+compressed stream is made of word tokens. If `c & 0x8000` is set, copy
+`c & 0x7FFF` literal words. Otherwise, repeat the next word `c` times.
+
+Verification, from `tools/shared/cyberpaint-seq.ts` and its test:
+
+- Every compressed frame decodes to exactly `4·ceil(w/16)·h` words and uses up
+  every input byte: 0 failures over the 191 compressed frames. In all there are
+  210 frames: LIEUX 82, objet 67, z 22, skins 22, tetes 11, and six single
+  pictures.
+- Raw frames match `ceil(w/16)·h·8` bytes exactly (14 in `objet.seq`, 5 in
+  `tetes.seq`).
+- Null control: starting the stream 2 bytes late fails on **191/191**
+  compressed frames.
+- Each frame's stored length equals the gap to the next offset (LIEUX 81/81).
+  The last frame is followed by 26 bytes of file padding.
+
+**Sound effects.** Each `.SON` file is a `+0` u32 BE sample count (= file size −
+6, 21/21) and a `+4` u16 BE rate (3,700–9,900 Hz), followed by signed 8-bit
+PCM. The exporter writes all 21 as WAVs.
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/zombi/amiga/sprites/z.png" alt="22 zombie figures from z.seq" width="854" height="59" style="display:block;width:100%;max-width:854px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>z.seq</code>: 22 zombie figures, 23–76 px.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/zombi/amiga/sprites/objet.png" alt="67 object sprites from objet.seq" width="1013" height="79" style="display:block;width:100%;max-width:1013px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>objet.seq</code>: 67 object sprites, 3×5 to 46×46. 14 of them are stored raw. <code>i-objets</code> has 66 records, and the off-by-one is open.</figcaption>
+</figure>
+
+<figure style="margin:1.5rem 0 2rem;text-align:center;">
+<img src="/assets/zombi/amiga/screens/victoire.png" alt="Zombi victory picture, decoded from victoire.seq" width="288" height="112" style="display:block;width:100%;max-width:576px;height:auto;margin:0 auto;image-rendering:pixelated;" />
+<figcaption><code>victoire.seq</code>, 288×112: the win picture.</figcaption>
+</figure>
+
+## Pitfalls and corrections
+
+- **Palette scaling was wrong at first, and has been corrected (2026-11-21).**
+  The first provisional mapping scaled each 3-bit ST channel by 36. Wrong for
+  the Amiga. The executable stores the 16-word palettes of `PRESENT.SEQ` and
+  `SCREEN.SEQ` (and of `echec`/`victoire`, except entry 0) with each 3-bit
+  channel **doubled** (`n → 2n`, so ST `777` becomes Amiga `EEE`). An exact
+  32-byte search finds the doubled words near `zombi+0x13BB8` and never finds
+  the raw ST words. Exported colours are `2n × 17`. The location and sprite
+  files use an ST palette whose entry 0 is `222` (Amiga `444`), not `SCREEN`'s
+  `111`.
+- **Column order.** Compressed SEQ frames are column-major in plane-major order.
+  The plane-interleaved order (`x·4+plane`) gives recognisable but shredded
+  pictures. That shredded output was the null that ruled it out.
+- **Raw frames are not column-major.** The 5 raw `tetes.seq` heads and 14 raw
+  `objet.seq` frames are ST screen words: row-major, with 4 interleaved plane
+  words per 16 px. Read column-major, they are noise.
+- **There are 11 `.seq` files, not 12.** The recon notes and plan counted 12.
+  The extraction pass found 11 in the retail data.
+- **Adjacency ≠ passage.** 34 faces between neighbouring cells are walled (`0A`). A walker
+  that infers exits from `plan` alone opens shop walls.
+
+## Reproduce
+
+`npm run zombi:export` (= `npx tsx tools/zombi/amiga/export-data.ts
+data/zombi/amiga/data`) writes `sprites/{lieux,objet,z,skins,tetes}`,
+`screens/{present,screen,mask,button,echec,victoire}`, `palettes/*.json`, 21
+WAVs and `data/{location-pictures,sounds}.json` to `public/assets/zombi/amiga/`.
+The decoder, `tools/shared/cyberpaint-seq.ts`, works on any Cyber Paint file.
+
+## Raw notes
+
+- [Amiga format notes (`data-structure.md`)](https://github.com/Shaid/crawl/blob/main/docs/zombi/amiga/data-structure.md)
+- [Plan](https://github.com/Shaid/crawl/blob/main/docs/zombi/plan.md)
+- [Open work (`TODO.md`)](https://github.com/Shaid/crawl/blob/main/docs/zombi/TODO.md)
+- [Status page](status/)

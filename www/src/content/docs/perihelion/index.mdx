@@ -1,0 +1,173 @@
+---
+title: "Perihelion: The Prophecy"
+description: Perihelion (Amiga, 1993) — Table.Dat file naming solved, 16 overhead maps and 6 tilesets structurally confirmed, 4 first-person wall atlases rendered; dungeon grid not yet located.
+---
+
+Perihelion: The Prophecy is a 1993 Amiga RPG with two exploration modes:
+overhead tile maps for towns and outdoor areas, and first-person dungeons. This
+project has a recon only. **No extractor is committed and no assets are
+published.** The renders described below are recon probes, in greyscale,
+because no palette has been found.
+
+This page is a curated summary of the raw notes in
+[`docs/perihelion/`](https://github.com/Shaid/crawl/blob/main/docs/perihelion/amiga/data-structure.md).
+Where the two disagree, the raw notes win.
+
+> **Pitfall: the files are already depacked, and the 0/1 grid is not one map.**
+> The WHDLoad installer decrunched every packed file, so there is no codec to
+> crack for 95 of the 96 data files. And the candidate dungeon-grid span in the
+> main program holds several maps of different widths. A forced 62- to 66-wide
+> render of it is incoherent.
+
+## Identification
+
+| Item | Value | Source |
+|---|---|---|
+| Title | Perihelion: The Prophecy | data-structure.md § Title / version |
+| Developer, publisher, year | Morbid Visions (Sweden) / Psygnosis, 1993 | same |
+| Platform | Amiga OCS, 1 MB chip RAM; 4 original disks | same |
+| Media | WHDLoad install (Dark Angel & Wepl, slave V1.3/1.4, 2009), not disk images | same |
+| Boot loader | `PerihelionData/Boot.Exe`, the game's own (strings: "please wait ... loading prophecy-sequence / intro-sequence / game") | same |
+| Main program | `000316B00105D570`, 520 KB, disk 0. An absolute-load image starting `JMP $0B7454`, not a HUNK file. sha1 `536556e619ff07421625bbd7fe50e3851bed349e` | § Inventory by family |
+| Engine lineage | Own engine. The first-person kit looks like the Black Crypt / EOB slot-blit family, not confirmed | § Game shape |
+
+`Docs/` ships 1994 fan material (BeeBuB / The Beer Connection): plain-text
+briefings and four hand-drawn **ILBM 640×256×3bpp level maps** (`CityOfMidlight`,
+`SecurityZone`, `WatchtowerColony1`, `WatchtowerColony2`). They are the oracle
+for the dungeon grids.
+
+## File naming: solved (confirmed)
+
+Every file in `PerihelionData/` except `Boot.Exe`, `Table.Dat` and
+`SaveDisk.Dat` is named after **the 8-byte `Table.Dat` record that describes
+it, printed as 16 hex digits**. The slave carries the template string
+`aabbccccdddddddd`.
+
+| Bytes | Field | Notes |
+|---|---|---|
+| `aa` | Disk, 0–3 | 4 original disks |
+| `bb` | Track | Custom tracks of at most `0x1880` B |
+| `cccc` | Byte offset inside the track | Maximum seen `0x1874` |
+| `dd` (first byte of the last 4) | Type | 0 = stored raw, 1 = packed on disk, 2 = save area (no file) |
+| remaining 3 bytes | Length on disk | Type 0: equals the file size (5/5). Type 1: packed length; the file is 1.03 to 9.3 times larger |
+
+`Table.Dat` (6,272 B = `0x1880`) is `"PHLN"`, 2 bytes `0000`, then **99 records**
+at file `+0x06`…`+0x31E`, then `0xFF` fill with a few cleared bits (probably a
+disk block-allocation bitmap, a hypothesis). **96 records map 1:1 to the 96
+hex-named files, with 0 orphans either way.** The 3 type-2 records (31,388,
+1,908 and 552 B) have no file and are presumably save areas that the slave
+redirects to `SaveDisk.Dat` (6,492 B of `0xDD`).
+
+Evidence that the files are depacked: 14 of the 15 ProTracker modules close
+exactly (`1084 + patterns × 1024 + Σ sample bytes == file size`). The 15th,
+`map.wind`, has data appended. The one packed exception is `005810FA00005344`
+(type 0, 21,316 B, entropy 7.53), which has its own header `0000 9C40 0000 5343`:
+40,000 B unpacked (320×200×5), 21,315 B packed. It needs the game's decruncher,
+probably in `Boot.Exe`.
+
+## File families
+
+| Family | Files | Format | Status |
+|---|---|---|---|
+| ProTracker MODs (`M.K.`) | 15: `map.wind`, `over.positive`, `over.negativ2`, `event.{city,village,mine,farm,tower,steelfortress}`, `innercity`, `inside.{colony,mine,farm,tower,vulkan}` | Standard, 32–198 KB | **Confirmed**, 14/15 size closure |
+| IFF 8SVX | 5 standalone + 8 inside the main program | Standard, 5–8 KB | **Confirmed** |
+| IFF ANIM | 2 files (174 KB, 86 KB) + 4 in the intro bank | Standard | Cut-scenes |
+| Intro bank | `010100060106A60E`, 520 KB | `JMP $0F9B60` + 7 ILBM + 4 ANIM (96% IFF coverage) + code | Intro / prophecy sequence |
+| Main program | `000316B00105D570`, 520 KB | 8 8SVX + 3 ILBM in the first ~`0x35000` B; 68k code at about `+0x60000`…`+0x7FFFF`; game text | Engine; holds the dungeon-grid candidate |
+| Portraits and documents | 28 × 10,500 B | 112×150, 5 planes, **row-interleaved** (14 B per plane-row) | **Rendered** |
+| Location pictures | 6 × 19,500 B | 240×130, 5 planes, row-interleaved (30 B per plane-row) | **Rendered**: city skyline, fortress, forest, ruins, tower, cave |
+| Wall atlases | 4 × 80,080 B (`0238…`, `0246…`, `0252…`, `0314…`) | 352×364, 5 planes, row-interleaved (44 B per plane-row) | **Rendered** |
+| Overhead tilesets | 6, 15,680–24,000 B | N × 160 B, 16×16×5 planes, row-interleaved | **Confirmed** (structural) |
+| Overhead maps | 16 × 3,200 B | 2 planes of 40×40 bytes | **Confirmed** (structural) |
+| SFX bank | `0277022E…` ≡ `032915BA…` (byte-identical, 89,040 B, disks 2 and 3) | Named samples (`gun.doomos.1`, `gun.single.shot`, `magicchip`) | Structured, unknown |
+| `map.wind` tail | `004515BC…` `+8,758` to end (188,986 B file) | Bitplane-like, 4-byte period | Unknown |
+| Other banks | `01640A96…` (405 KB), `01461308…` (249,804 B), `00770EA4…` (66,120 B), `022917F6…` (93,600 B), `00020000…` (17,610 B) | See the raw notes | Hypotheses |
+| Self-packed picture | `005810FA00005344`, 21,316 B | Own header, 320×200×5 | Needs the decruncher |
+
+## Overhead maps (structurally confirmed)
+
+Each 3,200 B map holds two 40×40 byte planes:
+
+- **Plane 0** (`+0x000`): tile index. Indices appear in first-appearance order
+  (0, 1, 2, 3 … row-major), the signature of a tool that de-duplicated a painted
+  picture into tiles.
+- **Plane 1** (`+0x640`): passability, `0`/`1`. One map, `028905DA…`, also has
+  two cells of `2`.
+
+Each tileset sits on disk before its maps. In every group the maps' largest
+index is below the tileset's tile count, and the group's last map uses
+**exactly** `count − 1`: **16/16 maps fit, 6/6 groups**.
+
+| Tileset (tiles) | Maps (max index) |
+|---|---|
+| `02810AC2` (150) | `02830A9E` (149) |
+| `02830E0A` (106) | `02850774` (91), `02850A2A` (102), `02850CE8` (105) |
+| `02850F1C` (98) | `02861518` (55), `02861770` (67), `0287015A` (93), `02870512` (97) |
+| `02870728` (100) | `02890182` (74), `02890414` (84), `028905DA` (90), `0289084A` (99) |
+| `033405CE` (101) | `0335166E` (83), `0336002A` (88), `03360286` (100) |
+| `03360514` (131) | `0338020A` (130) |
+
+Composing `02830A9E` from `02810AC2` gives a coherent 640×640 town. Pixel
+continuity across horizontal tile seams is **0.590** against a **0.349**
+shuffled-tile null; `02850CE8` scores **0.648** against **0.347**.
+
+## Wall atlases (rendered)
+
+Each 80,080 B atlas is 352×364, 5 planes, row-interleaved (byte autocorrelation
+peaks at 44 and 176). In greyscale it shows a ceiling and floor panorama,
+slanted side-wall strips at 3–4 depths, front walls at 3 depths, a dark doorway,
+doors, ladder walls, a hatch door with a radiation symbol, and a panel at 2
+sizes.
+
+Each atlas sits on disk directly before its dungeon's 8SVX and MOD:
+
+| 8SVX | Atlas | Dungeon MOD |
+|---|---|---|
+| `0237` | `0238` | `023E` `inside.colony` |
+| `0244` | `0246` | `024B` `inside.mine` |
+| `0250` | `0252` | `0258` `inside.farm` |
+| `0321` | `0314` | `031B` `inside.tower` |
+
+`inside.vulkan` has no atlas; it sits with the overhead group
+`03360514`/`0338020A`.
+
+## Dungeon grid: candidate only
+
+No per-dungeon map file exists on disk, so the grids must live in a program
+image. The lead is main program file `+0x72D80`…`+0x73DC0` (about 4 KB): almost
+only 0s and 1s (about 1,580 ones and 1,380 zeros), with a few values 2–6. The
+local row period changes along the span (20/40 near `+0x72D80`, 64 around
+`+0x73080`–`+0x73380`, 60 near `+0x73A80`, 12 at the end), so it is **several
+maps of different widths**. A small record table precedes it at
+`+0x72C20`…`+0x72D4A`.
+
+| Approach tried | Result |
+|---|---|
+| 2-D autocorrelation scan (2 KB windows, widths 8–128) over the 6 large non-IFF files | Only this span reads as a grid; hits in `01461308…` are word-padded bitmap data |
+| Forced 62–66-wide renders of the span | Slanted and incoherent |
+
+## The two walker answers
+
+| Question | Answer | Confidence |
+|---|---|---|
+| Wall storage | **Probably type-derived** (solid or open cells) for the dungeons: the fan maps draw block maps, and the candidate span is 0/1 cells. The overhead maps store per-cell passability `0`/`1`/`2` | Dungeons: hypothesis, grid not located. Overhead passability: structural |
+| Renderer shape | **Slot blits from a per-dungeon piece atlas**, like Black Crypt / EOB | Atlas rendered; the slot table that places the pieces is not found |
+
+The repository's walker decision log records the same reading: "dungeons
+probably type-derived (grid not yet located)", "slot table not found"
+([addendum](https://github.com/Shaid/crawl/blob/main/docs/walker-map-format-future-decision.md)).
+
+## Palettes: not found
+
+Only ILBM `CMAP`s are known: two 32-entry tables for the 112×150 pictures in the
+main program (`+0x32A9A`, `+0x33AFE`) and the intro-bank ILBMs. Tile, wall and
+picture palettes are presumably word tables in the main program, which has not
+been searched. This blocks every colour render.
+
+## Raw notes
+
+- [Format notes: `amiga/data-structure.md`](https://github.com/Shaid/crawl/blob/main/docs/perihelion/amiga/data-structure.md)
+- [Plan: `plan.md`](https://github.com/Shaid/crawl/blob/main/docs/perihelion/plan.md)
+- [Open work: `TODO.md`](https://github.com/Shaid/crawl/blob/main/docs/perihelion/TODO.md)
+
+Next: [Status & open work](status/).

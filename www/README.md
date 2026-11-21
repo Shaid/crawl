@@ -1,49 +1,35 @@
-# Starlight Starter Kit: Basics
+# Crawl documentation site
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+This Astro/Starlight site is the curated public face of the Crawl reverse-
+engineering repository. The home page presents all ten documented game
+projects; Black Crypt and Wizardry 6 have the two full format guides, while the
+other projects currently expose calibrated status pages.
 
-```
-npm create astro@latest -- --template starlight
-```
+## Development
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+Run from this directory:
 
-## 🚀 Project Structure
-
-Inside of your Astro + Starlight project, you'll see the following folders and files:
-
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+```sh
+npm install
+npm run dev
+npm run build
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+The build helper copies Black Crypt's extracted assets and a curated set of
+Wizardry 6 screens/atlases, generates the sidebar, and then runs Astro's static
+build. The full extraction trees remain in the repository's ignored
+`public/assets/` directory; the committed `www/public/assets/` files are the
+small deployment fallback.
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+## Content layout
 
-Static assets, like favicons, can be placed in the `public/` directory.
+- `src/content/docs/index.mdx` — project landing page and game cards.
+- `src/content/docs/status/` — all-games status board.
+- `src/content/docs/blackcrypt/` — full Black Crypt guide and galleries.
+- `src/content/docs/wizardry6/` — full Wizardry 6 guide, assets and open work.
+- `src/content/docs/<game>/` — status-first pages for the other curated games.
+- `src/content/docs/_sidebar.json` — global status/Wizardry 6 navigation.
+- `src/content/docs/blackcrypt/_sidebar.json` — Black Crypt's detailed nav.
 
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+The raw `docs/<game>/` notes are the source of truth when a concise site page
+and an exhaustive research note differ.

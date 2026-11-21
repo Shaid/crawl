@@ -9,13 +9,13 @@ export default defineConfig({
 	site: "https://crawl.shaid.net",
 	integrations: [
 		starlight({
-			title: 'Black Crypt — Data Formats',
+			title: 'Crawl — Game Data Formats',
 			favicon: '/favicon.png',
 			description:
-				'A human-readable guide to the internal data formats of Black Crypt (1992, Raven Software / Electronic Arts).',
+				'A curated status and data-format guide to a family of reverse-engineered classic dungeon crawlers.',
 			customCss: ['./src/styles/fonts.css'],
 			social: [
-				{ icon: 'github', label: 'GitHub', href: 'https://github.com/anomalyco/opencode' },
+				{ icon: 'github', label: 'GitHub', href: 'https://github.com/Shaid/crawl' },
 			],
 			sidebar,
 		}),

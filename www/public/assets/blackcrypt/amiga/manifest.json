@@ -1,5 +1,117 @@
 [
   {
+    "name": "data/bcspeed-effects",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/bcspeed-effects.json"
+  },
+  {
+    "name": "data/bcspeed-effects-simulated",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/bcspeed-effects-simulated.json"
+  },
+  {
+    "name": "data/bcspeed-sfx",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/bcspeed-sfx.json"
+  },
+  {
+    "name": "data/classes",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/classes.json"
+  },
+  {
+    "name": "data/ending-script",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/ending-script.json"
+  },
+  {
+    "name": "data/fire-animation",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/fire-animation.json"
+  },
+  {
+    "name": "data/floor-item-gfx-table",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/floor-item-gfx-table.json"
+  },
+  {
+    "name": "data/floor-item-names",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/floor-item-names.json"
+  },
+  {
+    "name": "data/item-icon-groups",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/item-icon-groups.json"
+  },
+  {
+    "name": "data/item-names",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/item-names.json"
+  },
+  {
+    "name": "data/items",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/items.json"
+  },
+  {
+    "name": "data/key-icon-gfx-table",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/key-icon-gfx-table.json"
+  },
+  {
+    "name": "data/level-sfx-banks",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/level-sfx-banks.json"
+  },
+  {
+    "name": "data/monster-names",
+    "sprites": 0,
+    "hasPalette": false,
+    "png": "",
+    "kind": "data",
+    "data": "data/monster-names.json"
+  },
+  {
     "name": "sprites/armour",
     "sprites": 19,
     "hasPalette": false,
@@ -115,6 +227,12 @@
     "sprites": 36,
     "hasPalette": true,
     "png": "sprites/portraits.png"
+  },
+  {
+    "name": "sprites/special-panels",
+    "sprites": 13,
+    "hasPalette": false,
+    "png": "sprites/special-panels.png"
   },
   {
     "name": "sprites/throwing-items",
