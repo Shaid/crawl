@@ -374,8 +374,8 @@ const GAMES = [
   { id: 'eotb', label: 'Eye of the Beholder', loader: loadEotb1View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'eotb2amiga', label: 'Eye of the Beholder II (Amiga)', loader: loadEotb2View, defaultLevel: 1, platform: 'amiga' as const },
-  { id: 'eotb3', label: 'Eye of the Beholder III', loader: loadEotb3View, defaultLevel: 3, platform: 'dosvga' as const },
   { id: 'abandonedplaces2', label: 'Abandoned Places 2', loader: loadAp2View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'eotb3', label: 'Eye of the Beholder III', loader: loadEotb3View, defaultLevel: 3, platform: 'dosvga' as const },
   { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'poolofradiance', label: 'Pool of Radiance', loader: loadPoolOfRadianceView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
@@ -417,13 +417,13 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
   bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
+  abandonedplaces2:
+    'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Monsters, items, objects, chests, water, fire and switches are not drawn; palette indices 12-15 (the lime/teal speckle) are unresolved; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
   eotb3:
     "the dungeon view is the game's own AESOP/16 bytecode (dungeon/features/doors classes) run in a TypeScript VM (tools/aesop/vm.ts) -- wall/door/decoration art + placement come from the game, collision from dungeon.impedance, steps from EYE.C's tables. Object state is the shipped quick-start SAVEGAME (not a fresh game); monsters, floor items, door opening, levers and stair/teleport level changes are not wired yet (docs/eotb3/TODO.md). Palette = Fixed + the area script's set_palette calls.",
   eotb2amiga:
     "same game as 'eotb2' (DOS/VGA), a genuinely different Amiga port -- .VCN/.CPS are LCW-compressed Amiga 5-bitplane graphics (EOB1-Amiga's own encoding) wrapped in EOB2's own container/.INF header shape; .VMP/.MAZ/.INF record layout and .DEC/.DCR are confirmed byte-identical (or byte-identical container) to the DOS port, so this reuses the DOS walker's renderer/loader code unmodified against Amiga-decoded JSON assets -- see docs/eotb2/amiga/data-structure.md. All 16 levels export and render (wall geometry, decorations, and the LEVEL10-14 mezz+azure palette-override bundle all confirmed); item/monster stat tables (ITEM.DAT/ITEMTYPE.DAT) not yet decoded for this platform.",
 };
-  abandonedplaces2:
-    'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Monsters, items, objects, chests, water, fire and switches are not drawn; palette indices 12-15 (the lime/teal speckle) are unresolved; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
 
 /**
  * Wizardry 6 graphics-variant plumbing (the `#variant` selector, anticipated
@@ -452,12 +452,12 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'eotb') return eotbLevelList(assetBase);
   if (game === 'eotb2' || game === 'eotb2amiga') return eotb2LevelList(assetBase);
   if (game === 'eotb3') return eotb3LevelList(assetBase);
+  if (game === 'abandonedplaces2') return ap2LevelList(assetBase);
   if (game === 'landsoflore') return landsofloreLevelList(assetBase);
   if (game === 'ishar') return isharLevelLists.ishar();
   if (game === 'ishar2') return isharLevelLists.ishar2();
   if (game === 'ishar3') return isharLevelLists.ishar3();
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
-  if (game === 'abandonedplaces2') return ap2LevelList(assetBase);
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
