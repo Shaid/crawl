@@ -88,3 +88,13 @@ apply here unchanged. Elvira-1-specific: `*tune` music files (see §1);
 zone-graph/room-name semantics (which zone id is which named room — no
 script trace done); the 16-frame zone-64 animation's real playback
 mechanism.
+
+
+## Walker groundwork — `gameamiga` and VC dialect probes (2026-11-21)
+
+Not decoded; findings so far (Elvira II's walker, `docs/elvira2/amiga/data-structure.md` §5, was built first):
+
+- `data/gameamiga` (218,977 B) is stored **plain** (`simonDecr` throws) and has the Elvira II header: `u32 itemCount-2 = 0x36B`, `u32 0x80`, a junk word, `u32 stringCount = 0x2B1`, `u32 textSize = 0x48C5`, text, then items from `file+0x48D9`.
+- Items are **variable length**, not Elvira II's record. First fixed part: `u32 name, u16 adjective, u16 noun, u16 state, u16 ?, 3 x u32 item refs (next/child/parent), u32 ?`, then a child tail whose first word counts 1, 2, 3, 4 ... down the first items and which holds a `0x26` flag word and further `u16` values. The `readGamePc` item reader does **not** parse it (a fixed 44-byte stride fails: 875 items would end at `+0xDF3D` in the middle of items).
+- `runit` holds a 242-entry operand-grammar table at the same signature (`readGrammarFromExe` works unchanged); ops 1-7 are one item operand, so it is not Elvira II's table.
+- VC scripts: a coordinate-ascent over Elvira 1's 750 script segments from Waxworks' table reaches 747/750 and differs on ~30 opcodes (draw is still op 10); it has not converged, so **no Elvira 1 VC table is committed**.
