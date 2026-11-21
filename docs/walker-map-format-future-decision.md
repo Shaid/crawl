@@ -1,10 +1,14 @@
 # Walker map format — future normalisation decision
 
-**Status: deferred** — more games need decoding before committing to one model.
-This document collects the findings so far so the decision can be made with full
-context when the time comes. Scope grew 2026-08-15 to also cover **rendering
-engine** normalisation (not just wall-storage format) — see that section below;
-same "defer" conclusion, same reasoning.
+**Status (2026-11-21): map format DECIDED — normalise every game to per-cell on
+import; not yet implemented. Renderer normalisation still deferred.** See
+"2026-11-21 review" at the end, which supersedes the survey tables and
+recommendations below wherever they disagree. The rest of this document is the
+history that led there.
+
+Original status: deferred — more games needed decoding before committing to one
+model. Scope grew 2026-08-15 to also cover **rendering engine** normalisation (not
+just wall-storage format).
 
 ---
 
@@ -853,3 +857,74 @@ bytecode decompile described above, not just the grid format. Adding a table
 row before that would overstate how finished this is; revisit once the
 render mechanism (not just the grid) is nailed down. Dungeon Hack stays out
 for the original reason — its `LEVELS.DAT` grid itself is still undecoded.
+
+---
+
+## 2026-11-21 review — map format decided, renderer still deferred
+
+Three months after the last update, enough games are decoded that the original
+trigger ("if shared-edge is W6-only, normalise it on import") has been met.
+
+### Wall-storage survey (decoded games, this repo)
+
+| Model | Games | Where it's decoded |
+|---|---|---|
+| Per-cell (each cell stores its own N/E/S/W faces) | Black Crypt, MM1, MM2, MM3, EOB1, EOB2, Lands of Lore, Gold Box (PoR, Curse, Secret, Pools, Krynn titles) | Gold Box is new since the table above: `GEO` planes 0/1 hold a 4-bit wall type per direction per cell (`tools/shared/goldbox-geo.ts`) |
+| Shared-edge (each wall stored once) | Wizardry 6 only | `tools/wizardry6/export-dungeon-levels.ts` — the only `shared-edge` producer in any seer project (grep, 2026-11-21) |
+| Type-derived (a face is a wall because the neighbour square is a wall) | Dungeon Master, Chaos Strikes Back, DM2; EOB3 (one byte per cell, `0xFF` = floor; richer types not yet ruled out) | `docs/dungeonmaster-format.md`; `docs/eotb3/dosvga/data-structure.md` §9.2 |
+| Not yet known | Bard's Tale 1–3 (BT1 `levs` is a 22×22 2-bit wall grid, model not classified), Dungeon Hack, Ishar 1–3 / Crystals of Arborea (scripted locations, not a wall grid), and the undecoded Amiga crawlers | `docs/bardstale1/TODO.md` `bt1-levs-cells`; `docs/_unexplored_/TODO.md` |
+
+### Decision: per-cell is the one internal model
+
+- **Every importer produces per-cell faces** (`wallStorage.kind` `bitflags` or
+  `per-cell-4`). Both other models convert losslessly for reading:
+  - shared-edge → per-cell: the one-pass copy in "Can W6's format be converted"
+    above;
+  - type-derived → per-cell: a face is a wall when the neighbour square's type is
+    Wall (off-map counts as Wall).
+- **Keep each game's extra layers as separate planes** — W6's `feature`/`orient`,
+  DM's square type and door orientation. They carry meaning the face values don't.
+- **Then remove `shared-edge` from `@seer-project/dungeon`** (`schema/level.ts`,
+  `FlatGridLevel.sharedEdgeValueAt`, `CellQuery`, `collision.ts`,
+  `AutomapRenderer`) once W6's export is converted. Since crawl is the only user,
+  this is a crawl-side change followed by a seer cleanup, not a cross-project
+  migration.
+- **A newly decoded game with a fourth model adds a converter, it doesn't reopen
+  this decision.**
+- **Implementation is not started.** Order: convert `export-dungeon-levels.ts` to
+  `per-cell-4` plus feature/orient planes → W6 walker and automap tests stay green
+  → drop `shared-edge` upstream.
+
+### Runtime wall mutation
+
+Unchanged from "Runtime map mutation" above: add a wall-plane patch overlay
+alongside `PatchedCellQuery`'s entity overlay when a walker first needs it. EOB's
+`setWallType`/`toggleWallState` opcodes are the likely first user. Per-cell storage
+makes the consistency risk real, so the overlay should write both faces of an edge
+in one call.
+
+### Renderer picture (corrected)
+
+The "two shared families plus MM3" table above is out of date. Current walkers
+(`tools/walker/games-*.ts`):
+
+| Shape | Games |
+|---|---|
+| Slot table → `DrawItem` composite (`@seer-project/dungeon`) | Black Crypt, Wizardry 6 |
+| Frustum blits (`tools/walker-mm/maze3d.ts`) | MM1, MM2 |
+| Probe/chain dispatch (bespoke) | MM3 |
+| 8×8-tile mosaic, drawn through `GameView.renderCanvas` | EOB1, EOB2, Lands of Lore, Gold Box |
+| Game-script location render (ALIS interpreter), through `renderCanvas` | Ishar 1–3, Crystals of Arborea |
+
+`renderCanvas` — meant as an escape hatch — is now the most common path. Still don't
+merge engines, but if anything is shared next, it should be a **tile-mosaic
+compositor** for the four 8×8-tile games, not the MM3-compatible superset sketched
+above (which still has only one user). Build it when one of those walkers next
+needs real work, not before.
+
+### Still open
+
+- Classify Bard's Tale's wall grid and Dungeon Hack's `LEVELS.DAT` when they're
+  decoded.
+- Recon the undecoded Amiga crawlers (`docs/_unexplored_/TODO.md`). Each adds a row
+  to the survey above.
