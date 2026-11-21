@@ -322,10 +322,19 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       platform: 'amiga',
       dataDirs: ['dungeonmaster2/amiga'],
       executable: undefined,
-      expectedFiles: ['GRAPHICS.DAT'],
-      supported: false,
+      expectedFiles: ['GRAPHICS.DAT', 'DUNGEON.DAT', 'SKUL.FTL'],
+      supported: true,
       assetDir: 'dungeonmaster2',
       features: {},
+
+      async buildAssets() {
+        // Walker: DUNGEON.DAT maps + GRAPHICS.DAT/SKUL.FTL viewport art (floor/ceiling/walls/door panels).
+        const { exportWalker } = await import('../dungeonmaster2/amiga/export-walker.ts');
+        const { exportViewport } = await import('../dungeonmaster2/amiga/export-viewport.ts');
+        const maps = exportWalker();
+        const vp = exportViewport();
+        console.log(`  dungeonmaster2/amiga walker: ${maps} maps, ${vp.wallsets} wallsets, ${vp.doors} door types`);
+      },
     }],
   },
   {

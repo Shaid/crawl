@@ -120,6 +120,11 @@ sidecar.
 
 ### Open: the differential/overlay sub-format
 
+> **Correction (2026-11-21): solved.** The base image is named by the underlay table (GRAPHICS.DAT item 1), selector 5
+> keeps the underlay pixel, and the 5-vs-6 flag is membership in that table (3,011/3,011 images tile). See
+> "`IMG4` codec -- the open items are solved" under Viewport. The shared `decodeImg4Checked` still guesses the
+> variant by tiling; `tools/dungeonmaster2/amiga/gdat.ts` `PictureBank` is the exact decoder.
+
 > Reframed 2026-11-18: the grammar is solved (see Correction above). What is
 > open is the meaning of selector 5 (compositing source) and the variant flag.
 
@@ -199,8 +204,9 @@ minimal synthetic `P41A` fixture decoded and re-encoded byte-exact, plus
 ## Walker findings (2026-11-21)
 
 Walker: `tools/walker/games-dungeonmaster2.ts` (+ `tools/dungeonmaster2/amiga/{model,render,export-walker}.ts`,
-`npm run dungeonmaster2:walker` -> `data/walker-maps.json`). Map, collision, doors and teleporter travel are real;
-the first-person picture is a **flat-colour placeholder raycast** (no DM2 art).
+`npm run dungeonmaster2:walker` -> `data/walker-maps.json`). Map, collision, doors and teleporter travel are real.
+~~The first-person picture is a flat-colour placeholder raycast.~~ Since 2026-11-21 the view is composed from
+GRAPHICS.DAT (floor, ceiling, walls, door panels) -- see "Viewport" below; the raycast is only a fallback.
 
 ### Square semantics (verified structurally; tests in `tools/walker/__tests__/games-dungeonmaster2.test.ts`)
 
@@ -224,13 +230,84 @@ Item 0 (80,380 B) = `u16 0x8001, u16 10045 (records), u16 7 (fields)`, then 7 (n
 * `D=1` records point at `IMG4` images; `D=5` records point at a **non-image, ~3-40 byte item class** (first bytes
   0x8d-0xdf, last byte `0xf0|k` with `k = 15 - n` where `n` = count of the leading 0xa0-0xbf bytes, 7/7 checked;
   looks like per-distance wall/floor *shape* descriptors, undecoded); `D=2/11/12/14` are parameters/other.
-* `T=26` = **viewport scenes**: per `I` (scene id, 0-135) one `D=1,S=0` full 224x136 backdrop image plus `D=5` shapes
-  keyed by `S` (0, 1, 20-41, 60-62) x `F` in {16, 48, 64} (three view distances) -- the DM2 equivalent of DM1's
-  Graphics.DAT item-696 zone layout. `T=23` `I`=1-5 = 224-wide horizon strips (20/30/62/71 px high) matching
-  `mapGraphicsStyle` 1-5 (outdoor layers). `T=15` = creature sprites (`I` = the ids in each map's `creatureGraphics`),
-  `T=16-21` = 16x16 item icons, `T=7` = UI.
-* What is **not** known: how a map picks its `T=26` scene id, the `D=5` shape codec, the palette. See TODO
-  `dm2-viewport-scenes`.
+* ~~`T=26` = **viewport scenes**~~ -- **wrong, see the Correction below.** `T=23` `I`=1-5 = 224-wide horizon strips
+  (20/30/62/71 px high) matching `mapGraphicsStyle` 1-5 (outdoor layers). `T=15` = creature sprites (`I` = the ids in
+  each map's `creatureGraphics`), `T=16-21` = 16x16 item icons, `T=7` = UI.
+
+> **Correction (2026-11-21):** `T=26` is **not** the viewport. `D=5` items are **text**: byte `i` stores
+> `(0xFF - ch - i) & 0xFF`, NUL-terminated (which is where the "last byte `0xf0|(15-n)`" pattern came from), and `F`
+> is the language (16 English, 48 German, 64 French). `T=26` decodes to the disk/save dialog messages
+> ("THAT'S NOT THE MASTER DISK!" / "DAS IST NICHT DIE MASTER-DISKETTE!" / ...), drawn over the 224x136 dialog
+> backdrop. The viewport art is category **8** (wallsets), positioned by the rect table -- see "Viewport" below.
+> Test: `tools/dungeonmaster2/amiga/__tests__/gdat.test.ts`.
+
+## Viewport (2026-11-21)
+
+Method: the routines were found and read in a relocated flat image of SKUL.FTL (Ghidra headless + radare2);
+a public DM2 PC reimplementation was consulted only to know which routines to look for (no code or tables taken
+from it). Every table the walker uses is read from the game's own files at the offsets cited.
+
+Code: `tools/dungeonmaster2/amiga/{gdat,skul-ftl,export-viewport,viewport}.ts`; asset
+`public/assets/dungeonmaster2/amiga/data/viewport.json` (`npx tsx tools/dungeonmaster2/amiga/export-viewport.ts`,
+wired into `game-config.ts` `buildAssets`). Frames: `npx tsx tools/dungeonmaster2/amiga/render-walker-frames.ts`.
+
+### Catalogue data types (`D`)
+
+1 image, 2 sound, 4 rectangle table, 5 text, 7/8 raw (category 0 `D=8` = the underlay table), 9 IRGB palette,
+11 word value, 12 image offset (`x<<8 | y`, signed bytes), 14 16-nibble remap string. Category numbers that matter
+here: 1 interface (item 0: rect table `D=4`, palettes `D=9`), 8 wallsets (`I` = a map's `mapGraphicsStyle`), 9 wall
+ornaments, 10 floor ornaments, 14 doors (`I` = a map's door type), 15 creatures, 16-21 items, 22 champions,
+23 outdoor horizon strips, 26 dialog texts.
+
+### `SKUL.FTL` (confirmed)
+
+A Mac-style A5-world module: section `0x10` = jump-table header (above-A5 0x1460, below-A5 0x617e, 648 entries; the
+JMP of entry k is at A5+0x22+8k), `0x11` = initialised data (`u16 1, u32 dataLen, u32 drelLen`; words copied, a zero
+word is followed by a count of extra zero bytes; expands to exactly 0x617e; then 740 u16 A5 offsets of longs that
+get A5 added -- all 740 targets hold valid A5-relative values), `0x12` = code. `parseSkulFtl` in `skul-ftl.ts`.
+Function addresses below are CODE offsets.
+
+| Routine | CODE offset | What it established |
+|---|---|---|
+| draw wall | `0x17e4a` | piece = cell+0x22 (0x32 for D4), rect = cell+0x2be (702), mirror for x>0, flipped squares use the partner cell's piece |
+| tile loop | `0x18006` | 20-cell draw order at A5-0x4086; cell records 18 bytes, class word at +2 |
+| floor / ceiling | `0x18bb0` | floor S=0 at rect 701, ceiling S=1 at rect 700, opaque, mirror from flip routine |
+| flip parity | `0x187d0` | `(x + y + facing + mapdef[6] + mapdef[7] + (mapdef[9] & 0x3f)) & 1`; floor/ceiling variants by scene flags (wallset word S=101) |
+| door tile / panel | `0x17c50` / `0x178d8` | door-visible bytes at A5-0x4164, panel rect words at A5-0x4184, panel image = door type `S = distance-1`, colour key word S=4 (10 if 0) |
+| map load | `0x20576` | the two door types (A5-0x5162) = map-def byte 14 low / high nibble (gated by map-def byte 3 bit 7 / byte 2 bit 0, else 0xff), i.e. the parser's `doorType0Index`/`doorType1Index`; the door record's bit 0 picks one |
+
+Cell tables (A5 offsets, read by `readViewportTables`): lateral distance -0x462a, forward distance -0x4612, flip
+partner -0x45fa, ornament class -0x409e. Cells: 0 party square, 1/2 D0 left/right, 3 D1, 4/5 D1 sides, 6-10 D2,
+11-15 D3, 16-20 D4 (21/22 unused by the walls).
+
+### Rectangle table (category 1, item 0, `D=4` = GRAPHICS.DAT item 243) -- confirmed (tiles exactly)
+
+`u16 0xfc0d, u16 30` id ranges `(first,last)`, then one `{u16 kind, u16 parent, i16 a, i16 b}` per id: 2,183 records,
+17,588 bytes exactly. Kind 9 = a size box `a x b`; kind 0-8 = anchor code (0 centre, 1 TL, 2 TR, 3 BR, 4 BL, 5 top,
+6 right, 7 bottom, 8 left) at `(a,b)` in the parent frame; kind 10-18 = anchor `kind-10` placed on the same anchor of
+the parent box, offset `(a,b)`. Rect 3 = the 224x136 viewport, 700 ceiling, 701 floor, 702-722 the wall cells,
+3700-3810 door panels. Image offsets (header top bits, `D=12` entries, the set-wide `D=12 S=0xFE`) are added to the
+anchor point; mirroring negates the x offset.
+
+### `IMG4` codec -- the open items are solved (confirmed)
+
+* **5- vs 6-nibble palette:** an image is an *overlay* (5-nibble palette; selector 5 = keep the underlay pixel) exactly
+  when it appears in the **underlay table**, category 0 `D=8` = GRAPHICS.DAT item 1: 1,010 sorted `(overlay, underlay)`
+  u16 pairs; underlays can chain. With that rule **3,011/3,011** catalogued images tile their item exactly (stream +
+  0-1 pad nibble + 16-byte trailer). Null control: only 65/1,010 overlays tile as 6-nibble images.
+* **Width/height top 6 bits** are signed draw offsets (x, y); x = -32 means "offset is in the `D=12` entry for this
+  picture" (155 images).
+* **Palette:** on the Amiga the colour nibbles index a **16-entry IRGB palette** directly: `D=9` items are 4-byte
+  `(index, r, g, b)` entries, 64 bytes per bank (wallsets have 6 banks: light levels, bank 0 = full light; the title
+  screens have one each). The 16-byte image trailer is a 16->256 colour map for the PC build and is not used here.
+  Evidence: the 320x200 title/credits image (item 207) renders correctly with palette item 214, and all six wallsets
+  render coherent scenes with their bank 0. **Rendered**, not traced to the Amiga palette-load code.
+
+### Square classes (the subset drawn)
+
+Wall (type 0, or trickwall with attr bit 2 clear, or outside the map) -> wall piece. Door square: if
+`(attr bit 3) == (facing & 1)` it is seen along the wall (frame only, not drawn yet), otherwise its door panel is
+drawn when closed (state != 0). Everything else draws nothing over the floor/ceiling for now.
 
 ## TODO
 

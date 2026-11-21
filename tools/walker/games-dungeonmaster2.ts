@@ -1,11 +1,13 @@
 /**
  * Dungeon Master II: Skullkeep (Amiga) `GameView`.
  *
- * HONEST STATE: map + collision + door toggling + teleporter travel are from
- * the real `DUNGEON.DAT`; the first-person image is a flat-colour PLACEHOLDER
- * raycast (tools/dungeonmaster2/amiga/render.ts), NOT DM2 art. The real
- * viewport compositor / palette are undecoded -- see
- * docs/dungeonmaster2/TODO.md (`dm2-viewport-scenes`, `dm2-palette`).
+ * Map + collision + door toggling + teleporter travel are from the real
+ * `DUNGEON.DAT`. The first-person image is composed from GRAPHICS.DAT by
+ * tools/dungeonmaster2/amiga/viewport.ts following SKUL.FTL's own view code
+ * (floor/ceiling, walls, door panels; per-map wallset, 16-colour IRGB palette).
+ * Not drawn yet: door frames, stairs, pits, ornaments, sky, items, creatures
+ * (docs/dungeonmaster2/TODO.md `dm2-viewport-objects`). The flat-colour
+ * raycast (render.ts) is only a fallback when viewport.json is missing.
  *
  * Controls: W/Up forward, S/Down back, A/D strafe, Q/E or Left/Right turn,
  * F open/close the door ahead. Level id = map index (44 maps).
@@ -17,10 +19,21 @@ import {
   DoorStates, DX, DY, SQ, doorPassable, fallbackPose, sqType, tryStep, type Dm2Bundle, type Dm2Map, type Pose4,
 } from '../dungeonmaster2/amiga/model.ts';
 import { renderPlaceholder, VIEW_W, VIEW_H } from '../dungeonmaster2/amiga/render.ts';
+import { renderViewport, type ViewportAsset } from '../dungeonmaster2/amiga/viewport.ts';
 
 const STEP_COOLDOWN_MS = 175;
 
 const bundles = new Map<string, Promise<Dm2Bundle>>();
+const viewports = new Map<string, Promise<ViewportAsset | null>>();
+
+function loadViewport(assetBase: string): Promise<ViewportAsset | null> {
+  let p = viewports.get(assetBase);
+  if (!p) {
+    p = fetch(`${assetBase}/data/viewport.json`).then((r) => (r.ok ? (r.json() as Promise<ViewportAsset>) : null)).catch(() => null);
+    viewports.set(assetBase, p);
+  }
+  return p;
+}
 const doorStatesByBase = new Map<string, DoorStates>();
 
 function loadBundle(assetBase: string): Promise<Dm2Bundle> {
@@ -60,17 +73,23 @@ export class DungeonMaster2View implements GameView {
   private readonly doors: DoorStates;
   private pose4: Pose4;
 
-  constructor(maps: Dm2Map[], doors: DoorStates, pose4: Pose4) {
+  private readonly viewport: ViewportAsset | null;
+
+  constructor(maps: Dm2Map[], doors: DoorStates, pose4: Pose4, viewport: ViewportAsset | null = null) {
     this.maps = maps;
     this.doors = doors;
     this.pose4 = pose4;
+    this.viewport = viewport;
   }
 
   private get map(): Dm2Map {
     return this.maps.find((m) => m.index === this.pose4.mapIndex)!;
   }
   get levelId(): number { return this.pose4.mapIndex; }
-  get levelLabel(): string { return `Map ${this.map.index} (level ${this.map.level}) [placeholder walls]`; }
+  get levelLabel(): string {
+    const real = this.viewport?.wallsets[this.map.mapGraphicsStyle];
+    return `Map ${this.map.index} (level ${this.map.level}, wallset ${this.map.mapGraphicsStyle})${real ? '' : ' [placeholder walls]'}`;
+  }
   get pose(): Pose { return { level: this.pose4.mapIndex, x: this.pose4.x, y: this.pose4.y, facing: this.pose4.facing as Pose['facing'] }; }
   get currentTick(): number { return this.tick; }
 
@@ -142,7 +161,10 @@ export class DungeonMaster2View implements GameView {
   automapCodes(): string[] { return []; }
   pick(): void { /* no hotspots: sensors/buttons not parsed */ }
 
-  renderRGBA(): Uint8ClampedArray { return renderPlaceholder(this.map, this.doors, this.pose4); }
+  renderRGBA(): Uint8ClampedArray {
+    const real = this.viewport ? renderViewport(this.viewport, this.map, this.pose4, undefined, this.doors) : null;
+    return real ?? renderPlaceholder(this.map, this.doors, this.pose4);
+  }
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const img = ctx.createImageData(VIEW_W, VIEW_H);
@@ -154,12 +176,12 @@ export class DungeonMaster2View implements GameView {
 }
 
 export async function loadDungeonMaster2View(assetBase: string, levelId: number, startPose: Pose | null): Promise<DungeonMaster2View> {
-  const b = await loadBundle(assetBase);
+  const [b, vp] = await Promise.all([loadBundle(assetBase), loadViewport(assetBase)]);
   let ds = doorStatesByBase.get(assetBase);
   if (!ds) doorStatesByBase.set(assetBase, (ds = new DoorStates()));
   const m = b.maps.find((x) => x.index === levelId) ?? b.maps[0]!;
   const pose: Pose4 = startPose
     ? { mapIndex: startPose.level, x: startPose.x, y: startPose.y, facing: startPose.facing }
     : b.start.mapIndex === m.index ? { ...b.start } : fallbackPose(m, ds);
-  return new DungeonMaster2View(b.maps, ds, pose);
+  return new DungeonMaster2View(b.maps, ds, pose, vp);
 }

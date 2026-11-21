@@ -27,6 +27,10 @@ export interface Dm2Map {
    * `rot`/`relative` are the record's rotation bits (hypothesis: DM1 layout).
    */
   teleporters: Record<string, { map: number; x: number; y: number; rot: number; relative: boolean }>;
+  /** The map's two door types (GRAPHICS.DAT category 14 items): header doorType0Index / doorType1Index. */
+  doorTypes?: [number, number];
+  /** Door squares -> door record type bit (0/1, selects `doorTypes`), by cell index. */
+  doorKinds?: Record<string, number>;
 }
 
 export interface Dm2Bundle {
