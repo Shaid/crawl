@@ -14,7 +14,7 @@ identity are **confirmed**. Open work: `docs/evilsdoom/TODO.md`.
 | Install | WHDLoad, Psygore v1.1 (12 Oct 2025); slave loads `prg/int.dat` first; refuses a depacked `OMD/PCH.DAT` |
 | Chipset | AGA (copper lists write `FMODE` `$1FC` and `BPLCON3` `$106`; 768-B CMAPs = 256 colours) |
 | Language of internal names | Croatian (`PATULJAK` dwarf, `ROGATI DEMON` horned demon, `KNJIZNICA` library, `BUSOLA` compass, `KOCKICE` cubes, `SPILJAROK`, `ANIMACIJA`); some save names Czech (testers) |
-| Location | `data/_unexplored_/EvilsDoomAGA/` (not yet promoted to `data/evilsdoom/amigaaga/`) |
+| Location | `data/evilsdoom/amigaaga/` (not yet promoted to `data/evilsdoom/amigaaga/`) |
 
 sha1 (packed, as shipped):
 

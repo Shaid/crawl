@@ -5,7 +5,7 @@ Recon 2026-11-21.
 
 ## Phase 0 — scaffold
 
-- Promote `data/_unexplored_/EvilsDoomAGA/` to `data/evilsdoom/amigaaga/`
+- Promote `data/evilsdoom/amigaaga/` to `data/evilsdoom/amigaaga/`
   (user's call; recon did not move it).
 - Register `evilsdoom` in `src/game-id.ts` (platform `amigaaga` already
   exists) and add a `defineGameConfig` entry.

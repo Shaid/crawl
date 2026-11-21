@@ -2,7 +2,6 @@
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| zombi-scaffold | open | Register `zombi` game id + game-config entry; promote retail files from `data/_unexplored_/Zombi/` | plan.md § Phases 0 | 2026-11-21 recon |
 | seq-cyberpaint | open | Promote the decoded Cyber Paint SEQ probe to a shared extractor (12 files, PNG atlases); confirm raw-frame layout and palette scaling | amiga/data-structure.md § SEQ | 2026-11-21 recon |
 | zombi-exit-orientation | open | Which compass names bytes 0..3 / 4..5 of `i-lieux` carry (rows count up or down; which vertical byte is up) | amiga/data-structure.md § i-lieux | 2026-11-21 recon |
 | zombi-picture-map | open | Location id → `LIEUX.SEQ` frame table (78 pictures for 90 locations; car park shares) — find it in `zombi` | amiga/data-structure.md § SEQ | 2026-11-21 recon |

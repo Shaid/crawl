@@ -214,6 +214,54 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'amiga',
     supportedPlatforms: ['amiga'],
   },
+  abandonedplaces: {
+    gameId: 'abandonedplaces',
+    name: GAME_DISPLAY_NAMES.abandonedplaces,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  abandonedplaces2: {
+    gameId: 'abandonedplaces2',
+    name: GAME_DISPLAY_NAMES.abandonedplaces2,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  crystaldragon: {
+    gameId: 'crystaldragon',
+    name: GAME_DISPLAY_NAMES.crystaldragon,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  evilsdoom: {
+    gameId: 'evilsdoom',
+    name: GAME_DISPLAY_NAMES.evilsdoom,
+    defaultPlatform: 'amigaaga',
+    supportedPlatforms: ['amigaaga'],
+  },
+  hiredguns: {
+    gameId: 'hiredguns',
+    name: GAME_DISPLAY_NAMES.hiredguns,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  liberation: {
+    gameId: 'liberation',
+    name: GAME_DISPLAY_NAMES.liberation,
+    defaultPlatform: 'cd32',
+    supportedPlatforms: ['cd32'],
+  },
+  perihelion: {
+    gameId: 'perihelion',
+    name: GAME_DISPLAY_NAMES.perihelion,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
+  zombi: {
+    gameId: 'zombi',
+    name: GAME_DISPLAY_NAMES.zombi,
+    defaultPlatform: 'amiga',
+    supportedPlatforms: ['amiga'],
+  },
 };
 
 export function getViewerConfig(gameId: GameId): ViewerConfig {

@@ -1,7 +1,7 @@
 # Zombi — plan
 
 Format detail lives in `amiga/data-structure.md`; open items in `TODO.md`.
-Retail files: `data/_unexplored_/Zombi/data/` (leave in place until the
+Retail files: `data/zombi/amiga/data/` (leave in place until the
 user promotes the title).
 
 ## Shape of the game (recon answer)

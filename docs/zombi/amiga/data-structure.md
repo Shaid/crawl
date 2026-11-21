@@ -1,7 +1,7 @@
 # Zombi (Amiga) — data structure
 
 Recon 2026-11-21 (re-recon). Game id `zombi` (not yet registered in
-`src/game-id.ts`). Retail files stay at `data/_unexplored_/Zombi/data/`
+`src/game-id.ts`). Retail files stay at `data/zombi/amiga/data/`
 (WHDLoad install by Sting, 24-Dec-2013; slave supports EN/FR/DE, this copy
 carries `francais.txt` but its strings are English).
 

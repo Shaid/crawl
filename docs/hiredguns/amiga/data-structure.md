@@ -11,7 +11,7 @@ from cheap probes. The exceptions are labelled. Open work is tracked in
   and the files already unpacked from the floppies. WHDLoad says it supports
   both the full game and the demo, and this tree is the full game: it has 41 maps and 5
   languages.
-- Retail files stay at `data/_unexplored_/HiredGuns/` (gitignored, not moved).
+- Retail files stay at `data/hiredguns/amiga/` (gitignored, not moved).
 
 | File | Size | sha1 |
 |---|---|---|

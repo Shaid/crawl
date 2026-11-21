@@ -1,7 +1,7 @@
 # Abandoned Places 2 (Amiga) — data structure
 
 Recon, 2026-11-21. Retail files stay where they are, at
-`data/_unexplored_/abandonedplaces2/`. Offsets are **byte offsets into the named
+`data/abandonedplaces2/amiga/`. Offsets are **byte offsets into the named
 file**, unless a line says otherwise.
 
 **Shared with AP1:** the kernel directory record and the packer are specified once,

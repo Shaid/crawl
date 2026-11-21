@@ -10,7 +10,7 @@ otherwise. Format details live here; status lives in `docs/crystaldragon/TODO.md
 | Title | Crystal Dragon (Black Legend, 1994; developer credited as Magnetic Fields in the project triage — **not** confirmed from the files, which carry no credits string) |
 | Platform | Amiga OCS/ECS (A500, KS 1.3; up to 6 bitplanes) |
 | Language | English (`Crystal_Dragon` text strings); the WHDLoad slave also supports a German version, not present here |
-| Media | WHDLoad install v1.3 (Psygore, 2012) at `data/_unexplored_/CrystalDragon/` (not moved into `data/`). Original disks were a trackloader-free AmigaDOS game; files are flat under `data/` |
+| Media | WHDLoad install v1.3 (Psygore, 2012) at `data/crystaldragon/amiga/` (not moved into `data/`). Original disks were a trackloader-free AmigaDOS game; files are flat under `data/` |
 | Protection | Removed by the slave (disk check; level-10 "reset level number" check). The data files are unaffected |
 
 sha1 (file-relative, whole file):

@@ -1,5 +1,7 @@
 # `data/_unexplored_/` — corpus triage
 
+> **Note (2026-11-21):** Abandoned Places 1/2, Crystal Dragon, Evil's Doom, Hired Guns, Liberation, Perihelion and Zombi have since moved to `data/<id>/<platform>/` (see each title's `docs/<id>/`); the paths below are the triage-time locations.
+
 First-contact triage of all 14 unexplored games (2,158 files, 74 MB),
 produced with `seer-probe`'s classifier and container scanner (whole
 corpus classified in ~4 s). Everything below is **hypothesis** unless

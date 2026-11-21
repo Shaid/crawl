@@ -7,7 +7,7 @@ packer. Build both games' unpacker once, as one shared tool.
 ## Phase 0 — scaffold (not done by recon)
 - Register the game id `abandonedplaces` (platform `amiga`) in `src/game-id.ts` and the
   game config, when the first extractor lands.
-- The data stays under `data/_unexplored_/abandonedplaces/` until the user moves it to
+- The data stays under `data/abandonedplaces/amiga/` until the user moves it to
   `data/abandonedplaces/amiga/`. Extractors should take the directory as an argument.
 
 ## Phase 1 — container + packer (easy; the spec is complete)

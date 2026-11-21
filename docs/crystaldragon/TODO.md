@@ -5,7 +5,6 @@ Plan: `docs/crystaldragon/plan.md`.
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| cd-scaffold | blocked:user to promote `data/_unexplored_/CrystalDragon` → `data/crystaldragon/amiga/` and approve game-id registration | Register `crystaldragon` (game-id, game config) | plan.md § Phase 0 | 2026-11-21 recon |
 | cd-sf-codec | open | Commit the `SF` backward-LZ decoder (scratch probe: 31/31 files exact, 0 B left over) plus a regression check | data-structure.md § "`SF` codec" | 2026-11-21 recon |
 | cd-sa-codec | open | Decode `SA`/`SP`/`SC` (context-modelled planar image codec, `Unpack` `+0x86`/`+0x296`) by emulating hunk 0 `+0x0004` | data-structure.md § "`.SCR` graphic sets" | 2026-11-21 recon |
 | cd-sq-codec | open | Decode `SQ` (`01`/`06`/`0b`; backward bit-stream + delta mode 1-3, `+0x746`) and identify the content | data-structure.md § "Container / compression layer" | 2026-11-21 recon |

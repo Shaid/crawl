@@ -1,7 +1,7 @@
 # Abandoned Places: A Time for Heroes (Amiga) — data structure
 
 Recon, 2026-11-21. Retail files stay where they are, at
-`data/_unexplored_/abandonedplaces/`. All file offsets below are **byte offsets into
+`data/abandonedplaces/amiga/`. All file offsets below are **byte offsets into
 the `Disk.N` image file**, unless a line says otherwise.
 
 This doc also holds the **ArtGame kernel container + packer spec** (§2–§3). Abandoned
@@ -74,7 +74,7 @@ byte offsets and the section-to-disk mapping is right.
 ## 3. ArtGame packer (shared with AP2) — **confirmed**
 
 **Reader:** `AP2` kernel hunk 0 `+0x22BE` (`LAB_01C2` in an IRA dump of
-`data/_unexplored_/abandonedplaces2/data/AP2`; file offset `+0x22E6`). AP1's kernel
+`data/abandonedplaces2/amiga/data/AP2`; file offset `+0x22E6`). AP1's kernel
 has an older implementation of the same grammar at about `Disk.1+0xA20` (a dispatch
 on `D3>>3` through a byte table, without the Duff's-device copy). This is a
 **backward** byte-oriented LZ: it reads from the end of the packed data and writes

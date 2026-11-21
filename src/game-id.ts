@@ -34,11 +34,19 @@ export const GAME_IDS = [
   'bardstale1',
   'bardstale2',
   'bardstale3',
+  'abandonedplaces',
+  'abandonedplaces2',
+  'crystaldragon',
+  'evilsdoom',
+  'hiredguns',
+  'liberation',
+  'perihelion',
+  'zombi',
 ] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
-/** 'amigaaga' is the Ishar-trilogy Amiga AGA release specifically (see `docs/ishar-container-format.md`) — distinct from the plain OCS/ECS 'amiga' id used elsewhere in this corpus. */
-export const PLATFORM_IDS = ['amiga', 'dosvga', 'dosega', 'snes', 'amigaaga'] as const;
+/** 'cd32' is the Amiga CD32 console release (Liberation: Captive II). 'amigaaga' is the Ishar-trilogy Amiga AGA release specifically (see `docs/ishar-container-format.md`) — distinct from the plain OCS/ECS 'amiga' id used elsewhere in this corpus. */
+export const PLATFORM_IDS = ['amiga', 'dosvga', 'dosega', 'snes', 'amigaaga', 'cd32'] as const;
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 
 export const DEFAULT_GAME: GameId = 'blackcrypt';
@@ -84,6 +92,14 @@ export const GAME_DISPLAY_NAMES: Record<GameId, string> = {
   bardstale1: "The Bard's Tale: Tales of the Unknown",
   bardstale2: "Bard's Tale II: The Destiny Knight",
   bardstale3: "Bard's Tale III: Thief of Fate",
+  abandonedplaces: "Abandoned Places: A Time for Heroes",
+  abandonedplaces2: "Abandoned Places 2",
+  crystaldragon: "Crystal Dragon",
+  evilsdoom: "Evil's Doom",
+  hiredguns: "Hired Guns",
+  liberation: "Liberation: Captive II",
+  perihelion: "Perihelion: The Prophecy",
+  zombi: "Zombi",
 };
 
 export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
@@ -92,4 +108,5 @@ export const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
   dosega: 'DOS/EGA',
   snes: 'SNES',
   amigaaga: 'Amiga AGA',
+  cd32: 'Amiga CD32',
 };

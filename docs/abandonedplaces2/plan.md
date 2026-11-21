@@ -6,7 +6,7 @@ The container and packer are shared with AP1 (spec: `docs/abandonedplaces/amiga/
 
 ## Phase 0 — scaffold (not done by recon)
 - Register `abandonedplaces2` / `amiga` in `src/game-id.ts` and the game config with
-  the first extractor. Data stays at `data/_unexplored_/abandonedplaces2/` until moved.
+  the first extractor. Data stays at `data/abandonedplaces2/amiga/` until moved.
 
 ## Phase 1 — unpack (trivial once the AP1 tool lands)
 - Parse `ap2.dir` (5 sections; sections 0–3 map to `ap2.000`–`.003`) and unpack all

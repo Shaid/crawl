@@ -3,7 +3,7 @@
 **Title:** Liberation: Captive II (a.k.a. "CaptiveII"), Mindscape 1994, Tony
 Crowther & Ross Goodley ("The Byte Engineers"). CD32 release, as shipped in the
 JOTD WHDLoad install v1.0 (2020, "floppy & cd32 versions supported").
-**Source tree:** `data/_unexplored_/LiberationCD32/` (not moved; 179 files,
+**Source tree:** `data/liberation/cd32/` (not moved; 179 files,
 15.4 MB). Game files under `data/`, WHDLoad slave + `Manual` (plain-text CD32
 manual) + `ReadMe` at the root.
 **Recon date:** 2026-11-21. Everything here is **hypothesis** unless marked

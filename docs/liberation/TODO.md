@@ -10,4 +10,3 @@
 | lib-city-view-mix | open | Is the outdoor city vector-only, or VGM pieces + vector buildings? | cd32/data-structure.md § "2. How is the first-person view drawn?" | 2026-11-21 recon |
 | lib-o3dg-chunks | open | Decode FORM O3DG/VCDO chunks (OFFS, EXVL, PLST, VSPR, VFTX) | cd32/data-structure.md § `FORM O3DG` | 2026-11-21 recon |
 | lib-imga | open | Decode ImgA sprite-bank entries (MainSp, 3dView, taxi, backpack) | cd32/data-structure.md § `ImgA` | 2026-11-21 recon |
-| lib-data-move | blocked:user to move files to data/liberation/cd32/ | Retail files still under data/_unexplored_/LiberationCD32/ | plan.md § Step 0 | 2026-11-21 recon |

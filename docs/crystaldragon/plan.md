@@ -4,12 +4,12 @@ Spec: `docs/crystaldragon/amiga/data-structure.md`. Open work:
 `docs/crystaldragon/TODO.md`. This file holds the order of work and never
 restates format detail.
 
-Retail files stay at `data/_unexplored_/CrystalDragon/` (WHDLoad install) until
+Retail files stay at `data/crystaldragon/amiga/` (WHDLoad install) until
 the user promotes the title.
 
 ## Phase 0 — scaffold
 
-- When the user promotes the title, move or copy `data/_unexplored_/CrystalDragon/data/*`
+- When the user promotes the title, move or copy `data/crystaldragon/amiga/data/*`
   to `data/crystaldragon/amiga/`.
 - Register `crystaldragon` in `src/game-id.ts` and add a `defineGameConfig`
   entry. Recon leaves this undone on purpose.

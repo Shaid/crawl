@@ -7,7 +7,7 @@ Open items live in [`TODO.md`](TODO.md). This file only orders the work.
 
 - Register `hiredguns` / `amiga` in `src/game-id.ts` and add a `defineGameConfig`
   entry in `tools/shared/game-config.ts`. Recon did not touch code.
-- The data currently lives at `data/_unexplored_/HiredGuns/`. When the title is
+- The data currently lives at `data/hiredguns/amiga/`. When the title is
   promoted, move it to `data/hiredguns/amiga/` (the user decides).
 - Add a pipeline step that unpacks RNC1 with `ancient` into `build/cache/hiredguns/`
   (all 108 RNC files unpack cleanly). Check whether `@seer-project/*` already has

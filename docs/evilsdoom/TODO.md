@@ -2,7 +2,7 @@
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| evilsdoom-scaffold | open | Promote files to `data/evilsdoom/amigaaga/`, register game id + game-config, RNC1/CrM2 depack layer | plan.md § Phase 0 | 2026-11-21 recon |
+| evilsdoom-scaffold | open | RNC1/CrM2 depack layer into `build/cache/evilsdoom/` (data moved to `data/evilsdoom/amigaaga/` and game registered 2026-11-21) | plan.md § Phase 0 | 2026-11-21 |
 | evilsdoom-map-record | open | Dungeon state block framing: levels per file, grid offsets, pre-grid word lists, cell bit meanings, start position | amigaaga/data-structure.md § Dungeon maps | 2026-11-21 recon |
 | evilsdoom-newgame-state | open | Which file/code seeds a new game's dungeon state (copied from `8(A6)+$EB38`) | amigaaga/data-structure.md § Dungeon maps | 2026-11-21 recon |
 | evilsdoom-view-slots | open | Decode the 14-B view-slot blit table (`BEL.dat+0x16834`): field meanings, plane count, mask layout | amigaaga/data-structure.md § First-person view | 2026-11-21 recon |

@@ -2,7 +2,7 @@
 
 | ID | Status | Question (one line) | Evidence | Updated |
 |----|--------|---------------------|----------|---------|
-| peri-scaffold | open | Register `perihelion` in `src/game-id.ts` + game config; extractor that parses `Table.Dat` and labels files | plan.md § Step 0; data-structure.md § File naming scheme | 2026-11-21 recon |
+| peri-scaffold | open | Extractor that parses `Table.Dat` and labels the 96 files (data moved to `data/perihelion/amiga/` and game registered 2026-11-21) | plan.md § Step 0; data-structure.md § File naming scheme | 2026-11-21 |
 | peri-audio | open | Extract 15 MODs (split `map.wind` at 8,758), 13 8SVX, IFF ANIM/ILBM banks | data-structure.md § Inventory by family | 2026-11-21 recon |
 | peri-palette | open | Locate tile/wall/picture palettes (main program `$0RGB` tables; test the two 112×150 CMAPs at +0x32A9A/+0x33AFE on the portraits) | data-structure.md § Palettes | 2026-11-21 recon |
 | peri-overhead-maps | open | Promote the 16 overhead maps + 6 tilesets (structure confirmed) to an extractor; colour once a palette is found | data-structure.md § Overhead maps | 2026-11-21 recon |
