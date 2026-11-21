@@ -97,7 +97,23 @@ export interface ViewportTables {
   doorVisible: number[];
   /** Per cell 0-15: rect id of a closed door panel (-1 none); +state for half-open states. */
   doorRect: number[];
+  /** Per cell 0-13: wallset piece of the door's roof slit (255 none) and its rect. */
+  slitPiece: number[];
+  slitRect: number[];
+  /** Per cell 0-13: [left, right] wallset pieces of the door frame pillars (255 none). */
+  framePieces: number[];
 }
+
+/**
+ * Door-frame flags DRAW_DOOR gets per viewport cell, decoded from the door-tile
+ * switch (jump table at CODE+0x17d18): `before` frames are drawn before the
+ * panel, `after` frames after it. Bits: 1 roof slit, 2 left pillar, 4 right pillar.
+ * Cells 1, 2, 9, 10 draw no door.
+ */
+export const DOOR_FRAME_FLAGS: { before: Record<number, number>; after: Record<number, number> } = {
+  before: { 0: 6, 3: 7, 4: 1, 5: 1, 6: 7, 7: 1, 8: 1, 11: 6, 12: 2, 13: 4, 14: 0, 15: 0 },
+  after: { 4: 4, 5: 2, 7: 4, 8: 2, 12: 4, 13: 2 },
+};
 
 /** A5 offsets of the viewport tables (Amiga SKUL.FTL). */
 export const VIEWPORT_TABLE_A5 = {
@@ -108,6 +124,9 @@ export const VIEWPORT_TABLE_A5 = {
   drawOrder: -0x4086, // CODE+0x1801c move.b -0x4086(a5,d5.w),d4 (tile loop)
   doorVisible: -0x4164, // CODE+0x17c5c tst.b -0x4164(a5,d7.w) (door tile)
   doorRect: -0x4184, // CODE+0x17958 move.w -0x4184(a5,d0.w*2),d0 (door panel)
+  slitPiece: -0x41b4, // CODE+0x17740 move.b -0x41b4(a5,d5.w),d3 (door frames)
+  slitRect: -0x41a6, // CODE+0x17750 move.w -0x41a6(a5,d5.w*2),-(a7)
+  framePieces: -0x41d0, // CODE+0x1779a lea -0x41d0(a5,d4.w*2),a0
 } as const;
 
 export function readViewportTables(img: SkulImage): ViewportTables {
@@ -121,5 +140,8 @@ export function readViewportTables(img: SkulImage): ViewportTables {
     drawOrder: Array.from(a5Bytes(img, VIEWPORT_TABLE_A5.drawOrder, 20)),
     doorVisible: Array.from(a5Bytes(img, VIEWPORT_TABLE_A5.doorVisible, 16)),
     doorRect: s16(a5Bytes(img, VIEWPORT_TABLE_A5.doorRect, 32)),
+    slitPiece: Array.from(a5Bytes(img, VIEWPORT_TABLE_A5.slitPiece, 14)),
+    slitRect: s16(a5Bytes(img, VIEWPORT_TABLE_A5.slitRect, 28)),
+    framePieces: Array.from(a5Bytes(img, VIEWPORT_TABLE_A5.framePieces, 28)),
   };
 }

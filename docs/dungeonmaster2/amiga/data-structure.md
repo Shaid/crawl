@@ -274,6 +274,7 @@ Function addresses below are CODE offsets.
 | floor / ceiling | `0x18bb0` | floor S=0 at rect 701, ceiling S=1 at rect 700, opaque, mirror from flip routine |
 | flip parity | `0x187d0` | `(x + y + facing + mapdef[6] + mapdef[7] + (mapdef[9] & 0x3f)) & 1`; floor/ceiling variants by scene flags (wallset word S=101) |
 | door tile / panel | `0x17c50` / `0x178d8` | door-visible bytes at A5-0x4164, panel rect words at A5-0x4184, panel image = door type `S = distance-1`, colour key word S=4 (10 if 0) |
+| door frames | `0x176ea` | roof slit piece/rect per cell at A5-0x41b4 / -0x41a6; pillar pieces `[left,right]` per cell at A5-0x41d0 (flipped squares: partner cell, swapped); left pillar at creature rect `5000+cell*25+10` anchored bottom-left, right at `+14` mirrored, bottom-right; skipped when door word S=0x40 is set. Per-cell frame flags (before/after the panel) come from the door-tile switch at CODE+0x17d18 |
 | map load | `0x20576` | the two door types (A5-0x5162) = map-def byte 14 low / high nibble (gated by map-def byte 3 bit 7 / byte 2 bit 0, else 0xff), i.e. the parser's `doorType0Index`/`doorType1Index`; the door record's bit 0 picks one |
 
 Cell tables (A5 offsets, read by `readViewportTables`): lateral distance -0x462a, forward distance -0x4612, flip
@@ -306,8 +307,9 @@ anchor point; mirroring negates the x offset.
 ### Square classes (the subset drawn)
 
 Wall (type 0, or trickwall with attr bit 2 clear, or outside the map) -> wall piece. Door square: if
-`(attr bit 3) == (facing & 1)` it is seen along the wall (frame only, not drawn yet), otherwise its door panel is
-drawn when closed (state != 0). Everything else draws nothing over the floor/ceiling for now.
+`(attr bit 3) == (facing & 1)` it is seen along the wall (class 0x10: at D1 the wallset's side-on frame S=6 at
+43/64 scale), otherwise (class 0x11) pillars/slit + its door panel when not open (state != 0). Everything else
+draws nothing over the floor/ceiling for now (type 7 never borders a floor square, so it is never visible).
 
 ## TODO
 

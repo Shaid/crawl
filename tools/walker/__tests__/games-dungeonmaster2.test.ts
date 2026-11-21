@@ -157,6 +157,9 @@ const TABLES: ViewportTables = {
   drawOrder: [19, 20, 17, 18, 16, 14, 15, 12, 13, 11, 9, 10, 7, 8, 6, 4, 5, 3, 1, 2],
   doorVisible: [1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1],
   doorRect: new Array(16).fill(-1),
+  slitPiece: new Array(14).fill(255),
+  slitRect: new Array(14).fill(0),
+  framePieces: new Array(28).fill(255),
 };
 
 /** w x h piece filled with colour `c`, except column 0 which is colour `edge` (makes mirroring visible). */
@@ -282,5 +285,12 @@ describe.skipIf(!existsSync(DAT) || !existsSync(GFX) || !existsSync(SKUL))('DM2 
     ds.set(m6, cell, 0);
     const opened = renderViewport(asset, m6, frames[2]!.pose, undefined, ds)!;
     expect(Buffer.compare(Buffer.from(opened), Buffer.from(out[2]!))).not.toBe(0);
+    // the door pillars: a door type flagged frameless (control) leaves the pillar columns (46..63, rect 5085) different
+    const type = m6.doorTypes![m6.doorKinds![cell]!]!;
+    const frameless: ViewportAsset = { ...asset, doors: { ...asset.doors, [type]: { ...asset.doors[type]!, noFrames: true } } };
+    const noPillars = renderViewport(frameless, m6, frames[2]!.pose, undefined, ds)!;
+    let diff = 0;
+    for (let y = 20; y < 100; y++) for (let x = 46; x < 64; x++) if (opened[(y * VIEW_W + x) * 4] !== noPillars[(y * VIEW_W + x) * 4]) diff++;
+    expect(diff).toBeGreaterThan(100);
   });
 });

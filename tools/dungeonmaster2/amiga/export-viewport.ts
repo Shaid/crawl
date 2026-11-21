@@ -24,8 +24,16 @@ import {
 import { parseSkulFtl, readViewportTables, type ViewportTables } from './skul-ftl.ts';
 
 export const CAT_WALLSET = 8;
-/** Floor, ceiling, then the 16 wall pieces (cell + 0x22 for cells 1-15, 0x32 for every D4 cell). */
-export const WALLSET_PIECES = [0, 1, ...Array.from({ length: 16 }, (_, i) => 35 + i)];
+/**
+ * Floor, ceiling, the 16 wall pieces (cell + 0x22 for cells 1-15, 0x32 for every D4 cell),
+ * the side-on door frame (6), door pillars (7-16, 211-216) and door roof slits (18-23).
+ */
+export const WALLSET_PIECES = [
+  0, 1, ...Array.from({ length: 16 }, (_, i) => 35 + i), ...Array.from({ length: 11 }, (_, i) => 6 + i),
+  ...Array.from({ length: 6 }, (_, i) => 18 + i), ...Array.from({ length: 6 }, (_, i) => 211 + i),
+];
+/** Creature/object rect id: 5000 + cell*25 + 5x5 position (facing-relative position, party facing 0). */
+export const creatureRect = (cell: number, pos: number) => 5000 + cell * 25 + pos;
 export const RECT_CEILING = 700;
 export const RECT_FLOOR = 701;
 export const RECT_CELL_BASE = 702;
@@ -41,7 +49,14 @@ export interface VpWallset {
   pieces: Record<string, VpPiece>;
 }
 
-export interface VpDoorType { id: number; colorKey: number; /** S = forward distance - 1 (D1-D3 panels) */ pieces: Record<string, VpPiece> }
+export interface VpDoorType {
+  id: number;
+  colorKey: number;
+  /** Door word S=0x40: non-zero = this door type has no frame pillars / slit. */
+  noFrames: boolean;
+  /** S = forward distance - 1 (D1-D3 panels) */
+  pieces: Record<string, VpPiece>;
+}
 
 export interface ViewportAsset {
   tables: ViewportTables;
@@ -77,6 +92,8 @@ export function buildViewportAsset(graphicsDat: Uint8Array, skulFtl: Uint8Array)
   const rectOut: Record<string, ResolvedRect> = {};
   for (const id of [RECT_CEILING, RECT_FLOOR, ...Array.from({ length: 21 }, (_, i) => RECT_CELL_BASE + i)]) rectOut[id] = resolveRect(rects, id);
   for (const id of tables.doorRect) if (id >= 0) rectOut[id] = resolveRect(rects, id);
+  for (const id of tables.slitRect) if (id > 0) rectOut[id] = resolveRect(rects, id);
+  for (let cell = 0; cell < 16; cell++) for (const pos of [2, 10, 14]) { const id = creatureRect(cell, pos); rectOut[id] = resolveRect(rects, id); }
 
   const signedPair = (v: number): [number, number] => {
     const x = (v >> 8) & 0xff, y = v & 0xff;
@@ -122,7 +139,7 @@ export function buildViewportAsset(graphicsDat: Uint8Array, skulFtl: Uint8Array)
       const p = piece(CAT_DOOR, I, S, off);
       if (p) pieces[S] = p;
     }
-    doors[I] = { id: I, colorKey: get(CAT_DOOR, I, DT.WORD, 4)?.P || 10, pieces };
+    doors[I] = { id: I, colorKey: get(CAT_DOOR, I, DT.WORD, 4)?.P || 10, noFrames: (get(CAT_DOOR, I, DT.WORD, 0x40)?.P ?? 0) !== 0, pieces };
   }
   return { tables, rects: rectOut, wallsets, doors };
 }
