@@ -6618,6 +6618,48 @@ now-precisely-scoped, pre-existing gap, not a new regression.
 > tile) — only movement that actually crosses the boundary on foot now
 > renders correctly.
 
+##### Non-walk trigger sites: the nine triggers identified, five implemented (2026-11-21)
+
+> **Correction (2026-11-21):** the TODO row said all 9 non-walk sites "need
+> action-chain/spell-command modelling". Re-reading them, **three of the nine
+> sit on `MoveParty`'s own `d2` result-code dispatch** and fire on an ordinary
+> *walked step* onto a data-derived special square, no action chain involved —
+> and on those steps the bit-29 diff gate is **bypassed** (`+0x16F00` skips to
+> `+0x16F82`, never reaching `+0x16F0A`), so the walk-path model was also wrong
+> for those steps. Two more are scripted-teleport actions (hookable without a
+> full executor). Disassembled with radare2 on the decompressed S_1
+> (`arch=m68k`), jump table `+0x0CE54` rebased on the `JMP (0,PC,D0.W)`
+> extension word at `+0x0CEAA` (**not** the table address).
+
+| Site (S_1) | Enclosing routine | Exact trigger | Toggles when | Walker |
+|---|---|---|---|---|
+| `+0x16DEA` | `MoveParty` `d2 == 2` | stepping onto a **floor pit** (type `0x14`, word `+0x0A` = 0, word `+0x10` != 1) | always (after the fall animation; party relocated to `+0x0C`/`+0x0E`) | **implemented** (`resolveSpecialSquare`/`applySpecialSquare`) |
+| `+0x16EB0` | `MoveParty` `d2 == 3` | stepping onto **stairs** (type `0x12`, `+0x10` = 2/3) | when the *destination* square's type-`0x12` record has byte `+0x07` == 0; otherwise `+0x16E64` calls `+0x16C62` (resource/ramp load) and branches to `+0x16ECE`, no toggle | **implemented** (same-map relocation only) |
+| `+0x16EE8` | `MoveParty` tail for `d2 == 4` and `d2 == 9` | stepping onto a **spinner** (`+0x10` = 4; no relocation, facing += 2) or **teleport** (`+0x10` 0/1; relocated to `+0x0C`/`+0x0E`, sfx 13) | always | **implemented** |
+| `+0x0CA5C` | `ExecuteAction` opcode `0x15` Teleportation (`+0x0CA3A`) | a scripted teleport action (`$1742`/`$1740` := action col/row) | only when the action's value byte is 0; non-zero calls `+0x96CBA` and skips it | **hook** `BlackCryptView.applyScriptedTeleport` (no action executor) |
+| `+0x0CD16` | `ExecuteAction` opcode `0x1E` Teleport + colour (`+0x0CCE6`) | scripted teleport + `SetDungeonPalette` | always | **hook** (same) |
+| `+0x0C3EA` | `fcn +0x0C2DA(unique, col, row)`, called from `+0x0C770` (opcode `0x06` pit toggle) and `+0x0C7DC` (opcode `0x07` pit on) | a pit action fires while the party stands on that square: party moved to the pit record's `+0x0C`/`+0x0E` | always (inside that branch) | documented only (needs action executor) |
+| `+0x06C36` | `fcn +0x06AF0`, sole caller `+0x07682` (a case of the spell/command dispatch `+0x07044`, keyed `$1EB4 - 0x50`) | a **teleport spell**: coordinates prompted via `+0x03B94`, refused with a message if `$1E2A == 0` or the target is blocked | always when it succeeds | documented only (no spell casting) |
+| `+0x10632`, `+0x10792` | `fcn +0x1038E`, sole caller `+0x0E47E` | a command arm of the command dispatcher (`$1A06 := 2`, `$1E5E := d7`); identity of the command **unresolved** | when `$1E5E` is clear / the arm is reached | documented only (**hypothesis**: not teleport-related) |
+| `+0x02E7E` | `DrawViewport` preamble | dead code (21/21 callers push `#1`) | never | n/a |
+
+Walker semantics (`tools/walker/games.ts`, `BlackCryptView`): on any cell change,
+the entered square's object chain is walked (`objectHandle` plane + `chainNext`;
+**last special record wins**, as `+0x27D18` re-enters the switch per record);
+a floor pit / stairs / teleport relocates the party to the record's words
+`+0x0C` (col) / `+0x0E` (row), all four add word `+0x08` to the facing (mod 4),
+and the toggle fires **instead of** the bit-29 diff. Assumptions, unverified:
+the pit global gate `$B2586 == 1` is set; blocking records elsewhere on the
+chain (codes 1/7/8) are left to the walker's own `canStep`; stairs relocate
+within the same map file.
+
+Tests (`tools/walker/__tests__/games-blackcrypt-mirror-toggle.test.ts`, 14/14):
+real map-3 teleporter `(5,7) -> (21,13)` (both ends bit-29 clear) flips the
+toggle, a second pass flips it back, real floor pit `(18,17) -> (35,29)` flips,
+the ceiling pit `(35,29)` and a 3-step ordinary walk (null controls) do not,
+real map-1 spinner `(10,1)` turns 180 degrees and flips, and the scripted-teleport
+hook flips for `0x15`/value 0 and `0x1E` but not `0x15`/value != 0.
+
 ##### Underwater/flooded-level rendering — Selector 2 and ViewpointChanged unified, and disentangled
 
 The user asked directly how flooded later levels are rendered. Both bit-31

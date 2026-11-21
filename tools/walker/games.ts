@@ -179,6 +179,25 @@ const WATER_RETINT_EXEMPT_LEVEL = 3;
  */
 const DARKNESS_TYPE_BIT = 0x2;
 
+/**
+ * `ResolveTargetSquare` (S_1 `+0x27BCA`..`+0x27D20`) result codes for the
+ * special-square structure records, as `MoveParty` (`+0x16D94`..`+0x16F08`)
+ * consumes them. Every one of these *replaces* the ordinary bit-29-diff
+ * gate with an unconditional `JSR $A4982.l` toggle (sites `+0x16DEA` pit,
+ * `+0x16EB0` stairs, `+0x16EE8` spinner/teleport) — see data-structure.md
+ * "`ViewpointChanged`" → "Non-walk trigger sites: triggers identified".
+ */
+const RESULT_FLOOR_PIT = 2;
+const RESULT_STAIRS = 3;
+const RESULT_SPINNER = 4;
+const RESULT_TELEPORT = 9;
+const BC_TYPE_STAIRS_TELEPORT_SPINNER = 0x12;
+const BC_TYPE_PIT = 0x14;
+
+/** The scripted-teleport action opcodes whose handlers contain a `JSR $A4982.l` (`bcdfs` action table, ExecuteAction S_1 `+0x0C4F6`). */
+export const BC_ACTION_TELEPORTATION = 0x15; // `+0x0CA5C` — toggles only when the action's value byte is 0
+export const BC_ACTION_TELEPORT_AND_COLOUR = 0x1e; // `+0x0CD16` — toggles unconditionally
+
 /** A `front-direct:`/`side-direct:` slot's override for the `$48F != 0` branch (`slots.json`, `scripts/export_dungeon_slots.py`'s `blackcrypt-darkness-mirror-toggle` addition) — just enough of a `PieceDraw` to patch a resolved `DrawItem` post-hoc, without touching `@seer-project/dungeon`'s `buildViewList`/`compositeDrawList`. */
 interface MirrorOverride {
   frame: string;
@@ -193,6 +212,7 @@ export class BlackCryptView implements GameView {
   readonly slots: SlotTableFile;
   private readonly walker: Walker;
   private readonly unit: LevelUnit;
+  private readonly levelFile: DungeonLevelFile;
   private readonly palette_: RGBAColor[];
   private readonly waterPalette_: RGBAColor[] | undefined;
   private readonly noclip: { on: boolean };
@@ -205,6 +225,7 @@ export class BlackCryptView implements GameView {
 
   constructor(opts: BlackCryptViewOptions) {
     this.unit = opts.unit;
+    this.levelFile = opts.levelFile;
     this.palette_ = opts.palette;
     this.waterPalette_ = opts.waterPalette;
     this.noclip = { on: false };
@@ -296,10 +317,20 @@ export class BlackCryptView implements GameView {
   update(dtMs: number, keys: KeyStateLike): Pose | null {
     const before = this.walker.pose;
     const next = this.walker.update(dtMs, keys);
-    // Only the ordinary walk path (an actual cell change) drives the
-    // toggle here — see DARKNESS_TYPE_BIT's doc comment for why the other
-    // 9 real trigger sites (teleport/spell/command) are out of scope.
+    // An actual cell change drives the toggle. Entering a floor pit /
+    // stairs / spinner / teleport square (data-derived, no action chain)
+    // takes MoveParty's special-code branch instead of the bit-29 gate:
+    // relocate + unconditional toggle. Otherwise the ordinary bit-29 diff.
     if (next && (next.x !== before.x || next.y !== before.y)) {
+      const special = this.resolveSpecialSquare(next.x, next.y);
+      if (special) {
+        const landed = this.applySpecialSquare(next, special);
+        if (landed.toggle) this.mirrorToggle = !this.mirrorToggle;
+        if (landed.pose.x !== next.x || landed.pose.y !== next.y || landed.pose.facing !== next.facing) {
+          this.walker.setPose(landed.pose);
+        }
+        return landed.pose;
+      }
       const type = this.unit.planes.type;
       const oldDark = (type?.[before.y * 64 + before.x] ?? 0) & DARKNESS_TYPE_BIT;
       const newDark = (type?.[next.y * 64 + next.x] ?? 0) & DARKNESS_TYPE_BIT;
@@ -310,6 +341,93 @@ export class BlackCryptView implements GameView {
   setPose(pose: Pose): void {
     this.walker.setPose(pose);
   }
+
+  /**
+   * Scripted teleport — the state transition of `ExecuteAction` opcodes
+   * `0x15` (Teleportation, S_1 `+0x0CA5C`) and `0x1E` (Teleport + dungeon
+   * colour change, `+0x0CD16`): the party's `$1742`/`$1740` are overwritten
+   * with the action's `col`/`row`, then `$48F` is toggled unconditionally
+   * (0x15 only when its value byte is 0; a non-zero value takes `+0x96CBA`
+   * instead and skips the toggle). The walker has no action-chain
+   * executor, so this is the hook a future one (or a test) calls. Facing is
+   * unchanged (the handlers never write `$1744`).
+   */
+  applyScriptedTeleport(opcode: number, col: number, row: number, value = 0): void {
+    const toggles = opcode === BC_ACTION_TELEPORT_AND_COLOUR || (opcode === BC_ACTION_TELEPORTATION && value === 0);
+    if (opcode !== BC_ACTION_TELEPORT_AND_COLOUR && opcode !== BC_ACTION_TELEPORTATION) {
+      throw new Error(`applyScriptedTeleport: opcode 0x${opcode.toString(16)} is not a teleport action`);
+    }
+    this.walker.setPose({ ...this.walker.pose, x: col, y: row });
+    if (toggles) this.mirrorToggle = !this.mirrorToggle;
+  }
+
+  /** Words of the entity record at `(x,y)` chain, BE-word read of `raw`. */
+  private bcWord(raw: number[], off: number): number {
+    return ((raw[off] ?? 0) << 8) | (raw[off + 1] ?? 0);
+  }
+
+  private chainAt(x: number, y: number): number[][] {
+    const handles = this.unit.planes.objectHandle;
+    const ents = this.levelFile.entities;
+    const out: number[][] = [];
+    if (!handles || !ents) return out;
+    let slot = handles[y * 64 + x] ?? 0;
+    for (let guard = 0; slot !== 0 && guard < 64; guard++) {
+      const rec = ents[`${this.unit.id}:${y}:${x}:${slot}`];
+      if (!rec?.raw) break;
+      out.push(rec.raw);
+      slot = rec.chainNext ?? 0;
+    }
+    return out;
+  }
+
+  /**
+   * `ResolveTargetSquare`'s special-square verdict for the chain at (x,y)
+   * (S_1 `+0x27C0A`..`+0x27CA8`; the code written by the *last* record wins):
+   * floor pit (type 0x14, passable word +0x0A = 0, word +0x10 != 1; the
+   * `$B2586 == 1` global gate is assumed set) = 2; type 0x12 by word +0x10:
+   * 2/3 stairs = 3, 4 spinner = 4, else teleport = 9. Returns null for any
+   * other square (ceiling pits, plain squares, plates...).
+   */
+  private resolveSpecialSquare(x: number, y: number): { code: number; raw: number[] } | null {
+    let found: { code: number; raw: number[] } | null = null;
+    for (const raw of this.chainAt(x, y)) {
+      const type = raw[5] ?? 0;
+      const sub = this.bcWord(raw, 0x10);
+      if (type === BC_TYPE_PIT) {
+        if (this.bcWord(raw, 0x0a) === 0 && sub !== 1) found = { code: RESULT_FLOOR_PIT, raw };
+      } else if (type === BC_TYPE_STAIRS_TELEPORT_SPINNER) {
+        const code = sub === 2 || sub === 3 ? RESULT_STAIRS : sub === 4 ? RESULT_SPINNER : RESULT_TELEPORT;
+        found = { code, raw };
+      }
+    }
+    return found;
+  }
+
+  /**
+   * `ResolveTargetSquare`'s commit tail + `MoveParty`'s code dispatch:
+   * destination (words +0x0C col / +0x0E row, skipped for spinners),
+   * facing += word +0x08 (mod 4), then the unconditional toggle. The one
+   * exception: stairs whose *destination* square's type-0x12 record has a
+   * non-zero byte +0x07 take `+0x16E64` (`JSR +0x16C62`, a resource/ramp
+   * load) and branch to `+0x16ECE`, skipping the toggle.
+   */
+  private applySpecialSquare(entered: Pose, sp: { code: number; raw: number[] }): { pose: Pose; toggle: boolean } {
+    let x = entered.x;
+    let y = entered.y;
+    if (sp.code !== RESULT_SPINNER) {
+      x = this.bcWord(sp.raw, 0x0c);
+      y = this.bcWord(sp.raw, 0x0e);
+    }
+    const facing = ((entered.facing + this.bcWord(sp.raw, 0x08)) & 3) as Pose['facing'];
+    let toggle = true;
+    if (sp.code === RESULT_STAIRS) {
+      const dest = this.chainAt(x, y).find((r) => (r[5] ?? 0) === BC_TYPE_STAIRS_TELEPORT_SPINNER);
+      if (dest && (dest[7] ?? 0) !== 0) toggle = false;
+    }
+    return { pose: { ...entered, x, y, facing }, toggle };
+  }
+
   setNoclip(on: boolean): void {
     this.noclip.on = on;
   }
