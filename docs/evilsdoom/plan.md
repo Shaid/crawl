@@ -13,6 +13,10 @@ Recon 2026-11-21.
 
 ## Phase 1 — dungeon map (walker blocker) · `evilsdoom-map-record`
 
+- Done 2026-11-21: level framing, grid offsets, pose words, cell bits read
+  from the module code (data-structure.md § Dungeon state block — framing).
+  Left: `evilsdoom-level-lists`, `evilsdoom-stairs`.
+
 Spec § "Dungeon maps". Walk the state block's record framing from the code
 that indexes `A6+$455C` (in `PRG/BEL.dat`, raw module, A6 globals; IRA
 `-M68020` on the module bytes from `+0x744`, or `amiga-disasm`). Goal: level
@@ -25,6 +29,10 @@ user's in-game magic map (`M` key). Pitfalls:
 
 ## Phase 2 — view slots and wall art · `evilsdoom-view-slots`, `evilsdoom-wal`
 
+- Done 2026-11-21 for walls/floor/ceiling + palette + step mirroring
+  (data-structure.md § First-person view — walls). Left: `evilsdoom-doors`,
+  `evilsdoom-decor`.
+
 Spec § "First-person view". Decode the 14-B descriptor table at
 `BEL.dat+0x16834` (and siblings in the other 4 modules), settle plane count
 and mask layout, then render `WAL/*.DT0/DT1` and `DOR/*` through it. Then
@@ -36,6 +44,9 @@ first. Pitfalls: `one-bitplane-or-equal-stride-reading-renders-plausible-art.md`
 `file-offsets-vs-segment-relative.md`.
 
 ## Phase 3 — walker
+
+- Done 2026-11-21: `tools/walker/games-evilsdoom.ts` (`renderCanvas`, 36
+  levels), exporter `tools/evilsdoom/amigaaga/export-walker.ts`.
 
 Type-derived → per-cell conversion (existing rule), slot-table composite via
 `@seer-project/dungeon` `DrawItem` like Black Crypt.

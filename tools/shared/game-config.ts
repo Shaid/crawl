@@ -408,9 +408,16 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['evilsdoom/amigaaga'],
       executable: undefined,
       expectedFiles: ['data/PRG/INT.DAT'],
-      supported: false,
+      supported: true,
       assetDir: 'evilsdoom',
       features: {},
+
+      async buildAssets() {
+        // RNC1 depack (build/cache/evilsdoom/unpacked) + walker maps/wall art/slot tables.
+        const { exportWalker } = await import('../evilsdoom/amigaaga/export-walker.ts');
+        const w = exportWalker();
+        console.log(`  evilsdoom/amigaaga walker: ${w.dungeons} dungeons, ${w.levels} levels`);
+      },
     }],
   },
   {

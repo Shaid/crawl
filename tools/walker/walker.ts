@@ -57,6 +57,7 @@ import { loadEotb1View, eotbLevelList } from './games-eotb.ts';
 import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
 import { loadEotb3View, eotb3LevelList } from './games-eotb3.ts';
 import { loadAp2View, ap2LevelList } from './games-abandonedplaces2.ts';
+import { loadEvilsDoomView } from './games-evilsdoom.ts';
 import { loadAp1View, ap1LevelList } from './games-abandonedplaces.ts';
 import { loadCrystalDragonView, crystalDragonLevelList } from './games-crystaldragon.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
@@ -408,6 +409,7 @@ const GAMES = [
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
   { id: 'dungeonmaster2', label: 'Dungeon Master II: Skullkeep', loader: loadDungeonMaster2View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'evilsdoom', label: "Evil's Doom", loader: loadEvilsDoomView, defaultLevel: 10, platform: 'amigaaga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
@@ -440,6 +442,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
     'SA/SF codecs byte-exact vs the game\'s own Unpack (86/86 sets); walls, pillars, floors and ceilings from the real .SCR sets + slot tables, view-cell layout, facings, face variants, step parity and palette read from Crystal_Dragon. HYPOTHESES: painter order (not the game\'s occlusion masks), open/blocked cell types, start pose, black beyond 3 cells. Not drawn: doors, stairs, teleports, barriers, wall decorations, monsters, items; stairs/teleports not followed -- docs/crystaldragon/TODO.md.',
   abandonedplaces:
     'wall pieces, draw order, backdrop parity, palette (fade-table step 15), grid flags, collision and teleports ported from the game\'s own `module` (view 0xAE3A, blits 0xD740/0xDDE4); 36 dungeon levels. Not drawn: wall-mounted objects, doors/gates, stairs art, monsters, items (closed doors do not block); forest levels unsupported; start pose of levels >1 and the view-window clip are hypotheses -- docs/abandonedplaces/TODO.md.',
+  evilsdoom:
+    "walls, floor/ceiling, step mirroring, palette and collision ported from the per-dungeon module PRG/<DNG>.dat (slot table, draw-list emit order, view gather); maps = SAVE/B state blocks (CLL: not byte-pristine, max-wall slot). Level id = dungeon*10 + level (0x Lost Legions, 1x Belcoon, 2x Mine, 3x Mythil, 4x Wisdom). Doors walkable + not drawn; decorations, objects, monsters not drawn; stairs not followed; start poses other than the saved one are a heuristic (bit-2 cell) -- docs/evilsdoom/TODO.md",
   abandonedplaces2:
     'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Palette = set_NN[0..15] + display.clr[16..31] + EHB half-brights, with the game\'s per-descriptor plane remap (confirmed from `main`). Monsters, items, objects, chests, water, fire and switches are not drawn; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
   eotb3:
