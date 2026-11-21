@@ -57,6 +57,22 @@ export const ELVIRA2_VC_PARAM_BYTES: readonly number[] = (() => {
   return t;
 })();
 
+/**
+ * Elvira 1's VC opcode lengths, derived like the other two tables: coordinate
+ * ascent (ops 1..79, 0..14 parameter bytes) over Elvira 1's own 750 consecutive
+ * script segments (65 zones), started from the better of the Waxworks / Elvira II
+ * tables (747/750 stalled in the first pass); it reaches **750/750** exact
+ * terminations (the Waxworks table scores 54, Elvira II's 57; a wrong draw length
+ * gives 594 -- see `games-elvira.test.ts`). The scripts compose into coherent
+ * pictures (zone 22 garden paths and gates, `docs/elvira/amiga/data-structure.md`),
+ * which checks the operand lengths of the ops that actually draw (10 draw, 22
+ * palette, 13/14/15/16/17/18 conditionals). Ops that only affect timing/animation
+ * (fade, delays, sprite setup) are constrained by the termination oracle alone and
+ * several of their lengths could be swapped for an equivalent split; ops never
+ * seen stay `-1` (they raise).
+ */
+export const ELVIRA1_VC_PARAM_BYTES: readonly number[] = [0,0,0,10,4,4,2,2,4,4,8,0,0,2,2,2,2,2,2,2,0,4,2,2,2,8,0,10,0,8,0,2,2,0,0,0,6,4,4,4,4,4,6,2,6,4,2,14,2,2,2,2,4,4,2,6,0,0,0,0,2,2,0,2,-1,-1,2,6,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,2];
+
 export const VC_OP = {
   END: 0,
   CALL: 2,

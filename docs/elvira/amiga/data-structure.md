@@ -97,4 +97,38 @@ Not decoded; findings so far (Elvira II's walker, `docs/elvira2/amiga/data-struc
 - `data/gameamiga` (218,977 B) is stored **plain** (`simonDecr` throws) and has the Elvira II header: `u32 itemCount-2 = 0x36B`, `u32 0x80`, a junk word, `u32 stringCount = 0x2B1`, `u32 textSize = 0x48C5`, text, then items from `file+0x48D9`.
 - Items are **variable length**, not Elvira II's record. First fixed part: `u32 name, u16 adjective, u16 noun, u16 state, u16 ?, 3 x u32 item refs (next/child/parent), u32 ?`, then a child tail whose first word counts 1, 2, 3, 4 ... down the first items and which holds a `0x26` flag word and further `u16` values. The `readGamePc` item reader does **not** parse it (a fixed 44-byte stride fails: 875 items would end at `+0xDF3D` in the middle of items).
 - `runit` holds a 242-entry operand-grammar table at the same signature (`readGrammarFromExe` works unchanged); ops 1-7 are one item operand, so it is not Elvira II's table.
-- VC scripts: a coordinate-ascent over Elvira 1's 750 script segments from Waxworks' table reaches 747/750 and differs on ~30 opcodes (draw is still op 10); it has not converged, so **no Elvira 1 VC table is committed**.
+- VC scripts: see the 2026-11-21 follow-up below -- the table now **converges (750/750)** and is committed.
+
+
+## Walker follow-up -- VC table solved, `gameamiga` layout refined (2026-11-21, later)
+
+**VC opcode lengths -- confirmed 750/750.** `ELVIRA1_VC_PARAM_BYTES`
+(`tools/shared/agos-vc.ts`): coordinate ascent (ops 1-79, 0-14 parameter bytes,
+re-scoring all 750 segments of the 65 zones per trial) from the better of the
+Waxworks/Elvira II tables ends every script exactly on its successor's start
+(750/750). The first pass stalled at 747 because it only varied a subset of ops;
+the converged table differs from both other dialects on ~40 ops (the Waxworks
+table scores 54/750 here, Elvira II's 57; a wrong draw length 594; a wrong
+`setPalette` length 705 -- `tools/walker/__tests__/games-elvira.test.ts`).
+Visual check: composing zone 22's ten picture scripts (2200-2209) with it gives
+coherent garden pictures (stone walls, hedge arches, plank doors, brick tunnel),
+so the draw/palette/conditional lengths are right. Ops that only drive timing or
+animation are pinned by the termination oracle alone.
+
+**No 8-bit-opcode script block exists in any Elvira 1 data file.** Scanning
+`gameamiga` (every even offset from the item start), `start`, `icon.dat` and
+`runit` with `readSubroutineBlock` under nine operand-width variants (item
+operand u16 / special+u16 / special+u32, text likewise) finds no block (best 4-5
+subroutines of noise; `runit` +0xC48E "72 subs" is the executable's 68k jump
+table). `start` is a saved-state image (same `0000 036C` item-count header).
+
+**`gameamiga` layout (refined, still undecoded).**
+- Items start at `+0x48D9` (**odd offset**: every record is at an odd file offset). Record = `u32 name, u16 adj, u16 noun, u16 state, u16 0, 3 x u32 item refs` (24 B) + a tail of 6-80 B whose commonest length is 70-72 B. Every tail carries a pointer word pair `0026 xxxx` (heap address `0x267FBC`, `0x267FFC`, ... increasing with the item index; later `0027 b11c`...) whose successive differences (0x40, 0x10, 0x6C, ...) look like the original runtime sizes of each item's child blocks -- an oracle available for any proposed child grammar (not yet used). Type-2 objects use the Waxworks scheme: `0002, u32 flags, popcount(flags) u16 values, u16 0` (flags `0x1DF` => `u32` + 7 `u16`) -- tiles item tails exactly in the cases checked by hand.
+- From about `+0x15F40` to EOF the records change character: **4,013 aligned `0x2710` words** (10000) in 0x15F61-EOF, each ending a short run of words (`0087 0001 0001 0000 027C 0030 0001 0062 2710`). **Hypothesis:** 10000 is the old AGOS end-of-line marker of 16-bit-opcode script lines and this tail is the subroutine block (the `elvira-gamepc` note "then 16-bit-opcode subroutine blocks"). Parsing it with u16 opcodes and u16 operands per the `runit` grammar finds no block from any start, so the operand widths (or the line/sub framing) differ from the guess.
+- The `0x00E0 <2200..>` property pairs inside that tail (e.g. `00E0 0898 0004`) carry zone-22 picture ids (2200-2209, 0x898-0x8A1): the room -> picture association is in this tail, so the walker needs it.
+
+**Walker status: blocked.** Pictures (VC scripts) now compose, but the room graph
+(room children of the items) and the room -> picture selection are in the
+undecoded tails/script block. Smallest next step: decode the tail grammar
+using the `0026 xxxx` pointer deltas as the size oracle, then re-read the
+`0x2710` region.
