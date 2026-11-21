@@ -73,6 +73,7 @@ import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from 
 import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
 import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
 import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
+import { loadBardsTale2View, bardsTale2LevelList } from './games-bardstale2.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
 import { loadDungeonMaster2View, dungeonMaster2LevelList } from './games-dungeonmaster2.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
@@ -393,6 +394,7 @@ const GAMES = [
   { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'bardstale2', label: "The Bard's Tale II", loader: loadBardsTale2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
   { id: 'dungeonmaster2', label: 'Dungeon Master II: Skullkeep', loader: loadDungeonMaster2View, defaultLevel: 0, platform: 'amiga' as const },
@@ -419,6 +421,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
   bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
+  bardstale2: 'walls/doors/secret doors, collision and wrap: the view-row builder and move routine are verified identical to BT1 in data/bard; the table-driven compositor (incl. the right-half mirror) is ported from the game code and renders recognisable corridors, but is not screenshot-checked against the real game; the start pose is a heuristic (not the game\'s stairs/arrival point), the palette is big_dung\'s own header (dung_blank is unused by the BT2 executable), the lamp/light distance is fixed at 4; special squares, stairs, monsters and the city are not implemented -- see docs/bardstale2/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
   abandonedplaces2:
     'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Monsters, items, objects, chests, water, fire and switches are not drawn; palette indices 12-15 (the lime/teal speckle) are unresolved; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
@@ -463,6 +466,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
+  if (game === 'bardstale2') return bardsTale2LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
   if (game === 'dungeonmaster2') return dungeonMaster2LevelList(assetBase);
   if (game === 'blackcrypt') {

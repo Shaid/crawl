@@ -470,6 +470,26 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'bardstale2',
+    displayName: "The Bard's Tale II: The Destiny Knight",
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['_unexplored_/BardsTale2/data/bards_data'],
+      executable: undefined,
+      expectedFiles: ['pics', 'levs', 'big_dung'],
+      supported: true,
+      assetDir: 'bardstale2',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { exportBardsTale2Data } = await import('../bardstale2/amiga/export-data.ts');
+        await exportBardsTale2Data(dataDir);
+        const { exportBardsTale2Dungeon } = await import('../bardstale2/amiga/export-dungeon.ts');
+        exportBardsTale2Dungeon(dataDir);
+      },
+    }],
+  },
+  {
     id: 'eotb3',
     displayName: 'Eye of the Beholder III: Assault on Myth Drannor',
     platforms: [{
