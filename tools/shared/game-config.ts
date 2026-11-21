@@ -450,6 +450,26 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'bardstale1',
+    displayName: "The Bard's Tale: Tales of the Unknown",
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['_unexplored_/BardsTaleNTSC/data/bards_data'],
+      executable: undefined,
+      expectedFiles: ['pics', 'levs', 'big_dung', 'dung_blank'],
+      supported: true,
+      assetDir: 'bardstale1',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { exportBardsTale1Data } = await import('../bardstale1/amiga/export-data.ts');
+        await exportBardsTale1Data(dataDir);
+        const { exportBardsTale1Dungeon } = await import('../bardstale1/amiga/export-dungeon.ts');
+        exportBardsTale1Dungeon(dataDir);
+      },
+    }],
+  },
+  {
     id: 'eotb3',
     displayName: 'Eye of the Beholder III: Assault on Myth Drannor',
     platforms: [{

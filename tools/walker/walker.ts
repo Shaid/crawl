@@ -72,6 +72,7 @@ import {
 import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from './games-ishar.ts';
 import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
 import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
+import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 import { W6TriggerState, type W6LevelLinks } from '../wizardry6/movement.ts';
@@ -390,6 +391,7 @@ const GAMES = [
   { id: 'ishar3', label: 'Ishar 3', loader: loadIshar3View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
+  { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
 ] as const;
@@ -413,6 +415,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
+  bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
   eotb3:
     "the dungeon view is the game's own AESOP/16 bytecode (dungeon/features/doors classes) run in a TypeScript VM (tools/aesop/vm.ts) -- wall/door/decoration art + placement come from the game, collision from dungeon.impedance, steps from EYE.C's tables. Object state is the shipped quick-start SAVEGAME (not a fresh game); monsters, floor items, door opening, levers and stair/teleport level changes are not wired yet (docs/eotb3/TODO.md). Palette = Fixed + the area script's set_palette calls.",
@@ -456,6 +459,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'abandonedplaces2') return ap2LevelList(assetBase);
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
+  if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
