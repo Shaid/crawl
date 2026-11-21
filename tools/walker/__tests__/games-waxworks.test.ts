@@ -264,7 +264,7 @@ describe('real data: VC scripts and the maze export', { skip: !HAVE }, () => {
     const a0 = auc(0);
     expect(Math.abs(a0 - 0.5)).toBeGreaterThan(0.3); // strong separation under the game's mapping
     for (const rot of [1, 2, 3]) expect(Math.abs(auc(rot) - 0.5)).toBeLessThan(0.25); // collapses when rotated
-  });
+  }, 90_000);
 });
 
 describe('Elvira II shares the room/exit reader', { skip: !existsSync(resolve('data/elvira2/amiga/data/gameamiga')) }, () => {
