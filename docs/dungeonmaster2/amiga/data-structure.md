@@ -195,6 +195,43 @@ Test coverage: `tools/shared/__tests__/amiga-player4x.test.ts` (a hand-built
 minimal synthetic `P41A` fixture decoded and re-encoded byte-exact, plus
 `describe.skipIf`-gated real-corpus checks reproducing the above).
 
+
+## Walker findings (2026-11-21)
+
+Walker: `tools/walker/games-dungeonmaster2.ts` (+ `tools/dungeonmaster2/amiga/{model,render,export-walker}.ts`,
+`npm run dungeonmaster2:walker` -> `data/walker-maps.json`). Map, collision, doors and teleporter travel are real;
+the first-person picture is a **flat-colour placeholder raycast** (no DM2 art).
+
+### Square semantics (verified structurally; tests in `tools/walker/__tests__/games-dungeonmaster2.test.ts`)
+
+| Claim | Evidence | Confidence |
+|---|---|---|
+| Door attr bit 3 = N-S passage axis | corridor continues along that axis on 53/53 doors, across it on 0/53 | **confirmed** (structural) |
+| Door state = attr bits 0-2 (0 open, 4 closed) | 48 doors are 4, 5 are 0, no others | rendered/consistent with DM1, not proven |
+| Type 7 `empty` is solid filler | 0 of ~13.8k floor-cell edges touch an `empty` cell (walls: 3,521) | **confirmed** (non-adjacency) |
+| Levels connect through teleporters, not stairs | only 4 stairs squares in 44 maps vs 216 teleporter squares | **confirmed** (counts) |
+| Teleporter record (thing type 1, 6 B): word1 bits 0-4 X, 5-9 Y, 10-11 rotation, 12 rot-type; word2 bits 8-15 target map | 216/216 destinations land on enterable cells of the target map; swapped X/Y control 53/216 | **confirmed** for X/Y/map; rotation + rot-type bit **hypothesis** |
+
+Resolved by `resolveTeleporters` (`tools/shared/dungeonmaster-dungeon.ts`), same per-square thing-chain walk as `resolveDoors`.
+
+### `GRAPHICS.DAT` item 0 is a resource catalogue (answers `dm2-gfx-item0-index`)
+
+Item 0 (80,380 B) = `u16 0x8001, u16 10045 (records), u16 7 (fields)`, then 7 (name, width) byte pairs
+`T1 I1 D1 S1 F1 G1 P2` (the ASCII letters `TIDSFGP` are visible in the header), then 10,045 x 8-byte records
+`{T,I,D,S,F,G,P}` (20 + 10,045 x 8 = 80,380 exactly). `P` is the GRAPHICS.DAT item number (or a literal value for
+`D` = 11/12/14 kinds). Observed structure (**hypothesis on field names, confirmed on the arithmetic**):
+
+* `D=1` records point at `IMG4` images; `D=5` records point at a **non-image, ~3-40 byte item class** (first bytes
+  0x8d-0xdf, last byte `0xf0|k` with `k = 15 - n` where `n` = count of the leading 0xa0-0xbf bytes, 7/7 checked;
+  looks like per-distance wall/floor *shape* descriptors, undecoded); `D=2/11/12/14` are parameters/other.
+* `T=26` = **viewport scenes**: per `I` (scene id, 0-135) one `D=1,S=0` full 224x136 backdrop image plus `D=5` shapes
+  keyed by `S` (0, 1, 20-41, 60-62) x `F` in {16, 48, 64} (three view distances) -- the DM2 equivalent of DM1's
+  Graphics.DAT item-696 zone layout. `T=23` `I`=1-5 = 224-wide horizon strips (20/30/62/71 px high) matching
+  `mapGraphicsStyle` 1-5 (outdoor layers). `T=15` = creature sprites (`I` = the ids in each map's `creatureGraphics`),
+  `T=16-21` = 16x16 item icons, `T=7` = UI.
+* What is **not** known: how a map picks its `T=26` scene id, the `D=5` shape codec, the palette. See TODO
+  `dm2-viewport-scenes`.
+
 ## TODO
 
 See `docs/dungeonmaster2/TODO.md`.

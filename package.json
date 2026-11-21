@@ -54,6 +54,7 @@
     "chaosstrikesback:extract-adf": "npx tsx tools/chaosstrikesback/amiga/extract-adf.ts",
     "chaosstrikesback:export": "npx tsx tools/chaosstrikesback/amiga/export-data.ts",
     "dungeonmaster2:export": "npx tsx tools/dungeonmaster2/amiga/export-data.ts",
+    "dungeonmaster2:walker": "npx tsx tools/dungeonmaster2/amiga/export-walker.ts",
     "sync-data-manifests": "npx tsx tools/sync-data-manifests.ts"
   },
   "dependencies": {

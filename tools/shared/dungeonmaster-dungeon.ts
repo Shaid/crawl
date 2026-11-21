@@ -405,3 +405,65 @@ export function resolveDoors(d: Uint8Array, parsed: ParsedDungeon): Array<Map<nu
   }
   return out;
 }
+
+/** Teleporter square destination (thing type 1, 6-byte record). */
+export interface TeleporterInfo {
+  map: number;
+  x: number;
+  y: number;
+  /** Rotation bits 10-11 of the record's first attribute word. */
+  rot: number;
+  /** Bit 12 of that word: HYPOTHESIS that it selects relative (vs absolute) rotation. */
+  relative: boolean;
+}
+
+/**
+ * Resolve the teleporter record of every teleporter square, per map
+ * (`result[mapIndex]`: cell index y*width+x -> destination). Record words
+ * (big-endian): [0] next-thing, [1] bits 0-4 target X, 5-9 target Y,
+ * 10-11 rotation, 12 rotation type; [2] bits 8-15 target map. Checked on DM2
+ * `DUNGEON.DAT`: 216/216 destinations are in-bounds, non-solid cells of the
+ * target map (swapped X/Y control: 53/216).
+ */
+export function resolveTeleporters(d: Uint8Array, parsed: ParsedDungeon): Array<Map<number, TeleporterInfo>> {
+  const h = parsed.header;
+  const defs = parsed.maps.map((m) => m.def);
+  const sumW = defs.reduce((s, m) => s + m.width, 0);
+  const objListStart = 44 + h.mapCount * 16 + sumW * 2;
+  const textStart = objListStart + h.objectListSizeWords * 2;
+  const listsStart = textStart + h.textDataSizeWords * 2;
+  const starts: number[] = [];
+  let cur = listsStart;
+  for (let t = 0; t < 16; t++) {
+    starts.push(cur);
+    const key = THING_COUNT_KEYS[t];
+    cur += key ? h.counts[key] * THING_RECORD_SIZES[t]! : 0;
+  }
+  const out: Array<Map<number, TeleporterInfo>> = [];
+  let objIdx = 0;
+  for (const m of parsed.maps) {
+    const res = new Map<number, TeleporterInfo>();
+    const { width, height } = m.def;
+    for (let x = 0; x < width; x++) {
+      for (let y = 0; y < height; y++) {
+        const sq = m.squares[y]![x]!;
+        if (!sq.hasObject) continue;
+        let thing = r16(d, objListStart + objIdx * 2, 'be');
+        objIdx++;
+        if (sq.type !== 'teleporter') continue;
+        for (let guard = 0; guard < 64 && thing < 0xfffe; guard++) {
+          const type = (thing >> 10) & 0xf;
+          const rec = starts[type]! + (thing & 0x3ff) * THING_RECORD_SIZES[type]!;
+          if (type === 1) {
+            const w1 = r16(d, rec + 2, 'be');
+            res.set(y * width + x, { map: r16(d, rec + 4, 'be') >> 8, x: w1 & 31, y: (w1 >> 5) & 31, rot: (w1 >> 10) & 3, relative: ((w1 >> 12) & 1) === 1 });
+            break;
+          }
+          thing = r16(d, rec, 'be');
+        }
+      }
+    }
+    out.push(res);
+  }
+  return out;
+}

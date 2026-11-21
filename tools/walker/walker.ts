@@ -74,6 +74,7 @@ import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-cry
 import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
 import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
+import { loadDungeonMaster2View, dungeonMaster2LevelList } from './games-dungeonmaster2.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 import { W6TriggerState, type W6LevelLinks } from '../wizardry6/movement.ts';
 
@@ -394,6 +395,7 @@ const GAMES = [
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
+  { id: 'dungeonmaster2', label: 'Dungeon Master II: Skullkeep', loader: loadDungeonMaster2View, defaultLevel: 0, platform: 'amiga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
@@ -401,6 +403,7 @@ type GameId = (typeof GAMES)[number]['id'];
 /** Per-game override for the confidence banner's parenthetical note; falls back to the generic W6 string above when unset. */
 const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   dungeonmaster: 'map + collision + walls/doors/stairs/pits composed from Graphics.DAT via its own zone layout (item 696); palette 0 confirmed against KAOS.FTL; NOT drawn: ornaments, objects, creatures, buttons -- see docs/dungeonmaster/TODO.md',
+  dungeonmaster2: 'map + collision + doors + teleporter travel from DUNGEON.DAT (door axis 53/53, teleporter targets 216/216 structurally verified); WALLS ARE A FLAT-COLOUR PLACEHOLDER, no DM2 art: viewport scenes/palette undecoded -- see docs/dungeonmaster2/TODO.md',
   chaosstrikesback: 'same engine/assets as Dungeon Master (items 49-125, 246-257, 696 byte-identical); Prison = map 100/101, main dungeon from the disk2 MINI.DAT save; ornaments/objects/creatures not drawn -- see docs/chaosstrikesback/TODO.md',
   poolofradiance: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (0/29 levels here), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
   curseoftheazurebonds: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (10/16 levels), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
@@ -461,6 +464,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
+  if (game === 'dungeonmaster2') return dungeonMaster2LevelList(assetBase);
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
