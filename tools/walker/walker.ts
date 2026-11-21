@@ -69,6 +69,7 @@ import {
 } from './games-goldbox.ts';
 import { loadIshar1View, loadIshar2View, loadIshar3View, isharLevelLists } from './games-ishar.ts';
 import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-crystalsofarborea.ts';
+import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 import { W6TriggerState, type W6LevelLinks } from '../wizardry6/movement.ts';
 
@@ -383,6 +384,7 @@ const GAMES = [
   { id: 'ishar2', label: 'Ishar 2', loader: loadIshar2View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'ishar3', label: 'Ishar 3', loader: loadIshar3View, defaultLevel: 1, platform: 'amigaaga' as const },
   { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
 ] as const;
 
 type GameId = (typeof GAMES)[number]['id'];
@@ -402,6 +404,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar2: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
+  zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
   eotb2amiga:
     "same game as 'eotb2' (DOS/VGA), a genuinely different Amiga port -- .VCN/.CPS are LCW-compressed Amiga 5-bitplane graphics (EOB1-Amiga's own encoding) wrapped in EOB2's own container/.INF header shape; .VMP/.MAZ/.INF record layout and .DEC/.DCR are confirmed byte-identical (or byte-identical container) to the DOS port, so this reuses the DOS walker's renderer/loader code unmodified against Amiga-decoded JSON assets -- see docs/eotb2/amiga/data-structure.md. All 16 levels export and render (wall geometry, decorations, and the LEVEL10-14 mezz+azure palette-override bundle all confirmed); item/monster stat tables (ITEM.DAT/ITEMTYPE.DAT) not yet decoded for this platform.",
 };
@@ -437,6 +440,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'ishar2') return isharLevelLists.ishar2();
   if (game === 'ishar3') return isharLevelLists.ishar3();
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
+  if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));

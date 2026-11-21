@@ -219,3 +219,22 @@ rate in Hz (3700–9900; 8363 and 8400 common), then signed 8-bit mono PCM.
 | SEQ pixels | column-major, plane-major (`plane·wc+x`) | clean 82/82 | adopted |
 | i-lieux ↔ plan | id = record index (off 0) vs index+1 (off 1), all 24 direction permutations | off 1, (row+1, col+1, row−1, col−1) best | see § i-lieux |
 | LIEUX ↔ locations × facings | 86 × 4 = 344 pictures expected if per-facing | 82 frames, 78 of them locations | one picture per location, no facings |
+
+## Movement and compass (confirmed from code, 2026-11-21)
+
+Offsets are `zombi` hunk S_0, file-relative to the code hunk start (A4 = data hunk base).
+
+| Fact | Where | Status |
+|---|---|---|
+| Picture blit: `+0x299E` draws a SEQ frame at (x + frame.x, y + frame.y); called with x=8, y=0x30 (`+0x0A94`) -> picture at screen (8,48), 160x80, inside the 176x80 view window at (0,48) (`+0x2780`). Rendered: fills the UI frame's black window exactly | confirmed |
+| Click rects (data `A4+0x4C0`, 8 B each): 1 left (0,75)-(7,101), 2 right (168,75)-(175,101), 3 top (75,40)-(101,47), 4 bottom (75,128)-(101,135); 5-8 portraits, 9-19 other buttons; 4x10 grid of 16x16 cells at (8,64) = object slots | confirmed |
+| Dispatcher `+0x7486`: rect1 -> `move(1)`, rect2 -> `move(0)`, rect3 -> `move(3)`, rect4 -> `move(2)` | confirmed |
+| `move(dir)` `+0x6254`: dir0 col+1 / exit byte 1; dir1 col-1 / byte 3; dir2 row+1 / byte 0; dir3 row-1 / byte 2. Plan memory is [floor][row][col], strides 72/9/1, 1-based | confirmed |
+| Exit values that move: 0x00 and 0x14 only (`+0x6470`); 0xFE -> event 5 (horde picture 81); 0xFA -> special (id 46); anything else (0x0A, 0xF0, 0x1E) is "blocked" | confirmed |
+| Vertical: only dir 2/3 fall back when their exit is not 0x00/0x14/0xFA/0xFE: top arrow -> floor+1 via byte 5, bottom arrow -> floor-1 via byte 4. So byte 5 = up, byte 4 = down | confirmed |
+| New game start: location 62 (helicopter, roof) `+0x0980` | confirmed (init code) |
+| `i-lieux` bytes 10..49 are 4 rows x 10 columns of object slots (read as four 10-B pieces, memory stride 11), the item grid over the picture | structural |
+
+> **Correction (2026-11-21):** the `i-lieux` table above lists a 32-B slot table at 10..41 and 42..49 unknown; the loader (`+0x0604`..`+0x0692`) reads bytes 0..9 then four 10-B rows, so 10..49 is one 4x10 grid.
+
+Orientation settled: `zombi-exit-orientation` is closed. Rows count DOWN the screen (top arrow = row-1 = byte 2). The game never prints a compass name; the walker calls the top arrow "N" (convention). Walker: `tools/walker/games-zombi.ts`, rules in `tools/zombi/amiga/map.ts`, export `tools/zombi/amiga/export-map.ts` -> `data/map.json`. Under `move()`, 85 of 86 cells are reachable from the start; location 59 (floor 4, exit value 0x1E) is not (its special exit is unimplemented).

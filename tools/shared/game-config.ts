@@ -441,6 +441,8 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       async buildAssets(_cfg, dataDir) {
         const { exportZombiData } = await import('../zombi/amiga/export-data.ts');
         await exportZombiData(dataDir);
+        const { exportZombiMap } = await import('../zombi/amiga/export-map.ts');
+        exportZombiMap(dataDir);
       },
     }],
   },
