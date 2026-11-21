@@ -72,8 +72,28 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+let arrival: number | null = null;
+/** Room/cell id the last cross-world move arrived at (exact: poses carry no z); consumed by the loader. */
+export function takeArrival(): number | null {
+  const a = arrival;
+  arrival = null;
+  return a;
+}
+
+const roomIndexCache = new WeakMap<MazeFile, Map<number, { world: number; room: MazeRoom }>>();
+/** Which world holds room/cell `id` (null when none). Built once per maze file. */
+export function worldOfRoom(maze: MazeFile, id: number): { world: number; room: MazeRoom } | null {
+  let idx = roomIndexCache.get(maze);
+  if (!idx) {
+    idx = new Map();
+    maze.worlds.forEach((w, wi) => w.rooms.forEach((r) => idx!.set(r.id, { world: wi, room: r })));
+    roomIndexCache.set(maze, idx);
+  }
+  return idx.get(id) ?? null;
+}
+
 export function startRoomFor(world: MazeWorld, startId: number = START_ROOM_ID): MazeRoom {
-  return world.rooms.find((r) => r.id === startId) ?? world.rooms.find((r) => r.pics[0]) ?? world.rooms[0];
+  return world.rooms.find((r) => r.id === startId) ?? (world.start ? world.rooms.find((r) => r.id === world.start!.id) : undefined) ?? world.rooms.find((r) => r.pics[0]) ?? world.rooms[0];
 }
 
 export class WaxworksView implements GameView {
@@ -89,6 +109,7 @@ export class WaxworksView implements GameView {
   private noclip = false;
   private cooldown = 0;
   private pendingPose: Pose | null = null;
+  private levelChange: Pose | null = null;
   private message: string | null = null;
   private roomId: number;
   private facing: number;
@@ -128,6 +149,16 @@ export class WaxworksView implements GameView {
       if (t && this.byId.has(t)) { this.roomId = t; this.message = null; return this.pose; }
     }
     const res = tryMove(this.byId, this.roomId, dir);
+    if (!res.ok && res.reason === 'no-room') {
+      // an exit into another world (a maze level <-> a room, or one maze level <-> the next): the harness loads that level
+      const there = worldOfRoom(this.maze, this.room.exits[dir]);
+      if (there && doorState(this.room, dir) === 1) {
+        arrival = there.room.id;
+        this.levelChange = { level: there.world, x: there.room.x, y: there.room.y, facing: (dir < 4 ? dir : this.facing) as Pose['facing'] };
+        this.message = `-> ${this.maze.worlds[there.world].label}`;
+        return null;
+      }
+    }
     if (!res.ok) { this.message = describeFailure(res, dir); return null; }
     this.roomId = res.to;
     this.message = null;
@@ -159,7 +190,7 @@ export class WaxworksView implements GameView {
     return p;
   }
 
-  takeLevelChange(): Pose | null { return null; }
+  takeLevelChange(): Pose | null { const p = this.levelChange; this.levelChange = null; return p; }
   takeMessage(): string | null { const m = this.message; this.message = null; return m; }
   setPose(pose: Pose): void {
     const w = this.world;
@@ -217,7 +248,7 @@ export class WaxworksView implements GameView {
     const r = this.room;
     ctx.fillStyle = '#ccc';
     ctx.font = '8px monospace';
-    ctx.fillText(`room ${r.id}  facing ${DIR_NAMES[this.facing]}  pic ${ref ? ref.script : '-'}${r.uncertain ? '  (state-gated)' : ''}`, 4, 142);
+    ctx.fillText(`${r.id >= 10000 ? `maze ${Math.floor(r.id / 10000)} cell ${r.id % 10000} (${r.x},${r.y},${r.z})` : `room ${r.id}`}  facing ${DIR_NAMES[this.facing]}  pic ${ref ? ref.script : '-'}${r.uncertain ? '  (state-gated)' : ''}`, 4, 142);
     let ex = '';
     for (let d = 0; d < 6; d++) {
       const st = doorState(r, d);

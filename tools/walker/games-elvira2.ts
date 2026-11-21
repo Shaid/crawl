@@ -6,10 +6,10 @@
  * (`tools/elvira2/amiga/export-maze.ts`).
  */
 import type { Pose } from '@seer-project/dungeon';
-import { WaxworksView, startRoomFor } from './games-waxworks.ts';
+import { WaxworksView, startRoomFor, takeArrival } from './games-waxworks.ts';
 import type { MazeFile } from '../waxworks/amiga/maze-map.ts';
 
-/** HYPOTHESIS: not decoded -- falls back to the first fully pictured room of the world. */
+/** HYPOTHESIS: the room-world start is not decoded -- falls back to the first pictured room. The maze worlds carry the game's own entry cells (`world.start`). */
 export const ELVIRA2_START_ROOM_ID = -1;
 
 let cached: MazeFile | null = null;
@@ -32,8 +32,12 @@ export async function loadElvira2View(assetBase: string, levelId: number, start:
   const wi = Math.min(Math.max(levelId, 0), maze.worlds.length - 1);
   const world = maze.worlds[wi];
   let roomId = startRoomFor(world, ELVIRA2_START_ROOM_ID).id;
-  let facing = 0;
-  if (start) {
+  let facing = world.start && roomId === world.start.id ? world.start.facing : 0;
+  const arrived = takeArrival();
+  if (arrived !== null && world.rooms.some((r) => r.id === arrived)) {
+    roomId = arrived;
+    if (start) facing = start.facing;
+  } else if (start) {
     const hit = world.rooms.find((r) => r.x === start.x && r.y === start.y);
     if (hit) roomId = hit.id;
     facing = start.facing;

@@ -34,6 +34,8 @@ export interface MazeWorld {
   /** Picture zones used by the world's rooms, with room counts. */
   zones: Record<string, number>;
   rooms: MazeRoom[];
+  /** Preferred entry room/facing of this world (Elvira II mazes); absent = first pictured room. */
+  start?: { id: number; facing: number };
 }
 
 export interface MazePictureRef {

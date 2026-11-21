@@ -134,7 +134,9 @@ pictures rendered, 331 distinct pictures, **every picture's script runs
 picture-bearing line aborted by an unmodelled condition (ops 148/149/125/76/77/27,
 default state shown). Walker: `tools/walker/games-elvira2.ts` (reuses `WaxworksView`).
 
-**Not covered:** the two super-room grids -- items 744 (30x30x4, script 1300) and
+> **Correction (2026-11-21, later):** the super-room grids are now walkable -- see section 6. The paragraph below is the earlier (pre-decode) state.
+
+**Not covered (superseded by section 6):** the two super-room grids -- items 744 (30x30x4, script 1300) and
 760 (20x20x6, script 1499), reached through 23 exits. Their `kSuperRoom`
 child is `u16 subroutine, x, y, z`, then x*y*z state words (two bits/direction,
 e.g. 17 = N+S corridor, 68 = E+W, 80 = S+W corner). Their pictures are *not* one
@@ -143,3 +145,63 @@ exit test) and wall-flag variables, then draws `picture 30000+var`; an
 interpreter for those ops is needed (`elvira2-superrooms`). The start room is
 not decoded (sub 100 branches on player-in-760/744) -- the walker starts at the
 first pictured room (`elvira2-start-room`).
+
+
+## 6. Super-room grid mazes (items 744 and 760) -- walker, 2026-11-21
+
+Code: `tools/elvira2/amiga/superrooms.ts` (worlds), the extended op set in
+`tools/waxworks/amiga/room-script.ts` (`SuperRoomEnv`), exporter hook
+`MazeSpec.superRooms`; tests `tools/walker/__tests__/games-elvira2-superrooms.test.ts`.
+
+**Grid -- confirmed.** `superroom` child = `u16 subroutine, W, H, Z`, then W*H*Z
+`u16` state words, index `(z*H + row)*W + col`; direction `d` = bits `2d..2d+1`
+(0 N, 1 E, 2 S, 3 W, 4 up, 5 down); N = row-1, E = col+1 (sub 1305: facing
+0/1/2/3 -> `v0 -= 30 / += 1 / += 30 / -= 1`). Oracle: horizontal exits are
+reciprocal (all six directions) for 2,378 of 2,452 in-grid exits in 744 (and 2,584/2,641 in 760);
+the column-major reading of the same words scores < 0.3 (test). State 1 =
+open, 2/3 = closed/locked door (ops 172/173); `down` state 3 (98 cells in 744)
+is a pit (sub 1315 tests `173 ... 5`; fall landing not decoded); up/down
+state 1 (12 pairs in 760) are stairs.
+
+> **Correction (2026-11-21):** script **cell numbers are 1-based**: cell `n` is
+> `states[n-1]`. The 22 doorway cells of sub 1286 are all non-empty only under
+> that offset (22/22; offsets 0, +-2, 19, 20, 21 give 8-16), and in every one the
+> door's own direction is a wall (state 0) -- the doors are embedded in walls.
+> Also sub 1300 line 5 computes the floor as `(v0 - 1) / 900`. Without the offset
+> the dev start cell 193 of maze 760 is an empty cell.
+
+**Script ops (inferred from use, then checked against the grid).** `166 B` reads
+the player's cell into variable B, `165 N` sets it; `71 N` runs subroutine N
+(`71 w:30006` = indirect: sub 1313 computes `1377 + (cell % 10)` -- the
+special-cell pictures in subs 1377-1386 are keyed by the cell's last digit);
+`36 a b` copies variable a to b; 47/48/49/50/52 = mul/div/mulf/divf/modf;
+`171/172/173 (item, cell, dir)` are conditions: door state of that cell in that
+direction is 1/2/3 (`-9` = the player's current super-room). Sub 1304 turns the
+neighbourhood into flag bits (60-63 left openings at steps 0-3, 64-67 right
+openings, 68-71 wall ahead at distance 0-3 -- script and grid agree on 556/556
+plain cells, test), and the zone-30 / 69 / 11 VC picture scripts read those
+bits. Pictures: zone 30 = cave tunnel views (maze 744), 69 = halls, 11 =
+760's arched-door tunnel; frames in `build/cache/elvira2/walker-frames/`.
+Walker: one level per floor (744: 4, 760: 6), 2,308 cells.
+
+**Doorways (confirmed for 22 rooms).** Sub 1286 (called by verb 547) lists
+`13 v0 <cell>` / `55 <room>` for the 22 cave rooms 344-364 and 455; subs
+1250-1255 give the facing (`13 v150 <facing>` ... `141 b2 <room>`). In all 22
+the room's exit into the maze is `(facing + 2) % 4` (null control: facing+3
+matches < 5). Rule used: at that cell, facing `F` and moving forward enters the
+room facing `F`; leaving the room by its exit `d` arrives at the cell facing
+`d`. Eight of the 22 doorway cells have an all-zero state word (isolated one-cell
+niches in the grid); they are exported as one-cell nodes reached from their room.
+
+**Start/entry (labelled).** `sub 0` verb lines 36/37 (verbs 281/274, no
+nouns -- probably the game's own debug/teleport commands) are `165 3240; 43
+b150 1; 55 i744` and `165 193; 42 b150 2; 55 i760`; those cells/facings are the
+worlds' default poses. Room 452's open `up` exit into 744 arrives at cell 3240
+(**hypothesis**: the only cell the scripts name for 744; its own special picture
+is scripted in sub 1377 line 17).
+
+**Still open:** the real game start (sub 101 ends `55 i:854` -- item 854 is a
+room holding the starting objects -- and the opening sequence moves the
+player on from there), the maze-pit landing cell (sub 1368), the closed/locked
+maze doors' opening scripts, and the ~0.3% of cell/facing pictures drawn by a
+line gated on an unmodelled condition (ops 77, 80 with item -1/-3, 125/148).

@@ -21,6 +21,16 @@ export const ELVIRA2_SPEC: MazeSpec = {
   sharedBank: (zone) => zone,
   vcTable: ELVIRA2_VC_PARAM_BYTES,
   minWorldRooms: 2,
+  superRooms: {
+    // sub 0 verb lines 36/37 (`165 3240; 55 i744`, `165 193; 55 i760`): the game's own entry cells
+    starts: [
+      { item: 744, cell: 3240, facing: 1 },
+      { item: 760, cell: 193, facing: 2 },
+    ],
+    // HYPOTHESIS: room 452's "up" exit (open) arrives at the 744 entry cell
+    entries: [{ room: 452, dir: 4, item: 744, cell: 3240 }],
+    doorwayItem: 760,
+  },
 };
 
 export async function exportElvira2Maze(dataDir: string): Promise<MazeFile> {

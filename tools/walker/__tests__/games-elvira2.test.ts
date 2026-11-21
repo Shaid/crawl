@@ -111,7 +111,9 @@ describe('real data: Elvira II', { skip: !HAVE }, () => {
 
   it('maze export: worlds, pictures non-blank, picture differs per facing in a corridor-like sample', () => {
     const { maze, sheets } = buildMaze(DATA, ELVIRA2_SPEC);
-    expect(maze.worlds.map((x) => x.rooms.length)).toEqual([118, 22, 4]);
+    expect(maze.worlds.slice(0, 3).map((x) => x.rooms.length)).toEqual([118, 22, 4]);
+    expect(maze.worlds[3].rooms.length).toBe(22); // the maze-760 doorway rooms (no other exits); room 452 -> maze 744 sits in area 3
+    expect(maze.worlds.length).toBe(14); // + 4 levels of maze 744 and 6 of maze 760
     expect(maze.stats.roomPicturesRendered).toBeGreaterThanOrEqual(540);
     expect(maze.stats.picturesWithoutSetPalette).toBe(0);
     // every picture uses > 4 distinct colours (a blank/garbled composite would not)
@@ -139,5 +141,5 @@ describe('real data: Elvira II', { skip: !HAVE }, () => {
       expect(doorState(r, d)).toBe(1);
     }
     expect(back / open).toBeGreaterThan(0.97);
-  });
+  }, 90_000);
 });

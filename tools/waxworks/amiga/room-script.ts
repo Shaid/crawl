@@ -12,15 +12,51 @@
  * `op51 b150 4` (= mod 4), then `process 7` (redraw the room) -- see
  * docs/waxworks/amiga/data-structure.md §7.
  */
-import type { AgosItem, Operand, Subroutine } from '../../shared/agos-gamepc.ts';
+import type { AgosItem, Operand, ScriptOp, Subroutine } from '../../shared/agos-gamepc.ts';
 
 export const VAR_FACING = 150;
+
+/**
+ * Super-room (Elvira II grid maze) state for the optional extended op set.
+ * Absent for ordinary rooms, in which case none of the extended ops below is
+ * interpreted (Waxworks / room behaviour unchanged).
+ */
+export interface SuperRoomGrid {
+  x: number;
+  y: number;
+  z: number;
+  /** 2 bits per direction (N E S W up down), index = (z*y + row)*x + col. */
+  states: number[];
+}
+export interface SuperRoomEnv {
+  /** Item id of the super-room the player is in (the game's special item -9). */
+  current: number;
+  grids: Map<number, SuperRoomGrid>;
+  /** Player cell index (`165` sets it, `166` reads it into a variable). */
+  pos: number;
+  /** Subroutines reachable by `process` (op 71). */
+  subs: Map<number, Subroutine>;
+  depth: number;
+}
 
 export interface RoomEvalEnv {
   items: Map<number, AgosItem>;
   vars: Map<number, number>;
   bits: Set<number>;
   bits2: Set<number>;
+  sr?: SuperRoomEnv;
+}
+
+/**
+ * Door state (0 none, 1 open, 2 closed, 3 locked) of direction `dir` of script
+ * cell number `cell` in a super-room grid; 0 outside it. **Script cell
+ * numbers are 1-based**: cell n is `states[n - 1]` (all 22 doorway cells of the
+ * 760 maze are non-empty only under that offset, docs/elvira2/amiga/data-structure.md section 6).
+ */
+export function gridDoorState(g: SuperRoomGrid, cell: number, dir: number): number {
+  const i = cell - 1;
+  if (i < 0 || i >= g.states.length) return 0;
+  return (g.states[i] >> (dir * 2)) & 3;
 }
 
 export interface PictureCall {
@@ -109,6 +145,13 @@ export function runRoomSubroutine(sub: Subroutine, env: RoomEvalEnv): RoomEvalRe
       }
       let cond = true;
       const a = o.args;
+      const ext = env.sr ? superRoomOp(o, env, env.sr, (nested) => {
+        pending.push(...nested.pictures);
+        nested.unmodelled.forEach((u) => res.unmodelled.add(u));
+      }) : undefined;
+      if (ext !== undefined) {
+        cond = ext;
+      } else
       switch (o.op) {
         case OP.zero:
           cond = (env.vars.get(varIndex(a[0], env)) ?? 0) === 0;
@@ -244,4 +287,78 @@ export function roomPictureFor(sub: Subroutine, items: Map<number, AgosItem>, fa
   const main = result.pictures.filter((p) => p.mode === 4);
   const call = main.length ? main[main.length - 1] : null;
   return { id: call ? call.id : null, call, result };
+}
+
+/**
+ * Extended ops for the super-room maze scripts (Elvira II sub 1300/1499
+ * family). Returns the condition value for ops it handles (`true` for
+ * actions), `undefined` for everything else. Semantics were inferred from how
+ * the shipped scripts use the ops, then checked against the grid data:
+ * 36 copies variable a into b (`36 b150 b6` then `43 b6 1` = facing+1),
+ * 47..50/52 are mul/div/mulf/divf/modf, 165 sets the player cell, 166 reads it
+ * into a variable, 71 runs a subroutine, 171/172/173 test the door state
+ * (1 open / 2 closed / 3 locked) of a direction of a cell, and `80 (-9, item)`
+ * asks whether the player is in that super-room.
+ */
+function superRoomOp(o: ScriptOp, env: RoomEvalEnv, sr: SuperRoomEnv, merge: (r: RoomEvalResult) => void): boolean | undefined {
+  const a = o.args;
+  const get = (n: number) => env.vars.get(n) ?? 0;
+  switch (o.op) {
+    case 36:
+      env.vars.set(varIndex(a[1], env), get(varIndex(a[0], env)));
+      return true;
+    case 47:
+      env.vars.set(varIndex(a[0], env), get(varIndex(a[0], env)) * wordValue(a[1], env));
+      return true;
+    case 48: {
+      const m = wordValue(a[1], env);
+      if (m !== 0) env.vars.set(varIndex(a[0], env), Math.trunc(get(varIndex(a[0], env)) / m));
+      return true;
+    }
+    case 49:
+      env.vars.set(varIndex(a[0], env), get(varIndex(a[0], env)) * get(varIndex(a[1], env)));
+      return true;
+    case 50: {
+      const m = get(varIndex(a[1], env));
+      if (m !== 0) env.vars.set(varIndex(a[0], env), Math.trunc(get(varIndex(a[0], env)) / m));
+      return true;
+    }
+    case 52: {
+      const m = get(varIndex(a[1], env));
+      if (m !== 0) env.vars.set(varIndex(a[0], env), get(varIndex(a[0], env)) % m);
+      return true;
+    }
+    case 165:
+      sr.pos = wordValue(a[0], env);
+      return true;
+    case 166:
+      env.vars.set(varIndex(a[0], env), sr.pos);
+      return true;
+    case 171:
+    case 172:
+    case 173: {
+      const item = a[0].v > 0 ? a[0].v : sr.current;
+      const g = sr.grids.get(item);
+      if (!g) return false;
+      return gridDoorState(g, wordValue(a[1], env), byteValue(a[2], env)) === o.op - 170;
+    }
+    case 80:
+      if (a[0].v === -9 && a[1].v > 0) return sr.current === a[1].v;
+      if (a[1].v === -9 && a[0].v > 0) return sr.current === a[0].v;
+      return undefined;
+    case 71: {
+      const sub = sr.subs.get(wordValue(a[0], env));
+      if (sub && sr.depth < 24) {
+        sr.depth++;
+        try {
+          merge(runRoomSubroutine(sub, env));
+        } finally {
+          sr.depth--;
+        }
+      }
+      return true;
+    }
+    default:
+      return undefined;
+  }
 }

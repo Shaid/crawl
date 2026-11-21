@@ -18,6 +18,7 @@ import { writePNG, writeJson } from '@seer-project/pipeline';
 import { simonDecr, discoverZones, loadPalette } from '../../shared/agos-vga.ts';
 import { readGamePc, readGrammarFromExe, readSubroutineBlock, roomsOf, type Subroutine } from '../../shared/agos-gamepc.ts';
 import { parseVga1, composePicture, WINDOW4, VC_PARAM_BYTES, type ZoneResources } from '../../shared/agos-vc.ts';
+import { buildSuperRoomWorlds, findMazeRoomLinks, cellId } from '../../elvira2/amiga/superrooms.ts';
 import { layoutRooms, type MazeFile, type MazeRoom, type MazeWorld } from './maze-map.ts';
 import { roomPictureFor, type PictureCall } from './room-script.ts';
 
@@ -36,6 +37,15 @@ export interface MazeSpec {
   vcTable: readonly number[];
   /** Smallest connected room set exported as a world. */
   minWorldRooms: number;
+  /** Elvira II only: also export the grid-maze super-rooms (items 744/760) as one world per level and link them to the rooms. */
+  superRooms?: {
+    /** Super-room item -> script cell/facing the game's own start verbs use. */
+    starts: Array<{ item: number; cell: number; facing: number }>;
+    /** Room -> maze entries not visible as doorway scripts (HYPOTHESIS). */
+    entries: Array<{ room: number; dir: number; item: number; cell: number }>;
+    /** Super-room item whose doorway table (sub 1286) links it to rooms. */
+    doorwayItem: number;
+  };
 }
 export const WAXWORKS_SPEC: MazeSpec = {
   variant: 'waxworks',
@@ -149,12 +159,27 @@ export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): Buil
     return h;
   };
 
+  const sp = spec.superRooms;
+  const mazeLinks = sp ? findMazeRoomLinks(subs, sp.doorwayItem) : [];
+  /** Room exit into a super-room item -> the maze cell it arrives at (0 = not a maze exit). */
+  const superLinkFor = (room: number, dir: number, dest: number): number => {
+    if (!sp) return 0;
+    const k = mazeLinks.find((l) => l.room === room && l.item === dest);
+    if (k) return cellId(k.item, k.cell);
+    const e = sp.entries.find((x) => x.room === room && x.dir === dir && x.item === dest);
+    return e ? cellId(e.item, e.cell) : 0;
+  };
   const stats = { rooms: 0, roomPictures: 0, roomPicturesRendered: 0, roomsUncertain: 0, tableDuplicates: duplicates, unmodelledOps: 0 };
   const worldList: MazeWorld[] = [];
   const unmodelledAll = new Set<number>();
-  comps
-    .filter((c) => c.length >= spec.minWorldRooms)
-    .sort((a, b) => b.length - a.length)
+  // Rooms whose only exits lead into a super-room (the maze doorway rooms) are in no room component: one extra world holds them.
+  const inComp = new Set(comps.flat());
+  const doorwayRooms = [...rooms]
+    .filter(([id, r]) => !inComp.has(id) && r.exits.some((e) => superLinkFor(id, e.dir, e.dest)))
+    .map(([id]) => id)
+    .sort((a, b) => a - b);
+  const mainComps = comps.filter((c) => c.length >= spec.minWorldRooms).sort((a, b) => b.length - a.length);
+  [...mainComps, ...(doorwayRooms.length ? [doorwayRooms] : [])]
     .forEach((comp, wi) => {
       const lay = layoutRooms(comp, (id) => {
         const ex = [0, 0, 0, 0, 0, 0];
@@ -166,7 +191,16 @@ export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): Buil
       for (const id of comp) {
         const rc = rooms.get(id)!;
         const exits = [0, 0, 0, 0, 0, 0];
-        for (const e of rc.exits) exits[e.dir] = e.dest;
+        let doorStates = rc.exitStates;
+        for (const e of rc.exits) {
+          exits[e.dir] = e.dest;
+          const into = superLinkFor(id, e.dir, e.dest);
+          if (into) {
+            exits[e.dir] = into;
+            // the room-side door state of these exits is 2 ("closed") in the data; the doorway is walked both ways here
+            doorStates = (doorStates & ~(3 << (e.dir * 2))) | (1 << (e.dir * 2));
+          }
+        }
         const sub = subs.get(rc.subroutineId);
         const pics = [0, 0, 0, 0];
         let uncertain = false;
@@ -189,11 +223,24 @@ export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): Buil
         }
         if (uncertain) stats.roomsUncertain++;
         const p = lay.pos.get(id)!;
-        mrooms.push({ id, x: p[0], y: p[1], z: p[2], exits, doorStates: rc.exitStates, pics, uncertain });
+        mrooms.push({ id, x: p[0], y: p[1], z: p[2], exits, doorStates, pics, uncertain });
       }
       stats.rooms += comp.length;
       worldList.push({ id: wi, label: '', zones: zoneCount, rooms: mrooms });
     });
+  if (sp) {
+    const built = buildSuperRoomWorlds({
+      db,
+      subs,
+      picture,
+      links: mazeLinks,
+      entries: sp.entries,
+      firstWorldId: worldList.length,
+      starts: new Map(sp.starts.map((s) => [s.item, { cell: s.cell, facing: s.facing }])),
+    });
+    worldList.push(...built.worlds);
+    for (const [k, v] of Object.entries(built.stats)) (stats as Record<string, number>)[`maze${k[0].toUpperCase()}${k.slice(1)}`] = v;
+  }
   stats.unmodelledOps = unmodelledAll.size;
   const noPalette = [...noPaletteZones.values()].reduce((a, b) => a + b, 0);
   (stats as Record<string, unknown>).picturesWithoutSetPalette = noPalette;
@@ -230,6 +277,7 @@ export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): Buil
 
   // Labels from the zones each world draws.
   for (const w of worldList) {
+    if (w.label) continue;
     const zs = Object.entries(w.zones).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([z]) => z);
     const full = w.rooms.filter((r) => r.pics.every(Boolean)).length;
     w.label = `World ${w.id + 1}: ${w.rooms.length} rooms, ${Math.round((100 * full) / w.rooms.length)}% fully pictured (zones ${zs.join(', ')})`;
