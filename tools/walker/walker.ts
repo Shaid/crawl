@@ -55,6 +55,7 @@ import { loadMM3View, mm3LevelList } from './games-mm3.ts';
 import { loadWizardry6Snes, wizardry6SnesLevelList } from './games-w6-snes.ts';
 import { loadEotb1View, eotbLevelList } from './games-eotb.ts';
 import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
+import { loadEotb3View, eotb3LevelList } from './games-eotb3.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
 import {
   loadPoolOfRadianceView,
@@ -370,6 +371,7 @@ const GAMES = [
   { id: 'eotb', label: 'Eye of the Beholder', loader: loadEotb1View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'eotb2amiga', label: 'Eye of the Beholder II (Amiga)', loader: loadEotb2View, defaultLevel: 1, platform: 'amiga' as const },
+  { id: 'eotb3', label: 'Eye of the Beholder III', loader: loadEotb3View, defaultLevel: 3, platform: 'dosvga' as const },
   { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'poolofradiance', label: 'Pool of Radiance', loader: loadPoolOfRadianceView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
@@ -405,6 +407,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
+  eotb3:
+    "the dungeon view is the game's own AESOP/16 bytecode (dungeon/features/doors classes) run in a TypeScript VM (tools/aesop/vm.ts) -- wall/door/decoration art + placement come from the game, collision from dungeon.impedance, steps from EYE.C's tables. Object state is the shipped quick-start SAVEGAME (not a fresh game); monsters, floor items, door opening, levers and stair/teleport level changes are not wired yet (docs/eotb3/TODO.md). Palette = Fixed + the area script's set_palette calls.",
   eotb2amiga:
     "same game as 'eotb2' (DOS/VGA), a genuinely different Amiga port -- .VCN/.CPS are LCW-compressed Amiga 5-bitplane graphics (EOB1-Amiga's own encoding) wrapped in EOB2's own container/.INF header shape; .VMP/.MAZ/.INF record layout and .DEC/.DCR are confirmed byte-identical (or byte-identical container) to the DOS port, so this reuses the DOS walker's renderer/loader code unmodified against Amiga-decoded JSON assets -- see docs/eotb2/amiga/data-structure.md. All 16 levels export and render (wall geometry, decorations, and the LEVEL10-14 mezz+azure palette-override bundle all confirmed); item/monster stat tables (ITEM.DAT/ITEMTYPE.DAT) not yet decoded for this platform.",
 };
@@ -435,6 +439,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'mm3') return mm3LevelList();
   if (game === 'eotb') return eotbLevelList(assetBase);
   if (game === 'eotb2' || game === 'eotb2amiga') return eotb2LevelList(assetBase);
+  if (game === 'eotb3') return eotb3LevelList(assetBase);
   if (game === 'landsoflore') return landsofloreLevelList(assetBase);
   if (game === 'ishar') return isharLevelLists.ishar();
   if (game === 'ishar2') return isharLevelLists.ishar2();

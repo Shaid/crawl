@@ -447,6 +447,31 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'eotb3',
+    displayName: 'Eye of the Beholder III: Assault on Myth Drannor',
+    platforms: [{
+      platform: 'dosvga',
+      dataDirs: ['eotb3/dosvga'],
+      executable: 'EYE.BAT',
+      expectedFiles: ['EYE.RES'],
+      supported: true,
+      assetDir: 'eotb3',
+      features: {},
+
+      async buildAssets() {
+        // EYE.RES decoders are Python (scripts/eotb3lib/). The walker pack
+        // (AESOP class bytecode + level objects + VFX bitmaps) is what
+        // tools/walker/games-eotb3.ts runs.
+        const { execFileSync } = await import('node:child_process');
+        const repo = process.cwd();
+        const py = process.env.PYTHON ?? 'python3';
+        execFileSync(py, [resolve(repo, 'scripts/extract_eotb3_res.py')], { stdio: 'inherit', cwd: repo });
+        execFileSync(py, [resolve(repo, 'scripts/extract_eotb3_walker.py')], { stdio: 'inherit', cwd: repo });
+        console.log('  eotb3/dosvga: EYE.RES assets + walker pack extracted (python)');
+      },
+    }],
+  },
+  {
     id: 'mm3',
     displayName: 'Might & Magic III: Isles of Terra',
     platforms: [{

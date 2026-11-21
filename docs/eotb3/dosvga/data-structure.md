@@ -881,6 +881,27 @@ the 19 outtake bitmaps with DAC base 0 instead of the current unresolved
 placement and check for a clean, non-garbled result) that didn't exist
 before this pass.
 
+
+> **Correction (2026-11-21):** the "decompile via daesop" next step is done, and no dispatch table needed hand-reversing: the class bytecode is run as-is. See 10.1.
+
+### 10.1 Walker: the view mechanism, confirmed (2026-11-21)
+
+Built `daesop` from ThirdEye (`apps/daesop`, g++ one-liner) and read `-j dungeon`. **confirmed** from the disassembly and by running it (`tools/aesop/vm.ts`, `tools/eotb3/engine.ts`, test `tools/walker/__tests__/games-eotb3.test.ts`):
+
+- Frame = kernel `draw view`: `dungeon` (class 1381, obj 2001) `init viewspace`(x,y,fdir) -> `draw floor` -> `draw walls` -> `draw objects`(0). Party x/y/fdir/lvl live in `kernel` (obj 0) statics @243/244/245/246.
+- `draw floor` = `draw_bitmap(view, wallset, 18, 0,0)`: shape 18 of the wall set is the 176x120 backdrop. `wallset` (dungeon static L@7168) is a bitmap resource id set by the area class's `enter level` (msg 256): e.g. mauslvl1 -> 253 "Mausoleum walls", plus `set_palette(1..3, ...)`.
+- `draw walls`: 25 slots (dx,dy tables per facing, `table270/374`, 4x26); cell = `lvlmap[y*32+x]` (0xFF = open, 0/1 = the two wall variants); shape = `table170[type*26+slot]` (0..18), x = `table66[slot]`, y = `table14[slot]`, mirror = `table118[slot]` (shapes 15/14/17 map to 8/13/16 mirrored). `draw_bitmap(page, table, number, x, y, scale, flip, fade_tbl, fade_lvl)`; flip bit0 = X.
+- `draw objects`: per view cell (3 planes of 32x32 words in `lvlobj`: features, items, monsters) sends `draw`(30) down the `W:next` chain. `features.draw` calls the subclass `report`(18) (arg 4 = bitmap resource id, arg 1 = flags) and `render`(112); shapes use the same 0..18 wall layout, `doors.render` adds `18*state`.
+- Level objects: `SAVEGAME/LVLnn.TMP` = SF_BIN stream `0x1A` then `{u16 slot, u32 class, u16 size}` + raw statics (ThirdEye `lvl_tmp.cpp`); LVL01 = 231 objects, LVL03 = 331 (matches ThirdEye). Statics layout entities: place@0 (y*32+x), x@2, y@3, lvl@4, region@5, next@6, prev@8; the class chain follows (features `decflags`).
+- Move rule (kernel `step`, `eye.cpp` step_X/Y): N=-y, E=+x, wrap 32; blocked iff `dungeon.impedance`(95)(mover=kernel,x,y) < 0 (-1 wall, -2 special event, no move). Verified: impedance blocks 100% of non-0xFF cells on level 1.
+- Palette: Fixed palette (id 335) at DAC 0, then `set_palette` bases `{0,0xB0,0xC0,0xE0,0xB0}`.
+
+Exports: `scripts/extract_eotb3_walker.py` -> `public/assets/eotb3/dosvga/data/walker/` (classes, levels, palettes, raw VFX). Frames: `npx tsx tools/eotb3/render-frames.ts` -> `build/cache/eotb3/walker-frames/`.
+
+**Not done / hypotheses:** monsters and floor items (TODO eotb3-walker-monsters-items); doors do not open (runtime `notify` stubbed); object state is the shipped quick-start save (a mid-game state, not a fresh start); level-11..14 (Temple of Lathander) use "Mausoleum walls" because the area scripts say so (not independently checked); `rnd`, `dice`, `notify`, `cancel`, `load_sound_block`, `load_resource` are stubbed (`Eotb3Engine.stubbed`).
+
+**Dungeon Hack transfer:** the VM (`tools/aesop/vm.ts`) and the class/extern/handler export (`extract_eotb3_walker.py`'s `parse_class`) are engine-level and apply unchanged to `HACK.RES` (same AESOP/16; ThirdEye uses `kFirstColorDH` DAC bases and an `assign_window` offscreen-page path instead). The dungeon draw handlers, tables and wall-shape numbering are EOB3-specific; DH's generated maze needs its own handlers (see `docs/dungeonhack/`, ThirdEye `dh_maze.cpp`).
+
 ---
 
 ## Still open
