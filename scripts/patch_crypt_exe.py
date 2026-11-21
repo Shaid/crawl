@@ -65,7 +65,7 @@ entries — but the per-map table is read only at `0x40f8d0`, on a dark-square
 (bit-31) state flip. So without this, map 5 would render (and save) ramp 0.
 
 The thunk's last 4 bytes (`add esp,8; ret`) become `jmp short 0x42df2e` +
-2 x `int3` padding, and a 34-byte tail at `0x42df2e` (past the Phase 5/7
+2 x `int3` padding, and a 59-byte tail at `0x42df2e` (past the Phase 5/7
 caves) does what the `0x40f8c9`-`0x40f8df` branch does, for the new map:
 
     add   esp, 8                        ; pop SwitchMap's two args
@@ -84,12 +84,24 @@ is present (`bclib/x86patch.py`). The patcher also sets `.text`'s
 VirtualSize from `0x2ceb4` to its raw size `0x2d000` (review finding 9), so
 the caves are inside the declared section.
 
-Not done here (review finding 7): both cross-map callers skip their
-same-map redraw tails (stairs `0x423cf9 jmp 0x423e00`; teleport `0x41b3bb`
-skips `0x4070b0`/`0x40f830(1)`/`0x408310`). The skipped calls are a
-walk-bob toggle, the square-entry handler and its dark-flip logic, and a
-page flip (`0x403d20` toggles the double-buffer index) — none clearly safe
-to call blind from here, so it stays a live-test item.
+## 2026-11-21: the arrival triple (review finding 7)
+
+Both cross-map callers skip their same-map redraw tails (stairs `0x423cf9
+jmp 0x423e00`; teleport `0x41b3bb`), and `SwitchMap`/`LoadDungeon`
+(`0x425350`)/`0x4258d0`/`0x40b7a0` never call the world renderer, so the
+old thunk left the *previous* map's view on screen until the next step.
+Decision (static): the skipped tail is needed. The same-map teleport path
+(`0x41b3cd`: `0x4070b0; 0x40f830(1); 0x408310(0)`), the stairs
+different-square path (`0x423de1`) and the stairs no-op path
+(`0x423d7d`-`0x423d8c`, `0x408330` = `0x408310(0)`) all run exactly this
+triple, and `0x40f830` is the renderer + square-entry handler (calls
+`0x40a430(1)` draw, `0x40a970`, and the dark-flip branch whose ramp read
+`0x40f8d0` is the one this thunk already mirrors). The compiler laid the
+teleport's cross-map and same-map branches in parallel, so the original
+(full-game) body of `0x423b50` must have performed the redraw itself. The
+tail now ends with that triple after the ramp is applied. Not added: the
+stairs-only `0x40a600` ("Line Dissolve" transition) and `0x4039a0` (a
+queue compaction) -- cosmetic, and the teleport caller has no equivalent.
 
 ## Repo hygiene
 
@@ -128,6 +140,12 @@ CUR_MAP_VADDR = 0x47481A                          # word: current map, 1-based
 MAP_RAMP_TABLE_VADDR = 0x434F22                   # word[14]: per-map default ramp
 CUR_RAMP_VADDR = 0x46F820                         # word: active ramp (saved)
 
+# Review finding 7 (2026-11-21): the "arrive on a square" triple that every
+# same-map path runs and both cross-map callers skip.
+ARRIVE_BOB_VADDR = 0x4070B0                       # walk-bob toggle
+ARRIVE_ENTER_VADDR = 0x40F830                     # square-entry handler (arg 1): draws the view
+ARRIVE_PRESENT_VADDR = 0x408310                   # present (arg 0)
+
 # --- Source. Assembled with GNU as + ld -Ttext=0x42deb3 (one unit, so the
 # rel8 jmp and both rel32 calls are resolved by the linker, not by hand).
 # The .org gap 0x42dec9-0x42df2e is owned by other patchers and is never
@@ -149,6 +167,13 @@ ramp:
     mov   word ptr ds:[{CUR_RAMP_VADDR:#x}], ax
     push  eax
     call  {SET_RAMP_VADDR:#x}
+    add   esp, 4
+    call  {ARRIVE_BOB_VADDR:#x}
+    push  1
+    call  {ARRIVE_ENTER_VADDR:#x}
+    add   esp, 4
+    push  0
+    call  {ARRIVE_PRESENT_VADDR:#x}
     add   esp, 4
     ret
 '''
@@ -174,19 +199,38 @@ _call_target = (CAVE_VADDR + _call_off + 5 + int.from_bytes(
 assert _call_target == SWITCHMAP_VADDR, hex(_call_target)
 assert CAVE_VADDR + 18 + 2 + THUNK_BYTES[19] == RAMP_VADDR
 
-# Ramp tail, 34 B at 0x42df2e (2026-11-13, TODO blackcrypt-mapswitch-ramp):
+# Ramp + arrival tail, 59 B at 0x42df2e (2026-11-13 ramp, TODO
+# blackcrypt-mapswitch-ramp; 2026-11-21 arrival triple, finding 7):
 # after SwitchMap has set word[0x47481a] = toMap, apply that map's default
 # accent ramp exactly as the dark-square-off branch at 0x40f8c9-0x40f8df
 # does (word[0x434f22 + map*2] -> word[0x46f820] -> fcn.0040aaa0).
+# Then the arrival triple (4070b0; 40f830(1); 408310(0)) exactly as the
+# same-map teleport path at 0x41b3cd and the stairs paths at 0x423de1 /
+# 0x423d7d run it -- see finding 7 in the module docstring.
 RAMP_BYTES = bytes.fromhex(
     '83c408' '0fb7051a484700' '668b0445224f4300' '66a320f84600' '50'
-    'e854cbfdff' '83c404' 'c3')
-assert len(RAMP_BYTES) == 34
+    'e854cbfdff' '83c404'
+    'e85c91fdff' '6a01' 'e8d518feff' '83c404' '6a00' 'e8aba3fdff' '83c404' 'c3')
+assert len(RAMP_BYTES) == 59
 assert RAMP_VADDR + len(RAMP_BYTES) <= CAVE_END_VADDR
-_rcall_off = RAMP_BYTES.index(b'\xe8')
-_rcall_target = (RAMP_VADDR + _rcall_off + 5 + int.from_bytes(
-    RAMP_BYTES[_rcall_off + 1:_rcall_off + 5], 'little', signed=True))
-assert _rcall_target == SET_RAMP_VADDR, hex(_rcall_target)
+
+
+def _call_targets(code: bytes, base: int) -> list[int]:
+    """Targets of every `e8 rel32` found by walking the known fixed layout."""
+    out, i = [], 0
+    while i < len(code):
+        if code[i] == 0xE8:
+            out.append(base + i + 5 + int.from_bytes(code[i + 1:i + 5], 'little', signed=True))
+            i += 5
+        else:
+            i += 1
+    return out
+
+
+# (the byte walk can see false 0xe8 inside immediates; the layout above has none)
+assert _call_targets(RAMP_BYTES, RAMP_VADDR) == [
+    SET_RAMP_VADDR, ARRIVE_BOB_VADDR, ARRIVE_ENTER_VADDR, ARRIVE_PRESENT_VADDR], \
+    [hex(x) for x in _call_targets(RAMP_BYTES, RAMP_VADDR)]
 
 EXPECTED_THUNK_INSNS = [
     'mov eax,DWORD PTR [esp+0x4]',
@@ -205,6 +249,13 @@ EXPECTED_RAMP_INSNS = [
     'mov ds:0x46f820,ax',
     'push eax',
     'call 0x40aaa0',
+    'add esp,0x4',
+    'call 0x4070b0',
+    'push 0x1',
+    'call 0x40f830',
+    'add esp,0x4',
+    'push 0x0',
+    'call 0x408310',
     'add esp,0x4',
     'ret',
 ]

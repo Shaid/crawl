@@ -25,7 +25,8 @@ Amiga data, and writes a new archive to a gitignored build path.
   (w, h) equal the shipped DOS entries' 14/14. Group = map + 10.
 * **Tilesets** — `bcdfy` (group 2, map 5) and `bcdfz` (group 3, maps 6-11),
   reusing `bcdfx`'s DOS names (the by-name lookup filters on the active
-  tileset group) and each `bcdfx` sibling's colour key; recipes from
+  tileset group); Alcove D/E and Plaque A-E additionally get the DOS-style
+  edge cut-out (see CUTOUT_ENTRIES) and each `bcdfx` sibling's colour key; recipes from
   `build_proof_of_concept_art_swap.TILESET_MAP` plus `Wall Left`/`Wall
   Right` (review finding 4). Oracle: the same builder run on `bcdfx`
   reproduces the shipped map-1 entries (see the self-check output).
@@ -37,9 +38,9 @@ Amiga data, and writes a new archive to a gitignored build path.
   112-B (4 x 28-B blit descriptors), then the inset pixels — read by the
   Amiga level loader (S_1 `+0x21F1C`-`+0x21F72`) only for levels whose
   gate word at S_1 `+0x21FE8` is non-zero (2,3,4,6,9,11 — the same maps as
-  the DOS table). The `smiley` placeholder (maps 4/11, drawn at 0,0) is
-  deliberately not added (one name, two different bitmaps, unfiltered
-  lookup).
+  the DOS table). The `smiley` placeholder (maps 4/11, drawn at 0,0) is one
+  16x16 bitmap (byte-identical on both maps, asserted), added once as a
+  group-0 resident entry because the by-name lookup is group-unfiltered.
 
 ## Pixel conversion: direct index copy (review finding 3)
 
@@ -101,7 +102,9 @@ CHANGED_IN_DOS = (19, 32, 33, 51)   # DOS Palette differs from Amiga EHB here
 # then up to 4 x (inset name ptr, x, y).
 PANEL_TABLE = 0x4307A8
 PANEL_TABLE_N = 6
-PANEL_SKIP_INSETS = {'smiley'}
+PANEL_PLACEHOLDER = 'smiley'   # maps 4/11 inset name, (0,0): one 16x16 placeholder
+PLACEHOLDER_GROUP = 0          # resident group: the by-name lookup is unfiltered
+                               # (group arg 0), so the one entry must be loaded on both maps
 
 TILESET_GROUP = {'bcdfy': 2, 'bcdfz': 3}
 TILESET_SLOTS = {
@@ -306,7 +309,37 @@ def decode_sub(chunks, label):
     return np.asarray(idx), None
 
 
-def tile_pixels(chunks, name, key, lut):
+# Review follow-up 2: DOS-only edge cut-outs.  The shipped map-1 Alcove D/E
+# and Plaque A-E have their wall-coloured margin keyed out (colour key 32)
+# so the real wall shows round the object; every keyed px is an accent-ramp
+# index (26-31/58-63) in the Amiga art (0 non-ramp), Alcove A-C stay opaque.
+# bcdfx's object is itself ramp-coloured, so the DOS artist cut a hand-drawn
+# silhouette there; bcdfy/bcdfz draw the object in non-ramp stone, so the
+# equivalent cut is "ramp pixels reachable from the border through ramp
+# pixels".  Applied to bcdfy/bcdfz only.
+CUTOUT_ENTRIES = {'Alcove D', 'Alcove E', 'Plaque A', 'Plaque B', 'Plaque C',
+                  'Plaque D', 'Plaque E'}
+
+
+def border_ramp_flood(idx):
+    """4-connected flood over Amiga ramp indices seeded on the border."""
+    h, w = idx.shape
+    ramp = np.isin(idx, sorted(RAMP))
+    seen = np.zeros((h, w), bool)
+    stack = [(y, x) for y in range(h) for x in range(w)
+             if (y in (0, h - 1) or x in (0, w - 1)) and ramp[y, x]]
+    for y, x in stack:
+        seen[y, x] = True
+    while stack:
+        y, x = stack.pop()
+        for yy, xx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+            if 0 <= yy < h and 0 <= xx < w and ramp[yy, xx] and not seen[yy, xx]:
+                seen[yy, xx] = True
+                stack.append((yy, xx))
+    return seen
+
+
+def tile_pixels(chunks, name, key, lut, cutout=False):
     if name in SIDE_WALLS:
         assert key == 32, (name, key)
         kind, layout = SIDE_WALLS[name]
@@ -326,6 +359,9 @@ def tile_pixels(chunks, name, key, lut):
     pieces = []
     for lab in labels:
         i, m = decode_sub(chunks, lab)
+        if cutout and name in CUTOUT_ENTRIES:
+            assert m is None and len(labels) == 1
+            m = ~border_ramp_flood(i)
         pieces.append(convert(i, m, lut, key))
     px = np.hstack(pieces)
     if recipe[0] == 'hflip':
@@ -344,6 +380,12 @@ def tileset_names(tileset):
     if slots is None or 0x08 in slots:
         names += list(SIDE_WALLS)
     return names
+
+
+def cut_pairs(chx, sib, data_by, lut):
+    for nm in sorted(CUTOUT_ENTRIES):
+        px = tile_pixels(chx, nm, sib[nm]['colorkey'], lut)
+        yield px, np.frombuffer(data_by[nm]['data'], np.uint8).reshape(px.shape)
 
 
 def build_tilesets(s1, lut, clp_entries, clp_raw, log):
@@ -376,6 +418,43 @@ def build_tilesets(s1, lut, clp_entries, clp_raw, log):
         r = next(r for r, nm in worst if nm == side)
         if r != 1.0:
             raise AssertionError(f'{side} recipe no longer exact on bcdfx ({r})')
+    # Follow-up 2 oracle lines: the DOS-only edits in the residue.
+    ac = tile_pixels(chx, 'Alcove C', sib['Alcove C']['colorkey'], lut)
+    acr = np.frombuffer(data_by['Alcove C']['data'], np.uint8).reshape(ac.shape)
+    shift_ok = bool((acr[:, 1:] == ac[:, :-1]).all())
+    log.append(f'Alcove C: shipped == built shifted right 1 px (cols 1..47): {shift_ok} '
+               f'({int((acr[:, 1:] == ac[:, :-1]).sum())}/{acr[:, 1:].size} px; col 0 is new '
+               f'wall texture) -- a DOS hand edit, not transferred to bcdfz')
+    n_diff_cut = sum(int((a != b).sum()) for a, b in cut_pairs(chx, sib, data_by, lut))
+    ac_now = int((ac == acr).sum())
+    ac_shift = int((acr[:, 1:] == ac[:, :-1]).sum()) + int((acr[:, 0] == ac[:, 0]).sum())
+    log.append(f'oracle with the Alcove C DOS shift modelled: {eq - ac_now + ac_shift}/{n} px = '
+               f'{100 * (eq - ac_now + ac_shift) / n:.2f}% (from {100 * eq / n:.2f}%); '
+               f'every remaining diff is a hand-cut silhouette (the 7 cut-out entries, '
+               f'{n_diff_cut} px) plus {n - (eq - ac_now + ac_shift) - n_diff_cut} px '
+               f'(Alcove C col 0, Special Button 1R)')
+    rec = pre = kk = ff = nonramp = 0
+    over = 0
+    for nm in sorted(CUTOUT_ENTRIES):
+        i, _m = decode_sub(chx, nm.lower().replace(' ', '-'))
+        ref = np.frombuffer(data_by[nm]['data'], np.uint8).reshape(i.shape)
+        kd, fl = ref == 32, border_ramp_flood(i)
+        kk += int(kd.sum())
+        rec += int((kd & fl).sum())
+        ff += int(fl.sum())
+        nonramp += int((kd & ~np.isin(i, sorted(RAMP))).sum())
+        px_cut = convert(i, ~fl, lut, 32)
+        over += int((px_cut == ref).sum())
+        n_cut_total = locals().get('n_cut_total', 0) + ref.size
+    log.append(f'DOS edge cut-outs (Alcove D/E, Plaque A-E; shipped keys 32): '
+               f'{kk} keyed px, {nonramp} of them non-ramp in the Amiga art; border-'
+               f'connected-ramp flood recall {rec}/{kk} = {100 * rec / kk:.2f}%, flood size {ff} '
+               f'(bcdfx draws the object in ramp colours too, so the flood over-keys '
+               f'there: applying it to bcdfx gives {over}/{n_cut_total} px = '
+               f'{100 * over / n_cut_total:.1f}% on those 7 entries vs '
+               f'{sum(int((px_o == r_o).sum()) for px_o, r_o in cut_pairs(chx, sib, data_by, lut))}'
+               f' without) -- so the rule is used for bcdfy/bcdfz only, where the '
+               f'object is non-ramp stone')
     fp = next(r for r, nm in worst if nm == 'Floor Pit D')
     log.append(f'Floor Pit D (left orientation) vs shipped: {100 * fp:.1f}%')
 
@@ -385,7 +464,8 @@ def build_tilesets(s1, lut, clp_entries, clp_raw, log):
         names = tileset_names(ts)
         for name in names:
             key = sib[name]['colorkey']
-            out.append(Entry(name, TILESET_GROUP[ts], key, tile_pixels(ch, name, key, lut),
+            out.append(Entry(name, TILESET_GROUP[ts], key,
+                             tile_pixels(ch, name, key, lut, cutout=True),
                              'tileset', ts))
         log.append(f'{ts}: {len(names)} entries (group {TILESET_GROUP[ts]})')
     return out
@@ -418,6 +498,7 @@ def build_panels(exe, s1, lut, log):
                              f'{[m for m, _b, _i in table]}')
     out = []
     pos_ok = pos_n = 0
+    smiley = {}
     for m, body, insets in table:
         raw = (AMIGA / f'bcdf{LETTERS[m - 1]}').read_bytes()
         lay = levelfile.tail_layout(raw, s1, m)
@@ -435,12 +516,17 @@ def build_panels(exe, s1, lut, log):
                 raise AssertionError(f'{body} inset {k}: bytesPerPlane {bpp} != {w}/8*{h}')
             pos_n += 1
             pos_ok += int((ax, ay) == (x, y))
-            if name in PANEL_SKIP_INSETS or name in seen:
-                if name in seen and seen[name] != src:
+            if name in seen:
+                if seen[name] != src:
                     raise AssertionError(f'{name}: two sources {seen[name]} / {src}')
                 continue
             seen[name] = src
             iidx, mask = bclib.decode_masked(raw[pix + src:pix + src + 7 * bpp], w, h)
+            if name == PANEL_PLACEHOLDER:
+                # maps 4 and 11 each carry one: the bitmaps must be identical
+                # (checked on the raw 7-plane bytes) so one entry serves both.
+                smiley[m] = (raw[pix + src:pix + src + 7 * bpp], (w, h), iidx, mask)
+                continue
             out.append(Entry(name, m + 10, INSET_KEY, convert(iidx, mask, lut, INSET_KEY),
                              'panel-inset', f'bcdf{LETTERS[m - 1]} +{pix + src:#x} {w}x{h}'))
         extent = 0
@@ -450,6 +536,13 @@ def build_panels(exe, s1, lut, log):
         if extent != gate[m - 1]:
             raise AssertionError(f'map {m}: inset descriptors span {extent} B, '
                                  f'gate block is {gate[m - 1]} B')
+    if sorted(smiley) != [4, 11] or len({v[0] for v in smiley.values()}) != 1 \
+            or len({v[1] for v in smiley.values()}) != 1:
+        raise AssertionError('smiley placeholder: maps 4/11 do not carry one identical bitmap')
+    _b, _wh, iidx, mask = smiley[4]
+    out.append(Entry(PANEL_PLACEHOLDER, PLACEHOLDER_GROUP, INSET_KEY,
+                     convert(iidx, mask, lut, INSET_KEY), 'panel-inset',
+                     'bcdfe/bcdfl inset 0 (maps 4 and 11 byte-identical, 16x16)'))
     log.append(f'special panels: Amiga gate maps == DOS table maps {gated}; '
                f'inset positions (Amiga descriptor x,y == DOS table x,y): {pos_ok}/{pos_n}')
     return out
@@ -542,7 +635,7 @@ def verify(stock: bytes, built: bytes, new: list[Entry], out_path: Path, log) ->
         else:
             assert ne.name in stock_names, ne.name
     stock_groups = {built[HEADER + i * REC + 41] for i in range(STOCK_COUNT)}
-    clash = {ne.group for ne in new} & stock_groups
+    clash = {ne.group for ne in new if ne.name != PANEL_PLACEHOLDER} & stock_groups
     assert not clash, f'new entries reuse stock group ids {clash}'
     log.append(f'verify: {len(E)} entries (816 + {n_new}); file {len(built):,} B '
                f'= stock + {growth:,} B ({n_new} x 56 dir + '

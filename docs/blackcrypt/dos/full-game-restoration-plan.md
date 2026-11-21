@@ -182,8 +182,8 @@ verification only; nothing was run under Wine or an emulator):
 |---|---|---|
 | 1 `orig<N>.gam` header | **fixed in tooling** — `scripts/build_dos_testpkg.py` builds the package; `orig<N>.gam` only on `--orig-slot N`, as `maindung[52:]` (170,953 B) | § "Live-test package" below |
 | 2 map-switch ramp | **patched, statically verified** — 34-B tail at `0x42df2e`; needs the owner's stairs 4→5 test | § "Phase 4" → "2026-11-13 addendum" |
-| 7 stairs redraw tail | **investigated, deliberately not patched** — see the addendum | same |
-| 9 VirtualSize | **fixed** — `.text` → `0x2d000` (`patch_crypt_exe.py`), `.rdata` → `0x2000` (Phase 5/7 patchers, idempotent) | same |
+| 7 stairs redraw tail | **patched 2026-11-21** (arrival triple appended to the thunk tail; was "not patched") — see the addendum correction | same |
+| 9 VirtualSize | **fixed** — `.text` → `0x2d000` (`patch_crypt_exe.py`), `.rdata` → `0x2000` (Phase 5/7 patchers, idempotent); re-checked 2026-11-21: all caves (ends `0x42df69`) now inside the declared section | same |
 | 3–6 Phase 3 | see § "Phase 3 injector — 2026-11-13" | |
 
 #### Live-test package
@@ -1569,7 +1569,8 @@ new records and pixels follow in order. Shared helper: `scripts/bclib/levelfile.
 | `bcdfz` tileset | 70 (68 + `Wall Left`/`Right`) | 3 | `bcdfx` sibling's | same |
 | Special-panel bodies | 6 | map + 10 | `0xFFFF` | `bcdfc/d/e/g/j/l` tail |
 | Panel insets (`blue eyes`, `sun key`, `moon key`, `crown`, `pearl`) | 5 | map + 10 | 33 | same |
-| **Total** | **317** | | | file **2,538,507 B** (+1,387,240) |
+| `smiley` placeholder (2026-11-21) | 1 | **0** (resident) | 33 | maps 4/11 inset 0 |
+| **Total** | **318** | | | file **2,538,819 B** (+1,387,552) |
 
 > **Correction to § "3.4"'s totals.** 299 → 317 entries and 2,478,475 →
 > 2,538,507 B. The difference is Statue (3), the two side walls per new
@@ -1612,6 +1613,24 @@ edits: alcove/plaque edges keyed out to 32 (Plaque A–E, Alcove D/E) and
 swapped ramp shades (26↔27, 58↔60) in Alcove C. The new tilesets copy the
 Amiga art as-is (opaque edges, as on Amiga) rather than guess those cut-outs.
 
+> **Update (2026-11-21) — edge cut-outs.** The residue is now characterised
+> (`inject_clipper_phase3.py` prints it every run). (1) **Alcove C**: the
+> shipped entry is the Amiga art shifted right by 1 px (cols 1-47 equal the
+> built cols 0-46, 1,598/1,598 px; col 0 is new wall texture) — a DOS hand
+> edit, not transferred. Modelling it lifts the bcdfx oracle from 97.98 % to
+> **98.27 %** (265,891/270,560 px). (2) **Alcove D/E, Plaque A-E** (the only
+> entries with key-32 margins; Alcove A-C stay opaque): 4,487 keyed px, **4,485
+> are accent-ramp indices (26-31/58-63) in the Amiga art** (2 are not). On
+> bcdfx the object is itself ramp-coloured (posts + face), so the DOS cut is a
+> hand-drawn silhouette that cannot be derived (the border-connected-ramp
+> flood has 99.96 % recall but over-keys: applying it to bcdfx scores 39.5 %
+> vs 73.8 % uncut on those 7 entries; shipped keyed px also do not equal the
+> underlying wall — best placement agreement 49-73 %). bcdfz draws the same
+> entries as a non-ramp stone slab on a ramp wall margin, so there the
+> flood **is** the intended cut: it is applied to bcdfy/bcdfz only (bcdfy has
+> no such entries), rendered check: silhouettes follow the slab/arch edge.
+> Unverifiable against shipped art for bcdfz; first live-test item.
+
 **Finding 5 — switch `0x3D` and special panel `0x46` coverage.**
 
 - `0x3D` is drawn by `fcn.00405ec0` (`0x405ed3 sub eax,0x3d`) as
@@ -1634,8 +1653,13 @@ Amiga art as-is (opaque edges, as on Amiga) rather than guess those cut-outs.
   DOS table's 24/24; the descriptors tile each gate block exactly; and the
   six bodies render as the golden face, druid face, tomb, three-skull,
   clam and Medusa panels in the DOS names' order. The `smiley` inset
-  (maps 4/11, at 0,0) is a placeholder and is not added: one name, two
-  different bitmaps, unfiltered lookup. See `amiga/data-structure.md`
+  (maps 4/11, at 0,0) is a placeholder. *(2026-11-21 correction: the two
+  maps' bitmaps are byte-identical — one 16x16 7-plane masked sprite — so
+  it is added once, as a **group-0 (resident)** entry: the lookup
+  `fcn.00402650(name, 0, count, dir)` is group-unfiltered, so a map-keyed
+  entry would be shadowed/unloaded on the other map. A missing name only
+  appends "Could not find Clip" to the debug log and skips the blit, so
+  this was never a crash risk.)* See `amiga/data-structure.md`
   § "Trailing Data" correction.
 
 **Verification of the written file** (re-read with
@@ -1802,7 +1826,7 @@ original assumption.
 > left a dark square, `0x46f86c` stays 1 until the first step onto a
 > non-dark square flips it back. Both self-correct within one step.
 >
-> **Finding 7 — not patched, on purpose.** Both cross-map callers skip
+> **Finding 7 — see the 2026-11-21 correction below (patched).** Original analysis: Both cross-map callers skip
 > their same-map tails: stairs `0x423cf9 jmp 0x423e00` skips
 > `0x40aa20`/`0x403d20`/`0x410d00` (only on a dark flip) and always
 > `0x4070b0`, `0x40f830(1)`, `0x40a600`, `0x4039a0`; teleport `0x41b3bb`
@@ -1813,7 +1837,27 @@ original assumption.
 > the square-entry handler blind from the thunk isn't clearly safe, so
 > the stale-view question stays a live-test item.
 >
-> **Finding 9.** `patch_crypt_exe.py` sets `.text` VirtualSize
+> **Correction (2026-11-21) — finding 7 is a real defect; patched.**
+> `SwitchMap`, `LoadDungeon` (`0x425350`), `0x4258d0` and `0x40b7a0` never
+> call the world renderer (`0x40f830` draws via `0x40a430(1)`/`0x40a970`),
+> so the thunk left the previous map's view up until the next step. The
+> same-map teleport path (`0x41b3cd`), the stairs different-square path
+> (`0x423de1`) and the stairs no-op path (`0x423d7d`) each run the identical
+> triple `0x4070b0; 0x40f830(1); 0x408310(0)` that the cross-map branches
+> skip, and the teleport's two branches are laid out in parallel — so the
+> original body of `0x423b50` must have done it. The thunk tail now appends
+> that triple after the ramp (59 B at `0x42df2e`..`0x42df69`, still inside
+> `.text`'s declared size); this also removes the "Known limit" above for
+> the dark-square case, because `0x40f830` runs its own dark-flip branch
+> (which reads the same per-map ramp table). Deliberately not added: the
+> stairs-only `0x40a600` ("Line Dissolve") and `0x4039a0`. Self-check:
+> re-assembly byte-exact, 15 instructions round-trip, a flipped tail byte
+> and a stray byte outside the windows both fail it; all four patchers still
+> compose. **Needs the live test** (stairs 4→5 and a teleport that changes
+> map: new view should appear immediately, walls violet on 5).
+>
+> **Finding 9** (re-checked 2026-11-21: real in principle, already fixed; the
+> patched `.text` VirtualSize `0x2d000` covers every cave, end `0x42df69`). `patch_crypt_exe.py` sets `.text` VirtualSize
 > `0x2ceb4` → `0x2d000`. The Phase 5/7 patchers set `.rdata` `0x12da` →
 > `0x2000`, accepting either value so they compose. Every patcher's
 > pre-flight now checks only the bytes it writes (Phase 5 used to demand
