@@ -4063,8 +4063,20 @@ and no header. Its start is independently pinned by the 12-byte file header:
 > `scripts/bclib/levelfile.py`; `scripts/extract_bcdfbn_decor.py` now
 > slices the sound bank from the loader's offsets (it used to include the
 > panel block in `audio/level{02,03,04,06,09,11}-sfx.raw`). The panel art is
-> injected into DOS by `scripts/inject_clipper_phase3.py`; an Amiga-side
-> asset export is not written yet.
+> injected into DOS by `scripts/inject_clipper_phase3.py`.
+>
+> **Amiga web export (2026-11-21):** `scripts/extract_bcdfbn_panels.py` →
+> `sprites/special-panels.{png,json}` (13 frames: 6 panels + 7 unique insets;
+> each coloured with its level's own dungeon palette; frame JSON carries
+> `level`/`file`/`kind` and per-descriptor screen placements, `0,0` = unplaced
+> runtime-filled slot) and `data/special-panels.json` (offsets + descriptors).
+> Descriptor x/y are **screen** coordinates (e.g. 92,78), not body-relative.
+> `scripts/verify_bcdfbn_panels.py`: exact consumption 6/6 (0 on the other 7),
+> descriptors self-consistent (bytesPerPlane, BLTSIZE) and spanning exactly
+> `gate` bytes, inset positions 24/24 vs DOS `crypt.exe`; null controls
+> (gate ±1, stream length +1, extent +1) all raise. The stock DOS
+> `clipper.clp` carries none of these panels (names absent), so no silhouette
+> oracle exists there.
 
 > **Correction (supersedes two earlier passes).** This region was previously
 > documented as "692 standalone 1bpp 16×20 icons", then corrected to "92
