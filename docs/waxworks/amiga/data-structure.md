@@ -196,6 +196,8 @@ Walker: `tools/walker/games-waxworks.ts` (W forward, A/D turn, S about, R/F up/d
 
 ## 8. Elvira 1 / 2 reuse
 
+> **Update (2026-11-21):** Elvira II now has its own walker on this pipeline, with its own VC opcode-length table (`ELVIRA2_VC_PARAM_BYTES`) and a *plain* (unpacked) `gameamiga` -- see `docs/elvira2/amiga/data-structure.md` §5. The `kSuperRoom` children exist (2 items, 30x30x4 and 20x20x6) and are not walked.
+
 The `gameamiga` room/exit reader works unchanged on **Elvira II** (`readGamePc(..., 'elvira2', grammarFromItsRunit)`: 853 items, 167 rooms; all
 449 `tablesNN` subroutines consume to EOF; the file continues past the subroutine block with a name list that is not parsed;
 `kSuperRoom` children are read but no Elvira II file has been checked for them). Elvira 1 is **not** covered: its items have a different

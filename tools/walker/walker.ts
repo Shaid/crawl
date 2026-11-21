@@ -75,6 +75,7 @@ import { crystalsOfArboreaLoader, crystalsOfArboreaLevelList } from './games-cry
 import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
 import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
 import { loadWaxworksView, waxworksLevelListFromAssets } from './games-waxworks.ts';
+import { loadElvira2View, elvira2LevelListFromAssets } from './games-elvira2.ts';
 import { loadBardsTale2View, bardsTale2LevelList } from './games-bardstale2.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
 import { loadDungeonMaster2View, dungeonMaster2LevelList } from './games-dungeonmaster2.ts';
@@ -398,6 +399,7 @@ const GAMES = [
   { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'waxworks', label: 'Waxworks', loader: loadWaxworksView, defaultLevel: 4, platform: 'amiga' as const },
+  { id: 'elvira2', label: 'Elvira II: The Jaws of Cerberus', loader: loadElvira2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'bardstale2', label: "The Bard's Tale II", loader: loadBardsTale2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
@@ -427,11 +429,12 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
   bardstale2: 'walls/doors/secret doors, collision and wrap: the view-row builder and move routine are verified identical to BT1 in data/bard; the table-driven compositor (incl. the right-half mirror) is ported from the game code and renders recognisable corridors, but is not screenshot-checked against the real game; the start pose is a heuristic (not the game\'s stairs/arrival point), the palette is big_dung\'s own header (dung_blank is unused by the BT2 executable), the lamp/light distance is fixed at 4; special squares, stairs, monsters and the city are not implemented -- see docs/bardstale2/TODO.md',
   waxworks: 'one pre-composed picture per room and facing: the game\'s own room scripts + VC draw scripts replayed offline (360 maze rooms of the 15 shared-graphics zones + 1,000 more rooms in 5 worlds); room graph, exits and door states from gameamiga (2,890/2,890 exits reciprocal). Left/right turn direction, compass names, object-gated pictures (default state shown), animated sprites and closed/locked doors are not implemented -- docs/waxworks/TODO.md',
+  elvira2: 'one pre-composed picture per room and facing (the game\'s own room scripts + VC draw scripts replayed offline; Waxworks pipeline): 144 ordinary rooms in 3 connected areas, exits/door states from gameamiga (280/283 horizontal+vertical exits reciprocal). NOT walkable: the two super-room grid mazes (30x30x4, 20x20x6) and the 23 exits into them; start room is a guess; object-gated pictures show their default state, animated sprites not drawn; turn direction/compass names are conventions -- docs/elvira2/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
   abandonedplaces:
     'wall pieces, draw order, backdrop parity, palette (fade-table step 15), grid flags, collision and teleports ported from the game\'s own `module` (view 0xAE3A, blits 0xD740/0xDDE4); 36 dungeon levels. Not drawn: wall-mounted objects, doors/gates, stairs art, monsters, items (closed doors do not block); forest levels unsupported; start pose of levels >1 and the view-window clip are hypotheses -- docs/abandonedplaces/TODO.md.',
   abandonedplaces2:
-    'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Monsters, items, objects, chests, water, fire and switches are not drawn; palette indices 12-15 (the lime/teal speckle) are unresolved; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
+    'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Palette = set_NN[0..15] + display.clr[16..31] + EHB half-brights, with the game\'s per-descriptor plane remap (confirmed from `main`). Monsters, items, objects, chests, water, fire and switches are not drawn; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
   eotb3:
     "the dungeon view is the game's own AESOP/16 bytecode (dungeon/features/doors classes) run in a TypeScript VM (tools/aesop/vm.ts) -- wall/door/decoration art + placement come from the game, collision from dungeon.impedance, steps from EYE.C's tables. Object state is the shipped quick-start SAVEGAME (not a fresh game); monsters, floor items, door opening, levers and stair/teleport level changes are not wired yet (docs/eotb3/TODO.md). Palette = Fixed + the area script's set_palette calls.",
   eotb2amiga:
@@ -474,6 +477,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'waxworks') return waxworksLevelListFromAssets(assetBase);
+  if (game === 'elvira2') return elvira2LevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'bardstale2') return bardsTale2LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);

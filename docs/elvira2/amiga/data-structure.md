@@ -92,3 +92,54 @@ game database, **not** the executable; `runit` is the executable),
 content also unexamined. `0tune`-`9tune` are ProTracker modules (solved
 format, extractor pending). The `Pics/` ILBMs carry a "SKID ROW" credit and
 are not in ScummVM's file list: release-group add-ons, not retail data.
+
+
+## 5. `gameamiga` room database, VC dialect and the walker (2026-11-21)
+
+Reader: `tools/shared/agos-gamepc.ts` (shared with Waxworks, `variant 'elvira2'`;
+see `docs/waxworks/amiga/data-structure.md` §5). Elvira II's `gameamiga` is
+**stored plain** (Waxworks' is `simon_decr`-packed; `simonDecr` on it throws).
+**Confirmed:** 853 items, 167 rooms, 2 super-rooms; the 184-entry opcode
+grammar is read from Elvira II's own `runit`; `gameamiga` + `tables01/03-09`
+(777 subroutines) consume to EOF. **Exits:** 283 room-to-room exits, 280
+reciprocal under `BACK = [2,3,0,1,5,4]` (rotated mapping: 0 of 248), 23 more
+exits lead into super-room items (744, 760). Door states 2 bits/direction
+(210 open, 90 closed, 6 locked). Movement op 54 (`moveDirn`, grammar `B`) with
+operand "variable 150" (verb 200) = exit[facing]; verb 205/206 = up/down (b4/b5)
+**confirmed from sub 0**. Turning: the super-room script computes right =
+facing+1, left = facing+3 (mod 4) (sub 1300) -- left/right *labels* and
+compass names stay conventions.
+
+**VC dialect differs from Waxworks.** Elvira II's VC opcode lengths
+(`ELVIRA2_VC_PARAM_BYTES`, `tools/shared/agos-vc.ts`) were derived the way
+Waxworks' were: coordinate ascent for the table under which every script ends
+(opcode 0) exactly at its successor's start. **1,268/1,268** segments (100 zones);
+the Waxworks table gives 1,237/1,268 and a wrong draw length collapses to 711
+(tests). Differences are on rare opcodes (17/32/37/41/46/47/53/55/59); ops never
+seen stay unknown (raise). `draw` (op 10), `setPalette` (22), calls and the
+conditionals have the same operands, and composed pictures are visually correct
+(`build/cache/elvira2/walker-frames/`: studio corridor doors, porch, kitchen,
+hotel door, bone cave).
+
+**Rooms:** each room's script (`room.subroutineId`) runs `picture <VC id> <window 4>`
+selected by `b150` (facing), VC id/100 = zone, the zone's *own* type-2 bank
+(no shared bank in this game). Static background only: `107` (animated
+actor/object sprites) is not drawn. Evaluator and exporter are the Waxworks ones
+(`tools/waxworks/amiga/{room-script,export-maze}.ts`, `MazeSpec`):
+`tools/elvira2/amiga/export-maze.ts` -> `public/assets/elvira2/amiga/data/maze.json`
++ `maze/z<zone>.png`. 3 connected areas (118 / 22 / 4 rooms), 545/549 room
+pictures rendered, 331 distinct pictures, **every picture's script runs
+`setPalette`** (0 pictures fall back to a guessed bank, so the
+`elvira2-paletteless-zones` gap does not touch the walker). 19 rooms have a
+picture-bearing line aborted by an unmodelled condition (ops 148/149/125/76/77/27,
+default state shown). Walker: `tools/walker/games-elvira2.ts` (reuses `WaxworksView`).
+
+**Not covered:** the two super-room grids -- items 744 (30x30x4, script 1300) and
+760 (20x20x6, script 1499), reached through 23 exits. Their `kSuperRoom`
+child is `u16 subroutine, x, y, z`, then x*y*z state words (two bits/direction,
+e.g. 17 = N+S corridor, 68 = E+W, 80 = S+W corner). Their pictures are *not* one
+script per cell: script 1300 builds the view from op 171 (`INB`, per-cell
+exit test) and wall-flag variables, then draws `picture 30000+var`; an
+interpreter for those ops is needed (`elvira2-superrooms`). The start room is
+not decoded (sub 100 branches on player-in-760/744) -- the walker starts at the
+first pictured room (`elvira2-start-room`).

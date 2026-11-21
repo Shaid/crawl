@@ -72,13 +72,13 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-export function startRoomFor(world: MazeWorld): MazeRoom {
-  return world.rooms.find((r) => r.id === START_ROOM_ID) ?? world.rooms.find((r) => r.pics[0]) ?? world.rooms[0];
+export function startRoomFor(world: MazeWorld, startId: number = START_ROOM_ID): MazeRoom {
+  return world.rooms.find((r) => r.id === startId) ?? world.rooms.find((r) => r.pics[0]) ?? world.rooms[0];
 }
 
 export class WaxworksView implements GameView {
-  readonly id = 'waxworks';
-  readonly gameLabel = 'Waxworks';
+  readonly id: string;
+  readonly gameLabel: string;
   readonly items: DrawItem[] = [];
   readonly banks: PieceBankLookup = {};
   readonly slots: SlotTableFile = { schemaVersion: 1, banks: [], slotRows: [] } as unknown as SlotTableFile;
@@ -99,7 +99,9 @@ export class WaxworksView implements GameView {
   readonly worldIndex: number;
   private readonly assetBase: string | null;
 
-  constructor(maze: MazeFile, worldIndex: number, assetBase: string | null, start: { roomId: number; facing: number }) {
+  constructor(maze: MazeFile, worldIndex: number, assetBase: string | null, start: { roomId: number; facing: number }, who: { id: string; label: string } = { id: 'waxworks', label: 'Waxworks' }) {
+    this.id = who.id;
+    this.gameLabel = who.label;
     this.maze = maze;
     this.worldIndex = worldIndex;
     this.assetBase = assetBase;

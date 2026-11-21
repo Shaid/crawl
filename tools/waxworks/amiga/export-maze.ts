@@ -17,15 +17,35 @@ import { resolve } from 'node:path';
 import { writePNG, writeJson } from '@seer-project/pipeline';
 import { simonDecr, discoverZones, loadPalette } from '../../shared/agos-vga.ts';
 import { readGamePc, readGrammarFromExe, readSubroutineBlock, roomsOf, type Subroutine } from '../../shared/agos-gamepc.ts';
-import { parseVga1, composePicture, WINDOW4, type ZoneResources } from '../../shared/agos-vc.ts';
+import { parseVga1, composePicture, WINDOW4, VC_PARAM_BYTES, type ZoneResources } from '../../shared/agos-vc.ts';
 import { layoutRooms, type MazeFile, type MazeRoom, type MazeWorld } from './maze-map.ts';
 import { roomPictureFor, type PictureCall } from './room-script.ts';
 
 const GAME = 'waxworks';
 const PLATFORM = 'amiga';
 const SHEET_COLS = 8;
-/** Zones whose `vga2` is the shared maze graphics bank (`zoneTable[zone] == 3` in the game, == no type-2 file). */
-const sharedBank = (zone: number) => (zone >= 85 ? 94 : 18);
+
+/** What differs between the AGOS room-graph games that share this exporter. */
+export interface MazeSpec {
+  variant: 'waxworks' | 'elvira2';
+  scheme: 'elvira' | 'waxworks';
+  /** `gameamiga` is `simon_decr`-packed on disk (Waxworks) or stored plain (Elvira II). */
+  packedGamePc: boolean;
+  /** Zones whose `vga2` is a shared picture bank (no type-2 file of their own): zone -> bank zone. */
+  sharedBank: (zone: number) => number;
+  vcTable: readonly number[];
+  /** Smallest connected room set exported as a world. */
+  minWorldRooms: number;
+}
+export const WAXWORKS_SPEC: MazeSpec = {
+  variant: 'waxworks',
+  scheme: 'waxworks',
+  packedGamePc: true,
+  /** `zoneTable[zone] == 3` in the game == no type-2 file. */
+  sharedBank: (zone) => (zone >= 85 ? 94 : 18),
+  vcTable: VC_PARAM_BYTES,
+  minWorldRooms: 5,
+};
 
 export interface BuiltMaze {
   maze: MazeFile;
@@ -49,15 +69,16 @@ function loadSubroutines(dataDir: string, grammar: string[], gameSubs: Subroutin
   return { map, duplicates };
 }
 
-export function buildMaze(dataDir: string): BuiltMaze {
+export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): BuiltMaze {
   const raw = (f: string) => simonDecr(new Uint8Array(readFileSync(resolve(dataDir, f))));
+  const sharedBank = spec.sharedBank;
   const grammar = readGrammarFromExe(new Uint8Array(readFileSync(resolve(dataDir, 'runit'))));
-  const db = readGamePc(raw('gameamiga'), 'waxworks', grammar);
+  const db = readGamePc(spec.packedGamePc ? raw('gameamiga') : new Uint8Array(readFileSync(resolve(dataDir, 'gameamiga'))), spec.variant, grammar);
   const { map: subs, duplicates } = loadSubroutines(dataDir, grammar, [...db.subroutines.values()]);
   const rooms = roomsOf(db);
 
   const files = readdirSync(dataDir);
-  const zoneFiles = discoverZones(files, 'waxworks');
+  const zoneFiles = discoverZones(files, spec.scheme);
   const bankCache = new Map<string, Uint8Array>();
   const loadBank = (f: string) => {
     let b = bankCache.get(f);
@@ -74,7 +95,7 @@ export function buildMaze(dataDir: string): BuiltMaze {
     let r: ZoneResources | undefined;
     if (zf?.type1) {
       const f2 = zf.type2 ?? zoneFiles.find((z) => z.zone === sharedBank(zone))?.type2;
-      if (f2) r = { vga1: parseVga1(loadBank(zf.type1)), vga2: loadBank(f2) };
+      if (f2) r = { vga1: parseVga1(loadBank(zf.type1), spec.vcTable), vga2: loadBank(f2) };
     }
     resCache.set(zone, r);
     return r;
@@ -106,6 +127,8 @@ export function buildMaze(dataDir: string): BuiltMaze {
 
   const picEnv = { zone: (z: number) => zoneRes(z) };
   interface Composed { zone: number; script: number; indices: Uint8Array; palette: { r: number; g: number; b: number }[] }
+  /** Pictures whose script never ran `setPalette`: they fall back to bank 0 of the zone's own `vga1` (guess). */
+  const noPaletteZones = new Map<number, number>();
   const composed: Composed[] = []; // index = handle - 1
   const handleByKey = new Map<string, number>();
   /** Compose a picture call; identical (script, consulted-variables) runs share one handle. 0 = nothing drawn. */
@@ -118,6 +141,7 @@ export function buildMaze(dataDir: string): BuiltMaze {
     const key = `${call.id}|${[...c.reads].sort().map(([k, v]) => `${k}=${v}`).join(',')}`;
     let h = handleByKey.get(key);
     if (!h) {
+      if (!c.palette) noPaletteZones.set(zone, (noPaletteZones.get(zone) ?? 0) + 1);
       composed.push({ zone, script: call.id, indices: c.indices, palette: c.palette ?? loadPalette(r.vga1.data, 0, 16) });
       h = composed.length;
       handleByKey.set(key, h);
@@ -129,12 +153,12 @@ export function buildMaze(dataDir: string): BuiltMaze {
   const worldList: MazeWorld[] = [];
   const unmodelledAll = new Set<number>();
   comps
-    .filter((c) => c.length >= 5)
+    .filter((c) => c.length >= spec.minWorldRooms)
     .sort((a, b) => b.length - a.length)
     .forEach((comp, wi) => {
       const lay = layoutRooms(comp, (id) => {
         const ex = [0, 0, 0, 0, 0, 0];
-        for (const e of rooms.get(id)!.exits) ex[e.dir] = e.dest;
+        for (const e of rooms.get(id)!.exits) if (rooms.has(e.dest)) ex[e.dir] = e.dest;
         return ex;
       });
       const mrooms: MazeRoom[] = [];
@@ -171,6 +195,9 @@ export function buildMaze(dataDir: string): BuiltMaze {
       worldList.push({ id: wi, label: '', zones: zoneCount, rooms: mrooms });
     });
   stats.unmodelledOps = unmodelledAll.size;
+  const noPalette = [...noPaletteZones.values()].reduce((a, b) => a + b, 0);
+  (stats as Record<string, unknown>).picturesWithoutSetPalette = noPalette;
+  (stats as Record<string, unknown>).zonesWithoutSetPalette = [...noPaletteZones.keys()].sort((a, b) => a - b).join(',');
 
   // Pack the rendered pictures into one sheet per zone.
   const byZone = new Map<number, number[]>();

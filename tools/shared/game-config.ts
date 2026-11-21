@@ -479,6 +479,28 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'elvira2',
+    displayName: 'Elvira II: The Jaws of Cerberus',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['elvira2/amiga'],
+      executable: undefined,
+      expectedFiles: ['data/gameamiga'],
+      supported: true,
+      assetDir: 'elvira2',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { resolve } = await import('node:path');
+        const files = resolve(dataDir, 'data');
+        const { exportElvira2Data } = await import('../elvira2/amiga/export-data.ts');
+        await exportElvira2Data(files, resolve(dataDir, 'Pics'));
+        const { exportElvira2Maze } = await import('../elvira2/amiga/export-maze.ts');
+        await exportElvira2Maze(files);
+      },
+    }],
+  },
+  {
     id: 'bardstale1',
     displayName: "The Bard's Tale: Tales of the Unknown",
     platforms: [{

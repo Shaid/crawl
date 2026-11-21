@@ -42,6 +42,21 @@ export const VC_PARAM_BYTES: readonly number[] = (() => {
   return t;
 })();
 
+/**
+ * Elvira II's VC opcode lengths, derived the same way from Elvira II's own
+ * 1,268 consecutive script segments (all 100 zones): coordinate ascent from
+ * the Waxworks table reached 1,268/1,268 exact terminations (the Waxworks
+ * table alone: 1,237/1,268; a perturbed table collapses -- see the test).
+ * Differs from Waxworks on ops 17/32/37/41/46/47/53/55/59 (all rare); ops
+ * never seen stay `-1`. Elvira 1's VC set is *not* this one (747/750 only).
+ */
+export const ELVIRA2_VC_PARAM_BYTES: readonly number[] = (() => {
+  const t = [0,0,2,10,6,4,2,2,4,4,8,-1,2,2,2,2,2,2,2,0,4,2,2,2,8,0,10,0,8,-1,2,2,0,0,0,-1,4,4,2,4,2,2,-1,2,2,4,2,6,-1,2,2,2,2,4,4,6,0,0,0,0,2,2,0,0];
+  while (t.length < 80) t.push(-1);
+  t[79] = 10;
+  return t;
+})();
+
 export const VC_OP = {
   END: 0,
   CALL: 2,
@@ -65,6 +80,8 @@ export interface VcOp {
 
 export interface Vga1 {
   data: Uint8Array;
+  /** Operand byte count per opcode for this game's VC dialect. */
+  table: readonly number[];
   paletteOffset: number;
   paletteBanks: number;
   images: Map<number, { colour: number; script: number }>;
@@ -74,7 +91,7 @@ export interface Vga1 {
 const u16 = (b: Uint8Array, o: number): number => (b[o] << 8) | b[o + 1];
 const s16 = (b: Uint8Array, o: number): number => ((u16(b, o) << 16) >> 16);
 
-export function parseVga1(data: Uint8Array): Vga1 {
+export function parseVga1(data: Uint8Array, table: readonly number[] = VC_PARAM_BYTES): Vga1 {
   const h = u16(data, 10) + 20;
   const nimg = u16(data, h + 2);
   const nanim = u16(data, h + 6);
@@ -90,7 +107,7 @@ export function parseVga1(data: Uint8Array): Vga1 {
     const o = atab + i * 8;
     anims.set(u16(data, o), u16(data, o + 6));
   }
-  return { data, paletteOffset: u16(data, 6), paletteBanks: u16(data, 2), images, anims };
+  return { data, table, paletteOffset: u16(data, 6), paletteBanks: u16(data, 2), images, anims };
 }
 
 /** Decode a script (until opcode 0). Throws on an opcode with no known length. */
@@ -102,7 +119,7 @@ export function walkScript(v: Vga1, offset: number): VcOp[] {
     const at = p;
     p += 2;
     if (op === 0) return out;
-    const n = VC_PARAM_BYTES[op];
+    const n = v.table[op];
     if (n === undefined || n < 0) throw new Error(`agos-vc: unknown VC opcode ${op} at 0x${at.toString(16)}`);
     const args: number[] = [];
     for (let i = 0; i < n; i += 2) args.push(s16(v.data, p + i));
