@@ -29,7 +29,7 @@
  * 8 chain, 9 user flags, 255 inherit.
  */
 
-export type GamePcVariant = 'waxworks' | 'elvira2';
+export type GamePcVariant = 'waxworks' | 'elvira2' | 'elvira1';
 
 /** Opcode operand grammar (see `readGrammarFromExe`). */
 export type OpcodeGrammar = string[];
@@ -87,13 +87,28 @@ export interface SuperRoomChild {
   z: number;
   exitStates: number[];
 }
+/** Elvira 1 room child (type 1): text ids of the short/long description. */
+export interface E1RoomChild {
+  kind: 'e1room';
+  short: number;
+  long: number;
+  flags: number;
+}
+/** Elvira 1 general exit child (type 4): 6 directional destinations + 6 more item refs. */
+export interface GenExitChild {
+  kind: 'genexit';
+  dest: number[];
+  extra: number[];
+}
 export type ItemChild =
   | RoomChild
+  | E1RoomChild
+  | GenExitChild
   | ObjectChild
   | SuperRoomChild
   | { kind: 'container'; volume: number; flags: number }
   | { kind: 'chain'; chained: number }
-  | { kind: 'userflags'; flags: number[] }
+  | { kind: 'userflags'; flags: number[]; items: number[] }
   | { kind: 'inherit'; master: number };
 
 export interface AgosItem {
@@ -111,7 +126,21 @@ export interface AgosItem {
 
 function readItem(r: Reader, id: number, variant: GamePcVariant): AgosItem {
   const it: AgosItem = { id, itemName: 0, adjective: 0, noun: 0, state: 0, next: 0, child: 0, parent: 0, classFlags: 0, children: [] };
-  if (variant === 'elvira2') {
+  if (variant === 'elvira1') {
+    // Layout read off the data: 875 items consume gameamiga exactly up to the subroutine block (agos-gamepc test).
+    it.itemName = r.u32() & 0xffff;
+    it.adjective = r.u16();
+    it.noun = r.u16();
+    it.state = r.u16();
+    r.u16();
+    it.next = r.itemRef();
+    it.child = r.itemRef();
+    it.parent = r.itemRef();
+    r.u16();
+    r.u16();
+    r.u16();
+    it.classFlags = r.u16();
+  } else if (variant === 'elvira2') {
     it.itemName = r.u32() & 0xffff;
     it.adjective = r.u16();
     it.noun = r.u16();
@@ -141,6 +170,7 @@ function readItem(r: Reader, id: number, variant: GamePcVariant): AgosItem {
 }
 
 function readChild(r: Reader, type: number, variant: GamePcVariant): ItemChild {
+  if (variant === 'elvira1') return readChildE1(r, type);
   switch (type) {
     case 1: {
       const subroutineId = r.u16();
@@ -173,12 +203,50 @@ function readChild(r: Reader, type: number, variant: GamePcVariant): ItemChild {
       return { kind: 'chain', chained: r.itemRef() };
     case 9: {
       const flags = [r.u16(), r.u16(), r.u16(), r.u16()];
-      return { kind: 'userflags', flags };
+      return { kind: 'userflags', flags, items: [] };
     }
     case 255:
       return { kind: 'inherit', master: r.itemRef() };
     default:
       throw new Error(`agos-gamepc: invalid item child type ${type} at 0x${(r.p - 2).toString(16)}`);
+  }
+}
+
+function readChildE1(r: Reader, type: number): ItemChild {
+  switch (type) {
+    case 1:
+      return { kind: 'e1room', short: r.u32() & 0xffff, long: r.u32() & 0xffff, flags: r.u16() };
+    case 2: {
+      r.u32();
+      r.u32();
+      r.u32();
+      const name = r.u32() & 0xffff;
+      const size = r.u16();
+      const weight = r.u16();
+      const flags = r.u16();
+      return { kind: 'object', flags, values: [size, weight], name };
+    }
+    case 4: {
+      const dest: number[] = [];
+      const extra: number[] = [];
+      for (let i = 0; i < 6; i++) dest.push(r.itemRef());
+      for (let i = 0; i < 6; i++) extra.push(r.itemRef());
+      return { kind: 'genexit', dest, extra };
+    }
+    case 7:
+      return { kind: 'container', volume: r.u16(), flags: r.u16() };
+    case 8:
+      return { kind: 'chain', chained: r.itemRef() };
+    case 9: {
+      const flags: number[] = [];
+      for (let i = 0; i < 8; i++) flags.push(r.u16());
+      const items = [r.itemRef(), r.itemRef(), r.itemRef(), r.itemRef()];
+      return { kind: 'userflags', flags, items };
+    }
+    case 255:
+      return { kind: 'inherit', master: r.itemRef() };
+    default:
+      throw new Error(`agos-gamepc: invalid Elvira 1 item child type ${type} at 0x${(r.p - 2).toString(16)}`);
   }
 }
 
@@ -218,9 +286,13 @@ export interface Subroutine {
  * opcode 0 (an empty " \0") and is followed by a binary table. Nothing is
  * transcribed from third-party sources.
  */
-export function readGrammarFromExe(exe: Uint8Array): string[] {
+export function readGrammarFromExe(exe: Uint8Array, variant: GamePcVariant = 'waxworks'): string[] {
   // Signature of opcodes 0..3: " \0", "I \0\0", "I \0\0", "I \0\0" (one-operand item opcodes).
-  const sig = [0x20, 0, 0x49, 0x20, 0, 0, 0x49, 0x20, 0, 0, 0x49, 0x20, 0, 0];
+  // Elvira 1's table has no leading empty entry: opcode 0 is the first item opcode ("I "), eight of them, then "II ".
+  const sig =
+    variant === 'elvira1'
+      ? [...Array(8)].flatMap(() => [0x49, 0x20, 0, 0]).concat([0x49, 0x49, 0x20, 0])
+      : [0x20, 0, 0x49, 0x20, 0, 0, 0x49, 0x20, 0, 0, 0x49, 0x20, 0, 0];
   let start = -1;
   for (let i = 0; i + sig.length < exe.length; i += 2) {
     if (sig.every((v, k) => exe[i + k] === v)) {
@@ -244,8 +316,8 @@ export function readGrammarFromExe(exe: Uint8Array): string[] {
   return out;
 }
 
-function readOp(r: Reader, grammar: string[]): ScriptOp {
-  const op = r.u8();
+function readOp(r: Reader, grammar: string[], e1 = false): ScriptOp {
+  const op = e1 ? r.u16() : r.u8();
   const g = grammar[op];
   if (g === undefined) throw new Error(`agos-gamepc: opcode ${op} has no grammar entry (at 0x${(r.p - 1).toString(16)})`);
   const args: Operand[] = [];
@@ -262,8 +334,12 @@ function readOp(r: Reader, grammar: string[]): ScriptOp {
         args.push({ k: 'w', v: r.u16() });
         break;
       case 'B': {
-        let v = r.u8();
-        if (v === 0xff) v = 0xff00 | r.u8();
+        let v: number;
+        if (e1) v = r.u16(); // Elvira 1: byte operands are words
+        else {
+          v = r.u8();
+          if (v === 0xff) v = 0xff00 | r.u8();
+        }
         args.push({ k: 'b', v });
         break;
       }
@@ -292,7 +368,7 @@ function readOp(r: Reader, grammar: string[]): ScriptOp {
  * non-zero block marker or at end of buffer. Returns the position reached,
  * which for every shipped file equals the file length.
  */
-export function readSubroutineBlock(buf: Uint8Array, offset: number, grammar: OpcodeGrammar): { subs: Subroutine[]; end: number } {
+export function readSubroutineBlock(buf: Uint8Array, offset: number, grammar: OpcodeGrammar, e1 = false): { subs: Subroutine[]; end: number } {
   const r = new Reader(buf, offset);
   const subs: Subroutine[] = [];
   while (r.p < buf.length && r.u16() === 0) {
@@ -300,6 +376,26 @@ export function readSubroutineBlock(buf: Uint8Array, offset: number, grammar: Op
     while (r.u16() === 0) {
       const line: ScriptLine = { ops: [] };
       if (sub.id === 0) line.verbs = [r.u16(), r.u16(), r.u16()];
+      else if (e1) r.u16(), r.u16(), r.u16(); // Elvira 1 lines carry three more (unused) words
+      if (e1) {
+        // 16-bit opcodes, line ends at 10000; opcode 198 is the comment (one word, dropped)
+        for (;;) {
+          const o = (buf[r.p] << 8) | buf[r.p + 1];
+          if (r.p + 2 > buf.length) throw new Error('agos-gamepc: subroutine line ran off the end');
+          if (o === 10000) {
+            r.p += 2;
+            break;
+          }
+          if (o === 198) {
+            r.p += 2;
+            r.u16();
+            continue;
+          }
+          line.ops.push(readOp(r, grammar, true));
+        }
+        sub.lines.push(line);
+        continue;
+      }
       for (;;) {
         const next = buf[r.p];
         if (next === undefined) throw new Error('agos-gamepc: subroutine line ran off the end');
@@ -346,7 +442,7 @@ export function readGamePc(buf: Uint8Array, variant: GamePcVariant, grammar: Opc
   let inited = r.u32();
   const stringCount = r.u32();
   if (version !== 0x80) throw new Error(`agos-gamepc: not a runtime database (marker 0x${version.toString(16)})`);
-  if (variant === 'elvira2') {
+  if (variant === 'elvira2' || variant === 'elvira1') {
     itemArraySize += 2;
     inited = itemArraySize;
   } else {
@@ -358,7 +454,7 @@ export function readGamePc(buf: Uint8Array, variant: GamePcVariant, grammar: Opc
   r.p += textSize;
   const items = new Map<number, AgosItem>();
   for (let id = 2; id < inited; id++) items.set(id, readItem(r, id, variant));
-  const { subs, end } = readSubroutineBlock(buf, r.p, grammar);
+  const { subs, end } = readSubroutineBlock(buf, r.p, grammar, variant === 'elvira1');
   const subroutines = new Map<number, Subroutine>();
   for (const s of subs) subroutines.set(s.id, s);
   return { variant, itemCount: inited, stringCount, text, items, subroutines, end };

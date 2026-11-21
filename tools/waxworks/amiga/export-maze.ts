@@ -79,6 +79,42 @@ function loadSubroutines(dataDir: string, grammar: string[], gameSubs: Subroutin
   return { map, duplicates };
 }
 
+/** Pack composed pictures (handle = index + 1) into one sheet per zone. */
+export function packSheets(composed: Array<{ zone: number; script: number; indices: Uint8Array; palette: { r: number; g: number; b: number }[] }>): {
+  sheets: Map<number, { width: number; height: number; rgba: Uint8Array }>;
+  refs: MazeFile['pictures'];
+} {
+  const byZone = new Map<number, number[]>();
+  composed.forEach((p, i) => (byZone.get(p.zone) ?? byZone.set(p.zone, []).get(p.zone)!).push(i + 1));
+  const sheets = new Map<number, { width: number; height: number; rgba: Uint8Array }>();
+  const refs: MazeFile['pictures'] = {};
+  for (const [zone, handles] of [...byZone].sort((a, b) => a[0] - b[0])) {
+    const rowsN = Math.ceil(handles.length / SHEET_COLS);
+    const width = SHEET_COLS * WINDOW4.w;
+    const height = rowsN * WINDOW4.h;
+    const rgba = new Uint8Array(width * height * 4);
+    handles.forEach((h, index) => {
+      const p = composed[h - 1];
+      const ox = (index % SHEET_COLS) * WINDOW4.w;
+      const oy = Math.floor(index / SHEET_COLS) * WINDOW4.h;
+      for (let y = 0; y < WINDOW4.h; y++) {
+        for (let x = 0; x < WINDOW4.w; x++) {
+          const c = p.palette[p.indices[y * WINDOW4.w + x] & 15];
+          const o = ((oy + y) * width + ox + x) * 4;
+          rgba[o] = c.r;
+          rgba[o + 1] = c.g;
+          rgba[o + 2] = c.b;
+          rgba[o + 3] = 255;
+        }
+      }
+      refs[String(h)] = { zone, index, script: p.script };
+    });
+    sheets.set(zone, { width, height, rgba });
+  }
+
+  return { sheets, refs };
+}
+
 export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): BuiltMaze {
   const raw = (f: string) => simonDecr(new Uint8Array(readFileSync(resolve(dataDir, f))));
   const sharedBank = spec.sharedBank;
@@ -246,34 +282,7 @@ export function buildMaze(dataDir: string, spec: MazeSpec = WAXWORKS_SPEC): Buil
   (stats as Record<string, unknown>).picturesWithoutSetPalette = noPalette;
   (stats as Record<string, unknown>).zonesWithoutSetPalette = [...noPaletteZones.keys()].sort((a, b) => a - b).join(',');
 
-  // Pack the rendered pictures into one sheet per zone.
-  const byZone = new Map<number, number[]>();
-  composed.forEach((p, i) => (byZone.get(p.zone) ?? byZone.set(p.zone, []).get(p.zone)!).push(i + 1));
-  const sheets = new Map<number, { width: number; height: number; rgba: Uint8Array }>();
-  const refs: MazeFile['pictures'] = {};
-  for (const [zone, handles] of [...byZone].sort((a, b) => a[0] - b[0])) {
-    const rowsN = Math.ceil(handles.length / SHEET_COLS);
-    const width = SHEET_COLS * WINDOW4.w;
-    const height = rowsN * WINDOW4.h;
-    const rgba = new Uint8Array(width * height * 4);
-    handles.forEach((h, index) => {
-      const p = composed[h - 1];
-      const ox = (index % SHEET_COLS) * WINDOW4.w;
-      const oy = Math.floor(index / SHEET_COLS) * WINDOW4.h;
-      for (let y = 0; y < WINDOW4.h; y++) {
-        for (let x = 0; x < WINDOW4.w; x++) {
-          const c = p.palette[p.indices[y * WINDOW4.w + x] & 15];
-          const o = ((oy + y) * width + ox + x) * 4;
-          rgba[o] = c.r;
-          rgba[o + 1] = c.g;
-          rgba[o + 2] = c.b;
-          rgba[o + 3] = 255;
-        }
-      }
-      refs[String(h)] = { zone, index, script: p.script };
-    });
-    sheets.set(zone, { width, height, rgba });
-  }
+  const { sheets, refs } = packSheets(composed);
 
   // Labels from the zones each world draws.
   for (const w of worldList) {

@@ -502,6 +502,28 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'elvira',
+    displayName: 'Elvira: Mistress of the Dark',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['elvira/amiga'],
+      executable: undefined,
+      expectedFiles: ['data/gameamiga'],
+      supported: true,
+      assetDir: 'elvira',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { resolve } = await import('node:path');
+        const files = resolve(dataDir, 'data');
+        const { exportElviraData } = await import('../elvira/amiga/export-data.ts');
+        await exportElviraData(files);
+        const { exportElvira1Maze } = await import('../elvira/amiga/export-maze.ts');
+        await exportElvira1Maze(files);
+      },
+    }],
+  },
+  {
     id: 'elvira2',
     displayName: 'Elvira II: The Jaws of Cerberus',
     platforms: [{

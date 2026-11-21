@@ -78,6 +78,7 @@ import { loadZombiView, zombiLevelListFromAssets } from './games-zombi.ts';
 import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
 import { loadWaxworksView, waxworksLevelListFromAssets } from './games-waxworks.ts';
 import { loadElvira2View, elvira2LevelListFromAssets } from './games-elvira2.ts';
+import { loadElviraView, elviraLevelListFromAssets } from './games-elvira.ts';
 import { loadBardsTale2View, bardsTale2LevelList } from './games-bardstale2.ts';
 import { loadBardsTale3View, bardsTale3LevelList } from './games-bardstale3.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
@@ -403,6 +404,7 @@ const GAMES = [
   { id: 'crystaldragon', label: 'Crystal Dragon', loader: loadCrystalDragonView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'waxworks', label: 'Waxworks', loader: loadWaxworksView, defaultLevel: 4, platform: 'amiga' as const },
+  { id: 'elvira', label: 'Elvira: Mistress of the Dark', loader: loadElviraView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'elvira2', label: 'Elvira II: The Jaws of Cerberus', loader: loadElvira2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'bardstale2', label: "The Bard's Tale II", loader: loadBardsTale2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'bardstale3', label: "The Bard's Tale III", loader: loadBardsTale3View, defaultLevel: 3, platform: 'amiga' as const },
@@ -436,6 +438,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   bardstale3: 'map, collision (walls/doors via the kick key K), wrap, stairs and teleports between dungeon levels: traced in the game program bard3 (not driver); the 61-slot view compositor, scaling and GDUNG.GRP pieces are re-implemented from bard3 tables, palette is the one the view routine loads (DATA 0x20868); light fixed at 5; not screenshot-checked; cities/wilderness, monsters, traps and special-square scripts other than stairs/teleport are not implemented -- see docs/bardstale3/TODO.md',
   bardstale2: 'walls/doors/secret doors, collision and wrap: the view-row builder and move routine are verified identical to BT1 in data/bard; the table-driven compositor (incl. the right-half mirror) is ported from the game code and renders recognisable corridors, but is not screenshot-checked against the real game; the start pose is a heuristic (not the game\'s stairs/arrival point), the palette is big_dung\'s own header (dung_blank is unused by the BT2 executable), the lamp/light distance is fixed at 4; special squares, stairs, monsters and the city are not implemented -- see docs/bardstale2/TODO.md',
   waxworks: 'one pre-composed picture per room and facing: the game\'s own room scripts + VC draw scripts replayed offline (360 maze rooms of the 15 shared-graphics zones + 1,000 more rooms in 5 worlds); room graph, exits and door states from gameamiga (2,890/2,890 exits reciprocal). Left/right turn direction, compass names, object-gated pictures (default state shown), animated sprites and closed/locked doors are not implemented -- docs/waxworks/TODO.md',
+  elvira: 'one pre-composed picture per room and facing (Elvira 1\'s own room scripts -- scene subroutine 1000 + the room\'s user flag 0, facing v150 -- and VC draw scripts replayed offline; Waxworks pipeline): 374 rooms in one connected world (gameamiga: 875 items consumed exactly to EOF; exits 738/774 reciprocal), 1,195/1,195 room pictures rendered, 33 rooms gated by unmodelled conditions. HYPOTHESES: start room 876 (end of the start-up block of subroutine 101), turn-arrow direction labels, object/variable-gated pictures show their default state, closed/locked doors not openable, animated sprites not drawn; palettes use the VC setPalette result (bank 0 fallback) -- docs/elvira/TODO.md',
   elvira2: 'one pre-composed picture per room and facing (the game\'s own room scripts + VC draw scripts replayed offline; Waxworks pipeline): 144 ordinary rooms in 3 connected areas (exits/door states from gameamiga, 280/283 reciprocal) + the two super-room grid mazes (744: 30x30x4, 760: 20x20x6) as one level per floor, cell/facing pictures from the maze scripts (1300/1499) run by an offline interpreter. Maze walls/openings follow the real grid (cell numbers are 1-based); 22 cave rooms are linked to maze cells from the game\'s own table (sub 1286). HYPOTHESES: room 452 <-> maze 744 cell 3240 (the game\'s dev-verb entry cell), maze doors (state 2/3) and room-side doorway states treated as plain; down-state 3 treated as a pit (blocked, no fall); the room-world start is a guess; object-gated pictures show their default state, animated sprites not drawn; turn direction/compass names are conventions -- docs/elvira2/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
   crystaldragon:
@@ -489,6 +492,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'crystaldragon') return crystalDragonLevelList(assetBase);
   if (game === 'waxworks') return waxworksLevelListFromAssets(assetBase);
+  if (game === 'elvira') return elviraLevelListFromAssets(assetBase);
   if (game === 'elvira2') return elvira2LevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'bardstale2') return bardsTale2LevelList(assetBase);

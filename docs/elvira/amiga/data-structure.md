@@ -132,3 +132,33 @@ table). `start` is a saved-state image (same `0000 036C` item-count header).
 undecoded tails/script block. Smallest next step: decode the tail grammar
 using the `0026 xxxx` pointer deltas as the size oracle, then re-read the
 `0x2710` region.
+
+
+## Walker: gameamiga decoded (2026-11-21, second pass)
+
+> **Correction (2026-11-21):** the "Walker groundwork"/"follow-up" sections above conclude that no script block exists and that the `0x2710` region is an undecoded 16-bit-opcode block. Both premises were wrong in detail; the whole file is decoded and **consumed to exactly its last byte** (`readGamePc(buf, 'elvira1', grammar).end === 218977`, 875 items, 357 subroutines; test `games-elvira.test.ts`). The three causes: (1) the "tails" are ordinary child blocks, (2) the opcode grammar start found earlier was a **later offset** of the real table, (3) Elvira 1 script lines carry three extra words.
+
+**Item record** (big-endian, items 2..876, starting `+0x48D9`; layout cross-checked by the parse ending exactly on the subroutine block, `+0x15F45`; ScummVM `res.cpp` used as a behaviour oracle):
+
+| Size | Field |
+|------|-------|
+| u32 | name (string id, low 16 bits) |
+| u16 x3 | adjective, noun, state |
+| u16 | unused |
+| u32 x3 | next, child, parent (0xFFFFFFFF = none, else id-2) |
+| u16 x3 | unused (the first counts 1, 2, 3 ... on the first items) |
+| u16 | classFlags |
+| u32 | non-zero (a heap pointer `0026 xxxx`, which is the oracle the earlier pass noticed) iff child blocks follow |
+| then | `u16 type` blocks until `type == 0` |
+
+Child types (sizes confirmed by exact consumption): **1** room = u32 short text, u32 long text, u16 flags (10 B); **2** object = 3 x u32 unused, u32 name, u16 size, u16 weight, u16 flags (22 B); **4** general exit = 12 x u32 item refs, the first six are N/E/S/W/up/down destinations (48 B); **7** container = u16 volume, u16 flags; **8** chain = item ref; **9** user flags = 8 x u16 + 4 x item ref (32 B); **255** inherit = item ref (a master whose children this item also has -- a room can exist only by inheritance). Type 3/5/6 never occur. The earlier "first word counts 1,2,3,4" was the u16 unused triple; the `0026 xxxx` pairs are the u32 "children follow" word, not child-block sizes.
+
+**Opcode grammar.** `runit+0x97D8` holds the real **284-entry** table (8 x `I`, then `II` ...), found by that signature; the earlier `readGrammarFromExe` signature (`" \0","I"x3`) matched the table's *tail* (entry ~45 on, 242 entries) and so mis-numbered every opcode. Opcode 0 is the first entry (`at`), **opcode 203 is the invert prefix**, **198 is the comment** (one word). The table equals ScummVM's `opcodeArgTable_elvira1` entry for entry (284/284) -- a cross-check, not the source.
+
+**Script lines (Elvira 1).** `u16 0` starts a subroutine (`u16 id`), `u16 0` starts a line; non-zero ends the list. Sub 0 lines carry `verb noun1 noun2` (3 x u16); every other line carries three unused u16. Then **16-bit opcodes with 16-bit operands** (`B` = u16, `I` = u16 marker 1/3/5/7/9 else u32 item, `T` = u16 marker 0/3 else u32 text) until the word `10000`. The 4,013 aligned `0x2710` words are those line terminators.
+
+**Room -> picture.** Subroutine 9 (run on room entry/turn after sub 5) reads user flag 0 of the player's parent (`copyof i-9 b0 v50; add v50 1000; process v50`): a room's scene is subroutine `1000 + userflags[0]` (all 374 rooms have one, 124 subroutines 1000-1123). Those subroutines branch on `v150` (facing 0/2/4/6) and call `picture <VC id> <4>` (opcode 224; VC id/100 = zone file). Movement (subroutine 4): `v150` 0/2/4/6 -> `moveDirn` 0/3/2/1; verbs 215/216/217 add 4/6/2 to `v150` mod 8 (turn round / two quarter turns). Exits: `moveDirn` direction d reads the room's general-exit child; a destination that is a room is an open exit, otherwise it is a door item: state 0 -> its parent room, 1 closed, 2 locked. 374 rooms (79 own room blocks + inheritors), 774 exits, **738/774 reciprocal** (shuffled partner control < 5%).
+
+Pipeline: `tools/shared/agos-gamepc.ts` (variant `elvira1`), `tools/elvira/amiga/room-script.ts` (evaluator, opcode numbers), `tools/elvira/amiga/export-maze.ts` (-> `public/assets/elvira/amiga/data/maze.json` + `maze/z<zone>.png`), view `tools/walker/games-elvira.ts` (reuses `WaxworksView`). 1,195/1,195 room pictures compose (222 distinct pictures in 41 zones); frames inspected: `build/cache/elvira/walker-frames/start-rooms.png` (rooms 876 castle entrance, 875 gatehouse portcullis, 870 and 866 courtyards).
+
+Not decoded / hypotheses (TODO `elvira-walker-gates`): start room 876 = `goto i876` ending sub 101's start-up block (the picture is the castle entrance, consistent with a game start); which turn arrow is left/right; 33 rooms whose scripts use unmodelled conditions (7 opcodes); item/variable-gated pictures show their default state; the `+ 5 more u32` (`extra`) half of the general-exit block is not interpreted.
