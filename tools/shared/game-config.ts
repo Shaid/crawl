@@ -461,9 +461,17 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['perihelion/amiga'],
       executable: undefined,
       expectedFiles: ['PerihelionData/Table.Dat'],
-      supported: false,
+      supported: true,
       assetDir: 'perihelion',
       features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // First-person dungeons: grids, composers (leaf routines decoded from the main program), atlases, palette.
+        const { resolve } = await import('node:path');
+        const { exportWalker } = await import('../perihelion/amiga/export-walker.ts');
+        const w = exportWalker(resolve(dataDir, 'PerihelionData'));
+        console.log(`  perihelion/amiga walker: ${w.dungeons} dungeons, ${w.leaves} composer leaves`);
+      },
     }],
   },
   {

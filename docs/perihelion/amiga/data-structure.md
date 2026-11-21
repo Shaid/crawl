@@ -28,7 +28,7 @@ Perihelion has **two exploration modes**, both confirmed from the data:
 1. **Overhead tile maps** (outdoor/city locations): 40×40 cells of 16×16 tiles, plus a parallel 40×40 passability layer. **rendered + structural invariant** (§ Overhead maps).
 2. **First-person dungeons** (`inside.*` locations — colony, mine, farm, tower): drawn by blitting pre-drawn wall pieces (front faces at several depths, slanted side walls, doors, ladders, ceiling/floor) from one 352×364 atlas per dungeon. **rendered** (§ Wall atlases). The slot/rectangle table that places them is not located yet.
 
-Walker Q1 (wall storage): the dungeon grid is **not located with certainty**. The fan maps draw dungeons as block maps (corridor squares vs solid), and a candidate ~4 KB region of 0/1 cells sits in the main program (§ Dungeon maps), which points to **type-derived** (solid/open cell) storage. That is a **hypothesis**. The overhead maps' passability layer is per-cell 0/1/2, confirmed by structure.
+Walker Q1 (wall storage) — **answered 2026-11-21: type-derived, one byte per cell** (§ First-person dungeons). Original recon text: the dungeon grid is **not located with certainty**. The fan maps draw dungeons as block maps (corridor squares vs solid), and a candidate ~4 KB region of 0/1 cells sits in the main program (§ Dungeon maps), which points to **type-derived** (solid/open cell) storage. That is a **hypothesis**. The overhead maps' passability layer is per-cell 0/1/2, confirmed by structure.
 Walker Q2 (view drawing): **frustum/slot blits from a per-dungeon piece atlas**, like Black Crypt / EOB. The atlas is **rendered**; the slot table is still open.
 
 ## File naming scheme — SOLVED (confirmed)
@@ -99,7 +99,10 @@ The 80,080 B files are 352×364, 5 planes, row-interleaved (byte autocorrelation
 Each atlas sits on disk directly before its dungeon's MOD and 8SVX: `0237` 8SVX → `0238` atlas → `023E` `inside.colony`; `0244` → `0246` → `024B` `inside.mine`; `0250` → `0252` → `0258` `inside.farm`; `0321`/`0314` → `031B` `inside.tower`. `inside.vulkan` has no atlas; it sits with the overhead group `03360514`/`0338020A`.
 Open: the piece rectangles and screen positions (a table in the main program), and the palette.
 
-### Dungeon maps (open — hypothesis)
+### Dungeon maps (superseded — see § First-person dungeons)
+
+> **Correction (2026-11-21):** solved. The span at file +0x72D80… is the five dungeon grids back to back (one byte per cell), located through the map loader's own table; the "several maps of different widths" reading was right, the widths are 20/32/30/20/30. The ~0x370 bytes after grid 5 are door-lock and event tables, not map. Details in § First-person dungeons below.
+
 
 No per-dungeon map file exists on disk, so the grids must live inside a program image.
 **Lead**: main program `000316B00105D570` file+0x72D80…+0x73DC0 (~4 KB) holds almost only values 0/1 (≈1,580 ones / 1,380 zeros), with a few 2–6 and isolated larger codes. Local row-period estimates change along the span (20/40 near +0x72D80, 64 around +0x73080–0x73380, 60 near +0x73A80, 12 at the end), so it is **several maps of different widths**, not one 64×64 grid; a forced 64-wide render is not coherent. A small record table precedes it at +0x72C20…+0x72D4A (`0001 0005 … 012C 003C`, then `0100 0200 0300 330F 3A0F …`).
@@ -112,6 +115,77 @@ Oracle: the fan maps in `Docs/` (block-style corridors) and `SecurityZone`'s one
 | Small-alphabet 2-D autocorrelation scan (2 KB windows, widths 8–128) over the 6 large non-IFF files | Only the main-program +0x72D80 span reads as a grid; `014613080102D68E` hits are word-padded bitmap data | finds the region, not the per-map header/width |
 | Forced 62–66-wide renders of the span | slanted/incoherent | the span holds several maps of different widths |
 
-## Palettes (open)
+## Palettes
+
+> **Correction (2026-11-21):** the in-game palette is found: 32 `$0RGB` words at runtime `$E7BDE` (file +0x67BDE), faded into the copper list by `$B7344`. See § First-person dungeons → Palette. The notes below predate that.
+
 
 Only ILBM `CMAP`s are known so far: the two 112×150 pictures in the main program (+0x32A9A, +0x33AFE; 32 entries each, same size as the 10,500 B portraits) and the intro-bank ILBMs. Palettes for tiles, walls and pictures are presumably word tables in the main program. Not searched yet.
+
+## First-person dungeons (decoded 2026-11-21)
+
+Source: the main program `000316B00105D570`, disassembled with capstone (linear sweep + targeted decodes).
+Extractor: `tools/perihelion/amiga/export-walker.ts` (readers in `exe.ts`, view port in `view-model.ts`); walker `tools/walker/games-perihelion.ts`.
+
+### Load address — confirmed
+
+The main program is an absolute image loaded at **`$80000`**: the slave's last instruction is `JMP $80000`, and the image's own `JMP $0B7454` (file +0) lands on `MOVE.L #$B74D8,$80 / TRAP #0` (file +0x37454), whose supervisor code continues cleanly at `$B74D8`. File offset = address − `$80000` for everything below. `$EE27C` is the file loader (`A0` = buffer, `D0` = **Table.Dat record index**); the slave patches it.
+
+### Dungeon set-up — confirmed
+
+`$F2C1E` = dungeon number 1..5. `$BED5A` loads three files per dungeon from long tables (Table.Dat record indices):
+
+| Dungeon | Atlas (`$BEDD6`) → `$25FB0` | Music (`$BEDEA`) | 8SVX (`$BEDFE`) → `$44D58` | Grid | Start x,y,facing (`$BEE48/52/5C`) |
+|---|---|---|---|---|---|
+| 1 | 0x14 `022917F6` (416×360) | 0x15 `innercity` | 0x16 `0237…` | 20×20 @ `$F2E14` | 10,1,0 |
+| 2 | 0x17 `023808FC` (352×364) | 0x18 `inside.colony` | 0x19 | 32×44 @ `$F2FA4` | 6,39,2 |
+| 3 | 0x1A `0246003C` | 0x1B `inside.mine` | 0x1C | 30×27 @ `$F3524` | 1,22,2 |
+| 4 | 0x1D `02520184` | 0x1E `inside.farm` | 0x1F | 20×22 @ `$F384E` | 1,17,2 |
+| 5 | 0x4E `03141714` | 0x4F `inside.tower` | 0x50 | 30×32 @ `$F3A06` | 23,27,2 |
+
+> **Correction (2026-11-21):** `022917F6…` (93,600 B, "sprites?") is dungeon 1's view atlas, 416×360×5 row-interleaved (260 B/row, the stride of the `$C3332` blitter). Dungeon 1 is the inner city (street views, opaque panels), not an `inside.*` dungeon.
+
+`$C4B22` copies one column of the table at `$C4B8C` into the live struct `$C4C86`: word = grid width (the `MULU $C4C86` row stride of every map access), then 11 lists of 5 longs (`$C4C88` grid pointer; `$C4C94` music/ambient zones; `$C4C98` door-lock table, 12-B records; `$C4CA0` teleport/ladder table; others are event lists — not decoded). Grid heights follow from the pointer spacing (grid 5 ends where list `$C4C98`[0] = `$F3DC6` begins): 400, 1,408, 810, 440, 960 bytes, each an exact multiple of its width. Every start cell is 0 with the exit (6) behind it.
+
+### Cell values — confirmed from the move/use handlers
+
+| Value | Meaning | Evidence |
+|---|---|---|
+| 0 | floor | |
+| 1 | wall | blocks (`$BCF94`); drawn as wall in every slot |
+| 2 | closed door | blocks; use-command (`$BD30A`, command 5) on the cell ahead sets it to 3 after the `$C4C98` lock check |
+| 3 | open door | passable; use sets it back to 2. Dungeon 1: a building doorway — standing on it, w/a/d do nothing, s returns to the previous square (`$BD08A`), the view is one full interior picture (`$C3960`) |
+| 4, 5 | ladder / hatch walls (two variants) | block only in dungeon 4 (`$BCFA4`); door frame + piece 20/21 |
+| 6 | exit | stepping on it opens the leave prompt `$BDF52` (n → back to the dungeon start, y → overworld) |
+
+### Movement — confirmed
+
+Facing `$F2C0E`: 0 = +y, 1 = −x, 2 = −y, 3 = +x (step routines `$C2688..$C2694`). Keys (`$BCE8A`): w forward, s back, a/d strafe (`$C2640` with relative 0/2/3/1, direction = facing + rel), q = facing−1 (`$C21DA`), e = facing+1 (`$C2202`). With y growing downwards that is 0 S, 1 W, 2 N, 3 E (turning right from S gives W). Previous position is kept in `$F2C08/$F2C0C`.
+
+### View window and composers — confirmed
+
+`$C26B2` copies the 7×7 cells around the party into `$C28D2`, rotated per facing (four copy loops `$C26F4/$C271C/$C2758/$C2786`), returning A0 = `$C28EA` (the party cell): **window +7 = one forward, +1 = one to the left**.
+`$C2A2E` clears the view buffer `$1BAE8` (432×120, 54 B × 5 interleaved planes per line; the 176-px view starts 16 bytes in at `$1BAF8`), sets the checkerboard parity `$C3426 = (x ^ y ^ facing) & 1`, then:
+
+- **far composer `$C2A94` (dungeons 2–5)** — background piece 0 (176×120 floor+ceiling) mirrored when parity = 0; cells two aside on rows 3/2; then 15 slot bytes `$C2F90..$C2F9E` gathered from rows 0–3 with occlusion (a wall one ahead stops rows 2–3; per side only the nearest of rows 1/2/3 gets a front face), drawn far to near. Each (slot, value) calls a leaf routine that sets piece `$C3420`, destination `$C3422`, mirror `$C3424` (often from the parity) and calls the masked blitter `$C30F4` (colour 0 transparent). Piece table `$C45A4` (25 × {src x bytes, src y, h, w bytes}), destination table `$C466C` (26 × {signed x bytes, y}).
+- **near composer `$C2FA0` (dungeon 1)** — three opaque panels (left 48 / centre 80 / right 48 px) from rows 0–2 via `$C3332`; piece table `$C397E` (19), destinations `$C3A16` (5).
+
+The extractor decodes every leaf (74, both parities) straight from the code and refuses any instruction outside the known leaf shape; the closed-door leaves (`$C3F3C` …) also contain a raw blitter copy that saves the doorway behind the door (`$1C9C0` → `$1763C`, for the opening animation) which draws nothing into the view and is stepped over.
+
+### Palette — confirmed (as the in-game screen palette)
+
+`$E7BDE`: 32 words, `000 FFF FED EDC … 210` (warm grey ramp) + `FEC … 310` (amber ramp). Faded into the copper list's COLOR00–31 (`$7D8DC`) by `$B7344` at game start (`$B768C`) and after interludes (`$C0E74`); the copper list has no mid-screen colour changes and no dungeon code loads another palette. Renders of all 5 atlases and an overhead town (`02830A9E` with tileset `02810AC2`) are coherent with it. `$E7B9E` is the title variant (pure grey ramp), `$E7B5E`/`$E7C1E` all-black / all-white fade targets.
+
+### In-game checks (for the user; x/y = grid column/row, y grows southwards; game facing 0 = S, 1 = W, 2 = N, 3 = E)
+
+1. Dungeon 2 (`inside.colony`) start (6,39) facing N: corridor walls both sides on the near square, then a wider room; turn round (S): a closed door with a red glyph, centred, filling the front-wall frame.
+2. Dungeon 3 (`inside.mine`) start (1,22) facing N: straight corridor, walls on both sides for three squares, gravel floor, black beyond.
+3. Dungeon 4 (`inside.farm`) at (2,14) facing W: a metal hatch/ladder wall directly ahead.
+4. Dungeon 1 (`innercity`) start (10,1) facing S: a street running away between building fronts; facing W from the same square: a building front filling the view.
+5. Step forward one square anywhere: the floor/ceiling texture and wall bricks should flip left-right (the parity mirror).
+
+Frames rendered for these: `build/cache/perihelion/walker-frames/` (`npx tsx tools/perihelion/amiga/render-frames.ts`).
+
+### Open
+
+The door-lock records (`$C4C98` list), teleport/ladder records (`$C4CA0`), event/zone lists, and what the overhead 40×40 maps connect to are not decoded. See `docs/perihelion/TODO.md`.

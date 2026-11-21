@@ -60,6 +60,7 @@ import { loadAp2View, ap2LevelList } from './games-abandonedplaces2.ts';
 import { loadEvilsDoomView } from './games-evilsdoom.ts';
 import { loadAp1View, ap1LevelList } from './games-abandonedplaces.ts';
 import { loadCrystalDragonView, crystalDragonLevelList } from './games-crystaldragon.ts';
+import { loadPerihelionView, perihelionLevelList } from './games-perihelion.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
 import {
   loadPoolOfRadianceView,
@@ -403,6 +404,7 @@ const GAMES = [
   { id: 'crystalsofarborea', label: 'Crystals of Arborea', loader: crystalsOfArboreaLoader, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'zombi', label: 'Zombi', loader: loadZombiView, defaultLevel: 5, platform: 'amiga' as const },
   { id: 'crystaldragon', label: 'Crystal Dragon', loader: loadCrystalDragonView, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'perihelion', label: 'Perihelion: The Prophecy', loader: loadPerihelionView, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'bardstale1', label: "The Bard's Tale", loader: loadBardsTale1View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'waxworks', label: 'Waxworks', loader: loadWaxworksView, defaultLevel: 4, platform: 'amiga' as const },
   { id: 'elvira', label: 'Elvira: Mistress of the Dark', loader: loadElviraView, defaultLevel: 0, platform: 'amiga' as const },
@@ -444,6 +446,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   elvira: 'one pre-composed picture per room and facing (Elvira 1\'s own room scripts -- scene subroutine 1000 + the room\'s user flag 0, facing v150 -- and VC draw scripts replayed offline; Waxworks pipeline): 374 rooms in one connected world (gameamiga: 875 items consumed exactly to EOF; exits 738/774 reciprocal), 1,195/1,195 room pictures rendered, 33 rooms gated by unmodelled conditions. HYPOTHESES: start room 876 (end of the start-up block of subroutine 101), turn-arrow direction labels, object/variable-gated pictures show their default state, closed/locked doors not openable, animated sprites not drawn; palettes use the VC setPalette result (bank 0 fallback) -- docs/elvira/TODO.md',
   elvira2: 'one pre-composed picture per room and facing (the game\'s own room scripts + VC draw scripts replayed offline; Waxworks pipeline): 144 ordinary rooms in 3 connected areas (exits/door states from gameamiga, 280/283 reciprocal) + the two super-room grid mazes (744: 30x30x4, 760: 20x20x6) as one level per floor, cell/facing pictures from the maze scripts (1300/1499) run by an offline interpreter. Maze walls/openings follow the real grid (cell numbers are 1-based); 22 cave rooms are linked to maze cells from the game\'s own table (sub 1286). HYPOTHESES: room 452 <-> maze 744 cell 3240 (the game\'s dev-verb entry cell), maze doors (state 2/3) and room-side doorway states treated as plain; down-state 3 treated as a pit (blocked, no fall); the room-world start is a guess; object-gated pictures show their default state, animated sprites not drawn; turn direction/compass names are conventions -- docs/elvira2/TODO.md',
   zombi: 'one picture per location (confirmed: executable blit at (8,48), arrow click rects, movement rule, start in the helicopter); compass NAMES are a convention (top arrow = N); special exits FE/FA/F0/1E and object/zombie overlay not implemented -- see tools/walker/games-zombi.ts',
+  perihelion:
+    'Grids, start poses, atlases, the 7x7 view window, both view composers (every leaf routine decoded from the main program), piece/destination tables, parity flip, movement/blocking rules, door toggle and palette read from the main program (loaded at $80000). HYPOTHESES: door-lock table ignored (every door toggles with Space); exits and ladders not followed; level names = music-module titles. Not drawn: NPCs, monsters, items, events; the overhead 40x40 maps are a separate mode -- docs/perihelion/TODO.md.',
   crystaldragon:
     'SA/SF codecs byte-exact vs the game\'s own Unpack (86/86 sets); walls, pillars, floors and ceilings from the real .SCR sets + slot tables, view-cell layout, facings, face variants, step parity and palette read from Crystal_Dragon. HYPOTHESES: painter order (not the game\'s occlusion masks), open/blocked cell types, start pose, black beyond 3 cells. Not drawn: doors, stairs, teleports, barriers, wall decorations, monsters, items; stairs/teleports not followed -- docs/crystaldragon/TODO.md.',
   abandonedplaces:
@@ -494,6 +498,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'crystaldragon') return crystalDragonLevelList(assetBase);
+  if (game === 'perihelion') return perihelionLevelList(assetBase);
   if (game === 'waxworks') return waxworksLevelListFromAssets(assetBase);
   if (game === 'elvira') return elviraLevelListFromAssets(assetBase);
   if (game === 'elvira2') return elvira2LevelListFromAssets(assetBase);
