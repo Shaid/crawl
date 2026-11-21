@@ -187,16 +187,121 @@
  * with the GLIB titles' own still-open version of this question) it has
  * not been confirmed by disassembly.
  *
- * **No embedded or external palette source for these tiles has been
- * located** (would need a further disassembly pass to find a boot-time
- * `LoadRGB4`-style call, not attempted this session — a secondary,
- * lower-priority open item relative to the pixel-geometry decode itself).
- * Rendered here with a synthetic 16-step grey ramp
- * (`CHAMPIONS_GREY_PALETTE`) — the same "monochrome/greyscale, no true
- * palette" convention this title's own `8X8D1.DAX`-sourced wall renders
- * already use (2 grey levels there vs. 16 here). Visually confirmed
- * (4x upscale, `Read`): real, structured, non-degenerate brick/door/
- * panel/diamond-motif tile art, not noise.
+ * > **Correction (2026-11-18, audit): the flat whole-file bank is NOT
+ * > supported — treat as wrong (seam ~ null).** "Fits 115/115" is an
+ * > in-range test against a bank of 700+ tiles and cannot fail (no null
+ * > control). Measured by tile-seam agreement (how often pixels match across
+ * > adjacent tile edges of a rendered view): the flat bank scores 0.23-0.50
+ * > per wall vs 0.16-0.34 for random tiles (null); the per-wall model
+ * > (blank, 45 universal tiles from id 203, then entries `10W+1`/`10W+2`, or
+ * > entry `W` for 5-slice walls) scores 0.39-0.68 (Death Knights' confirmed
+ * > quarters model: 0.51-0.71 vs null 0.17-0.30). Structurally, 5-slice
+ * > walldefs index only 1-115 = 45 + 70, and the entries line up with
+ * > 10-slice walldef ids exactly ({1,3,5,8} <-> {11/12, 31/32, 51/52,
+ * > 81/82}; {19,21,15,17} <-> {191/192, 211/212, 151/152, 171/172}).
+ * > Unexplained: indices 186-236 (second group of 10-slice walls). Tracked as
+ * > `cok-wall-addressing` in `docs/championsofkrynn/TODO.md`. Also: the code
+ * > gives bank 2 NO universal prefix, contradicting the paragraph above that
+ * > says it reuses bank 1's id 203 (bank-2 walls do index 1-45, so the
+ * > prefix is probably needed); and "9/9 WALLDEF1 ids" above is wrong —
+ * > WALLDEF1 has 6.
+ *
+ * > **Correction (2026-11-18, audit): the wall-tile palette is entries 0-15,
+ * > NOT 16-31 — the block below is superseded on that point and kept as a
+ * > documented dead end.** Oracle: Champions' own DOS-format `8X8D1.DAX`
+ * > holds the same tiles as EGA 4bpp nibbles (9-byte LE header + 8-byte
+ * > EGA->CGA map + 32 B/tile, high nibble first); the Amiga DAA pixel
+ * > indices equal the DOS nibbles under the IDENTITY mapping — 100.00% for
+ * > ids 11 and 23 (70 tiles, 4,480/4,480 px each) and 202 (38 tiles,
+ * > 2,432/2,432), 99.97% for id 203 (2,879/2,880); null control (shuffled
+ * > tile pairing) 20-28%. The 4-plane tiles therefore address registers
+ * > 0-15 directly, and the DOS game shows them with the EGA default palette,
+ * > which is exactly the shared entries 0-15 of `DUNGCOM.DAA`'s embedded
+ * > palette (`000 00a 0a0 0aa a00 a0a a50 aaa 555 55f 5f5 5ff f55 f5f ff5 fff`).
+ * > The "16-31" choice rested on (a) a false premise — `DUNGCOM.DAA` is NOT
+ * > byte-identical to `BORDER.DAA` (287 B vs 8,935 B, differing at byte 3;
+ * > only their embedded palettes match) and (b) a Death Knights precedent
+ * > that does not discriminate (its 16-31 half is identical in every DKK
+ * > file; DKK's 5-plane tiles hold only values 0 or 16-31 because plane 5
+ * > itself selects the upper half — no register-offset mechanism is needed
+ * > or implied for Champions). Status: **DOS-index-identical** (pixel
+ * > indices confirmed; the Amiga on-screen colours remain unverified
+ * > against a screenshot).
+ * >
+ * > **Correction (2026-09-01, this session): a real, corroborated colour
+ * > palette source HAS now been found** — `DUNGCOM.DAA` (and its exact byte
+ * > twin `BORDER.DAA` — the on-screen chrome drawn around the wall-art
+ * > viewport during dungeon exploration), plus `CPIC1.DAA`/`comspr.daa`/
+ * > `RANDCOM.DAA`/`WILDCOM.DAA`/`cpic2.daa`, all embed the identical
+ * > 32-entry palette (this title's own `decodeDaaPalette`-shaped 9-byte-
+ * > header + 64-byte-palette layout — the SAME shape Death Knights' picture/
+ * > sprite `.DAA` files use, just never checked for Champions before this
+ * > session since the tile-bank files specifically don't have it). Its
+ * > SECOND 16 entries (indices 16-31) are: `88f, b43, 311, 700, 732, d75,
+ * > ea8, 066, f11, f50, fb0, 050, 606, 336, 88a, ccf` — the first 16
+ * > (indices 0-15) are just the boring default CGA/EGA-style system ramp
+ * > (`000,00a,0a0,0aa,a00,a0a,a50,aaa,555,55f,5f5,5ff,f55,f5f,ff5,fff`,
+ * > shared verbatim across nearly every `.DAA` picture file sampled,
+ * > including one-off story illustrations like `BIGPIC1.DAA`/`SKY.DAA` that
+ * > each carry their own distinct *upper* half instead).
+ * >
+ * > **Evidence this indices-16-31 half, not 0-15, is the real wall-tile
+ * > palette:**
+ * > 1. **Sibling-title precedent, byte-verified, not just by analogy**:
+ * >    Death Knights of Krynn's OWN `DUNGCOM.daa` embeds a palette whose
+ * >    indices 16-31 (`000,555,aaa,fff,a00,a0a,a50,0a0,00a,55f,5f5,5ff,f55,
+ * >    f5f,ff5,0aa`, give or take entry 16) are near-identical to DKK's
+ * >    ALREADY-CONFIRMED real wall palette (the universal id-202 entry in
+ * >    `8x8d1.daa` — see this file's Death Knights section above). That is:
+ * >    in the one sibling title where the wall palette is independently
+ * >    confirmed by a completely different mechanism (an embedded
+ * >    per-tile-bank palette), `DUNGCOM.daa`'s own palette reproduces it —
+ * >    direct precedent that `DUNGCOM`'s embedded palette is generically
+ * >    "the dungeon-exploration-screen palette," not a one-off unrelated
+ * >    asset's colours.
+ * > 2. **Champions' own `BORDER.DAA` is byte-identical to `DUNGCOM.DAA`**
+ * >    (287 bytes, same compressed bytes) — and `BORDER.DAA` is definitely
+ * >    part of the SAME on-screen dungeon-exploration display as the wall
+ * >    art (the chrome drawn around the first-person viewport), so its
+ * >    palette is a strong candidate for the shared screen palette governing
+ * >    everything drawn in that view, walls included.
+ * > 3. **Rendered visual result**: compositing real `WALLDEF` views with
+ * >    this candidate (indices 16-31) produces coherent, non-degenerate
+ * >    wall art preserving the exact same checkerboard/triangle/door-frame
+ * >    geometry the existing greyscale renders already show — while the
+ * >    LOWER half (indices 0-15, the default CGA ramp) renders the identical
+ * >    geometry as a jarring, incoherent mix of saturated primary hues
+ * >    (magenta/cyan/pink) with no plausible in-game reading. Confirmed by
+ * >    `Read`-ing both renders side by side for `walldef-1001-wall5-view6`
+ * >    and `walldef-2019-wall2-view6`.
+ * >
+ * > **What this does NOT establish**: a `re-oracle`-quality static
+ * > disassembly pass this session (see `docs/championsofkrynn/TODO.md`)
+ * > *exhaustively* searched the whole 479,844-byte executable for a
+ * > `LoadRGB4`/`SetRGB4`-family LVO call (both direct and tail-call forms,
+ * > cross-checked against real NDK `.fd` LVO numbers to avoid the
+ * > `AllocMem`-vs-`LoadRGB4` numeric-LVO collision this same search first
+ * > hit) and for any direct `$DFF180`-`$DFF1BE` hardware colour-register
+ * > write or hand-built Copper-list colour block — and found NONE of these
+ * > anywhere in the binary. So *why* the wall-tile bitplane data would
+ * > address palette registers 16-31 rather than 0-15 (a plausible
+ * > mechanism: the wall viewport is a separate screen region whose bitplane
+ * > set is hardware/software-offset by a fixed 16, common on OCS Amiga
+ * > split-palette UI+viewport designs — but NOT the only possible one) is
+ * > NOT confirmed by code. This palette is **RENDERED / well-corroborated
+ * > hypothesis, not CONFIRMED**: real on-disk data, cross-validated by an
+ * > independent sibling-title precedent and a strong visual result, but
+ * > without a disassembly-traced consumer. See
+ * > `docs/championsofkrynn/amiga/data-structure.md` §4 and
+ * > `docs/championsofkrynn/TODO.md` for the full paths-tried table.
+ *
+ * Rendered here using `CHAMPIONS_GREY_PALETTE` if no real palette
+ * is supplied by the caller (the extractor now always supplies the real
+ * one, loaded from `DUNGCOM.DAA` at export time — see
+ * `tools/championsofkrynn/amiga/export-data.ts`); the old synthetic 16-step
+ * grey ramp (`CHAMPIONS_GREY_PALETTE`) is kept only as a documented
+ * reference for what was shipped before this session and as the decoder's
+ * default when no palette is supplied.
  */
 import { amiga12ToRGB } from './amiga-planar.ts';
 import { readAmigaDaaDirectory, decompressDosDaxEntry, type DosDaxEntry } from './goldbox-dosdax.ts';
@@ -204,7 +309,7 @@ import { readAmigaDaaDirectory, decompressDosDaxEntry, type DosDaxEntry } from '
 const CHAMPIONS_DAA_HEADER_LEN = 9;
 const CHAMPIONS_DAA_PLANE_COUNT = 4;
 
-/** Synthetic 16-step amiga12 (0x0RGB) grey ramp — Champions' `8X8D*.DAA` tiles carry no real palette at all (see module doc); this stands in for one so `buildDaaColorTiles` can render them the same way as Death Knights' real-palette tiles. */
+/** Synthetic 16-step amiga12 (0x0RGB) grey ramp — the pre-2026-09-01 fallback for Champions' `8X8D*.DAA` tiles, before a real on-disk palette source (`DUNGCOM.DAA`, see module doc) was found. Kept as `decodeChampionsWallTileSurface`'s default when no real palette is supplied. */
 export const CHAMPIONS_GREY_PALETTE: number[] = Array.from({ length: 16 }, (_, i) => (i << 8) | (i << 4) | i);
 
 /**
@@ -212,11 +317,13 @@ export const CHAMPIONS_GREY_PALETTE: number[] = Array.from({ length: 16 }, (_, i
  * header (no embedded palette), then `tileCount` derived directly from body
  * length at a fixed `planeCount` of 4 — see module doc for why the header's
  * own offset-8 byte is cross-checked but not trusted outright (id 203's
- * real, off-by-one anomaly). Returns a `DaaTileSurface` (with the synthetic
- * grey palette attached) so callers can reuse `daaTileIndices`/
- * `buildDaaColorTiles` unchanged.
+ * real, off-by-one anomaly). Returns a `DaaTileSurface` carrying whatever
+ * `palette` the caller supplies (defaults to the synthetic grey ramp for
+ * backward compatibility) so callers can reuse `daaTileIndices`/
+ * `buildDaaColorTiles` unchanged. See module doc's correction block for the
+ * real `DUNGCOM.DAA`-sourced palette callers should normally pass.
  */
-export function decodeChampionsWallTileSurface(raw: Uint8Array): DaaTileSurface {
+export function decodeChampionsWallTileSurface(raw: Uint8Array, palette: number[] = CHAMPIONS_GREY_PALETTE): DaaTileSurface {
   if (raw.length <= CHAMPIONS_DAA_HEADER_LEN) {
     throw new Error(`champions daa tile surface: entry too short (${raw.length} bytes)`);
   }
@@ -227,7 +334,7 @@ export function decodeChampionsWallTileSurface(raw: Uint8Array): DaaTileSurface 
     );
   }
   const tileCount = planes.length / (CHAMPIONS_DAA_PLANE_COUNT * 8);
-  return { tileCount, planeCount: CHAMPIONS_DAA_PLANE_COUNT, palette: CHAMPIONS_GREY_PALETTE, planes };
+  return { tileCount, planeCount: CHAMPIONS_DAA_PLANE_COUNT, palette, planes };
 }
 
 export interface DaaTileSurface {
@@ -260,6 +367,18 @@ export function decodeDaaPalette(raw: Uint8Array): number[] {
   const palette: number[] = [];
   for (let i = 0; i < DAA_PALETTE_COUNT; i++) palette.push((paletteBytes[i * 2] << 8) | paletteBytes[i * 2 + 1]);
   return palette;
+}
+
+/**
+ * Extract Champions of Krynn's 16-colour wall-tile palette from an
+ * already-decompressed `DUNGCOM.DAA` entry — entries 0-15 of the embedded
+ * 32-entry palette (the EGA default ramp). Corrected 2026-11-18: this was
+ * 16-31; see this module's "Correction (2026-11-18, audit)" doc block for
+ * the DOS `8X8D1.DAX` identity-mapping oracle. `raw` is entry id 1's
+ * decompressed bytes (`DUNGCOM.DAA` has exactly one entry).
+ */
+export function readChampionsWallPalette(raw: Uint8Array): number[] {
+  return decodeDaaPalette(raw).slice(0, 16);
 }
 
 /**
@@ -360,8 +479,13 @@ export function buildDkkWallColorBank(byId: Map<number, Uint8Array>, wallId: num
  * a genuine corrupted/blanked stub) are skipped, contributing 0 tiles —
  * NOT a placeholder gap, since a real Amiga engine reading this exact
  * on-disk data would see the identical decompression failure.
+ *
+ * `palette` defaults to the synthetic grey ramp for backward compatibility;
+ * callers should normally pass the real `DUNGCOM.DAA`-derived 16-colour
+ * palette (see module doc's correction block) — `readChampionsWallPalette`
+ * below loads it.
  */
-export function buildChampionsFlatTileBank(fileData: Uint8Array): Uint8Array[] {
+export function buildChampionsFlatTileBank(fileData: Uint8Array, palette: number[] = CHAMPIONS_GREY_PALETTE): Uint8Array[] {
   const { dataOffset, entries } = readAmigaDaaDirectory(fileData);
   const placeholder = new Uint8Array(8 * 8 * 4).fill(128);
   for (let i = 3; i < placeholder.length; i += 4) placeholder[i] = 255; // opaque
@@ -369,7 +493,7 @@ export function buildChampionsFlatTileBank(fileData: Uint8Array): Uint8Array[] {
   const decodeEntryTiles = (entry: DosDaxEntry): Uint8Array[] => {
     try {
       const raw = decompressDosDaxEntry(fileData, dataOffset, entry);
-      const surface = decodeChampionsWallTileSurface(raw);
+      const surface = decodeChampionsWallTileSurface(raw, palette);
       return buildDaaColorTiles(surface, surface.palette);
     } catch {
       return [];

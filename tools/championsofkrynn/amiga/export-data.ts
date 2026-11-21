@@ -31,9 +31,14 @@
  *       bank 1's `8X8D1.DAX` tile bank for BOTH banks (a coincidental id
  *       overlap gave bank 2 only 10/65 renders). 115/115 view slices
  *       across both banks (50/50 bank 1, 65/65 bank 2 — 0 skipped) render
- *       with the flat whole-file tile bank; rendered in greyscale (a
- *       synthetic 16-step grey ramp) — no real colour palette for these
- *       tiles has been located yet.
+ *       with the flat whole-file tile bank (2026-11-18 audit: that bank's
+ *       addressing is NOT supported — tile seams ~ null; see TODO
+ *       `cok-wall-addressing`). Coloured with entries 0-15 of `DUNGCOM.DAA`'s
+ *       embedded palette (`readChampionsWallPalette`; corrected 2026-11-18
+ *       from 16-31: Amiga tile indices equal the DOS `8X8D1.DAX` EGA nibbles
+ *       at 100%, and DOS shows them with the EGA default ramp = entries
+ *       0-15). Status: DOS-index-identical, unverified against an Amiga
+ *       screenshot.
  *   public/assets/championsofkrynn/amiga/dungeon/level-<bank*1000+id>.json
  *     — GEO cell grids + ECL-resolved wallset bindings, one file per level.
  *
@@ -43,9 +48,9 @@
 import { resolve } from 'node:path';
 import { mkdirSync, readdirSync } from 'node:fs';
 import { readBinary, writePNG, writeJson } from '@seer-project/pipeline';
-import { readDosDaxDirectory, decompressDosDaxEntry, type DosDaxEntry } from '../../shared/goldbox-dosdax.ts';
+import { readDosDaxDirectory, decompressDosDaxEntry, readAmigaDaaDirectory, type DosDaxEntry } from '../../shared/goldbox-dosdax.ts';
 import { decodeWallSlices } from '../../shared/goldbox-walltiles.ts';
-import { buildChampionsFlatTileBank, renderColorView } from '../../shared/goldbox-daa-tiles.ts';
+import { buildChampionsFlatTileBank, renderColorView, readChampionsWallPalette } from '../../shared/goldbox-daa-tiles.ts';
 import { assetDir, syncDataManifest, manifestEntry, writeManifest } from '../../shared/asset-paths.ts';
 import { decodePorGeoEntry, type GeoLevel } from '../../shared/goldbox-geo.ts';
 import { exportGeoDungeon } from '../../shared/goldbox-dungeon-export.ts';
@@ -114,9 +119,17 @@ export async function exportChampionsOfKrynnData(dataDir: string) {
   // indices — see the module doc's "Addressing model" section). `8X8D2.DAA`
   // (bank 2) has no id 202/203 of its own, so its flat bank has no
   // "universal" prefix of its own — a documented asymmetry, not a bug.
+  // Wall-tile palette — entries 0-15 of `DUNGCOM.DAA`'s embedded palette (NOT
+  // 16-31; corrected 2026-11-18, see `goldbox-daa-tiles.ts`'s module doc for
+  // the DOS `8X8D1.DAX` identity-mapping oracle).
+  const dungcomData = readBinary(resolve(dataDir, 'DUNGCOM.DAA'));
+  const { dataOffset: dungcomOffset, entries: dungcomEntries } = readAmigaDaaDirectory(dungcomData);
+  const dungcomRaw = decompressDosDaxEntry(dungcomData, dungcomOffset, dungcomEntries[0]);
+  const wallPalette = readChampionsWallPalette(dungcomRaw);
+
   const daaTilesByBank = new Map<number, Uint8Array[]>([
-    [1, buildChampionsFlatTileBank(readBinary(resolve(dataDir, '8X8D1.DAA')))],
-    [2, buildChampionsFlatTileBank(readBinary(resolve(dataDir, '8X8D2.DAA')))],
+    [1, buildChampionsFlatTileBank(readBinary(resolve(dataDir, '8X8D1.DAA')), wallPalette)],
+    [2, buildChampionsFlatTileBank(readBinary(resolve(dataDir, '8X8D2.DAA')), wallPalette)],
   ]);
 
   const allRenderedFiles: string[] = [];
@@ -188,11 +201,11 @@ export async function exportChampionsOfKrynnData(dataDir: string) {
         // Remap into the same bank*1000-namespaced wall-id space the
         // texture filenames above use, so `resolveWallFlatId` (shared,
         // unmodified) finds the right bank's own PNG.
-        level.wallsetBinding = {
-          slot1: binding.slot1 !== undefined ? bank * LEVEL_ID_MULTIPLIER + binding.slot1 : undefined,
-          slot2: binding.slot2 !== undefined ? bank * LEVEL_ID_MULTIPLIER + binding.slot2 : undefined,
-          slot3: binding.slot3 !== undefined ? bank * LEVEL_ID_MULTIPLIER + binding.slot3 : undefined,
-        };
+        // The 0x7f/0xff "don't touch this slot" sentinels stay un-namespaced
+        // (2026-11-18 audit: they were exported as 1255/2127 before).
+        const ns = (v: number | undefined) =>
+          v === undefined || v === 0x7f || v === 0xff ? v : bank * LEVEL_ID_MULTIPLIER + v;
+        level.wallsetBinding = { slot1: ns(binding.slot1), slot2: ns(binding.slot2), slot3: ns(binding.slot3) };
         levelsWithAnyBinding++;
       }
     }
