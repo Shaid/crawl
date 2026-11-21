@@ -107,10 +107,17 @@ for (const file of W6_SITE_FILES) {
 	const source = join(w6SourceRoot, file);
 	const destination = join(W6_ASSET_DST, file);
 	if (!existsSync(source)) throw new Error(`Missing Wizardry 6 site asset: ${source}`);
+	// In CI the repo's public/assets is gitignored, so the source *is* the
+	// committed destination; copying a file onto itself throws.
+	if (!hasLiveW6Assets) continue;
 	mkdirSync(dirname(destination), { recursive: true });
 	cpSync(source, destination);
 }
-console.log(`Copied ${W6_SITE_FILES.length} curated Wizardry 6 assets into ${W6_ASSET_DST}`);
+console.log(
+	hasLiveW6Assets
+		? `Copied ${W6_SITE_FILES.length} curated Wizardry 6 assets into ${W6_ASSET_DST}`
+		: `Using ${W6_SITE_FILES.length} committed Wizardry 6 site assets in ${W6_ASSET_DST}`,
+);
 
 for (const [game, file] of TITLE_SITE_FILES) {
 	const source = join(repo, 'public', 'assets', game, file);
