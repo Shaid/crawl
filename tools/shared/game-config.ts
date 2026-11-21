@@ -358,6 +358,9 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         const { exportTilesets } = await import('../abandonedplaces2/amiga/export-tilesets.ts');
         const r = exportTilesets();
         console.log(`  abandonedplaces2/amiga: ${r.atlases} atlases, ${r.frames} frames, geometry ${r.geometry.ok}/${r.geometry.checked}`);
+        const { exportWalker } = await import('../abandonedplaces2/amiga/export-walker.ts');
+        const w = exportWalker();
+        console.log(`  abandonedplaces2/amiga walker: ${w.levels} levels, ${w.res} resource files`);
       },
     }],
   },

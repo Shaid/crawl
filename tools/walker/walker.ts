@@ -56,6 +56,7 @@ import { loadWizardry6Snes, wizardry6SnesLevelList } from './games-w6-snes.ts';
 import { loadEotb1View, eotbLevelList } from './games-eotb.ts';
 import { loadEotb2View, eotb2LevelList } from './games-eotb2.ts';
 import { loadEotb3View, eotb3LevelList } from './games-eotb3.ts';
+import { loadAp2View, ap2LevelList } from './games-abandonedplaces2.ts';
 import { loadLandsOfLoreView, landsofloreLevelList } from './games-landsoflore.ts';
 import {
   loadPoolOfRadianceView,
@@ -372,6 +373,7 @@ const GAMES = [
   { id: 'eotb2', label: 'Eye of the Beholder II', loader: loadEotb2View, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'eotb2amiga', label: 'Eye of the Beholder II (Amiga)', loader: loadEotb2View, defaultLevel: 1, platform: 'amiga' as const },
   { id: 'eotb3', label: 'Eye of the Beholder III', loader: loadEotb3View, defaultLevel: 3, platform: 'dosvga' as const },
+  { id: 'abandonedplaces2', label: 'Abandoned Places 2', loader: loadAp2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'landsoflore', label: 'Lands of Lore', loader: loadLandsOfLoreView, defaultLevel: 1, platform: 'dosvga' as const },
   { id: 'poolofradiance', label: 'Pool of Radiance', loader: loadPoolOfRadianceView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'curseoftheazurebonds', label: 'Curse of the Azure Bonds', loader: loadCurseOfTheAzureBondsView, defaultLevel: 1, platform: 'amiga' as const },
@@ -412,6 +414,8 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   eotb2amiga:
     "same game as 'eotb2' (DOS/VGA), a genuinely different Amiga port -- .VCN/.CPS are LCW-compressed Amiga 5-bitplane graphics (EOB1-Amiga's own encoding) wrapped in EOB2's own container/.INF header shape; .VMP/.MAZ/.INF record layout and .DEC/.DCR are confirmed byte-identical (or byte-identical container) to the DOS port, so this reuses the DOS walker's renderer/loader code unmodified against Amiga-decoded JSON assets -- see docs/eotb2/amiga/data-structure.md. All 16 levels export and render (wall geometry, decorations, and the LEVEL10-14 mezz+azure palette-override bundle all confirmed); item/monster stat tables (ITEM.DAT/ITEMTYPE.DAT) not yet decoded for this platform.",
 };
+  abandonedplaces2:
+    'slot-table renderer ported from the game\'s own tables (walls, floor/ceiling, on-wall decorations, pits, stairs, gates; collision from the real cell flags). Monsters, items, objects, chests, water, fire and switches are not drawn; palette indices 12-15 (the lime/teal speckle) are unresolved; stairs are not followed between levels -- docs/abandonedplaces2/TODO.md.',
 
 /**
  * Wizardry 6 graphics-variant plumbing (the `#variant` selector, anticipated
@@ -445,6 +449,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'ishar2') return isharLevelLists.ishar2();
   if (game === 'ishar3') return isharLevelLists.ishar3();
   if (game === 'crystalsofarborea') return crystalsOfArboreaLevelList();
+  if (game === 'abandonedplaces2') return ap2LevelList(assetBase);
   if (game === 'zombi') return zombiLevelListFromAssets(assetBase);
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);

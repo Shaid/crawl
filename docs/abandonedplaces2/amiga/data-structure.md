@@ -126,7 +126,9 @@ gt 7, obj 11, mon 14, pit 16, swp 20, sww 36, fl 2.
 The view is 192×135 (`fl_*` = 2 full-frame floor/ceiling images). Wall records come
 as near/mid/far front faces plus left/right side faces in mirrored pairs.
 **Renderer = slot table** (pre-drawn bitmaps per view position, cookie-cut with
-their mask). The slot destination table itself is still to be found in `main`.
+their mask). The slot destination tables are decoded: see §6.
+
+> **Correction (2026-11-21):** the slot destination table is solved (§6); the walker consumes it.
 
 > **Correction (2026-11-21):** the recon's "1,476/1,520, 44 UI failures (presumably no
 > mask plane)" is now explained and closed. **Flags word 6**: high byte + 1 = colour
@@ -180,3 +182,88 @@ their mask). The slot destination table itself is still to be found in `main`.
 | dng cell bytes 0–4 | — | — | |
 | `.def` word 6 low byte, slot dest coords | — | — | |
 | `.ani`, `.cfs`, `bank*` | — | — | |
+
+## 6. Renderer, level cells and theme selection (2026-11-21) — from disassembly of `main`
+
+Offsets below are **hunk offsets in `main`** (= file offset − 0x20; the hunk base is 0, so absolute
+`$xxxx` operands equal these). Code starts at +0x1B0 (the first 0x1B0 bytes are an allocation/size
+table beginning `EXEC`). Disassembly lives in gitignored scratch only; it was r2 linear-sweep of the
+flat code image. Extractor: `tools/abandonedplaces2/amiga/export-walker.ts` (tables read from the
+shipped file at the offsets cited); port: `tools/abandonedplaces2/amiga/view-model.ts`.
+
+### 6.1 Level → tileset (**confirmed** structure, loader at +0x12214)
+- `+0x170A4`: 28 words, level → theme (`0,0,3,3,3,3,1,1,1,5,5,4,4,7,7,7,6,6,6,2,2,8,8,9,12,10,11,13`).
+- `+0x17088`: theme → palette set (`set_NN.clr`): `0,1,2,3,4,5,5,6,7,7,50,50,50,50`.
+- `+0x16EC8`: 14 rows × 16 words (theme → file number per family). Column order (matches the name list at
+  `+0x16B64..`): wl, fl, pit, obj1, obj2, obj3, onwl1, onwl2, stru, strd, mon1, mon2, gt, sww, swg, swp.
+  The loader (`+0x1247A`) patches the two digits of each `xx` in the name; `99` = empty placeholder
+  (outdoor themes 10–13 use `wl_99`, i.e. no walls). Level 24–27 are themes 12/10/11/13.
+- Destination variables per family: wl ofs/def/bpl = `$535E/$5362/$5366`, fl def/bpl `$5356/$535A`
+  (fl ofs = literal `fl_00.ofs`, `$5352`), pit `$540E/$5412/$5416`, obj1–3 `$541A..$543A`,
+  onwl1 `$543E/5442/5446`, onwl2 `$544A/544E/5452`, stru `$5456/545A/545E`, strd `$5462/5466/546A`,
+  mon1/2 `$5486..`/`$5492..`, gt `$549E/54A2/54A6`, sww `$54AA..`, swg `$54B6..`, swp `$54C2..`;
+  fixed resources: `grounda.def/.ofs` + `water.bpl` (`$53E6/$53E2/$53EA`), chest `$53FA..`, fire `$53EE/53F2/53F6`,
+  items `$547A..`, fspells `$546E..`, spani `$5406/$540A`.
+
+### 6.2 Level file blocks (**confirmed** for 3 of 10; others rendered)
+`dng_NN.dat` header offsets map to runtime vars in the loader at +0x949A: offs[0] cells (`$968E`),
+offs[1] list `$9692` (30-B records, x@+0x12 y@+0x14; set by cell byte5 bit7), offs[2] `$9696` (36-B, x@+0x16
+y@+0x18; byte5 bit6), offs[3] `$969A`, offs[4] **gates** `$969E` (10-B: type, x, y, state, orient),
+offs[5] **wall decorations** `$96A2` (8-B: type 1/2 = onwl1/onwl2, x, y, side 0..3 absolute N,E,S,W),
+offs[6] `$96A6`, offs[7] **stairs/teleports** `$96AA` (12-B: kind 1/2, x, y, destX, destY, destLevel), offs[8]/[9] unknown.
+Lists are terminated by a word `0xFFFF`; a word `0` is an empty slot. Evidence: 29/29 decor entries in
+dng_00 sit on cells with byte3 bit3 set (null control: shuffled coordinates fail); block lengths are
+`10n+2` (gates), `8n+2` (decor), `12n+2` (stairs).
+
+Cell bytes (8 per cell, row-major `y*W+x`):
+
+| Byte.bit | Meaning | Evidence |
+|---|---|---|
+| 5.0 | wall; blocks movement | 0x9A42, draw 0x7980 |
+| 5.1 | illusory wall: drawn as wall unless flag `$49A6`, does **not** block party | 0x7980/0x9A2E; toggled by event at 0xB294 |
+| 5.7 | monster present (list offs[1]); blocks party | 0x79D2, 0x9A4C |
+| 5.3/4/5/6 | presence flags for entity lists (`$96BE`/`$96BA`/`$96C2`/`$9696`) | 0x7A22–0x7B8C (hypothesis: items/monsters) |
+| 0.0 / 0.1 | fire (animated, two flicker frames) / water | 0x698E, 0x68A4 |
+| 1.0 | ceiling-hung `obj_` object; blocks party | 0x6A32, 0x9A6A |
+| 3.1 | chest (`chest.def`); blocks party | 0x6952, 0x9A56 |
+| 3.2 | blocks party (not drawn by any routine found) | 0x9A60 |
+| 3.3 | has on-wall decoration(s) in offs[5] | 0x78A8 |
+| 4.2 / 4.3 | pit B (ceiling, pit recs 8–15) / pit A (floor, recs 0–7) | 0x6918 / 0x68DE |
+| 4.4 / 4.5 | stairs/teleport kinds 2 / 1 (offs[7]) | 0x9AB8 / 0x9AC0, 0x6CC4 |
+| 4.6 | gate (offs[4]); blocked while `state` bit0 clear | 0x6B04, 0x9B4A (bit0 set = open) |
+
+Facing: 0 = north (−y), 1 = east, 2 = south, 3 = west; step deltas at `+0x115CA` = `(0,-1),(1,0),(0,1),(-1,0)`.
+
+### 6.3 View renderer (**confirmed** by disassembly; entry +0x66CC, frame loop +0x6766)
+- View = 192×135, 4 depth rows × 5 lateral cells (lateral 0 centre, 1 left1, 2 left2, 3 right1, 4 right2).
+  Cell offsets: `+0x15806` `[row][lat][facing][dx,dy]` signed bytes (built per frame by +0x758C).
+  Face rotation `+0x158A6`: `rot[facing][side] = (side − facing)&3`.
+- Order: floor/ceiling `fl[(x^y^facing)&1]` at (0,0) (+0x7280; parity makes the floor chequer alternate per step),
+  then cells far→near (rows 3..0), lateral 4,3,2,1,0.
+- **Solid cell** (+0x7D2A): draws the four entries `+0x15EB6[cell*4..]` (255 = none) of a 72-slot face table.
+  Template `+0x15F06` (72×`kind,id1,id2`), destination `+0x15FDE` (72×`x,y` int16), `.def` record fields add their
+  own x/y (+0x5D3C). `kind 1`: `wl[id1]` plain; `kind 2`: parity `(cx^cy)&1` = 0 → `wl[id1]` plain, else `wl[id2]` **flipped**.
+  Flipped x = `x − 2·xoff + frameW − 8·bytesPerRow` (bit-reversed rows via `mirror.dat`).
+- **Occlusion** (+0x76C0/+0x7734/+0x77A2): per lateral line 0/1/3, if the cell one row nearer is solid, entries
+  `{0,32,8}+r` / `{16,56}+r` / `{24,64}+r` are cleared.
+- **On-wall decoration** (+0x78A8/+0x7932, draw +0x6C4A→+0x7C6E): slot = `+0x160FE[cell*4 + rot(side)]` (−1 none),
+  `(kind,rec)` = `+0x1614E[slot]`, kinds 0 none / 1 plain / 2 flipped / 3 flipped iff parity 0. A decoration with a
+  non-empty record **replaces** the wall face of that slot (onwl pieces are full wall pictures).
+- **Pits**: `(action,rec)` pairs per cell `+0x16446` (A) / `+0x1646E` (B), dest `+0x16676` / `+0x166C6`.
+- **Stairs**: cell flag + offs[7]; drawn through the decoration path on `rot = 2` (near face), `strd` for kind 1, `stru` for kind 2.
+- **Gates**: orientation test `+0x6BD4[orient*4+facing]`; face-on uses `+0x16496`/`+0x16766` (recs 0–2) plus bars `+0x164E6`/`+0x16806`
+  (recs 3–5) while `state==0`; edge-on `+0x164BE`/`+0x167B6` (rec 6). The opening animation (state ≠ 0, high byte) is not ported.
+- Not ported (draw routines located, tables not decoded): monsters/items/objects/chests/water/fire/switches (`ap2-entities`).
+
+### 6.4 Paths tried / honesty
+| Item | Result |
+|---|---|
+| Palette indices 12–15 (lime/teal in `set_00`) | wl records use 12/14 for 17–50 % of pixels (far walls mostly 14); no routine found that rewrites them (the `$3584` writes are UI rectangles, not colours). Still `ap2-image-palettes`. |
+| IRA on `main` | `ReadSymbol error` on this HUNK; used a flat-image r2 sweep (entry +0x1B0). |
+
+### 6.5 What transfers to AP1 (hypothesis, not checked)
+Same kernel lineage (§4): the 4×5 view-cell scheme, `rot[facing][side]`, the 72-slot face-template idea,
+per-cell parity flipping, `mirror.dat` bit reversal, the `0x1C`-byte-record style blit and the
+"decoration replaces wall face" rule are engine-level and likely carry over; AP1's headerless art needs its
+geometry from its own tables (offset/size per piece) rather than `.def`, and its 2-byte cells carry fewer
+flags. Locate AP1's equivalents by searching its `code` for the `mulu #0x1C`-style record stride and a `(side-facing)&3` table.
