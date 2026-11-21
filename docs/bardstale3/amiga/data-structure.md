@@ -14,9 +14,11 @@ assumed from the directory name.
 ```
 BardsTale3.slave           WHDLoad slave (identity oracle, §0)
 Manual / ReadMe / Solution / Spells   WHDLoad-extracted reference text (no format work needed)
-data/driver                 68k executable/overlay, not yet disassembled
+data/driver                 title/sound loader blob (no HUNK header; strings Thief:title...). NOT the game -- see §4
+                             (2026-11-21 correction: the game program is `bard3`)
 data/all.pic                "animated picture" bank — CONFIRMED, see §2
-data/bard3                  palette source for all.pic (id-remap + palette tables) — CONFIRMED, see §2
+data/bard3                  THE GAME PROGRAM (3-hunk HUNK executable: CODE 0x1eb00 B, DATA, BSS); also holds
+                             all.pic's palette tables (§2) and every map/view table (§4)
 data/D0WAL.GRP, GDUNG.GRP, SKARA.GRP, WILDWAL.GRP
                              LE u16 offset directory (D0WAL: 7 entries, 14..8864), records start
                              with magic RAW\x18 — NOT yet decoded
@@ -96,11 +98,66 @@ LE u16 offset directory (entry 0 = directory length), record = `"RAW"`, `w` px (
 i.e. the decode is right; **palette not located** (bard3's picture palettes are for `all.pic`; the dungeon/wild palette source is
 unknown) and the which-record-is-which-depth mapping is not traced (needs `driver`). `data/grp-wall-art.json` holds raw indices.
 
-### Why there is no BT3 walker yet
+### Why there was no BT3 walker yet (superseded 2026-11-21, see §4)
 Missing, in order: (1) the cell semantics of the grid family and the whole dungeon-record layout (a `driver` trace of the
 map-load + move routine), (2) the palette for the wall art, (3) the view geometry / record-to-depth mapping. Smallest next step:
 disassemble `driver`'s map loader (search for the `maps.hi`/`maps.lo` open + LZHUF call) and follow the buffer to the move routine.
 
-## 4. Open
+## 4. Dungeon walker trace (2026-11-21, bard3 -- CONFIRMED from code)
+
+> **Correction (2026-11-21):** the map/view code is not in `driver`. `driver` is a small title/sound loader;
+> the game is `bard3` (`0x3F3` HUNK file; it even contains the string `Thief:driver`). `bard3` opens
+> `Thief_data:maps.lo` / `maps.hi` / `wildwal.grp` / `skara.grp` / `gdung.grp` / `dung.tst` by table
+> (DATA 0x20698..). Addresses below are flat: CODE at 0, DATA at 0x1eb00 (file offset = addr - 0x1eb00 + 0x23c10),
+> BSS at 0x267b4. Disassembled with IRA (`-a -LABEL=1`), labels = addresses.
+
+**Map loader** 0x9634(map, buf): map index -> (file 1 = maps.lo / 2 = maps.hi, record) via DATA 0x206ed, then the
+u32 directory + `[u32 size][LZHUF]` record (LZHUF at 0x0748). Maps 0-9 are the ten cities/wilderness grids;
+dungeon index d (global 0x268da) = map - 10, so the 61 dungeon records are d = 0..60. Dungeon entry 0x1cb2.
+
+**Dungeon record** (all offsets confirmed by their consumers): `0x10` flags (bits 0-2 encounter level, bit 4 stairs
+prompt sense, bits 6-7 wall set: filename table index 3+v -> 0,1,2 = gdung.grp, 3 = `dung.tst` which is not
+shipped and never selected), `0x11` level index in the dungeon, `0x12..0x19` dungeon index of each level
+(0xff none), `0x1a/0x1b/0x1c` exit y/x/city, `0x1d` monster set, `0x1e` W, `0x1f` H, `0x20/0x21` signed x/y offset of
+the level (stairs keep the party at the same frame position: y += old[0x21] - new[0x21], 0xcdf0 + 0x1d6a),
+`0x22` u16**LE** special-list offset, `0x24` u16LE[H] row offsets (row y; stored last row first).
+> **Correction (2026-11-21):** the old note "[0x10] = size-1, [0x11] = level index ... u16BE word table stepping 0x19"
+> misread this header: 0x19 = 5 x W; the words are little-endian; size is at 0x1e/0x1f.
+
+**Cell = 5 bytes**: `[0]` E | N<<4, `[1]` W | S<<4 (one 4-bit value per face; word = b1<<8|b0, rotated left by
+4*facing at 0x01c8 so the front face is bits 4-7), `[2]` 0x80 random encounters, 0x40 portal up, 0x20 portal down
+(both drawn), 0x10 fixed encounter, 0x08 darkness; `[3]` traps (0x01 spinner, 0x10 silence, 0x40 damage ...);
+`[4]` automap (0x01 seen, 0x08 visited). Per-flag handlers: table DATA 0x25a78/0x25ab8/0x25ac8. Orientation check:
+the shared face of neighbours agrees on 99.0 % of faces over the large maps (wrong orientation: < 80 %).
+Face values: 0 open, 1/9 wall (two art sets), 2,3,4 / 10,11,12 door, 5/13 invisible wall, 6,14 and 8 walls, 7,15
+doors (nibble -> piece table 0x20d72, nibble -> move class 0x20c32).
+
+**Movement** (0x20a8 / 0x2018 -> 0x22ba): forward = (x,y) + (0,1)/(1,0)/(0,-1)/(-1,0) for N/E/S/W, wrap mod W/H
+(0x2d7a). The forward key (0x4800) only passes class 0; the `0x4b` command ('K', kick) also passes door classes 1/2.
+Turns: 0x4b00 left, 0x4d00 right, 0x5000 U-turn; no back-step.
+
+**Stairs / teleport**: special list = count + 4-byte entries `[y (0x7f any)] [x (0xff any)] [u16LE script]`;
+scripts are bytecode (71 opcodes, handler table DATA 0x222cc, high bit = continue). Opcode 0 = level index -1
+(below 0 leaves to the city at 0x1a..0x1c), 1 = +1 (0xce92 / 0xcefc, after a yes/no prompt); opcode 3 = teleport
+(y, x, target; in a dungeon target bit 7 = city, else dungeon index). Check: 42 of 47 stairs squares land exactly on a
+reverse-stairs square of the target level (the 5 others are in White Tower / Ice Keep).
+
+**View** (0x29dc): 34 view cells per facing (DATA 0x20d62 -> 4 x 34 (dx,dy)); cells 0-24 = wall words, 25-33 =
+portal words (0x1f238). 61 draw slots (cell 0x20e02, nibble shift 0x20e3f, enable 0x20ef6, x/y 0x20e7c with x in
+bytes, width-1 0x20b6a, GRP directory byte offset 0x20be4, scale 0x20ba7 (64 = 1:1), mirror 0x20dc5); first slot by
+light level 0x20d82. Only the 22 slots with enable set are ever drawn (a 3-wide, 3-deep view). Piece p (1..4) in slot s
+= GDUNG directory entry slotGrp/2 + 2(p-1) (even = 24x97 side, odd = 64x55 front; limit 16 bytes in a dungeon);
+entries 8/9 (112x44 + 112x45) are the ceiling / floor background halves (0x9d12, 2464 B each). Blitter 0x0062:
+scaled chunky copy, accumulator decimation (-scale per pixel/row, emit on <0, +64), mirror, colour 5 transparent
+(mask table built from 0x55 at 0x0aa6). Light < 4 blanks part of the view (0x20fd6 / 0x20fe0).
+**Palette**: the view routine loads DATA 0x20868 (= bard3 file 0x25978, palette 0 of the all.pic table) via SetRGB4
+(0x2bdc -> 0x1268); DATA 0x208c8 when flag 0x28c36 is set (unidentified).
+> **Correction (2026-11-21):** `.GRP` pixels start at record+13 (13-byte header, last byte 0), not +12.
+
+Unreferenced: `D0WAL.GRP` (no name string in bard3). Extractor: `tools/bardstale3/amiga/export-dungeon.ts`
+(tables read from bard3, never typed in) -> `public/assets/bardstale3/amiga/data/dungeon/`; logic
+`tools/bardstale3/amiga/dungeon.ts`; walker `tools/walker/games-bardstale3.ts`.
+
+## 5. Open
 
 See `docs/bardstale3/TODO.md`.

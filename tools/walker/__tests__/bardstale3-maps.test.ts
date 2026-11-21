@@ -32,7 +32,7 @@ describe.skipIf(!existsSync(resolve(D, 'maps.hi')))('bardstale3 real data', () =
     expect(Buffer.compare(Buffer.from(good), Buffer.from(bad))).not.toBe(0);
     expect(Array.from(good.subarray(0, 8))).toEqual([0xcc, 0xf5, 0xe3, 0xe5, 0xee, 0xe3, 0xe9, 0xe1]); // "Lucencia" high-bit
   });
-  it('GRP records: header geometry predicts every span (12 + bpr*h + 1)', () => {
+  it('GRP records: header geometry predicts every span (13-byte header + bpr*h)', () => {
     let n = 0;
     for (const f of ['D0WAL.GRP', 'GDUNG.GRP', 'SKARA.GRP', 'WILDWAL.GRP']) {
       const recs = decodeGrp(rd(f)); // throws on any span mismatch

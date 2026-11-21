@@ -16,9 +16,11 @@
  * Cell values are NOT interpreted (no consumer traced), orientation is unconfirmed.
  *
  * `.GRP` (D0WAL, GDUNG, SKARA, WILDWAL): LE u16 offset directory (entry 0 = directory length); each record
- * `"RAW" w(1) 00000000 bytesPerRow(u16BE) h(1) key(1)` + bytesPerRow*h chunky 4bpp bytes + 1 trailing byte
- * (header says span = 12 + bpr*h + 1 for 32/32 non-empty records). `key` = 5 = the nibble that fills the
- * background (probably the transparent colour). Palette: not located yet -> greyscale.
+ * `"RAW" w(1) 00000000 bytesPerRow(u16BE) h(1) key(1) 00` (13-byte header) + bytesPerRow*h chunky 4bpp bytes
+ * (span = 13 + bpr*h for 32/32 non-empty records). The game's own reader (bard3 CODE 0x9b92 / 0x9d12) takes the
+ * pixels from record+13 and the transparent key from the 0x55 mask table (colour 5). Palette: bard3 DATA 0x20868
+ * (see dungeon.ts).
+ * > Correction (2026-11-21): pixels start at +13, not +12 (the old "1 trailing byte" was the last pixel byte).
  */
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -102,11 +104,11 @@ export function decodeGrp(buf: Uint8Array): GrpRecord[] {
       out.push({ w: 0, h: 0, bpr: 0, key: 0, px: [] });
       continue;
     }
-    if (b - a !== 12 + bpr * h + 1) throw new Error(`grp record ${i}: span ${b - a} != 12+${bpr}*${h}+1`);
+    if (b - a !== 13 + bpr * h) throw new Error(`grp record ${i}: span ${b - a} != 13+${bpr}*${h}`);
     const px: number[] = [];
     for (let y = 0; y < h; y++)
       for (let x = 0; x < bpr; x++) {
-        const v = buf[a + 12 + y * bpr + x]!;
+        const v = buf[a + 13 + y * bpr + x]!;
         px.push(v >> 4, v & 15);
       }
     out.push({ w: bpr * 2, h, bpr, key: buf[a + 11]!, px });

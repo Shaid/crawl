@@ -77,6 +77,7 @@ import { loadBardsTale1View, bardsTale1LevelList } from './games-bardstale1.ts';
 import { loadWaxworksView, waxworksLevelListFromAssets } from './games-waxworks.ts';
 import { loadElvira2View, elvira2LevelListFromAssets } from './games-elvira2.ts';
 import { loadBardsTale2View, bardsTale2LevelList } from './games-bardstale2.ts';
+import { loadBardsTale3View, bardsTale3LevelList } from './games-bardstale3.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
 import { loadDungeonMaster2View, dungeonMaster2LevelList } from './games-dungeonmaster2.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
@@ -401,6 +402,7 @@ const GAMES = [
   { id: 'waxworks', label: 'Waxworks', loader: loadWaxworksView, defaultLevel: 4, platform: 'amiga' as const },
   { id: 'elvira2', label: 'Elvira II: The Jaws of Cerberus', loader: loadElvira2View, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'bardstale2', label: "The Bard's Tale II", loader: loadBardsTale2View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'bardstale3', label: "The Bard's Tale III", loader: loadBardsTale3View, defaultLevel: 3, platform: 'amiga' as const },
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
   { id: 'dungeonmaster2', label: 'Dungeon Master II: Skullkeep', loader: loadDungeonMaster2View, defaultLevel: 0, platform: 'amiga' as const },
@@ -427,6 +429,7 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   ishar3: 'top-down world-region map (confirmed geometry); first-person view not yet decoded for this title -- see tools/walker/games-ishar.ts',
   crystalsofarborea: 'party-roster/travel checklist UI (confirmed structure + real map picture); no destination-graph/hotspot mechanism decoded yet -- see tools/walker/games-crystalsofarborea.ts',
   bardstale1: 'walls/doors/secret doors, collision and wrap ported from the game code (view builder + move routine); view-art compositor not yet screenshot-checked against the real game; north = +row and left/right turn direction are inferred; stairs, specials, monsters and the city are not implemented -- see docs/bardstale1/TODO.md',
+  bardstale3: 'map, collision (walls/doors via the kick key K), wrap, stairs and teleports between dungeon levels: traced in the game program bard3 (not driver); the 61-slot view compositor, scaling and GDUNG.GRP pieces are re-implemented from bard3 tables, palette is the one the view routine loads (DATA 0x20868); light fixed at 5; not screenshot-checked; cities/wilderness, monsters, traps and special-square scripts other than stairs/teleport are not implemented -- see docs/bardstale3/TODO.md',
   bardstale2: 'walls/doors/secret doors, collision and wrap: the view-row builder and move routine are verified identical to BT1 in data/bard; the table-driven compositor (incl. the right-half mirror) is ported from the game code and renders recognisable corridors, but is not screenshot-checked against the real game; the start pose is a heuristic (not the game\'s stairs/arrival point), the palette is big_dung\'s own header (dung_blank is unused by the BT2 executable), the lamp/light distance is fixed at 4; special squares, stairs, monsters and the city are not implemented -- see docs/bardstale2/TODO.md',
   waxworks: 'one pre-composed picture per room and facing: the game\'s own room scripts + VC draw scripts replayed offline (360 maze rooms of the 15 shared-graphics zones + 1,000 more rooms in 5 worlds); room graph, exits and door states from gameamiga (2,890/2,890 exits reciprocal). Left/right turn direction, compass names, object-gated pictures (default state shown), animated sprites and closed/locked doors are not implemented -- docs/waxworks/TODO.md',
   elvira2: 'one pre-composed picture per room and facing (the game\'s own room scripts + VC draw scripts replayed offline; Waxworks pipeline): 144 ordinary rooms in 3 connected areas, exits/door states from gameamiga (280/283 horizontal+vertical exits reciprocal). NOT walkable: the two super-room grid mazes (30x30x4, 20x20x6) and the 23 exits into them; start room is a guess; object-gated pictures show their default state, animated sprites not drawn; turn direction/compass names are conventions -- docs/elvira2/TODO.md',
@@ -480,6 +483,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'elvira2') return elvira2LevelListFromAssets(assetBase);
   if (game === 'bardstale1') return bardsTale1LevelList(assetBase);
   if (game === 'bardstale2') return bardsTale2LevelList(assetBase);
+  if (game === 'bardstale3') return bardsTale3LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
   if (game === 'dungeonmaster2') return dungeonMaster2LevelList(assetBase);
   if (game === 'blackcrypt') {
