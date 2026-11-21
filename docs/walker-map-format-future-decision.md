@@ -874,7 +874,7 @@ trigger ("if shared-edge is W6-only, normalise it on import") has been met.
 | Per-cell (each cell stores its own N/E/S/W faces) | Black Crypt, MM1, MM2, MM3, EOB1, EOB2, Lands of Lore, Gold Box (PoR, Curse, Secret, Pools, Krynn titles) | Gold Box is new since the table above: `GEO` planes 0/1 hold a 4-bit wall type per direction per cell (`tools/shared/goldbox-geo.ts`) |
 | Shared-edge (each wall stored once) | Wizardry 6 only | `tools/wizardry6/export-dungeon-levels.ts` — the only `shared-edge` producer in any seer project (grep, 2026-11-21) |
 | Type-derived (a face is a wall because the neighbour square is a wall) | Dungeon Master, Chaos Strikes Back, DM2; EOB3 (one byte per cell, `0xFF` = floor; richer types not yet ruled out) | `docs/dungeonmaster-format.md`; `docs/eotb3/dosvga/data-structure.md` §9.2 |
-| Not yet known | Bard's Tale 1–3 (BT1 `levs` is a 22×22 2-bit wall grid, model not classified), Dungeon Hack, Ishar 1–3 / Crystals of Arborea (scripted locations, not a wall grid), and the undecoded Amiga crawlers | `docs/bardstale1/TODO.md` `bt1-levs-cells`; `docs/_unexplored_/TODO.md` |
+| Not yet known | Bard's Tale 1–3 (BT1 `levs` is a 22×22 2-bit wall grid, model not classified), Dungeon Hack, Ishar 1–3 / Crystals of Arborea (scripted locations, not a wall grid) | `docs/bardstale1/TODO.md` `bt1-levs-cells` |
 
 ### Decision: per-cell is the one internal model
 
@@ -931,3 +931,32 @@ needs real work, not before.
 - Recon the undecoded Amiga crawlers, now including Zombi (`docs/_unexplored_/TODO.md`).
   Each adds a row to the survey above; Zombi may confirm a picture-per-location
   renderer shape.
+
+### Addendum (2026-11-21, later): the undecoded Amiga crawlers, after recon
+
+Eight recons (`docs/_unexplored_/TODO.md`, each title's own `docs/<id>/`). Confidence is
+recon-level — mostly structural or rendered, not traced through the game's code yet.
+
+| Game | Wall storage | View | Confidence |
+|---|---|---|---|
+| Abandoned Places | Type-derived (32×32 grid, `1` = wall) | Probably slot table | Grid structural; view hypothesis |
+| Abandoned Places 2 | Type-derived (32×32 × 8-B cells, solid bit) | Slot table; `.def`/`.ofs` describe each piece's geometry | Grid structural; geometry 1,476/1,520 records |
+| Crystal Dragon | Type-derived (cell type 5 = wall, 6 = door) | Probably slot table (per-slot frame/position tables follow each graphic set) | Rendered |
+| Evil's Doom | Type-derived (30×30 × 1 B, bit 7 = solid; maps live in the save-state block, not in files) | Probably slot table | Rendered; view strong hypothesis |
+| Perihelion | Dungeons probably type-derived (grid not yet located); overhead towns are 40×40 tile + passability planes | Piece atlases per dungeon; slot table not found | Towns structural; dungeons hypothesis |
+| Zombi | Per-cell (each location stores its 4 exits + up/down; 162/162 reciprocal) | **One pre-drawn picture per location** — a new shape | Structural |
+| Hired Guns | **True 3D**: 20×23×23 voxel grid, walls from solid neighbours plus a per-cell shape index | Probably pre-scaled pieces in depth slots | Grid from the exe's address maths; view hypothesis |
+| Liberation: Captive II | Unknown — maps are **generated** per (world, zone) seed, not stored | Bitmap wall pieces + vector 3D objects — a new mixed shape | Generator mechanism from code; grid hypothesis |
+
+What it changes:
+
+- **The per-cell decision holds.** Five of the eight are type-derived, which converts
+  with the existing rule; Zombi is per-cell already. No new 2D model turned up.
+- **Two new requirements for the schema:** Hired Guns needs vertical links between
+  layers (stairs, lifts, open space above/below); Zombi's up/down exits need the same.
+  Liberation and Dungeon Hack both generate their maps, so their importers would run a
+  generator (or a recorded instance) rather than read a file.
+- **Two new renderer shapes:** picture-per-location (Zombi) and bitmap-plus-vector
+  (Liberation). The slot-table family gains up to four likely members (AP1, AP2,
+  Crystal Dragon, Evil's Doom), which strengthens the case for it as the main shared
+  engine — once one of them is confirmed in code, not just by layout.
