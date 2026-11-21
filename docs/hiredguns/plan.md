@@ -1,5 +1,10 @@
 # Hired Guns — plan
 
+> **Status (2026-11-21):** phases 2-4 are done for the walker (maps, packer, view):
+> `tools/hiredguns/amiga/`, `tools/walker/games-hiredguns.ts`. The vertical-link question
+> of phase 5 is answered by treating each z-layer as a walker level (stairs/falls change
+> level). Remaining work is in [`TODO.md`](TODO.md).
+
 Format detail lives in [`amiga/data-structure.md`](amiga/data-structure.md).
 Open items live in [`TODO.md`](TODO.md). This file only orders the work.
 

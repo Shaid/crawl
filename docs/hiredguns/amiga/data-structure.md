@@ -1,7 +1,9 @@
 # Hired Guns (Amiga) — data structure
 
-**Status: recon only (2026-11-21).** Nearly everything below is a **hypothesis**
-from cheap probes. The exceptions are labelled. Open work is tracked in
+**Status (2026-11-21, walker pass):** maps, cell bitfields, the `.gfx` packer, the
+block-graphics banks and the first-person view are **decoded and in use by the walker**
+(see [Walker pass](#walker-pass-2026-11-21) at the end). The recon sections below are kept
+with `Correction` notes where the walker pass overturned them. Open work is tracked in
 [`../TODO.md`](../TODO.md).
 
 ## Title / version
@@ -75,6 +77,14 @@ Each map is a fixed 157,738-byte memory image. The layout is identical across al
 | `+0x11828` | 42,320 | **Voxel plane 1** (= plane 0 + `0xA8E8`) | structural-confirmed |
 | `+0x1C110` | 42,320 | **Voxel plane 2** (= plane 0 + 2×`0xA8E8`) | structural-confirmed |
 
+> **Correction (2026-11-21):** every plane starts **2 bytes earlier**: `0x6F3E`, `0x11826`,
+> `0x1C10E`. The file is `struct locn` (542 B) followed by `struct map`
+> (`MapEditor/HGmapstructure.h`, re-derived: buttons are 28 B, not 24), and the sizes land
+> plane 1 at exactly `0x6F3E` and the last 460-byte safety net on EOF (157,738 B). Read
+> from `0x6F3E`, solid rock is the long `0x00000042` = `opaque_bit | block_here_bit`, block 0.
+> The "w0..w4 header" and "briefing text" rows above are the `locn` record
+> (`locn_x1..y2`, `hit_width/height`, `players`, legend/info text with `FB/FC` codes).
+
 The planes sit 43,240 B (`0xA8E8`) apart. That is 42,320 B of cells plus 920 B
 (= 10 rows × 92) that are zero in all 41 maps.
 
@@ -103,6 +113,13 @@ z directly. It is not a stack of separate 2D floor maps.** Which way z runs
 (index 0 = top or bottom) is **not yet known**.
 
 ### Cell words (hypothesis)
+
+> **Correction (2026-11-21):** this whole subsection was read 2 bytes off (see above) and is
+> superseded by [Cell bitfields](#cell-bitfields-confirmed). What it called "plane 1 byte 1"
+> is the low byte of **plane 2** (`map_cell2.block_2d`, the overhead-map tile shape, which
+> is why it looked authored and neighbour-dependent); "plane 2 = `0x0000 0F00`" is plane 3's
+> `0x0F000000`, the four sky-direction bits of an open-air cell. The 3D graphic of a block
+> is **not** stored per cell: it is the block type's Style record, chosen per view position.
 
 - **Plane 0**, 4 B: byte 1 is a flag/type byte. `0x42` = solid rock (179,694 cells
   where plane 1 = `0x0C`), `0x40` = layer frame / open air, `0x00` = empty, plus
@@ -153,6 +170,12 @@ placement, so a fixed-stride scan would miss them
 (`fixed-stride-record-count-unverified.md`).
 
 ## Character/monster `.gfx`: custom packer + ground truth on disk
+
+> **Correction (2026-11-21):** header `+0` is two bytes, not a word: `+0` = valid bits in
+> the last packed byte minus 1, `+1` = checksum seed. The packer is solved (see
+> [Walker pass](#walker-pass-2026-11-21)). The figure records are the **same 67-placement
+> block-graphics records** as the Style banks; the 4 facings x 4 depth sizes are 4 records
+> whose 67 placements point at 4 images (one per depth).
 
 Header: `+0 word ?` (varies), `+2 long` unpacked size (0x3BF6 = 15,350 for every
 character, 0x4B66 = 19,302 for every monster), `+6 long` packed size (= file
@@ -222,3 +245,136 @@ extra slots. That needs the view routine traced in the exe.
 | Approach | Result | Why it failed |
 |---|---|---|
 | `ancient identify` | "Unknown or invalid compression format" | Not a known packer. Reader is `C/Crunch` (packer) and the game exe (unpacker) |
+| Game's own `cr_decrunch` (dev archive `Sources/Miscroutines.s`), re-implemented in `tools/hiredguns/amiga/crunch.ts` | **Solved**: 31/31 files, checksum residue 0, length = header | See [Walker pass](#walker-pass-2026-11-21) |
+
+
+## Walker pass (2026-11-21)
+
+Everything in this section was used to build the walker (`tools/walker/games-hiredguns.ts`)
+and is checked by `tools/walker/__tests__/games-hiredguns.test.ts`. Sources learned from
+(read only; no code copied): the DMA CD32 dev archive `MapEditor/HGmapstructure.h`,
+`Sources/Drawviews.s` (`blit_view`, `scan_view`, `blit_block`), `Sources/Tables.s`,
+`Sources/Equates.i`, `Sources/Controls&Movement.s` (`move`, `forward`),
+`Sources/Main.s` (`players_fall`, `move_doors`, `open_door`), `Sources/Miscroutines.s`
+(`cr_decrunch`), `Graphics/Style1/Ass/*.s`. Every table the walker uses is copied out of
+the **retail floppy executable** (RNC1-unpacked `Hired Guns`, 142,248 B, one CODE hunk,
+file header 0x20 B), not from the CD32 source. File offsets below are into that image.
+
+### Map file layout (confirmed)
+
+`Maps/NN.map` = `struct locn` (542 B) + `struct map`. Offsets: locn `+525` disk,
+`+526` map_num (= file number, 41/41), `+527` picture, `+528` music, `+529` atmos,
+`+530/531` mons1/mons2, `+532` sky, `+533` **style** (0..4 = `Styles/Style0N.gfx`).
+Map at `0x21E`: `+128` four players' x,y,z then exit x,y,z (15 B), `+143` time limit;
+`+6346` monsters[128] x 16 B; `+9616` doors[32] x 12 B (`u16 posn` = byte offset into plane 1,
+`u8 trig`, `u8 direction` (3 = locked), `u32 door_type`, `u8 delay, count, key, button_only`).
+Planes at `0x6F3E` / `0x11826` / `0x1C10E`, index `z*529 + y*23 + x`.
+The title is the `LOG ENTRY N. <title>.` line of the locn info text (map 01 "Artificial
+Island", matching the dev-archive folder `Map01_ArtificialIsland`); later maps carry a
+one-line `name` in the map struct instead. Every map's monsters[] table is empty at rest
+(monsters come from eggs, plane 2).
+
+**z runs upwards** (confirmed three ways): the view's "above" row is `+529` cells and its
+graphics are the top of the window (retail `north` table, below); z=0 is solid bedrock and
+z=19 an opaque cap in all 41 maps; every player start sits in an open cell directly above a
+block. x grows east, y south (`north` = `-23`).
+
+### Cell bitfields (confirmed)
+
+Plane 1 (`map_cell1`, u32, MSB-first bitfields):
+
+| Bits | Mask | Field |
+|---|---|---|
+| 0 | `0x1` | floor_here |
+| 1 | `0x2` | block_here |
+| 2 | `0x4` | water_here |
+| 3 | `0x8` | panel_here |
+| 4 | `0x10` | explosion_here |
+| 5 | `0x20` | aux_here |
+| 6 | `0x40` | opaque (hides cells behind it; blocks movement) |
+| 7 | `0x80` | invisible |
+| 8 | `0x100` | pushable |
+| 9-10 | `0x600` | floor type: 0 grass/floor, 1 (no retail graphic), 2 lift, 3 light pool |
+| 11-16 | `0x1F800` | block type (below) |
+| 17-18 | | water level 0..3 |
+| 19-20 | | panel 0 text, 1 button in, 2 button out |
+| 21-22 | | explosion |
+| 23-27 | | variant (door slide 0..10, lift height, text index) |
+| 28-31 | | aux: 0/1 egg, 2..6 containers, 7 egg remains, 8..11 stairs up (N/E/S/W), 12/13 open-door frame front/side, 14/15 dead monster |
+
+Block types: 0 stone, 1 pushable, 2 boost, 3 exit, 4 tree, 5 field, 6 teleport,
+7 lift hydraulic, 8..15 monsters (2 kinds x in/left/right/out), 16..19 stairs down
+(walking N/E/S/W from the cell above a block 18/19/16/17 goes down a layer), 20/21 door front/side,
+22..31 effects (grenades, sentries), 32..47 player heads.
+Plane 2 (`map_cell2`): egg hatch/contents, seen flags, `block_2d` (automap tile, low 6 bits).
+Plane 3 (`map_cell3`): bit 31 light, 30..28 no-question/monster/egg, 27..24 sky W/S/E/N,
+item type/damage/ammo in the low 24 bits.
+
+Structural check: on all 41 maps, every up-stair (aux 8+d) has the down-stair block facing
+back (block 16..19) directly ahead in direction d: **530/530**; reading the direction rotated
+by one gives **0/530** (null control).
+
+### `.gfx` packer (solved)
+
+`CharactersGfx/*.gfx` and `MonstersGfx/*.gfx`: a ByteKiller-style backward LZ
+(`tools/hiredguns/amiga/crunch.ts` documents the token set). **31/31** files decode with
+a zero checksum residue and the header's length. Byte-exact oracle: the decrunched
+`Adele.gfx` holds **18 of the 22** `MakeFigure/Filters` rectangles cut from
+`Characters/Adele` (ILBM) as their 4 colour bitplanes, byte for byte; the 4 misses are the
+`Dead` rectangles, which a character figure does not carry. Decoded layout: 4 facing records
+(front at 0, left 3556, right 7112, back 10668; 956-byte record header + 2,600 B of images,
+the `ds.b 3556` slots of the Style banks), then the face.
+
+### Block-graphics banks (Style, Misc, figures)
+
+`tools/hiredguns/amiga/gfxbank.ts`. A bank is a table of u32 record offsets, then records:
+18-byte bob header (`u32 addr, u16 w, u16 h, u16 maskPlane, u8 control, u8 clip,
+u8 planeOps[6]`) + **67 placements x 14 B** (`s16 w, h, x, y, control; u32 dataOffset` from
+the record start), then plane-major images (4 colour planes + mask plane 4). One placement
+per view position: the record already holds the pre-scaled piece and its screen x/y for
+every position, so there is no per-depth scaling at run time.
+
+Retail Style bank entries (48): 0..3 floors (grass, -, lift, light pool), **4 + block type**
+for blocks 0..23 (12..19 are empty `ds.b` slots filled at load from the two MonstersGfx
+figures; 26/27 door2 absent), 28..30 panels, **31 + aux** for aux 0..15 (38 egg remains
+absent), 47 automap blocks. Misc.gfx entry 16+w is the water re-tint (bitplane 4 only).
+
+Placement `control`: 0 normal, 1 vertically flipped, 2 normal then flipped directly below
+(the eye-level pieces store only the top half), 3 nothing, -1 random flip, >3 split pair:
+the flipped half drawn `control` rows lower and pushed apart by the cell's variant through
+the per-distance gap tables (lifts, fields). `planeOps` per screen plane: 1 copy from the
+same image plane, 2 clear, 3 set — through the mask plane. Unlit blocks clear plane 4
+(colours 0..15); water and light pools set plane 4 (colours 16..31 are the tinted copies).
+
+### First-person view (confirmed from the retail code + tables)
+
+`blit_view` at retail **0x85FC** (same structure as the CD32 `Drawviews.s` minus lighting):
+for each of **67 view positions** in table order (far to near; per depth 4..0: 5 cells of the
+layer above, 5 of the layer below, then 7/7/5/3/3 eye-layer cells, outer columns first;
+position 66 = the party's own cell), skip cells `scan_view` made invisible, look up the
+placement index in `view_offsets` (retail **0x1740A**, 67 longs). Placements 0..20 = layer
+above (draw aux, block, panel, water, floor); 21..66 = eye layer and layer below (floor,
+aux, shallow water, block, panel, explosion, own-cell containers, deep water). The view is
+**142 x 84**. Backdrop: if the party cell's sky bit for the facing is set, colour 6 for the top
+42 rows (`skyline_window`, recoloured line by line by the copper), black elsewhere.
+
+Retail tables (copied by `tools/hiredguns/amiga/export-walker.ts`, fingerprint-checked):
+
+| Table | File offset | Shape |
+|---|---|---|
+| `view_offsets` | 0x1740A | 67 longs (lea at 0x8608) |
+| `north/east/south/west` | 0x188FC | 4 x 67 longs of byte deltas (lea at 0x64EC, 0x75FA) |
+| `block_removal` | 0x17624 | 67 x 8 cases x 4 words (view index*4, -1 end) (lea at 0x8576) |
+| `block_rotations` | 0x8E8E | 4 facings x 64 bytes |
+| `aux_rotations` | 0x8FA2 | 4 x 16 bytes |
+| `blit_block` gap tables | 0x908C | 4 x 11 bytes (dist1..dist4) |
+| `game_palette` | 0x1F996 | 32 x $0RGB (lea at 0x1EEA8) |
+| `gamegfx` slots | blit_view immediates | floor +0x00, block +0x10, panel +0x70, aux +0x7C |
+
+### Movement (rules from the dev-archive source; not yet checked in game)
+
+`tools/hiredguns/amiga/model.ts` lists the rules (support, stairs up via aux 8..11, stairs
+down via blocks 16..19, door bump opens, ledge/step checks, falling). In the walker each
+z-layer is a level (`levelId = map*100 + z`); a stair or a fall moves the party to another
+layer and the walker reports that as a level change. All 41 maps: BFS from player 1's start
+reaches 19..952 cells; stair-up and stair-down moves pair one-for-one on every map.

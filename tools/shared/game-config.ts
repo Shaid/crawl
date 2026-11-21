@@ -428,9 +428,16 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       dataDirs: ['hiredguns/amiga'],
       executable: undefined,
       expectedFiles: ['game/Hired Guns'],
-      supported: false,
+      supported: true,
       assetDir: 'hiredguns',
       features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // RNC1 depack (build/cache/hiredguns/unpacked) + exe view tables, Style/Misc banks, 41 maps.
+        const { exportHiredGunsWalker } = await import('../hiredguns/amiga/export-walker.ts');
+        const w = exportHiredGunsWalker(dataDir);
+        console.log(w ? `  hiredguns/amiga walker: ${w.maps} maps, ${w.levels} walkable layers` : '  hiredguns/amiga: data not found');
+      },
     }],
   },
   {

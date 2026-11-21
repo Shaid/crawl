@@ -83,6 +83,7 @@ import { loadBardsTale2View, bardsTale2LevelList } from './games-bardstale2.ts';
 import { loadBardsTale3View, bardsTale3LevelList } from './games-bardstale3.ts';
 import { loadDungeonMasterView, loadChaosStrikesBackView, dungeonMasterLevelList } from './games-dungeonmaster.ts';
 import { loadDungeonMaster2View, dungeonMaster2LevelList } from './games-dungeonmaster2.ts';
+import { loadHiredGunsView, hiredGunsLevelList } from './games-hiredguns.ts';
 import type { CellPlanes } from '../wizardry6/evaluate-cell.ts';
 import { W6TriggerState, type W6LevelLinks } from '../wizardry6/movement.ts';
 
@@ -411,6 +412,7 @@ const GAMES = [
   { id: 'dungeonmaster', label: 'Dungeon Master', loader: loadDungeonMasterView, defaultLevel: 0, platform: 'amiga' as const },
   { id: 'chaosstrikesback', label: 'Chaos Strikes Back', loader: loadChaosStrikesBackView, defaultLevel: 100, platform: 'amiga' as const },
   { id: 'dungeonmaster2', label: 'Dungeon Master II: Skullkeep', loader: loadDungeonMaster2View, defaultLevel: 0, platform: 'amiga' as const },
+  { id: 'hiredguns', label: 'Hired Guns', loader: loadHiredGunsView, defaultLevel: 111, platform: 'amiga' as const },
   { id: 'evilsdoom', label: "Evil's Doom", loader: loadEvilsDoomView, defaultLevel: 10, platform: 'amigaaga' as const },
 ] as const;
 
@@ -419,6 +421,7 @@ type GameId = (typeof GAMES)[number]['id'];
 /** Per-game override for the confidence banner's parenthetical note; falls back to the generic W6 string above when unset. */
 const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
   dungeonmaster: 'map + collision + walls/doors/stairs/pits composed from Graphics.DAT via its own zone layout (item 696); palette 0 confirmed against KAOS.FTL; NOT drawn: ornaments, objects, creatures, buttons -- see docs/dungeonmaster/TODO.md',
+  hiredguns: 'map cells, stairs, falls, doors and the 67-position view (placements, draw order, hidden-block removal, facing rotations, palette) from the game: retail exe tables + Style banks, rules from the DMA dev-archive source; level = map*100 + z-layer, stairs/falls change level. NOT drawn: players, monsters, explosions, text panels, horizons; the sky gradient colours are a placeholder -- see docs/hiredguns/TODO.md',
   dungeonmaster2: 'map + collision + doors + teleporter travel from DUNGEON.DAT; viewport = GRAPHICS.DAT wallset floor/ceiling/walls + door panels placed by its own rect table, cell tables/draw order from SKUL.FTL data, 16-colour IRGB palette (full-light bank); NOT drawn: door frames, stairs, pits, ornaments, sky, items, creatures -- see docs/dungeonmaster2/TODO.md',
   chaosstrikesback: 'same engine/assets as Dungeon Master (items 49-125, 246-257, 696 byte-identical); Prison = map 100/101, main dungeon from the disk2 MINI.DAT save; ornaments/objects/creatures not drawn -- see docs/chaosstrikesback/TODO.md',
   poolofradiance: 'maze connectivity confirmed; wall art is per-cell where the level ECL script resolves it (0/29 levels here), a real per-level texture elsewhere -- see tools/shared/goldbox-ecl.ts',
@@ -499,6 +502,7 @@ async function listLevels(game: GameId, assetBase: string): Promise<Array<{ id: 
   if (game === 'bardstale3') return bardsTale3LevelList(assetBase);
   if (game === 'dungeonmaster' || game === 'chaosstrikesback') return dungeonMasterLevelList(assetBase);
   if (game === 'dungeonmaster2') return dungeonMaster2LevelList(assetBase);
+  if (game === 'hiredguns') return hiredGunsLevelList(assetBase);
   if (game === 'blackcrypt') {
     const lv = await fetchJSON<DungeonLevelFile>(`${assetBase}/dungeon/levels.json`);
     return lv.units.map((u) => ({ id: u.id, label: u.name ?? `Map ${u.id}` }));
