@@ -221,8 +221,9 @@ index plus a log of dead ends worth not repeating; where the two disagree,
   (4 x 48x29 crests, 3 x 48x25 body armour; only the left 36 px are drawn);
   records 2 and 4 match `default-3.png` 1044/1044 and 900/900 RGB-exact.
   Extractor `scripts/extract_paperdoll.py` -> `sprites/{armour,paperdoll}.*`.
-  Remaining ~11 KB tail of the `0x036FD` stream (other UI art at 32/16/80-px
-  widths) is tracked in `docs/blackcrypt/TODO.md` (`bcdfa-paperdoll-tail`).
+  The rest of the `0x036FD` stream is **also solved** (48 blit-descriptor
+  records, data-structure.md "Large Equipment-Panel Art"); open work is only
+  `docs/blackcrypt/TODO.md` (`bcdfa-panel-unidentified-pair`, low).
 - **Dungeon-floor item sprites - SOLVED (147 sprites = 49 items x 3 view
   depths).** Pixels = one RLE stream at `bcdfa+0x270C4` -> 31,388 B; geometry =
   a 147 x 10-byte blit-descriptor table in decompressed `bcdft` S_1
@@ -409,14 +410,16 @@ LAB_010C:
   `font_big_glyphs`, `scripts/extract_bcdfa_font.py` → `sprites/font-mono.*`
   (64), `sprites/font-micro.*` (59), `sprites/font-big.*` (59) — all four
   regions code-confirmed, `font-mono2` retired.
-- `0x111E1`–`0x15F8D` (entry 5, 34,340 B) is **partly solved**. Its
+- `0x111E1`–`0x15F8D` (entry 5, 34,340 B) is **solved** (13 records, see
+  data-structure.md "UI / Automap Resource Bank"; the old "partly solved /
+  still open" wording below is superseded). Its
   `0x0000`-`0x3480` sub-record (13,440 B) is the **Spell Book background**
   (100.000% DOS silhouette). Its `0x7CA0`-end tail (2,436 B) is the **29 key
   icons** (`key_icon_sprites`, `scripts/extract_bcdfa_keys.py` →
   `sprites/keys.*` — 100.000% DOS agreement, all 29 frames; DOS's own
   unnamed `Start Keys`/`End Keys` bracket is the same 29 8x14 icons). The
-  remaining ~17.7 KB (`0x3480`/`0x62C4`/`0x7110`/`0x7230`/`0x7350`/`0x73A0`)
-  is still open — a heterogeneous multi-record UI/text bank, not one image.
+  remaining sub-records (`0x3480`/`0x62C4`/`0x7110`/`0x7230`/`0x7350`/`0x73A0`)
+  are identified too (`scripts/extract_bcdfa_ui_bank.py`).
 - **bcdfa's `0x15F8D`–`0x1AE70` span** (entry 6, 20,195 B, directory-confirmed
   **raw not RLE**) is **BCSPEED.EFF — solved**: 95 effect particle-emitter
   scripts, the third BCSPEED bank, tying the GFK sprites to the PRG movement

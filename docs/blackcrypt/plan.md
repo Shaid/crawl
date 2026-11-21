@@ -209,8 +209,8 @@ section only keeps the resolved narrative for context.
    script binds to a GFK record per-particle, via BCSPEED.EFF (see item 7
    below) — not a static table. Tag bytes `0x3C`/`0x40`/`0x44` are confirmed
    to be byte offsets into a jump table; `0x3C` is the end/kill case. The
-   individual `0x40`/`0x44` handlers are still open — see `TODO.md`
-   (`bcdfa-prg-handlers`).
+   individual `0x40`/`0x44` handlers are **solved** (all 18 traced, 2026-11-21 note;
+   `bcdfa-prg-handlers` row deleted).
 7. ~~**What is in the rest of bcdfa (0x00000–0x0DFFA, 0x10779–0x1AE6F, 0x1B5B4–end)?**~~
    **SOLVED — bcdfa has a full 13-entry container directory, just like
    bcdfx/y/z.** `OpenBcdfaFile` at decompressed `bcdft` S_1 `+0x1DBD2` (found
@@ -334,9 +334,9 @@ correct for bcdfo portraits and bcdfa icon tiles.
   "negative result / reuses the 24×24 icon" entry here is superseded — see the
   "Dungeon-floor item sprites" section in `data-structure.md` for the spec,
   the evidence and why the first search missed it.
-- Remaining tail of the `bcdfa+0x036FD` stream (~11 KB of other UI art at
-  32/16/80-px row widths) is still unclassified — tracked in `TODO.md`
-  (`bcdfa-paperdoll-tail`), evidence in `data-structure.md`. The `bcdfo`
+- Remaining tail of the `bcdfa+0x036FD` stream — **solved** (48 descriptor
+  records; 2026-11-21 note, `bcdfa-paperdoll-tail` row never needed),
+  evidence in `data-structure.md` "Large Equipment-Panel Art". The `bcdfo`
   "gaps" are closed: that file is now fully accounted for, 0 remainder.
 
 ### Phase 3: Overlay Disassembly (In Progress)

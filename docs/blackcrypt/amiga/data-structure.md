@@ -928,7 +928,7 @@ bar as bcdfx/y/z's 3/3 directory-sum confirmations.
 | 2 | `0x06F4D`-`0x0DFFB` | 28,846 | **raw** | `0x28` | 28,846 | Effect sound bank (PCM) | **confirmed** (existing section) — `comp=0` now directly explains why this was never RLE |
 | 3 | `0x0DFFB`-`0x10779` | 10,110 | RLE | `0x2C` | 16,576 | BCSPEED.GFK | **confirmed** (existing section) |
 | 4 | `0x10779`-`0x111E1` | 2,664 | RLE | `0xE0` | 4,288 | **Four fonts**: 8×8 1bpp message-log (64 glyphs), 4×5 micro (59), 8×8 mask (59), 8×8 6bpp colour (59) | **confirmed** — all four regions have consumer code and the sizes sum to 4,288 exactly; see "bcdfa — Mono Font Bank" below |
-| 5 | `0x111E1`-`0x15F8D` | 19,884 | RLE | `0xB4` | 34,340 | Multi-purpose UI/graphics resource bank — tail `0x7CA0`-end is the **29 key icons** (confirmed) | **partly open** — 15 consumer sites mapped to exact sub-record offsets; see below |
+| 5 | `0x111E1`-`0x15F8D` | 19,884 | RLE | `0xB4` | 34,340 | Multi-purpose UI/graphics resource bank — tail `0x7CA0`-end is the **29 key icons** (confirmed) | **partly open** — 15 consumer sites mapped to exact sub-record offsets; see below *(superseded 2026-11-21: all 13 records identified, see "UI / Automap Resource Bank — SOLVED")* |
 | 6 | `0x15F8D`-`0x1AE70` | 20,195 | **raw** | `0xE8` | 20,195 | **BCSPEED.EFF** — 95 effect particle-emitter scripts (DOS: `"Speed Effects"`) | **confirmed** — see "bcdfa — BCSPEED.EFF" below |
 | 7 | `0x1AE70`-`0x1B5B3` | 1,859 | **raw** | `0xEC` | 1,859 | BCSPEED.PRG | **confirmed** (existing section) |
 | 8 | `0x1B5B3`-`0x270C4` | 47,889 | RLE | `0xD4` | 75,600 | Item icon bank 0 | **confirmed** (existing section) |
@@ -1118,6 +1118,8 @@ handlers are not traced; `0x3C` is the end/kill case by position.
 > enumeration.
 
 #### Still open
+
+> **(2026-11-21) Historical — every row here is now solved; nothing in bcdfa is open. Current open work: `docs/blackcrypt/TODO.md`.**
 
 | Question | Status |
 |----------|--------|
@@ -3064,6 +3066,8 @@ the two register numbers and the two live values are **confirmed**.
 
 #### Still open
 
+> **(2026-11-21) Empty heading; the `gfxNumber` → icon question below is confirmed (LUT `+0x26EF2`). Open work: `TODO.md`.**
+
 #### `gfxNumber` → icon index — **strongly supported hypothesis**
 
 `gfxNumber` appears to be a **direct 0-based index into bank 0**. Evidence
@@ -3776,7 +3780,7 @@ depends on the `floorNN-dD` convention breaks.
 
 | Question | Status |
 |----------|--------|
-| The three remaining bcdfa gaps | Unchanged — `0x00000` (18,932 B), `0x10779` (4,288 B) and `0x111E1` (34,340 B) are each one clean RLE stream, content unidentified. Note this bank was found in the *fourth* such gap, so they are worth a pass with the same descriptor-table-in-S_1 assumption |
+| The three remaining bcdfa gaps | **(2026-11-21) All three SOLVED later** (UI panel bank, four fonts, entry-5 UI/automap bank — see their SOLVED sections). Original text: Unchanged — `0x00000` (18,932 B), `0x10779` (4,288 B) and `0x111E1` (34,340 B) are each one clean RLE stream, content unidentified. Note this bank was found in the *fourth* such gap, so they are worth a pass with the same descriptor-table-in-S_1 assumption |
 
 ---
 
