@@ -66,6 +66,41 @@ campfire flame flicker) — see
 Extractor: `tools/bardstale3/amiga/export-data.ts` (`npx tsx
 tools/bardstale3/amiga/export-data.ts`).
 
-## 3. Open
+## 3. Maps and wall art (2026-11-21, walker attempt -- partial)
+
+### `maps.hi` / `maps.lo` container (confirmed)
+u32BE directory of record offsets (entry 0 = directory length, so 37 / 36 entries; last entry = file length), each
+record `[u32 BE decodedSize][Okumura LZHUF stream]` (N=4096 spaces-filled, F=60, THRESHOLD=2; a fresh decoder,
+`tools/bardstale3/amiga/lzhuf.ts`). **71/71 records decode and the stream consumes exactly `span - 3` bytes
+(= span - 4 + 1 read-ahead byte) for every record** -- the same invariant the picture codec shows; a decoder started
+one byte late breaks it (null control in `tools/walker/__tests__/bardstale3-maps.test.ts`). Extractor:
+`tools/bardstale3/amiga/export-maps.ts` -> `data/maps.json`. (The earlier "71 records of `[u32 size][LZHUF]`" scan treated
+the files as a flat sequence; they have the directory above.)
+
+### Decoded record
+16-byte high-bit ASCII name (`0xff` padded: "Lucencia", "Wilderness", "Tower", "Cyanis' Tower"), then two families:
+| Family | Maps | Layout |
+|---|---|---|
+| **grid** (10: Lucencia, Celaria Bree, Nowhere, Dark Copse, Black Scar in `hi`; Wilderness, Skara Brae, Arboria, Ciera Brannia, Gelidia in `lo`) | cities/overland, 11..20 square | `[0x10]=w [0x11]=h`, 2 flag bytes (`0x9f 0x11` ...), `(h+2)` u16BE words (word 0 unresolved; words 1..h = row start - 1, rows listed last to first), then **h rows of w cell bytes at `0x14 + 2(h+2)`** (Lucencia: 12x12 at 0x30), then a tail of 3-5-byte records (events/specials, unresolved) |
+| **dungeon** (61) | towers, tombs, mountains, catacombs ... one record per level | `[0x10]` = size-1 (0x13 = 20 wide), `[0x11]` = level index 0..3, link bytes (`03 04 05 06 ff ff ff ff ...`), a u16BE word table with only ~7 entries stepping 0x19, then a compact (RLE/sparse?) cell stream -- **not decoded** |
+Cell bytes of the grid family (Lucencia): `00` open (90 of 144), `e3` (37) / `e2` (7) wall-like blocks, `f8`, `f1`, `f2`, `04`, `0f` singletons
+(specials). **Hypothesis**: a cell is either a solid block or open (the BT3 city/wild maps are not per-face like BT1/BT2);
+no consumer in `driver` was traced, orientation (row order, which edge is north) is unconfirmed, so no walker was built.
+
+### `.GRP` wall art (container confirmed, 32/32 non-empty records)
+LE u16 offset directory (entry 0 = directory length), record = `"RAW"`, `w` px (1 byte), `00 00 00 00`, `bytesPerRow` u16BE (= w/2),
+`h` (1 byte), key colour (1 byte = 5), `bytesPerRow*h` **chunky 4bpp** bytes (high nibble first), 1 trailing byte; span =
+`12 + bpr*h + 1` for every non-empty record (`decodeGrp` throws otherwise). Entry sizes alternate: **24x97 side-wall** and
+**64x55 front-wall** (`D0WAL` 7 records, `SKARA` 8, `GDUNG` 10 incl. two 112x44/112x45 pieces = floor/ceiling halves?, `WILDWAL` 11 incl.
+4 empty 22-byte placeholders and one 65x55). Greyscale render of `D0WAL` records 0/1 shows a skewed side wall and a flagstone front wall,
+i.e. the decode is right; **palette not located** (bard3's picture palettes are for `all.pic`; the dungeon/wild palette source is
+unknown) and the which-record-is-which-depth mapping is not traced (needs `driver`). `data/grp-wall-art.json` holds raw indices.
+
+### Why there is no BT3 walker yet
+Missing, in order: (1) the cell semantics of the grid family and the whole dungeon-record layout (a `driver` trace of the
+map-load + move routine), (2) the palette for the wall art, (3) the view geometry / record-to-depth mapping. Smallest next step:
+disassemble `driver`'s map loader (search for the `maps.hi`/`maps.lo` open + LZHUF call) and follow the buffer to the move routine.
+
+## 4. Open
 
 See `docs/bardstale3/TODO.md`.

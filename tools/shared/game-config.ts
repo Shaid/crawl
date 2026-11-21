@@ -497,6 +497,26 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'bardstale3',
+    displayName: "The Bard's Tale III: Thief of Fate",
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['_unexplored_/BardsTale3/data'],
+      executable: undefined,
+      expectedFiles: ['all.pic', 'bard3', 'maps.hi', 'maps.lo'],
+      supported: true,
+      assetDir: 'bardstale3',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        const { exportBardsTale3Data } = await import('../bardstale3/amiga/export-data.ts');
+        await exportBardsTale3Data(dataDir);
+        const { exportBardsTale3Maps } = await import('../bardstale3/amiga/export-maps.ts');
+        exportBardsTale3Maps(dataDir);
+      },
+    }],
+  },
+  {
     id: 'eotb3',
     displayName: 'Eye of the Beholder III: Assault on Myth Drannor',
     platforms: [{
