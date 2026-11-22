@@ -35,3 +35,19 @@ describe.skipIf(!existsSync(EN1))('Ishar 1 step test', () => {
     expect(ISHAR1_TITLE.enter!(to, to, () => 1, occupied)).toBeNull();
   });
 });
+
+describe.skipIf(!existsSync('data/ishar/amigaaga/MCAVE.DO'))('ALIS operand decoding (entity lists, other entities)', () => {
+  it('reads clistent/crstent destinations and two-word ohim/shim operands', async () => {
+    const { unpackIsharScript } = await import('../../shared/ishar-firstperson.ts');
+    const { decodeAlisInstr } = await import('../../shared/alis-disasm.ts');
+    const mcave = unpackIsharScript(new Uint8Array(readFileSync('data/ishar/amigaaga/MCAVE.DO')));
+    // MCAVE +0x5a: clistent -> sdirw(0x44), then the loop test on that local
+    const l = decodeAlisInstr(mcave, 0x5a);
+    expect(l.op).toBe('clistent');
+    expect(l.end).toBe(0x5d);
+    // MCAVE +0x321f: cstore {odirw(0x10) / 3} -> shimw(local 0x44, +2): 13 bytes, ends at 0x322c
+    const st = decodeAlisInstr(mcave, 0x321f);
+    expect(st.fields.dest).toEqual({ t: 'him', op: 'shimw', value: 0x44, offset: 2 });
+    expect(st.end).toBe(0x322c);
+  });
+});

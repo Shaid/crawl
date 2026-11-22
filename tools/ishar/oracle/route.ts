@@ -22,10 +22,12 @@ export function planRoute(
   maxNodes = 400_000,
   /** Monsters known to stand on cells (GERDEP's monster check; e.g. `stepOccupancy` of the last step). */
   occupied?: IsharOccupancy,
+  /** Cells the route must not enter although the game allows it (e.g. inside a monster's attack range, `ishar1Danger`). */
+  avoid?: IsharOccupancy,
 ): { actions: WalkAction[]; states: IsharPartyState[] } | null {
   const forward = (s: IsharPartyState): IsharPartyState | null => {
     const t = spec.stepFrom(s, s.facing);
-    if (!t || extraBlocked.has(cellKey(t.region, t.row, t.col)) || !layers(t.region % 10)) return null;
+    if (!t || extraBlocked.has(cellKey(t.region, t.row, t.col)) || !layers(t.region % 10) || avoid?.(t.region, t.row, t.col)) return null;
     return enterCell(spec, layers, s, t, occupied);
   };
   const key = (s: IsharPartyState) => `${s.region}:${s.row}:${s.col}:${s.facing}`;

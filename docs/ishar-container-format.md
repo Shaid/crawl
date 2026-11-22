@@ -1720,6 +1720,30 @@ plausibility.
    table in §9.3). Ported as `isharEnter` with an occupancy predicate.
    On a 359-action read-back walk, move agreement rose from 85.8% to 99.7%.
    The one disagreement left is a press swallowed by an NPC message.
+8. **Monster attacks (Ishar 1).** GEREN `+0x27` loops over the EN1 slots.
+   A placed monster with kind < 0 attacks the party when both |drow| and
+   |dcol| are at most 5; GEREN `+0xe5e` sets the range by region code.
+   Slot 48 (CONT4 40,15) killed every earlier walk near CONT4 (43,18).
+9. **Caves.** CONT5 (13,24) holds the value 81. Stepping onto it sets the
+   region code to 15 (a cave on the CONT5 grid), after TELEP.DO's
+   manual-protection question. Region 15's group is MCAVE, FCAVE2,
+   SCAVE and COLCAVE. MCAVE starts PCAVE (the doors) as a child entity
+   with `clive`, passes it the door position with `shimw`, and reads
+   PARAM's door table (`0x3c00` row, `0x3c34` col, `0x3b64` open).
+   COLCAVE kills PCAVE on the next wake. `IsharScene` models such
+   children: a `clive` from a scene script starts the child, and the
+   child lives until the next step.
+10. **Decoder fixes found on the way (2026-11-23).**
+    - `clistent` (0x9c) and `crstent` (0x60) end in `csuccent` and read a
+      store destination; crawl read none.
+    - The `ohim*`/`shim*` operands are two words (the local that holds the
+      entity handle, then the offset into that entity's vram); crawl read
+      one.
+
+    Both desynchronised every script that uses them; the misdecode showed
+    up as `cnul`s and gaps in GERDEP and GEREN. The interpreter now treats
+    the entity lists as empty, storing -1. It routes `ohim`/`shim` to
+    `clive` children.
 
 **Measured:**
 

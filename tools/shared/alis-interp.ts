@@ -80,6 +80,11 @@ export interface SceneEnv {
   readGrid(addr: number, pop: () => number, direct: number): number;
   /** Optional `smain*` writes; when absent they are dropped (and warned about). */
   writeMain?(addr: number, value: number): void;
+  /** `clive id`: start another entity from script `id`; returns its handle (stored to the instruction's destination), or -1. */
+  live?(id: number): number;
+  /** `shim*`/`ohim*`: another entity's variable at vram `offset` (the handle comes from a `clive`). */
+  writeEntity?(handle: number, offset: number, value: number): void;
+  readEntity?(handle: number, offset: number): number;
 }
 
 const STEP_BUDGET = 200_000;
@@ -218,6 +223,12 @@ export class AlisScriptRunner {
       return base + idx;
     };
 
+    const readHim = (tok: Extract<AlisToken, { t: 'him' }>): number => {
+      const h = locals.get(s16(tok.value)) ?? -1;
+      if (env.readEntity) return env.readEntity(h, tok.offset);
+      warn(`unmodeled entity read ${tok.op}`);
+      return 0;
+    };
     const evalToken = (tok: AlisToken): number => {
       switch (tok.t) {
         case 'imm':
@@ -238,6 +249,8 @@ export class AlisScriptRunner {
           return applyUnaryStep(tok.op, tok.arg);
         case 'eval':
           return runSteps(tok.steps);
+        case 'him':
+          return readHim(tok);
         default:
           warn(`unmodeled token ${tok.t}`);
           return 0;
@@ -286,6 +299,8 @@ export class AlisScriptRunner {
           else warn(`unmodeled EVAL step opname ${step.op}`);
         } else if (step.t === 'unary') {
           acc = applyUnaryStep(step.op, step.arg);
+        } else if (step.t === 'him') {
+          acc = readHim(step);
         } else {
           warn(`unmodeled EVAL step shape ${step.t}`);
         }
@@ -311,6 +326,12 @@ export class AlisScriptRunner {
           warn(`unmodeled indexed destination ${dest.t === 'imm' ? dest.op : dest.t}`);
         }
         acc = saved;
+        return;
+      }
+      if (tok.t === 'him') {
+        const h = locals.get(s16(tok.value)) ?? -1;
+        if (env.writeEntity) env.writeEntity(h, tok.offset, mode === 'add' ? (env.readEntity?.(h, tok.offset) ?? 0) + v : v);
+        else warn(`unmodeled entity write ${tok.op}`);
         return;
       }
       if (tok.t !== 'imm' || typeof tok.value !== 'number') {
@@ -553,6 +574,19 @@ export class AlisScriptRunner {
           this.sprites = this.sprites.filter((sp) => sp.numelem !== n);
           break;
         }
+        case 'clive': {
+          const h = env.live ? env.live(instr.fields.id as number) : -1;
+          if (!env.live) warn('clive without a scene (no entity started)');
+          acc = h;
+          if (instr.fields.dest) storeTo(instr.fields.dest as AlisToken, h, 'set');
+          break;
+        }
+        // The entity list: the scene runs no other entities, so every list
+        // is empty and these store its end marker (-1).
+        case 'clistent': case 'crstent': case 'csuccent': case 'cpredent':
+          acc = -1;
+          storeTo(instr.fields.dest as AlisToken, -1, 'set');
+          break;
         // Everything below is a no-op for computing which sprites go where.
         case 'cscreen': case 'cinteron': case 'cinteroff': case 'cscanon': case 'cscanoff': case 'cscanclr':
         case 'credon': case 'credoff': case 'cfindtyp': case 'clinking': case 'ccancel':
@@ -561,15 +595,15 @@ export class AlisScriptRunner {
         case 'cnul37': case 'copensc': case 'cclosesc':
         case 'cscmov': case 'cscset': case 'cset': case 'cmov': case 'casleep':
         case 'casleepon': case 'casleepoff': case 'casleepfar': case 'ctstmov': case 'ctstset':
-        case 'cftstmov': case 'cftstset': case 'csuccent': case 'cpredent': case 'cnearent': case 'cneartyp':
-        case 'cnearmat': case 'cviewent': case 'cviewtyp': case 'cviewmat': case 'corient': case 'crstent':
+        case 'cftstmov': case 'cftstset': case 'cnearent': case 'cneartyp':
+        case 'cnearmat': case 'cviewent': case 'cviewtyp': case 'cviewmat': case 'corient':
         case 'csend': case 'callentity': case 'ctiming': case 'czap': case 'cexplode': case 'cding':
         case 'cnoise': case 'cinitab': case 'cfopen': case 'cfclose': case 'cfwritev': case 'cfreadb':
         case 'cfwriteb': case 'cplot': case 'cdraw': case 'cbox': case 'cboxf': case 'cink': case 'cpmode':
         case 'cpicture': case 'cxyscroll': case 'cmouson': case 'cmousoff': case 'cmouse': case 'cdefmouse':
         case 'csetmouse': case 'capproach': case 'cescape': case 'cvtstmov': case 'cvftstmov': case 'cvmov':
         case 'cdefworld': case 'cworld': case 'cfindmat': case 'cmusic': case 'cdelmusic': case 'ccadence':
-        case 'csetvolum': case 'clistent': case 'csound': case 'cmsound': case 'cdelsound': case 'ctstform':
+        case 'csetvolum': case 'csound': case 'cmsound': case 'cdelsound': case 'ctstform':
         case 'cmmusic': case 'cmforme': case 'csettime': case 'cgettime': case 'cvinput': case 'csinput':
         case 'crunfilm': case 'cvpicprint': case 'cvputprint': case 'cspicprint': case 'csputprint': case 'cfont':
         case 'cpaper': case 'ctoblack': case 'cmovcolor': case 'ctopalet': case 'cnumput': case 'cscheart':
@@ -580,7 +614,7 @@ export class AlisScriptRunner {
         case 'cautomode': case 'cautofile': case 'cscback': case 'cscrolpage': case 'cmatent': case 'cshrink':
         case 'csavepal': case 'csczoom': case 'calloctab': case 'cfreetab': case 'cscantab': case 'cneartab':
         case 'cscsun': case 'cdarkpal': case 'cscdark': case 'cscfollow': case 'cscview': case 'cfilm':
-        case 'cpointpix': case 'czoom': case 'cload': case 'clive': case 'cunload': case 'cwakeup':
+        case 'cpointpix': case 'czoom': case 'cload': case 'cunload': case 'cwakeup':
         case 'ckill': case 'cvprint': case 'csprinti': case 'csprinta': case 'clocate': case 'ctab':
         case 'crandom': case 'cleave': case 'cprotect': case 'cclock':
         case 'cwlive': case 'cswitching': case 'cclipping':

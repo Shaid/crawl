@@ -46,6 +46,8 @@ export type AlisTableKind = 'opername' | 'storename' | 'addname';
 /** One decoded operand token. EVAL/SEVAL bodies are flat ordered step lists (a tiny accumulator-machine program), not nested expression trees -- see `evalSteps` in `ishar-scene-script.ts` for how they execute. */
 export type AlisToken =
   | { t: 'imm'; op: string; width: 'b' | 'w' | 'z'; value: number | string }
+  /** `ohim*`/`shim*`/`ahim*`: another entity's variable: the entity handle is the local word at `value`, the variable is at `offset` in its vram. */
+  | { t: 'him'; op: string; value: number; offset: number }
   | { t: 'ref'; op: string; addr: number }
   | { t: 'nullary'; op: string }
   | { t: 'unary'; op: string; arg: AlisToken }
@@ -71,7 +73,7 @@ const OPERNAMES: Record<number, [string, string]> = {
   0x18: ['odirtp', 'b'], 0x1a: ['odirtc', 'b'], 0x1c: ['odirti', 'b'],
   0x1e: ['omainb', 'w'], 0x20: ['omainw', 'w'], 0x22: ['omainp', 'w'],
   0x24: ['omaintp', 'w'], 0x26: ['omaintc', 'w'], 0x28: ['omainti', 'w'],
-  0x2a: ['ohimb', 'w'], 0x2c: ['ohimw', 'w'], 0x2e: ['ohimp', 'w'],
+  0x2a: ['ohimb', 'HIM'], 0x2c: ['ohimw', 'HIM'], 0x2e: ['ohimp', 'HIM'],
   0x30: ['ohimtp', ''], 0x32: ['ohimtc', ''], 0x34: ['ohimti', ''],
   0x36: ['opile', ''], 0x38: ['oeval', 'EVAL'], 0x3a: ['ofin', ''],
   0x40: ['opushacc', ''],
@@ -98,7 +100,7 @@ const STORENAMES: Record<number, [string, string]> = {
   0x18: ['sdirtp', 'b'], 0x1a: ['sdirtc', 'b'], 0x1c: ['sdirti', 'b'],
   0x1e: ['smainb', 'w'], 0x20: ['smainw', 'w'], 0x22: ['smainp', 'w'],
   0x24: ['smaintp', 'w'], 0x26: ['smaintc', 'w'], 0x28: ['smainti', 'w'],
-  0x2a: ['shimb', 'w'], 0x2c: ['shimw', 'w'], 0x2e: ['shimp', ''],
+  0x2a: ['shimb', 'HIM'], 0x2c: ['shimw', 'HIM'], 0x2e: ['shimp', ''],
   0x30: ['shimtp', ''], 0x32: ['shimtc', ''], 0x34: ['shimti', ''],
   0x36: ['spile', ''], 0x38: ['seval', 'SEVAL'], 0x3a: ['sfin', ''],
 };
@@ -110,7 +112,7 @@ const ADDNAMES: Record<number, [string, string]> = {
   0x18: ['adirtp', 'b'], 0x1a: ['adirtc', 'b'], 0x1c: ['adirti', 'b'],
   0x1e: ['amainb', 'w'], 0x20: ['amainw', 'w'], 0x22: ['amainp', 'w'],
   0x24: ['amaintp', 'w'], 0x26: ['amaintc', 'w'], 0x28: ['amainti', 'w'],
-  0x2a: ['ahimb', ''], 0x2c: ['ahimw', 'w'], 0x2e: ['ahimp', ''],
+  0x2a: ['ahimb', ''], 0x2c: ['ahimw', 'HIM'], 0x2e: ['ahimp', ''],
   0x30: ['ahimtp', 'w'], 0x32: ['ahimtc', ''], 0x34: ['ahimti', ''],
   0x36: ['spile', ''], 0x38: ['aeval', 'SEVAL'], 0x3a: ['afin', ''],
 };
@@ -203,6 +205,10 @@ function readToken(c: Cursor, kind: AlisTableKind): AlisToken {
   // loop needing this to terminate) and are read sign-extended. Every other
   // 'b'/'w'-shaped token here is an ADDRESS/offset operand (local-scratch
   // index, global byte offset) and stays unsigned.
+  // opernames.c/storenames.c ohim*/shim*: two words, the local holding the
+  // entity handle and the offset into that entity's vram (2026-11-23: these
+  // were read as one word, which desynchronised every script using them).
+  if (shape === 'HIM') { const value = c.u16(); return { t: 'him', op: name, value, offset: c.s16() }; }
   if (shape === 'b') return { t: 'imm', op: name, width: 'b', value: name === 'oimmb' ? c.s8() : c.u8() };
   if (shape === 'w') return { t: 'imm', op: name, width: 'w', value: name === 'oimmw' ? c.s16() : c.u16() };
   if (shape === 'z') return { t: 'imm', op: name, width: 'z', value: c.strz() };
@@ -413,7 +419,9 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0x5d: { const a = expr(c); const type = c.u16(); const b = expr(c); const cc = expr(c); return fin('cviewtyp', { a, type, b, c: cc }); }
     case 0x5e: { const a = expr(c); const b = expr(c); const cc = expr(c); return fin('cviewmat', { a, b, c: cc }); }
     case 0x5f: return fin('corient', { expr: expr(c) });
-    case 0x60: return fin('crstent', {});
+    // crstent/clistent rewind the entity list and store its first entry
+    // (they end in csuccent, which reads a store operand)
+    case 0x60: return fin('crstent', { dest: store(c) });
     case 0x61: {
       const ln = c.u8();
       const exprs: AlisToken[] = [];
@@ -500,7 +508,7 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0x99: return fin('cxinv', {});
     case 0x9a: return fin('cxinvon', {});
     case 0x9b: return fin('cxinvoff', {});
-    case 0x9c: return fin('clistent', {});
+    case 0x9c: return fin('clistent', { dest: store(c) });
     case 0x9d: return fin('csound', {});
     case 0x9e: return fin('cmsound', {});
     case 0x9f: return fin('credon', {});

@@ -227,6 +227,25 @@ export function ishar1Occupancy(t: Ishar1MonsterTable): IsharOccupancy {
 }
 
 /**
+ * Cells inside the attack range of a placed monster (slots 28..59 that
+ * pass the step test's blocking rule). GEREN's monster loop (`+0x27`)
+ * lets such a monster attack the party when both |row - row'| and
+ * |col - col'| are below a range GEREN `+0xe5e` sets to 5 or 6 (by the
+ * region code mod 10). Measured in the oracle for slot 48 (CONT4 40,15):
+ * it hits at a distance of 5 on either axis and never at 6, and its first
+ * hit (up to 18) kills the new-game party (Aramir alone, 12 hp). Route
+ * planners use this to walk around such monsters; the game itself does
+ * not refuse those cells.
+ */
+export function ishar1Danger(t: Ishar1MonsterTable, range = 5): IsharOccupancy {
+  const guards: Array<[number, number, number]> = [];
+  for (let i = ISHAR1_MONSTER_FIRST_SLOT; i < 60; i++) {
+    if (t.hp[i]! > 0 && t.kind[i]! < 0 && t.z[i] === 0) guards.push([t.region[i]!, t.row[i]!, t.col[i]!]);
+  }
+  return (region, row, col) => guards.some(([g, r, c]) => g === region && Math.abs(r - row) <= range && Math.abs(c - col) <= range);
+}
+
+/**
  * Ishar 1 GERDEP `+0xc38` (the step test every move calls; the horizontal
  * moves set the target `0x3fd0`/`0x3fd1` at `+0xbe0`, the vertical ones at
  * `+0x934`/`+0xa8a` after any region change):
@@ -275,6 +294,15 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
   facingRaw: [1, 2, 3, 4],
   gridA: 0x80,
   gridB: 0x234a,
+  // PARAM's door table (new-game values, read back from the oracle): row,
+  // col and open flag of 41 doors and gates. The cave scripts (MCAVE)
+  // read it to draw each door open or shut; GERDEP's gate check
+  // `+0x1629` reads the same arrays.
+  tables: {
+    0x3c00: [49, 27, 29, 30, 25, 20, 40, 42, 0, 31, 20, 16, 33, 22, 23, 19, 29, 37, 51, 38, 44, 33, 27, 25, 34, 34, 36, 36, 38, 38, 40, 40, 35, 37, 39, 41, 40, 40, 45, 45, 50],
+    0x3c34: [58, 14, 24, 33, 38, 42, 28, 34, 0, 51, 53, 24, 20, 35, 25, 28, 58, 50, 27, 23, 13, 31, 32, 31, 11, 13, 11, 13, 11, 13, 11, 13, 12, 12, 12, 12, 29, 27, 40, 42, 54],
+    0x3b64: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0],
+  },
   // oracle `S 14 x=0 y=0 w=255 h=125`
   screen: { xCenter: 127, horizonY: 86, width: 256, height: 126 },
   mainGlobals(s) {
@@ -300,6 +328,10 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
         return { scripts: ['FTEMPLE', 'TEMPLE'], paletteFrom: { script: 'FTEMPLE', slot: -1 } };
       case 13: case 14:
         return { scripts: ['FVILLE', 'VILLE', 'FONTAINE'], paletteFrom: { script: 'FVILLE', slot: -1 } };
+      case 15:
+        // the CONT5 cave behind the (13,24) gate cell (value 81): oracle
+        // start order. MCAVE starts PCAVE (the doors) itself.
+        return { scripts: ['MCAVE', 'FCAVE2', 'SCAVE', 'COLCAVE'], paletteFrom: { script: 'FCAVE2', slot: -1 } };
       default:
         return null;
     }
@@ -307,7 +339,7 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
   // GERDEP +0x1baf: cswitch2 on the region code, then per-region gate rules
   // (e.g. region 1: col >= 46 in zone 0 -> zone 1; col < 46 in zone 1 -> 0;
   // (25,60) in zone 1 -> 3 ...), all ending at +0x1d34 / +0x2278.
-  sceneScripts: ['FOND', 'RPLAINE', 'PLAINE', 'ARBRE', 'FORET', 'FBUIS', 'LACUSTRE', 'VILLAGE', 'RAMPART', 'INVILLE', 'FTEMPLE', 'TEMPLE', 'FVILLE', 'VILLE', 'FONTAINE'],
+  sceneScripts: ['FOND', 'RPLAINE', 'PLAINE', 'ARBRE', 'FORET', 'FBUIS', 'LACUSTRE', 'VILLAGE', 'RAMPART', 'INVILLE', 'FTEMPLE', 'TEMPLE', 'FVILLE', 'VILLE', 'FONTAINE', 'MCAVE', 'PCAVE', 'FCAVE2', 'SCAVE', 'COLCAVE', 'INCAVE'],
   gridBuffers: 'ishar1-pairs',
   stepFrom(st, dir) {
     let { region, row, col } = st;
@@ -546,6 +578,8 @@ interface LoadedScript {
   name: string;
   data: Uint8Array;
   runner: AlisScriptRunner;
+  /** Started by another scene script's `clive` (its handle), not by the region group. */
+  handle?: number;
 }
 
 /** Display-list order of the reference engine (see module doc). */
@@ -594,6 +628,12 @@ export class IsharScene {
     const globals: Record<number, number> = { ...this.spec.mainGlobals(st), ...st.globals, ...(this.spec.zone ? { [this.spec.zone.addr]: this.zone } : {}) };
     const { stride, rows, gridA, gridB } = this.spec;
     return {
+      live: (id) => this.live(id),
+      writeEntity: (h, off, v) => {
+        const c = this.scripts.find((x) => x.handle === h);
+        if (c) c.runner.locals.set(off, v);
+      },
+      readEntity: (h, off) => this.scripts.find((x) => x.handle === h)?.runner.locals.get(off) ?? 0,
       readMain: (addr) => globals[addr] ?? 0,
       writeMain: (addr, v) => {
         globals[addr] = v;
@@ -610,6 +650,37 @@ export class IsharScene {
         return 0;
       },
     };
+  }
+
+  private nextHandle = 0x100;
+  private idNames: Map<number, string> | null = null;
+
+  /**
+   * `clive id` from a scene script: start that script as a child entity
+   * (e.g. MCAVE starts PCAVE, the cave doors, and passes it the door's
+   * position through `shimw`). The child runs after the scripts already
+   * woken this step and lives until the next step (the oracle trace:
+   * COLCAVE kills PCAVE on every wake and MCAVE starts a new one).
+   * Script ids are the scripts' own header ids (`id@0`), looked up among
+   * `sceneScripts`.
+   */
+  private live(id: number): number {
+    if (!this.idNames) {
+      this.idNames = new Map();
+      for (const n of this.spec.sceneScripts) {
+        const d = this.load(n);
+        if (d && d.length > 1) this.idNames.set((d[0]! << 8) | d[1]!, n);
+      }
+    }
+    const name = this.idNames.get(id);
+    const s = name ? this.create(name) : null;
+    if (!s) {
+      this.warnings.push(`clive of unknown script id ${id}`);
+      return -1;
+    }
+    s.handle = this.nextHandle++;
+    this.scripts.push(s);
+    return s.handle;
   }
 
   private create(name: string): LoadedScript | null {
@@ -695,7 +766,7 @@ export class IsharScene {
     const key = want.join(',');
     if (key === this.addOnKey && !restart) return;
     const base = this.spec.sceneGroup(st.region)?.scripts ?? [];
-    const keep = this.scripts.filter((s) => base.includes(s.name) || (want.includes(s.name) && !restart));
+    const keep = this.scripts.filter((s) => s.handle !== undefined || base.includes(s.name) || (want.includes(s.name) && !restart));
     const have = new Set(keep.map((s) => s.name));
     const env = this.env();
     for (const name of want) {
@@ -722,6 +793,7 @@ export class IsharScene {
     const fresh = this.groupKeyFor(state) !== this.groupKey;
     if (this.enter(state) && !fresh) {
       const env = this.env();
+      this.scripts = this.scripts.filter((s) => s.handle === undefined);
       for (const s of this.scripts) {
         s.runner.wake();
         s.runner.settle(env);
