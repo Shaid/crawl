@@ -505,6 +505,8 @@ export function captureLegWalk(
     start?: { region: number; row: number; col: number; facingRaw: number };
     /** Keep the savestate the last leg left here. */
     finalState?: string;
+    /** Harness commands run at the start of every leg (e.g. `pokew` to keep the party alive on a scenery walk). */
+    legCommands?: readonly string[];
   } = {},
 ): WalkStep[] {
   const t = ORACLE_TITLES[game];
@@ -529,7 +531,7 @@ export function captureLegWalk(
       const expect = p !== null && 'actions' in p ? p.expect : undefined;
       if (!actions || actions.length === 0) break;
       const dir = join(outDir, `leg${leg}`);
-      const ev: Array<[number, string]> = [];
+      const ev: Array<[number, string]> = (opts.legCommands ?? []).map((c) => [2, c] as [number, string]);
       actions.forEach((a, i) => {
         const f0 = 4 + i * WALK_STRIDE;
         const [x, y] = a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;

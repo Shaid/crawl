@@ -69,7 +69,7 @@ index 26375e3..00547a1 100644
  }
  
 diff --git a/src/opcodes.c b/src/opcodes.c
-index 1151bed..c4b8006 100644
+index 1151bed..37e1ca0 100644
 --- a/src/opcodes.c
 +++ b/src/opcodes.c
 @@ -1142,6 +1142,7 @@ static void cwakeup(void)
@@ -94,6 +94,47 @@ index 1151bed..c4b8006 100644
  
 +     { extern void h_trace(const char *, const char *); sAlisScriptLive *w = ENTSCR(alis.varD7); h_trace("kill", w ? w->name : 0); }
       killent(alis.varD7);
+ }
+ 
+@@ -7021,6 +7024,7 @@ static void csinput(void)
+ {
+     alis.charmode = 0;
+     getstring();
++    if (getenv("ALIS_HARNESS_STRCMP")) fprintf(stderr, "[strcmp] csinput '%s' in %s pc=%x\n", alis.sd7, alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org));
+     cstore_continue();
+ }
+ 
+diff --git a/src/opernames.c b/src/opernames.c
+index d3b0040..e68f4f2 100644
+--- a/src/opernames.c
++++ b/src/opernames.c
+@@ -1,3 +1,4 @@
++#include <stdlib.h>
+ //
+ // Copyright 2023 Olivier Huguenot, Vadim Kindl
+ //
+@@ -1052,6 +1053,7 @@ void omodel(void)
+ void ogetkey(void)
+ {
+     alis.varD7 = io_getkey();
++    if (getenv("ALIS_HARNESS_STRCMP")) fprintf(stderr, "[strcmp] okey %d in %s pc=%x\n", alis.varD7, alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org));
+     ALIS_DEBUG(EDebugInfo, " [%d] ", alis.varD7);
+ }
+ 
+@@ -1144,6 +1146,7 @@ void osadd(void)
+ void osegal(void)
+ {
+     readexec_opername_swap();
++    if (getenv("ALIS_HARNESS_STRCMP")) fprintf(stderr, "[strcmp] '%s' == '%s'\n", alis.sd6, alis.sd7);
+     alis.varD7 = strncmp(alis.sd6, alis.sd7, strlen(alis.sd6)) ? 0 : -1;
+ }
+ 
+@@ -1151,6 +1154,7 @@ void osegal(void)
+ void osdiff(void)
+ {
+     readexec_opername_swap();
++    if (getenv("ALIS_HARNESS_STRCMP")) fprintf(stderr, "[strcmp] '%s' != '%s'\n", alis.sd6, alis.sd7);
+     alis.varD7 = strncmp(alis.sd6, alis.sd7, strlen(alis.sd6)) ? -1 : 0;
  }
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
@@ -300,7 +341,7 @@ index 0000000..3188242
 +  for (int i = 0; i < n; i++) { u8 v = alis.mem[alis.basemain + offs[i]]; if (v != last[i]) { fprintf(stderr, "[watch] %ld %x %d->%d by=%s pc=%x\n", h_frameno, offs[i], (s8)last[i], (s8)v, alis.script && alis.script->name ? alis.script->name : "?", alis.script ? alis.script->pc : 0); last[i] = v; } }
 +}
 diff --git a/src/sys/sys.c b/src/sys/sys.c
-index 89651c2..759d397 100644
+index 89651c2..81dc8f3 100644
 --- a/src/sys/sys.c
 +++ b/src/sys/sys.c
 @@ -1963,7 +1963,8 @@ u8 io_inkey(void)
@@ -313,6 +354,24 @@ index 89651c2..759d397 100644
  #endif
      {
          button.scancode = 0;
+@@ -2111,7 +2112,7 @@ u8 io_shiftkey(void)
+ 
+ u8 io_getkey(void)
+ {
+-    
++    if (getenv("ALIS_HARNESS_STRCMP")) fprintf(stderr, "[strcmp] getkey\n");
+     u8 result = 0;
+     while (alis.state && (result = io_inkey()) == 0)
+     {
+@@ -2121,7 +2122,7 @@ u8 io_getkey(void)
+     {
+         sys_sleep(k_event_ticks);
+     }
+-
++    if (getenv("ALIS_HARNESS_STRCMP")) fprintf(stderr, "[strcmp] getkey -> %d\n", result);
+     return result;
+ }
+ 
 diff --git a/src/sys/sys_sdl2.c b/src/sys/sys_sdl2.c
 index 9783d8a..14b77dd 100644
 --- a/src/sys/sys_sdl2.c

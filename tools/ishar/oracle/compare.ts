@@ -258,11 +258,14 @@ export function crawlWalk(
   steps: ReadonlyArray<{ action: 'F' | 'L' | 'R'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number> }>,
   layers: (region: number) => readonly Uint8Array[] | undefined,
   initial: { A?: GridReader; B?: GridReader } = {},
+  /** Extra scene wakes at the start pose: a walk that starts from a mid-game savestate meets scripts with a per-wake phase (FOND's alternation) already advanced. */
+  startWakes = 0,
 ): WalkComparison[] {
   const spec = data.spec;
   const buffers = new IsharGridBuffers(spec, layers, initial);
   const scene = new IsharScene(spec, data.load, buffers.update(start));
   scene.enter(start);
+  for (let i = 0; i < startWakes; i++) scene.step(start);
   let cur = start;
   const out: WalkComparison[] = [];
   for (const s of steps) {

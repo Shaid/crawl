@@ -96,3 +96,18 @@ These variables change how it runs:
 the title's `npcScripts`) kills those entities whenever they are alive, between
 script activations. That changes the game: use it only for long scenery walks
 that roaming NPCs would otherwise block or turn into fights.
+
+Read-back walks: `captureLegWalk(game, plan, outDir, opts)` plays a walk in
+legs. Each leg starts from the savestate the previous one saved, in a
+private hard-linked copy of the game directory (the shared boot state is
+never touched). `plan` returns the next leg's actions and expected states
+(`tools/ishar/oracle/route.ts` plans them on the CONT grids with the
+title's step test). The harness command `expect OFF VAL` holds all further
+input once a main-global byte differs, so a leg stops where the game
+stopped following it. Use `startState`/`finalState` to chain walks and
+`legCommands` for per-leg pokes.
+
+`ALIS_HARNESS_STRCMP=1` logs the engine's string compares and key reads,
+with the script and pc of each `ogetkey`. That is how the Ishar 1 CONT3
+manual-protection answer table (MONSTRE.DO) was found.
+
