@@ -1812,6 +1812,13 @@ sprites overlap in the opposite order there, 5 pixels each. The game's
 tie order follows the entity slot each new script was given, and crawl
 approximates that by start order.
 
+15. **Ishar 2 travel (2026-11-23, traced, not driven).** MAIN `+0x374`
+    stores a message value in `0x51bf` and starts `+0xede`. The
+    `cswitch2` at `+0xee6` (base 3) sets row, col, region code `0x2d18`,
+    zone `0x4ef2` and facing for selectors -2..8: ten arrival points on
+    regions 1-7 (`ISHAR2_TRAVEL`). Selector -3 returns to a saved position;
+    GESORT sends it. The sender of the island selectors is not found.
+
 **Measured 2026-11-23 (later), with roaming monsters removed and hp kept
 at 500.** All values are placements / pixels outside NPC boxes:
 

@@ -506,6 +506,28 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
  * local -2, 1 in every run). One CONT file holds both grids: layer 0 at
  * `basemain+0x80`, layer 1 at `+0x159c`.
  */
+/**
+ * Ishar 2's travel destinations (MAIN `+0xee6`): a message to MAIN stores
+ * its value in `0x51bf` (`+0x374`, `cstore oscan`) and starts `+0xede`,
+ * whose `cswitch2` (base 3) sets row `0x2ab4`, col `0x2ab5`, region code
+ * `0x2d18`, zone `0x4ef2` and raw facing `0x2ab6`, then reloads the scene.
+ * Selector -3 returns to the position saved in `0x4fd1`/`0x5074`/`0x5075`/
+ * `0x5076` (GESORT sends it: a recall spell); selector 0 has no arm. Which
+ * script sends the island selectors (the boat trip) is not traced yet.
+ */
+export const ISHAR2_TRAVEL: ReadonlyArray<{ selector: number; region: number; row: number; col: number; zone: number; facingRaw: number }> = [
+  { selector: -2, region: 3, row: 54, col: 26, zone: 19, facingRaw: 2 },
+  { selector: -1, region: 7, row: 5, col: 21, zone: 51, facingRaw: 2 },
+  { selector: 1, region: 1, row: 2, col: 53, zone: 3, facingRaw: 2 },
+  { selector: 2, region: 4, row: 48, col: 56, zone: 25, facingRaw: 3 },
+  { selector: 3, region: 4, row: 21, col: 9, zone: 6, facingRaw: 2 },
+  { selector: 4, region: 4, row: 76, col: 3, zone: 8, facingRaw: 1 },
+  { selector: 5, region: 3, row: 3, col: 55, zone: 23, facingRaw: 2 },
+  { selector: 6, region: 2, row: 28, col: 51, zone: 54, facingRaw: 1 },
+  { selector: 7, region: 5, row: 10, col: 46, zone: 30, facingRaw: 2 },
+  { selector: 8, region: 6, row: 11, col: 45, zone: 41, facingRaw: 2 },
+];
+
 export const ISHAR2_TITLE: IsharTitleSpec = {
   game: 'ishar2',
   stride: 60,

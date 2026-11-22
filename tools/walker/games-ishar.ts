@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_PORTALS, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -398,6 +398,8 @@ export class IsharView implements GameView {
   private firstPerson = false;
   private toggleKeyWasDown = false;
   private cycleKeyWasDown = false;
+  private travelKeyWasDown = false;
+  private travelIndex = 0;
   private locationIndex = 0;
   private fpCache: { key: string; frame: ReturnType<typeof renderIsharLocationFrame> } | null = null;
   private fpCanvas: HTMLCanvasElement | null = null;
@@ -537,6 +539,21 @@ export class IsharView implements GameView {
       this.locationIndex = (this.locationIndex + 1) % count;
     }
     this.cycleKeyWasDown = cycleDown;
+
+    // Ishar 2: T jumps to the next of the game's own travel destinations
+    // (MAIN's arrival table, `ISHAR2_TRAVEL`), as a boat trip or a spell
+    // would; the sub-zone is not carried over yet.
+    const travelDown = keys.isDown('KeyT');
+    if (travelDown && !this.travelKeyWasDown && this.id === 'ishar2') {
+      const d = ISHAR2_TRAVEL[this.travelIndex++ % ISHAR2_TRAVEL.length]!;
+      const facing = ISHAR2_TITLE.facingRaw.indexOf(d.facingRaw) as Pose['facing'];
+      if (this.gridOf(d.region)) {
+        this.setPose({ level: d.region, x: d.row, y: d.col, facing });
+        this.travelKeyWasDown = travelDown;
+        return this.pose_;
+      }
+    }
+    this.travelKeyWasDown = travelDown;
 
     if (this.stepCooldown > 0) return null;
 
