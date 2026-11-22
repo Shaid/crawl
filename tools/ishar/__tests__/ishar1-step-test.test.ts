@@ -6,7 +6,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ISHAR1_TITLE, ishar1MonsterTableFromEn1, ishar1Occupancy, isharEnter } from '../../shared/ishar-scene.ts';
+import { ISHAR1_TITLE, ishar1CavePortal, ishar1DoorShut, ishar1MonsterTableFromEn1, ishar1Occupancy, isharEnter } from '../../shared/ishar-scene.ts';
 
 const EN1 = 'data/ishar/amigaaga/EN1.FIC';
 const cont = (n: number) => new Uint8Array(readFileSync(`data/ishar/amigaaga/CONT${n}.FIC`));
@@ -49,5 +49,28 @@ describe.skipIf(!existsSync('data/ishar/amigaaga/MCAVE.DO'))('ALIS operand decod
     const st = decodeAlisInstr(mcave, 0x321f);
     expect(st.fields.dest).toEqual({ t: 'him', op: 'shimw', value: 0x44, offset: 2 });
     expect(st.end).toBe(0x322c);
+  });
+});
+
+describe.skipIf(!existsSync(EN1))('Ishar 1 caves: doors, passages, the cave mouth (oracle-measured rules)', () => {
+  const c5 = cont(5);
+  const cell = (_r: number, row: number, col: number) => ((c5[row * 90 + col]! << 24) >> 24);
+  const at = (region: number, row: number, col: number) => ({ region, row, col, facing: 0 as const });
+  it('a shut door blocks its edge both ways; an open one does not', () => {
+    const shut = new Array(41).fill(0);
+    const open = new Array(41).fill(1);
+    // (16,24) = 51: door on the south edge
+    expect(ISHAR1_TITLE.enter!({ ...at(15, 16, 24), tables: { 0x3b64: shut } }, at(15, 17, 24), cell)).toBeNull();
+    expect(ISHAR1_TITLE.enter!({ ...at(15, 16, 24), tables: { 0x3b64: open } }, at(15, 17, 24), cell)).toEqual(at(15, 17, 24));
+    expect(ISHAR1_TITLE.enter!({ ...at(15, 15, 24), tables: { 0x3b64: shut } }, at(15, 16, 24), cell)).toEqual(at(15, 16, 24));
+    // (30,33) = 53: door on the east edge, refused coming in from the east
+    expect(ishar1DoorShut(at(15, 30, 34), at(15, 30, 33), cell, shut)).toBe(true);
+  });
+  it('a passage keeps the step: (49,19) east onto the -81 lands one east of (36,26)', () => {
+    expect(ISHAR1_TITLE.enter!({ ...at(15, 49, 19), tables: { 0x3b64: new Array(41).fill(1) } }, at(15, 49, 20), cell)).toEqual(at(15, 36, 27));
+  });
+  it('CONT5 (13,24) is the cave mouth', () => {
+    expect(ishar1CavePortal(at(5, 12, 24), at(5, 13, 24))).toEqual(at(15, 13, 24));
+    expect(ishar1CavePortal(at(15, 13, 24), at(15, 12, 24))).toEqual(at(5, 12, 24));
   });
 });

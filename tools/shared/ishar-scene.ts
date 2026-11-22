@@ -58,6 +58,8 @@ export interface IsharPartyState {
   facing: 0 | 1 | 2 | 3;
   /** Other main globals that are game state rather than position (e.g. Ishar 2's day phase `0x519f`); override `mainGlobals`' defaults. */
   globals?: Readonly<Record<number, number>>;
+  /** One-dimensional main tables as the game holds them now (e.g. Ishar 1's door flags `0x3b64`); override the spec's new-game `tables`. */
+  tables?: Readonly<Record<number, readonly number[]>>;
 }
 
 export interface IsharSceneGroup {
@@ -269,19 +271,85 @@ export function ishar1Danger(t: Ishar1MonsterTable, range = 5): IsharOccupancy {
  * the same reason. Applying the gate table to plain cells refuses steps
  * the game allows (oracle walk).
  */
-export function isharEnter(to: IsharPartyState, v: number, occupied?: IsharOccupancy): IsharPartyState | null {
+export function isharEnter(to: IsharPartyState, v: number, occupied?: IsharOccupancy, from?: IsharPartyState): IsharPartyState | null {
+  // A passage sets the position, and then the move itself still applies
+  // (GERDEP adds the step to 0x137c/0x137d after the test, e.g. `+0x5d8`,
+  // `+0x9d2`): oracle, CONT5 cave (49,19) east onto the -81 at (49,20)
+  // lands on (36,27), one east of the table's (36,26).
+  const dr = from && Math.abs(to.row - from.row) === 1 ? to.row - from.row : 0;
+  const dc = from ? to.col - from.col : 0;
   if (v === -80 || v === -81) {
     const dest: Record<number, readonly [number, number]> = v === -80
       ? { 1: [17, 67], 3: [45, 24], 4: [50, 50], 15: [36, 26] }
       : { 1: [21, 14], 3: [4, 52], 4: [46, 13], 15: [49, 20] };
     const d = dest[to.region];
-    return d ? { ...to, row: d[0], col: d[1] } : null;
+    return d ? { ...to, row: d[0] + dr, col: d[1] + dc } : null;
   }
-  if (v === -82) return { ...to, region: 6, row: 20, col: 71 };
+  if (v === -82) return { ...to, region: 6, row: 20 + dr, col: 71 + dc };
   if (v < 0) return null;
   if (occupied?.(to.region, to.row, to.col)) return null;
   return to;
 }
+
+/**
+ * The CONT5 cave mouth, measured in the oracle (the writer is MAIN
+ * `+0x1b11`, in a part the disassembler does not reach yet): stepping onto
+ * CONT5 (13,24), the only cell holding 81, switches the region code from 5
+ * to 15 (TELEP.DO asks a manual word first); stepping from it back north
+ * to (12,24) switches it back. Inside, the cave is drawn on the same CONT5
+ * grid.
+ */
+export function ishar1CavePortal(from: IsharPartyState, to: IsharPartyState): IsharPartyState {
+  if (to.region === 5 && to.row === 13 && to.col === 24) return { ...to, region: 15 };
+  if (from.region === 15 && from.row === 13 && from.col === 24 && to.row === 12 && to.col === 24) return { ...to, region: 5 };
+  return to;
+}
+
+/**
+ * Doors and gates inside the caves (region code >= 10), measured in the
+ * oracle against PARAM's door table (`0x3c00` row, `0x3c34` col, `0x3b64`
+ * open), whose flags the walk poked one by one:
+ * - a cell holding 50..69 has a door on one edge, (value - 50) mod 4 =
+ *   north / south / west / east. Crossing that edge, out of the cell or
+ *   into it, is refused while the door is shut. Seen: CONT5 (16,24) = 51
+ *   refuses the step south out of it; (30,33) = 53 refuses the step into
+ *   it from the east.
+ * - a cell holding 82..85 is a gate: stepping onto it is refused while it
+ *   is shut (CONT5 34,11 / 38,13 / 40,13 / 41,12).
+ * A door cell with no table entry never blocks. GERDEP's side-wall arms
+ * (`+0x11d5`/`+0x13a9`, which call the gate check `+0x1629`) have the same
+ * north/south/west/east order. How the cave cell values reach those arms
+ * is not traced.
+ */
+export function ishar1DoorShut(
+  from: IsharPartyState,
+  to: IsharPartyState,
+  cell: (region: number, row: number, col: number) => number,
+  open: readonly number[],
+): boolean {
+  if (from.region < 10 || to.region !== from.region) return false;
+  const rows = ISHAR1_DOOR_ROWS;
+  const cols = ISHAR1_DOOR_COLS;
+  const shut = (row: number, col: number) => {
+    for (let i = 0; i < rows.length; i++) if (rows[i] === row && cols[i] === col) return (open[i] ?? 0) === 0;
+    return false;
+  };
+  const dr = to.row - from.row;
+  const dc = to.col - from.col;
+  // the edge (N, S, W, E) a step crosses, seen from each side
+  const side = (r: number, c: number) => (r < 0 ? 0 : r > 0 ? 1 : c < 0 ? 2 : 3);
+  const edgeDoor = (row: number, col: number, edge: number) => {
+    const v = cell(from.region, row, col);
+    return v >= 50 && v <= 69 && (v - 50) % 4 === edge && shut(row, col);
+  };
+  if (edgeDoor(from.row, from.col, side(dr, dc)) || edgeDoor(to.row, to.col, side(-dr, -dc))) return true;
+  const g = cell(to.region, to.row, to.col);
+  return g >= 82 && g <= 85 && shut(to.row, to.col);
+}
+
+/** PARAM's door table (new game; static in every oracle run): row and column of 41 doors and gates. */
+export const ISHAR1_DOOR_ROWS: readonly number[] = [49, 27, 29, 30, 25, 20, 40, 42, 0, 31, 20, 16, 33, 22, 23, 19, 29, 37, 51, 38, 44, 33, 27, 25, 34, 34, 36, 36, 38, 38, 40, 40, 35, 37, 39, 41, 40, 40, 45, 45, 50];
+export const ISHAR1_DOOR_COLS: readonly number[] = [58, 14, 24, 33, 38, 42, 28, 34, 0, 51, 53, 24, 20, 35, 25, 28, 58, 50, 27, 23, 13, 31, 32, 31, 11, 13, 11, 13, 11, 13, 11, 13, 12, 12, 12, 12, 29, 27, 40, 42, 54];
 
 /** FOND.DO `+0x68`: `cpalette 8` on its first resume. */
 const FOND_PALETTE = { script: 'FOND', slot: 8 } as const;
@@ -299,9 +367,12 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
   // read it to draw each door open or shut; GERDEP's gate check
   // `+0x1629` reads the same arrays.
   tables: {
-    0x3c00: [49, 27, 29, 30, 25, 20, 40, 42, 0, 31, 20, 16, 33, 22, 23, 19, 29, 37, 51, 38, 44, 33, 27, 25, 34, 34, 36, 36, 38, 38, 40, 40, 35, 37, 39, 41, 40, 40, 45, 45, 50],
-    0x3c34: [58, 14, 24, 33, 38, 42, 28, 34, 0, 51, 53, 24, 20, 35, 25, 28, 58, 50, 27, 23, 13, 31, 32, 31, 11, 13, 11, 13, 11, 13, 11, 13, 12, 12, 12, 12, 29, 27, 40, 42, 54],
+    0x3c00: ISHAR1_DOOR_ROWS,
+    0x3c34: ISHAR1_DOOR_COLS,
     0x3b64: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0],
+    // a second PARAM (row, col) list, 22 entries (MCAVE draws something at each; levers?)
+    0x3c68: [0, 28, 25, 25, 25, 51, 49, 49, 39, 39, 0, 0, 33, 23, 35, 37, 39, 41, 39, 35, 40, 45],
+    0x3c9c: [0, 55, 52, 54, 56, 33, 33, 35, 15, 17, 0, 0, 35, 32, 11, 11, 11, 11, 13, 13, 28, 41],
   },
   // oracle `S 14 x=0 y=0 w=255 h=125`
   screen: { xCenter: 127, horizonY: 86, width: 256, height: 126 },
@@ -361,8 +432,10 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
     }
     return { ...st, region, row, col };
   },
-  enter(_from, to, cell, occupied) {
-    return isharEnter(to, cell(to.region, to.row, to.col), occupied);
+  enter(from, to, cell, occupied) {
+    if (ishar1DoorShut(from, to, cell, from.tables?.[0x3b64] ?? this.tables![0x3b64]!)) return null;
+    const r = isharEnter(to, cell(to.region, to.row, to.col), occupied, from);
+    return r && ishar1CavePortal(from, r);
   },
   zone: { script: 'GERDEP', entry: 0x1baf, exits: [0x1d34, 0x2278], addr: 0x3eac, prevRegionLocal: 25 },
   addOns(region, zone) {
@@ -640,7 +713,7 @@ export class IsharScene {
         if (this.spec.zone && addr === this.spec.zone.addr) this.zone = v;
       },
       readGrid: (addr, pop, direct) => {
-        const table = this.spec.tables?.[addr];
+        const table = st.tables?.[addr] ?? this.spec.tables?.[addr];
         if (table) return table[direct] ?? 0;
         const row = pop();
         const col = direct;

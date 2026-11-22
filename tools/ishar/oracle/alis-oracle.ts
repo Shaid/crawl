@@ -56,7 +56,7 @@ export interface OracleTitle {
   /** Scripted boot: `[frame, command]` pairs, the last one saves the state. */
   boot: ReadonlyArray<readonly [number, string]>;
   /** Main-segment tables dumped with the party after every walk step (`WalkStep.mem[name]`), e.g. the monster table the step test reads. */
-  stepMemdumps?: ReadonlyArray<{ name: string; off: number; len: number }>;
+  stepMemdumps?: ReadonlyArray<{ name: string; off: number; len: number; /** a one-dimensional table the scene scripts read (`IsharPartyState.tables`), signed bytes */ table?: boolean }>;
   /** Memory captured at the start of every pose run (`<name>.bin` in the run directory). */
   bootMemdumps?: ReadonlyArray<{ name: string; off: number; len: number }>;
   /** Party state in the boot savestate (scene created, no wake-up yet). */
@@ -106,6 +106,10 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
       { name: 'monKind', off: 0x22f2, len: 70 },
       { name: 'monRegion', off: 0x3910, len: 70 },
       { name: 'monZ', off: 0x3a48, len: 140 },
+      // PARAM's door flags (the cave scripts draw each door open or shut)
+      { name: 'doorOpen', off: 0x3b64, len: 41, table: true },
+      // and the lever states MCAVE reads next to the lever list 0x3c68/0x3c9c
+      { name: 'leverState', off: 0x3b98, len: 50, table: true },
     ],
   },
   ishar2: {

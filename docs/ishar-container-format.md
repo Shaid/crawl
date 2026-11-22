@@ -1733,6 +1733,20 @@ plausibility.
    COLCAVE kills PCAVE on the next wake. `IsharScene` models such
    children: a `clive` from a scene script starts the child, and the
    child lives until the next step.
+
+   Cave movement, measured in the oracle:
+   - **Doors.** A cell holding 50..69 has a door on edge (value - 50)
+     mod 4 (north, south, west, east). Crossing that edge is refused
+     while the door is shut.
+   - **Gates.** Stepping onto a cell holding 82..85 is refused while the
+     gate is shut.
+   - **Passages** (-80/-81/-82) keep the move's own step after the jump.
+
+   MCAVE also reads a lever list (`0x3c68`/`0x3c9c`) and its state
+   (`0x3b98`).
+
+   The temple (region 6, FTEMPLE + TEMPLE) is the corridor at CONT6
+   row 20. Measured over 79 frames: 100%.
 10. **Decoder fixes found on the way (2026-11-23).**
     - `clistent` (0x9c) and `crstent` (0x60) end in `csuccent` and read a
       store destination; crawl read none.

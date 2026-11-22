@@ -276,7 +276,7 @@ export function crawlWalk(
   let occupied = stepOccupancy(game(data), steps[0]?.mem);
   for (const s of steps) {
     const facing = spec.facingRaw.indexOf(s.facingRaw);
-    const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals: s.globals };
+    const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals: s.globals, tables: stepTables(game(data), s.mem) };
     let predicted: IsharPartyState | null;
     if (s.action !== 'F') predicted = { ...cur, facing: ((cur.facing + (s.action === 'R' ? 1 : 3)) & 3) as 0 | 1 | 2 | 3 };
     else {
@@ -299,6 +299,18 @@ export function crawlWalk(
 }
 
 const game = (data: TitleData): OracleGame => data.spec.game as OracleGame;
+
+/** The scene tables a walk step dumped (`stepMemdumps` entries flagged `table`). */
+export function stepTables(game: OracleGame, mem: Readonly<Record<string, Uint8Array>> | undefined): Record<number, number[]> | undefined {
+  if (!mem) return undefined;
+  let out: Record<number, number[]> | undefined;
+  for (const m of ORACLE_TITLES[game].stepMemdumps ?? []) {
+    const b = mem[m.name];
+    if (!m.table || !b) continue;
+    (out ??= {})[m.off] = [...b].map(s8);
+  }
+  return out;
+}
 
 /** GERDEP's monster occupancy from a walk step's `stepMemdumps` (Ishar 1 only). */
 export function stepOccupancy(game: OracleGame, mem: Readonly<Record<string, Uint8Array>> | undefined): IsharOccupancy | undefined {
