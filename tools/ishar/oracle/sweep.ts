@@ -63,11 +63,15 @@ function main(): void {
   if (!existsSync(savestatePath(game))) bootToSavestate(game, join(out, 'boot'));
   const frames = capturePoses(game, poses, out);
   const data = loadTitleData(game);
-  const seq = crawlSequence(data, ORACLE_TITLES[game].start, poses, oracleRunGrids(game, data, out));
+  const taken = frames.map((f) => f.taken !== false);
+  const seq = crawlSequence(data, ORACLE_TITLES[game].start, poses, oracleRunGrids(game, data, out), taken);
+  const skipped = taken.filter((t) => !t).length;
+  if (skipped) console.log(`${skipped} pose(s) not taken by the game (an encounter held the input); left out of the totals`);
   const pct = (a: number, b: number) => (b ? ((100 * a) / b).toFixed(2) : '-');
   for (const shift of [0, 1]) {
     const tot = { o: 0, c: 0, m: 0, p: 0, pe: 0, pm: 0, pme: 0 };
     seq.forEach((c, i) => {
+      if (!taken[i] || !taken[(i + shift) % frames.length]) return;
       const r = comparePose(game, frames[(i + shift) % frames.length]!, data, c.scripts, c.canvas, c.leaves);
       if (shift === 0) {
         console.log(`${i} r${poses[i]!.row} c${poses[i]!.col} f${poses[i]!.facing}  oracle=${r.oracle} crawl=${r.crawl} matched=${r.matched} px=${pct(r.pixelsEqual, r.pixels)}% masked=${pct(r.pixelsMaskedEqual, r.pixelsMasked)}%`);

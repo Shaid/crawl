@@ -232,6 +232,8 @@ export interface OracleScreen {
 }
 
 export interface OracleFrame {
+  /** Pose captures only: the game reached the requested pose (false when an encounter swallowed the input). */
+  taken?: boolean;
   width: number;
   height: number;
   rgb: Uint8Array;
@@ -314,14 +316,19 @@ export function capturePoses(game: OracleGame, poses: readonly OraclePose[], out
     const before = t.facingCycle[(ci + t.facingCycle.length - 1) % t.facingCycle.length]!;
     ev.push([f0, `poke ${t.row.toString(16)} ${p.row}`], [f0, `poke ${t.col.toString(16)} ${p.col}`], [f0, `poke ${t.facing.toString(16)} ${before}`]);
     ev.push([f0 + 1, `click ${t.turnRight[0]} ${t.turnRight[1]}`], [f0 + 3, 'up']);
-    ev.push([f0 + POSE_SETTLE, `dump p${i}`]);
+    ev.push([f0 + POSE_SETTLE, `dump p${i}`], [f0 + POSE_SETTLE, `memdump ${t.row.toString(16)} 3 q${i}`]);
   });
   ev.push([4 + poses.length * POSE_STRIDE + 2, 'quit']);
   const r = runOracle(game, ev, outDir, { loadState: true, timeoutMs: 60_000 + poses.length * 200 });
   const frames: OracleFrame[] = [];
   for (let i = 0; i < poses.length; i++) {
     if (!existsSync(join(outDir, `p${i}.ppm`))) throw new Error(`oracle did not dump pose ${i}\n${r.stderr.slice(-2000)}`);
-    frames.push(readFrame(outDir, `p${i}`));
+    const q = readFileSync(join(outDir, `q${i}.bin`));
+    const p = poses[i]!;
+    // The game ignores the turn while a dialogue or fight holds the input
+    // (an NPC encounter); such a pose was neither drawn nor woken.
+    const taken = q[0] === p.row && q[1] === p.col && (q[2]! >= 128 ? q[2]! - 256 : q[2]!) === t.facingRaw[p.facing];
+    frames.push({ ...readFrame(outDir, `p${i}`), taken });
   }
   return frames;
 }

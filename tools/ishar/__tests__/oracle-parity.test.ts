@@ -50,6 +50,7 @@ for (const game of Object.keys(SAMPLES) as Array<'ishar' | 'ishar2'>) {
         prepareGameDir(game as OracleGame);
         if (!existsSync(savestatePath(game))) bootToSavestate(game, join(out, 'boot'));
         const frames = capturePoses(game, poses, out);
+        expect(frames.map((f) => f.taken)).toEqual(poses.map(() => true));
         const data = loadTitleData(game);
         const seq = crawlSequence(data, ORACLE_TITLES[game].start, poses, oracleRunGrids(game, data, out));
         const rows = seq.map((c, i) => {

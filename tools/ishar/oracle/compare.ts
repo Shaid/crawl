@@ -197,15 +197,19 @@ export function crawlSequence(
   start: IsharPartyState,
   poses: readonly OraclePose[],
   gridsFor: (region: number, row: number) => { A: GridReader; B: GridReader } = data.grids,
+  /** Per pose: did the game take it (a swallowed input wakes nothing)? Default all. */
+  taken: readonly boolean[] = [],
 ): Array<{ scene: IsharScene; scripts: string[]; leaves: IsharSceneLeaf[]; canvas: Uint8Array }> {
   const spec = data.spec;
   const scene = new IsharScene(spec, data.load, gridsFor(start.region, start.row));
   scene.enter(start);
   const out: Array<{ scene: IsharScene; scripts: string[]; leaves: IsharSceneLeaf[]; canvas: Uint8Array }> = [];
-  for (const p of poses) {
+  for (const [i, p] of poses.entries()) {
     const st: IsharPartyState = { region: start.region, row: p.row, col: p.col, facing: p.facing };
-    scene.setGrids(gridsFor(st.region, p.row));
-    scene.step(st);
+    if (taken[i] !== false) {
+      scene.setGrids(gridsFor(st.region, p.row));
+      scene.step(st);
+    }
     const leaves = scene.leaves();
     // scripts alive at this pose (the zone add-ons come and go)
     out.push({ scene, scripts: scene.scriptNames, leaves, canvas: compositeIsharView(leaves, spec.screen, scene.palette) });
