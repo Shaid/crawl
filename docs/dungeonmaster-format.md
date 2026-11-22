@@ -369,8 +369,9 @@ it without any hardcoded offset or seed list:
 
 > **Correction (2026-11-21):** the `KAOS.FTL`+0x79A lead below is the real
 > dungeon-view palette. The table is at +0xFBC / +0x79A (entry 0 is the
-> preceding zero word) and equals ScummVM's `G0021` palette 0 (16/16 words);
-> CSB `disk1/KAOS.FTL`+0x100A likewise. See
+> preceding zero word); it is light level 0 of a six-level table in the
+> module's data block (A5-0x36BA DM, A5-0x3A5C CSB; decoded by
+> `tools/dungeonmaster/amiga/ftl.ts`); CSB `disk1/KAOS.FTL`+0x100A likewise. See
 > `docs/dungeonmaster/amiga/data-structure.md` § "Viewport composition". Only
 > the non-dungeon-view palettes remain open (`dm1-palette`).
 

@@ -340,7 +340,7 @@ export function parseDungeon(d: Uint8Array): ParsedDungeon {
 export interface DoorInfo {
   /** 0/1 -> the map's doorType0Index / doorType1Index door set. */
   type: number;
-  /** Door record attribute bit 5 (ScummVM `Door::opensVertically`). */
+  /** Door record attribute bit 5: the door slides vertically (DM `KAOS.FTL` door draw K+0x13EEC tests it). */
   vertical: boolean;
   /** Door record attribute bit 6 (`hasButton`). */
   hasButton: boolean;

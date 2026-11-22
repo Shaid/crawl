@@ -4,7 +4,8 @@ import {
   deriveFaces, tryStep, DoorStates, DmLevelView, faceOf, SQ, type DmMapData,
 } from '../../dungeonmaster/amiga/model.ts';
 import { DmViewport, VIEWPORT_W, VIEWPORT_H, parseLayout, getCoord } from '../../dungeonmaster/amiga/viewport.ts';
-import { buildMaps, gfxFromDat, kaosPalette0Matches } from '../../dungeonmaster/amiga/export-walker.ts';
+import { buildMaps, gfxFromDat, kaosPalette0Matches, kaosDungeonPalettes } from '../../dungeonmaster/amiga/export-walker.ts';
+import { parseFtl } from '../../dungeonmaster/amiga/ftl.ts';
 
 const sq = (type: number, attr = 0) => (type << 5) | attr;
 
@@ -79,6 +80,40 @@ describe('DM per-cell faces + movement (synthetic)', () => {
     const moved = tryStep([m, lower], ds, { mapIndex: 0, x: 3, y: 1, facing: 1 }, 1);
     expect(moved.moved).toBe(true);
     expect(moved.pose.mapIndex).toBe(1);
+    // K+0x1CCFC / K+0x5C6A: the party lands on the paired stairs square itself, facing out of it
+    // (E-W stairs: east unless the east neighbour is wall/stairs, here x=5 is outside the map -> west)
+    expect(moved.pose).toEqual({ mapIndex: 1, x: 4, y: 1, facing: 3 });
+    // standing on stairs, a backward step takes them back (K+0x1CE7C)
+    const back = tryStep([m, lower], ds, moved.pose, 1);
+    expect(back.pose.mapIndex).toBe(0);
+  });
+
+  it('game step rules: door state 1 and 5 pass, 2..4 block; imaginary fake walls pass; open pits chain (K+0x1CDF6, K+0x18FA8)', () => {
+    const m = synth();
+    const ds = new DoorStates();
+    const here = { mapIndex: 0, x: 1, y: 1, facing: 1 };
+    const cell = 1 * m.width + 2;
+    for (const [st, ok] of [[0, true], [1, true], [2, false], [3, false], [4, false], [5, true]] as const) {
+      ds.set(m, cell, st);
+      expect(tryStep([m], ds, here, 1).moved).toBe(ok);
+    }
+    const fw = synth();
+    fw.raw[1 * fw.width + 2] = sq(SQ.FAKEWALL, 1); // imaginary
+    fw.faces = deriveFaces(fw.width, fw.height, fw.raw);
+    expect(tryStep([fw], ds, here, 1).moved).toBe(true);
+    fw.raw[1 * fw.width + 2] = sq(SQ.FAKEWALL, 0); // solid: null control
+    fw.faces = deriveFaces(fw.width, fw.height, fw.raw);
+    expect(tryStep([fw], ds, here, 1).moved).toBe(false);
+    // a pit on levels 0 and 1 at the same square drops the party two levels
+    const lv = (level: number, pit: boolean): DmMapData => {
+      const s = synth();
+      const raw = s.raw.slice();
+      raw[1 * s.width + 2] = pit ? sq(SQ.PIT, 8) : sq(SQ.CORRIDOR);
+      return { ...s, index: level, level, raw, faces: deriveFaces(s.width, s.height, raw) };
+    };
+    const all = [lv(0, true), lv(1, true), lv(2, false)];
+    const fell = tryStep(all, ds, here, 1);
+    expect(fell.pose).toEqual({ mapIndex: 2, x: 2, y: 1, facing: 1 });
   });
 });
 
@@ -109,6 +144,22 @@ describe.skipIf(!HAS_DM)('Dungeon Master real data', () => {
     const kaos = new Uint8Array(readFileSync('data/dungeonmaster/amiga/KAOS.FTL'));
     expect(kaosPalette0Matches(kaos, 0xfbc)).toBe(16);
     expect(kaosPalette0Matches(kaos, 0xfbc + 2)).toBeLessThan(16); // null control: wrong offset
+  });
+
+  it('KAOS.FTL code decompresses to the module header\'s own byte-sum; six light-level palettes at A5-0x36BA', () => {
+    const kaos = new Uint8Array(readFileSync('data/dungeonmaster/amiga/KAOS.FTL'));
+    const m = parseFtl(kaos);
+    expect(m.code.length).toBe(0x23072);
+    expect(m.codeSum).toBe(m.header.words[4]);
+    const bad = Uint8Array.from(kaos);
+    bad[bad.length - 40] ^= 0x10; // null control: one flipped bit in the packed code
+    expect(parseFtl(bad).codeSum).not.toBe(m.header.words[4]);
+    const pals = kaosDungeonPalettes(kaos, 0x36ba);
+    expect(pals).toHaveLength(6);
+    // each light level is no brighter than the one before, channel by channel
+    for (let l = 1; l < 6; l++) for (let i = 0; i < 16; i++) for (const sh of [0, 4, 8]) {
+      expect((pals[l]![i]! >> sh) & 15).toBeLessThanOrEqual((pals[l - 1]![i]! >> sh) & 15);
+    }
   });
 
   it('start view renders a non-blank frame; a wall-facing and an open-facing view differ; a rotated copy differs', () => {
@@ -154,6 +205,7 @@ describe.skipIf(!HAS_CSB)('Chaos Strikes Back real data (same engine)', () => {
       expect(Object.keys(m.doors).length).toBe(m.raw.filter((r) => (r >> 5) === SQ.DOOR).length);
     }
     const kaos = new Uint8Array(readFileSync('data/chaosstrikesback/amiga/disk1/KAOS.FTL'));
-    expect(kaosPalette0Matches(kaos, 0x100a)).toBe(16);
+    expect(kaosPalette0Matches(kaos, 0x100a, 0x3a5c)).toBe(16);
+    expect(kaosDungeonPalettes(kaos, 0x3a5c)).toEqual(kaosDungeonPalettes(new Uint8Array(readFileSync('data/dungeonmaster/amiga/KAOS.FTL')), 0x36ba));
   });
 });
