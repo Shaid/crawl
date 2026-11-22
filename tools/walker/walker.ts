@@ -426,6 +426,7 @@ type GameId = (typeof GAMES)[number]['id'];
 
 /** Per-game override for the confidence banner's parenthetical note; falls back to the generic W6 string above when unset. */
 const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
+  wizardry6: 'Amiga view pixel-exact vs the game\'s own renderer on all 37,888 in-region poses, moves vs TryMove and arrivals vs LAB_06B6 (Unicorn oracle, tools/wizardry6/oracle/); torches show a static frame; no encounters, door-open animation or real automap -- see docs/wizardry6/TODO.md',
   dungeonmaster: 'map + collision + walls/doors/stairs/pits composed from Graphics.DAT via its own zone layout (item 696); palette 0 confirmed against KAOS.FTL; NOT drawn: ornaments, objects, creatures, buttons -- see docs/dungeonmaster/TODO.md',
   hiredguns: 'map cells, stairs, falls, doors and the 67-position view (placements, draw order, hidden-block removal, facing rotations, palette) from the game: retail exe tables + Style banks, rules from the DMA dev-archive source; level = map*100 + z-layer, stairs/falls change level. NOT drawn: players, monsters, explosions, text panels, horizons; the sky gradient colours are a placeholder -- see docs/hiredguns/TODO.md',
   dungeonmaster2: 'map + collision + doors + teleporter travel from DUNGEON.DAT; viewport = GRAPHICS.DAT wallset floor/ceiling/walls + door panels placed by its own rect table, cell tables/draw order from SKUL.FTL data, 16-colour IRGB palette (full-light bank); NOT drawn: door frames, stairs, pits, ornaments, sky, items, creatures -- see docs/dungeonmaster2/TODO.md',

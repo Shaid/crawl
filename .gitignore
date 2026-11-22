@@ -15,3 +15,6 @@ __pycache__/
 # Local AI tool caches/config (opencode CLI, openground MCP)
 .opencode/
 .openground/
+
+# Wizardry 6 Unicorn oracle venv (tools/wizardry6/oracle/README.md)
+tools/wizardry6/oracle/.venv/

@@ -1583,6 +1583,22 @@ loop (`CODE+0xaa4a`–`0xaaf4`) at the same call depth as `9b58`, not from
 >   self-consistency, not ground truth** (review finding 5). The `18-24(A5)` arg blocks and `48-55` dir runs are
 >   real, but their role in the shipped walk view is gated/optional; the
 >   walker's slots + view model now reproduce the reference exactly.
+>
+> > **Correction (2026-11-22):** every pixel claim in this section, and in
+> > §4.7.5/§4.7.8/§4.7.9.1 ("0/64,000 px", the "pixel-identity oracles",
+> > "298,744-pose sweep"), was **self-referential**. They compared crawl's
+> > renderer against crawl's own earlier renderer, or only checked that the
+> > render did not crash. Not one frame had been compared with the game.
+> > The first real comparison was
+> > the Unicorn single-routine oracle (`tools/wizardry6/oracle/`). It runs
+> > `Bane`'s own view renderer `LAB_0554` (`CODE+0xa810`) for every
+> > in-region cell and facing (37,888 poses). Against it, the walker
+> > mismatched on **21,177 poses (55.9%)**. One cause is the claim above
+> > itself: "unmirrored, source at the graphic's own left edge" is wrong for
+> > any record with `srcClip > 0`. `DrawMazePiece`'s direct path reads from
+> > `offset + srcClip`, so the source column shifts along with `destX`
+> > (83 direct draws were sampling the wrong columns). Fixed in
+> > `export-dungeon-slots.ts`. Results after the fixes are in §4.7.11.
 > - The 5 cited "push" address pairs don't all actually reach `9b58`.
 >   Only 3 of the table's 5 result globals do: `-0x2c70(a4)` (front, once,
 >   into `0xab92`) and `-0x2c6a(a4)`/`-0x2c68(a4)` (left/right, each
@@ -1747,6 +1763,26 @@ EvalCellFace(x@8, y@0xa, locX@0xc, locY@0xe, region@0x10, lateral@0x12):
 > path (distinct from its 4 `CMPI` checks) — needed to know what happens
 > for door cells (`5`) and every other feature-derived value this table
 > produces (`6`, `8`-`14`) that isn't one of the 4 `CMPI`-compared values.
+>
+> > **Correction (2026-11-22):** the four side-effect arrays are
+> > **render gates**, not "triggered/discovered" state. `LAB_0554` clears
+> > all four at the start of every render (`0x0a912`-`0x0a926`). `0x9b58`
+> > reads three of them in its ceiling/floor code (`0x9b6c`, `0x0a06e`,
+> > `0x0a08c`) and the fourth in its floor tail (`0x0a0f2`). The meanings,
+> > confirmed against the game oracle (§4.7.11):
+> >
+> > - **6**: `-11306` = draw compose `0x159` (mode 0, mirror-self on the
+> >   pose parity) over the plain floor. This applies to the front site at
+> >   depth 1 only.
+> > - **13**: `-11330` = alt floor, the same gate flagP levels 8/10/12 use.
+> > - **14**: `-11342` = skip the floor.
+> > - **15**: `-11354` = skip the ceiling.
+> >
+> > The cases are reached through `LAB_048F`, which needs `facing == orient`,
+> > feature 6 or feature > 12. They fire only when the flagP/flagQ prologue
+> > fell through to the feature dispatch, which every non-fog path does
+> > (§4.7.9's correction). Implemented in `evaluate-cell.ts` (`evalOverlay`:
+> > `floorOverlay`/`altFloor`/`skipFloor`/`skipCeiling`) and `view-model.ts`.
 
 `levelBuf` = `-0x481e(a4)` — the buffer §7.1 originally traced as a
 character-creation "selected class" scratch copy. `0x969a`/`0x9876` are the
@@ -2814,6 +2850,75 @@ would only matter once a live-encounter oracle exists. ~~the
 `-11364/65/66(A4)` occlusion-override writer and `-18340(A4)`'s exact
 value space~~ — **both closed in §4.7.9 below.**
 
+> **Correction (2026-11-22, verified against the game oracle, §4.7.11):**
+> the kind≠`0xFF` records are **static scenery, not the combat-encounter
+> portrait overlay**, and are now drawn. The correction block above
+> mis-read `LAB_04B9`'s `kind` as "whichever monster was loaded last".
+> `LAB_032B` (`CODE+0x5726`) runs once at startup and loads `MON01.PIC`
+> into resource slot 1 and `MON02.PIC` into slot 2. The view only ever
+> pushes kind 1 or 2. Slot 1 holds the **wall torches** (cels 1-22). Slot 2
+> holds the **fairy fountain** (1-9), the **portcullis** (10-12), the
+> **doorway shadow** (13-15) and a door edge (16). The section-8 index is
+> `(cel-1)`, not `(depth-1)`: x += byte `+8 + (cel-1)*2`, y += byte
+> `+58 + (cel-1)` of section-8 record `pic` (`LAB_02B4` reads it with
+> `ReadSection(8, pic)` into the slot). The cel drawer `CODE+0x35e6`:
+>
+> - draws index 15 as transparent;
+> - clips x to `[clip0, clip1)`, upper bound exclusive;
+> - has no vertical clip.
+>
+> These three were harness-verified, with 0 mismatched pixels over a
+> random background.
+>
+> All 11 push sites:
+>
+> | site | code | kind | cel | x | clip | depth tag | condition |
+> |---|---|---|---|---|---|---|---|
+> | `0x9c46` | 3 | 2 | `-11728+15` | 0 | site | d | front, d 0, `-11728 > 0` (door-opening animation; 0 in a static view) |
+> | `0x9c7c`/`0x9cac` | 3 | `0xFF` | door leaf `26(A5)+d` | | | d | (as before) |
+> | `0x9d02` | 4 | 2 | `d+10` (portcullis) | `-31838[d*3+lat]` | site | d | `d > 0 \|\| lat == 1` |
+> | `0x9d3c`/`0x9d76` | 1/3/4 | `0xFF` | the two doorway records | | | d | |
+> | `0x9dc6` | 1/3/4 | 2 | `d+13` (doorway shadow) | `-31838[d*3+lat]` | site | **d+1** | `d > 0 \|\| lat == 1` |
+> | `0x9ed2` | **8** | 1 | torch `(p && d<2 ? 18 : 0) + d*2 + frame + 1` | `-31838[d*3+lat]` | site | d | `d > 0 \|\| lat == 1` |
+> | `0x9f20` | **9** | 2 | `d+1` (fountain) | `-31838[d*3+lat]` | site | d | `d > 0 \|\| lat == 1` |
+> | `0x0a312` | 8 (`LAB_0506`) | 1 | torch `d*2 + 12(A5) + frame` (7 left, 13 right) | 0 | `[72,248)` | d | d < 3 |
+> | `0x0a33c` | 9 (`LAB_0506`) | 2 | `d + 14(A5)` (4 left, 7 right) | 0 | `[72,248)` | d | d < 3 |
+>
+> The table's columns:
+>
+> - **lat** is `0x9b58`'s `12(A5)`: front 1, L1/L2 0, R1/R2 2.
+> - **site clip** is front `[72,248)`, L1 `[72,T1[d])`, L2 `[T1[d],248)`,
+>   R1 `[72,T2[d])`, R2 `[T2[d],248)`. Here T1 = `-31854` = 0/104/128/144
+>   and T2 = `-31846` = 0/216/192/176.
+> - `-31838` = 0,0,0, -64,0,64, -32,0,32, -16,0,16.
+> - **p** is the per-depth parity `-11436`.
+> - **frame** is the torch toggle `-11736`. The idle loop flips it 0/1 at
+>   `0x5b26`, and it also phases the alt floor (`0x0a120`/`0x0a146`). The
+>   walker draws frame 0.
+>
+> So the per-code table above is wrong in two rows. Code **7** pushes no
+> token. Codes **8/9** are kind **1/2** (torch/fountain), not "2/1". Codes
+> 11/12/13 also draw the feat-10 base pair `56/58` before their own piece
+> (`0x9f2c`).
+>
+> The **consumer** makes two passes per depth tag. It counts down from
+> `-11440`, so tags above the final loop bound are never drawn. The first
+> pass draws the kind-`0xFF` records and the second the cel records. Each
+> pass walks the queue **from the last record pushed to the first**
+> (`D4 = count-1 .. 0`). The walker previously painted in push order, which
+> is visible wherever two mode-0 pieces overlap. Example: the two
+> `wall-open` records, and the door leaf versus the doorway.
+>
+> Shipped:
+>
+> - `export-mazedata-indexed.ts` adds the 39 resident cels to the indexed
+>   atlas (`mon01_celNN`/`mon02_celNN`, keyed mask).
+> - `export-dungeon-slots.ts` adds the `cel:<kind>:<cel>:<site>:<depth>` and
+>   `cel:<kind>:<cel>:perp` slots, positioned and pre-clipped from
+>   section 8.
+> - `view-model.ts` now has `frontKeys(...).cels`, `sideCel`, the
+>   consumer's two-pass order and the tag-bound filter.
+
 #### 4.7.9 The flagP/flagQ overlay dispatches decoded — fog cells, open sky, pits, and the alt floor (2026-08-16)
 
 **Confirmed** (disassembly; the two 14-way dispatch jump tables at
@@ -2957,6 +3062,23 @@ traced to closure (left unimplemented, not guessed); whether
 `canStepDir`'s newly-added fog override matches real movement rules (no
 oracle beyond the render-side symmetry argument — the same `EvalCellFace`
 return value feeds both consumers in the original code).
+
+> **Correction (2026-11-22, game oracle, §4.7.11):** two claims above are
+> wrong.
+>
+> - **The flagQ test is not reached only from levels 7/9.** Every non-fog
+>   flagP handler ends by branching to `LAB_0486` (`0x9446`), which is the
+>   flagQ test. Only the fog handler returns early. The walker used to set
+>   `fellThroughToQ = level === 7 || level === 9`, which dropped flagQ's
+>   skip-ceiling on every other flagged cell.
+> - **The "facing-indexed handler" for flagQ levels 2/5/7/9 has no effect.**
+>   The flagQ table at `0x9482` sends those levels straight to `LAB_048A`,
+>   the ordinary facing-switched wall read that every cell takes. It is not
+>   an override.
+>
+> After the flagQ test, every non-fog path continues into §4.7.2's feature
+> dispatch. Its side-effect cases (6/13/14/15) are gates, so the same
+> fall-through rule applies to them.
 
 ---
 
@@ -3104,6 +3226,109 @@ from another level that is enabled at new game.
 - the trigger rows' runtime writers other than `LAB_05CD`
 
 `setPose` jumps (URL / minimap click) do not run the arrival scan.
+
+
+#### 4.7.11 Verified against the game: the Unicorn oracle (2026-11-22)
+
+**Confirmed** against the game's own code. This is the first ground-truth
+check of the walker; every earlier pixel claim was self-referential (see
+§4.7.1's correction). `tools/wizardry6/oracle/` loads `Bane` (the HUNK
+relocated at fixed bases, A4 = DATA+`0x7FFE`) into a Unicorn 68000 core
+and calls the game's routines directly. It is not a system emulator. The
+setup:
+
+- **Startup the game's way.** mazedata goes through `LAB_0268`. The maze
+  caches are filled as `newgame.dbs` fills them. Resident `.PIC` slots
+  are loaded through `LoadPicToSlot`.
+- **Python stubs** stand in for AllocMem, file I/O and the four
+  `BltBitMap` minterms, plus a captured "present".
+- **Calls compared:**
+  - `LAB_0554` (`CODE+0xa810`) is rendered for every in-region cell ×
+    facing;
+  - `TryMove` (`CODE+0x116ac`) runs for every cell × facing × direction ×
+    door state;
+  - `LAB_06B6` (`CODE+0xe9be`) runs after level entry `LAB_073F` on every
+    entity cell.
+
+Pose mapping: walker (x, y) → absolute maze coordinate = level origin +
+(x, y) → region-local via the level record's `+0x1e0`/`+0x1ec` origin
+tables.
+
+**View, 176×112 viewport, every pixel.** Each "before" cell gives the
+share of poses that mismatched, with the share for standable poses only
+in brackets.
+
+| level | poses | before | after |
+|---|---|---|---|
+| 0 | 3,072 | 37.7% (62.7%) | 0 |
+| 1 | 3,072 | 48.4% (55.8%) | 0 |
+| 2 | 3,072 | 54.8% (62.8%) | 0 |
+| 3 | 3,072 | 64.1% (79.9%) | 0 |
+| 4 | 3,072 | 42.4% (59.1%) | 0 |
+| 5 | 3,072 | 35.0% (46.2%) | 0 |
+| 6 | 3,072 | 74.0% (70.4%) | 0 |
+| 7 | 3,072 | 58.0% (58.4%) | 0 |
+| 8 | 3,072 | 66.8% (69.3%) | 0 |
+| 9 | 3,072 | 57.2% (77.2%) | 0 |
+| 10 | 1,024 | 79.4% (92.6%) | 0 |
+| 11 | 1,536 | 70.8% (70.2%) | 0 |
+| 12 | 3,072 | 57.1% (65.3%) | 0 |
+| 13 | 1,536 | 64.1% (64.7%) | 0 |
+| **all** | **37,888** | **55.9%** (21,177) | **0 (0.00%)** |
+
+The null control renders the walker at facing+1 on about 5% of poses. It
+still differs from the game on 1,799 of 1,920 of them. The exceptions are
+fog/empty views on levels 0, 4, 5 and 12, which look the same from more
+than one facing.
+
+**Movement and arrival.**
+
+- **Moves.** 151,552 `TryMove` attempts at door state 0, plus forced door
+  states 1, 2 and 3. The only disagreement was state 3 on level 12: the
+  game is silent where the walker reported "bounce". The cause is that the
+  state-3 arm (`0x117f0`) never shows `-10888(A4)` after a failed step.
+  This is now `MoveResult.kind === 'blocked'`. After the fix, a re-run of levels 0/5/9/12 at door states 0 and 3 (98,304 attempts) gives 0 disagreements.
+- **Arrival.** All 770 entity cells were checked, kinds 1/7 live. The one
+  disagreement was a **kind-5** entity. Kind 5 (`0xea30`) sets game state
+  `-18610 = 0x12`, which ends the scan, so later entities on the cell never
+  fire. `arrive()` now halts there (`halted`).
+
+**What the fixes were** (each verified by the sweep and folded into the
+sections above):
+
+| # | fix | where |
+|---|---|---|
+| 1 | direct draws read the source from `+srcClip` (83 draws) | §4.7.1, `export-dungeon-slots.ts` |
+| 2 | kind-1/2 queue records are resident `MON01`/`MON02` cels (torches, fountain, portcullis, doorway shadow); 11 push sites | §4.7.8 |
+| 3 | features 6/13/14/15 are render gates (floor overlay `0x159`, alt floor, skip floor, skip ceiling) | §4.7.2 |
+| 4 | the flagQ test (and the feature dispatch) is reached from every non-fog flagP path | §4.7.9 |
+| 5 | `LAB_0506`'s depth-3 preamble forks on parity too (`wall-side:{L,R}:3:alt`) | `export-dungeon-slots.ts` |
+| 6 | codes 11-13 draw the feat-10 base pair first | §4.7.8 |
+| 7 | queue consumer: per tag, maze pieces then cels, each last-pushed-first | §4.7.8 |
+| 8 | the package's painter sort (Black Crypt's depth-descending rule) must not reorder W6 items; `inGameOrder` keeps the emitted (= game) order | `view-model.ts` |
+| 9 | state-3 failed steps are silent; kind-5 halts the arrival scan | §4.7.10, `movement.ts` |
+
+Finding #8 of the audit was a level-6 lateral-door mismatch whose root
+cause was left open at the time. It disappeared once fixes 4 and 7 were
+in; no separate fix was needed.
+
+**Not covered by the oracle:**
+
+- **Torch animation.** The sweep uses frame 0, the value at boot, and the
+  walker draws frame 0 too.
+- **The door-open animation** (`-11728`).
+- **The other 19 entity kinds.** Their handlers are stubbed.
+- **The automap.**
+- **Runtime state the static views never set:** levitation `-18136` and
+  the message flag `-10896`.
+
+All of these are tracked in `docs/wizardry6/TODO.md`.
+
+Regression test: `tools/wizardry6/__tests__/oracle-parity.test.ts`. It
+covers 336 fixed poses, 840 moves at door states 0 and 3, and all 770
+arrival cells. It skips cleanly without `data/` or a Python that has
+`unicorn`. Run against the pre-fix code, all three cases fail: 207/336
+poses, 4 moves and 1 arrival.
 
 
 ## 5. Font/portrait `.EGA` files
