@@ -136,8 +136,9 @@ describe('buildViewItems: wall-type dispatch -> slots.json keys', () => {
   it('routes wall value 3 (closed door) to door-leaf + wall-open, deferred after everything else', () => {
     const wallA = new Array(81).fill(0);
     wallA[at(4, 5)] = 3;
-    // door leaf first, then the doorway record -- the LAB_04B9 push order
-    expect(frames(makePlanes({ wallA }))).toEqual(['leaf_front_1', 'open_front_1']);
+    // pushed leaf-then-doorway (LAB_04B9), but the consumer (0xaff0) walks
+    // each depth's records last-pushed-first, so the doorway paints first
+    expect(frames(makePlanes({ wallA }))).toEqual(['open_front_1', 'leaf_front_1']);
   });
 
   it('draws the big side-door art for a doorway in the near lateral column (depth-0 fall-in, 0x9d84)', () => {

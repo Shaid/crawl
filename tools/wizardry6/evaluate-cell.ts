@@ -206,6 +206,12 @@ export interface OverlayEffect {
   skipFloor: boolean;
   /** Draw the alt-floor compose family (214-241) instead of the normal floor (flagP levels 8/10/12-inside-regions-0-8). */
   altFloor: boolean;
+  /**
+   * Feature 6's `-11306(A4)` flag (`CODE+0x95ac`). `0x9b58`'s floor tail
+   * reads it only for the front site at depth 1 (`0x0a0d0`-`0x0a118`),
+   * where it adds compose `0x159` (mode 0) over the normal floor.
+   */
+  floorOverlay?: boolean;
 }
 
 const NO_OVERLAY: OverlayEffect = { fog: false, skipCeiling: false, skipFloor: false, altFloor: false };
@@ -268,12 +274,14 @@ export function evalOverlay(
 
   const flagPSet = (planes.flagP?.[cellIdx] ?? 0) !== 0;
   if (flagPSet) {
-    fellThroughToQ = level === 7 || level === 9;
+    fellThroughToQ = true; // every non-fog flagP handler branches to LAB_0486 (the flagQ test); fog returns early below
     if (level === 0 || level === 4 || level === 5) {
       effect = { ...effect, fog: true };
+      fellThroughToQ = false;
     } else if (level === 12) {
       const region = planes.region?.[cellIdx] ?? -1;
       effect = region >= 0 && region <= 8 ? { ...effect, altFloor: true } : { ...effect, fog: true };
+      if (effect.fog) fellThroughToQ = false;
     } else if (level === 8 || level === 10) {
       effect = { ...effect, altFloor: true };
     } else if (level === 1) {
@@ -287,14 +295,26 @@ export function evalOverlay(
   if (fellThroughToQ) {
     const flagQSet = (planes.flagQ?.[cellIdx] ?? 0) !== 0;
     if (flagQSet) {
-      // Levels 2, 5, 7, 9 route to a further facing-indexed handler that
-      // wasn't traced to closure (§4.7.9) -- left unimplemented rather
-      // than guessed, so those 4 levels get no flagQ effect here.
+      // Levels 2, 5, 7, 9 branch straight to LAB_048A (the flagQ table at
+      // CODE+0x9482): no ceiling effect, but they still reach the feature
+      // dispatch below.
       if (!(level === 2 || level === 5 || level === 7 || level === 9)) {
         effect = { ...effect, skipCeiling: true };
       }
     }
   }
 
+  // CODE+0x964e feature dispatch (LAB_048F, reached for feature 6, any
+  // feature > 12, or facing == orient; its side-effect cases are 6 and
+  // 13-15, none of which touch the returned wall code):
+  // 6 -> -11306 floor overlay, 13 -> -11330 alt floor, 14 -> -11342 skip
+  // floor, 15 -> -11354 skip ceiling.
+  if (fellThroughToQ) {
+    const feat = planes.feature[cellIdx];
+    if (feat === 6) effect = { ...effect, floorOverlay: true };
+    else if (feat === 13) effect = { ...effect, altFloor: true };
+    else if (feat === 14) effect = { ...effect, skipFloor: true };
+    else if (feat === 15) effect = { ...effect, skipCeiling: true };
+  }
   return effect;
 }

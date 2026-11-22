@@ -50,8 +50,8 @@ const SCREEN_HEIGHT = 200;
  * `CODE+0x9b58`'s per-call-site wall baseIndex constants — the verified
  * reference (`render-corridor-frame.ts`, which produced the cell-driven
  * corridor screenshots) draws each wall site DIRECTLY from
- * `composeList[baseIndex + depth]` (unmirrored, source at the graphic's own
- * left edge, `srcClip` only shifting destX). Five wall call sites (front +
+ * `composeList[baseIndex + depth]` (unmirrored; `srcClip` shifts both destX
+ * and the source column — see `composeDraw`). Five wall call sites (front +
  * two left layers + two right layers, the right being the exact mirror of
  * the left) plus the front-door run give `wall:front:<depth>`,
  * `door:front:<depth>` and `wall-lat:{L1,L2,R1,R2}:<depth>`. The receding
@@ -67,10 +67,55 @@ interface FrameRect {
   h: number;
 }
 
-function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
+/**
+ * `scenario.dbs` section 8 (file `0x290b4`, 64 x 314-byte records). The
+ * `.PIC` loader `LAB_02B4` (`CODE+0x4580`) reads record `pic` into the
+ * resource-cache slot it loads `MON<pic>.PIC` into (`-15076(A4) +
+ * slot*314`), and the queue push `LAB_04B9` (`CODE+0x9a52`) offsets every
+ * cel record by that slot's per-cel hotspot: x += byte `+8 + (cel-1)*2`,
+ * y += byte `+58 + (cel-1)`.
+ */
+const SECTION8_OFFSET = 0x290b4;
+const SECTION8_STRIDE = 314;
+
+export interface CelSource {
+  /** Section-8 record of the `.PIC` resident in this slot. */
+  section8: Uint8Array;
+}
+
+/**
+ * The view's `.PIC`-cel queue records (`0x9b58`, §4.7.8), all drawn from the
+ * two session-resident banks (slot 1 = `MON01.PIC`, slot 2 = `MON02.PIC`).
+ * Position = `-31838(A4)[depth*3 + lat]` (lat = the site's `12(A5)`: front 1,
+ * L1/L2 0, R1/R2 2) + the section-8 hotspot; clipped by the cel drawer to the
+ * site's `[14(A5), 16(A5))` x-window (harness-verified: the upper bound is
+ * exclusive, there is no vertical clip, index 15 is transparent).
+ */
+const CEL_X = [0, 0, 0, -64, 0, 64, -32, 0, 32, -16, 0, 16]; // -31838(A4), DATA +0x3b0
+const CEL_CLIP_L = [0, 104, 128, 144]; // -31854(A4), DATA +0x390
+const CEL_CLIP_R = [0, 216, 192, 176]; // -31846(A4), DATA +0x398
+const VIEW_X0 = 0x48;
+const VIEW_X1 = 0xf8;
+const CEL_SITES: Record<string, { lat: number; clip: (d: number) => [number, number] }> = {
+  front: { lat: 1, clip: () => [VIEW_X0, VIEW_X1] },
+  L1: { lat: 0, clip: (d) => [VIEW_X0, CEL_CLIP_L[d]!] },
+  L2: { lat: 0, clip: (d) => [CEL_CLIP_L[d]!, VIEW_X1] },
+  R1: { lat: 2, clip: (d) => [VIEW_X0, CEL_CLIP_R[d]!] },
+  R2: { lat: 2, clip: (d) => [CEL_CLIP_R[d]!, VIEW_X1] },
+};
+/** Every cel index `0x9b58` can push, per kind, as a function of depth (torch frame 0/1, parity). */
+const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+const CEL_INDICES: Record<number, (d: number) => number[]> = {
+  // code 8 torch: (parity && d < 2 ? 18 : 0) + d*2 + frame + 1
+  1: (d) => [d * 2 + 1, d * 2 + 2, ...(d < 2 ? [19 + d * 2, 20 + d * 2] : [])],
+  // code 9 fountain d+1, code 4 portcullis d+10, codes 1/3/4 doorway shadow d+13
+  2: (d) => [d + 1, d + 10, d + 13],
+};
+
+function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect, cels?: Record<number, CelSource>) {
   const slots: Record<string, unknown> = {};
 
-  /** Resolve compose record `baseIndex + depth` into a package `PieceDraw` exactly as the verified reference `render-corridor-frame.ts` draws it: direct (unmirrored), source at the graphic's own left edge (`srcClip` only shifts destX), OR blend. Returns `null` for a zero-width "draw nothing" filler. */
+  /** Resolve compose record `baseIndex + depth` into a package `PieceDraw` on `DrawMazePiece`'s direct path: unmirrored, OR blend, and `srcClip` shifts BOTH destX and the source column (the blitter reads from `offset + srcClip`). > **Correction (2026-11-22):** this used to start the source at the graphic's own left edge (`srcClip` shifting only destX), copied from `render-corridor-frame.ts`; the game-oracle sweep (`tools/wizardry6/oracle/`) showed every clipped direct draw (83 of them) was sampling the wrong columns. Returns `null` for a zero-width "draw nothing" filler. */
   const composeDraw = (baseIndex: number, depth: number, mode: 0 | 1 = 1) => {
     const rec = maze.composeList[baseIndex + depth];
     if (!rec || rec.widthBytes === 0) return null;
@@ -81,7 +126,7 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
       frame: `mazedata_dir${String(rec.dirIndex).padStart(3, '0')}`,
       destX: (rec.destXByte + rec.srcClip) * 8,
       destY: rec.destY,
-      srcX: frame.x,
+      srcX: frame.x + rec.srcClip * 8,
       srcY: frame.y,
       srcW: rec.widthBytes * 8,
       srcH: gfx.heightPx,
@@ -339,17 +384,21 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
       slots[`door:${site}:${depth}`] = slot(composeDraw(a[44]!, depth));
       slots[`door:${site}:${depth}:alt`] = slot(mirroredDraw(a[46]!, a[44]!, depth));
       slots[`door-leaf:${site}:${depth}`] = slot(composeDraw(a[26]!, depth, 0));
+      // Draw order = the game's: `0x9b58` pushes the (28,32) record first
+      // and the (36,40) record second, and the queue consumer at `0xaff0`
+      // walks each depth's records last-pushed-first, so 36/40 land first.
+      // Mode 0 (replace) makes the order visible wherever the pieces overlap.
       slots[`wall-open:${site}:${depth}`] = multiSlot([
-        composeDraw(a[28]!, depth, 0),
-        composeDraw(a[32]!, depth, 0),
         composeDraw(a[36]!, depth, 0),
         composeDraw(a[40]!, depth, 0),
+        composeDraw(a[28]!, depth, 0),
+        composeDraw(a[32]!, depth, 0),
       ]);
       slots[`wall-open:${site}:${depth}:alt`] = multiSlot([
-        mirroredDraw(a[30]!, a[28]!, depth, 0),
-        mirroredDraw(a[34]!, a[32]!, depth, 0),
         mirroredDraw(a[38]!, a[36]!, depth, 0),
         mirroredDraw(a[42]!, a[40]!, depth, 0),
+        mirroredDraw(a[30]!, a[28]!, depth, 0),
+        mirroredDraw(a[34]!, a[32]!, depth, 0),
       ]);
       slots[`feat6:${site}:${depth}`] = slot(composeDraw(a[48]!, depth));
       slots[`feat6:${site}:${depth}:alt`] = slot(mirroredDraw(a[50]!, a[48]!, depth));
@@ -365,6 +414,68 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
       slots[`feat13:${site}:${depth}`] = slot(composeDraw(a[68]!, depth, 0));
     }
   }
+  /** One `.PIC`-cel draw: cel `cel` of resource slot `kind` with its top-left at `x` + the section-8 hotspot, clipped to `[c0, c1)`. */
+  const celSlot = (kind: number, cel: number, x0: number, c0: number, c1: number, where: string) => {
+    const src = cels![kind]!;
+    const frameName = `mon${String(kind).padStart(2, '0')}_cel${String(cel - 1).padStart(2, '0')}`;
+    const frame = frameByName(frameName);
+    const x = x0 + src.section8[8 + (cel - 1) * 2]!;
+    const y = src.section8[58 + (cel - 1)]!;
+    const l = Math.max(x, c0, 0);
+    const r = Math.min(x + frame.w, c1, SCREEN_WIDTH);
+    if (r <= l) return null;
+    return {
+      draws: [
+        {
+          bank: 'mazedata',
+          frame: frameName,
+          destX: l,
+          destY: y,
+          srcX: frame.x + (l - x),
+          srcY: frame.y,
+          srcW: r - l,
+          srcH: frame.h,
+          mirrorX: false,
+          blend: 'mask' as const,
+          origin: `.PIC cel ${cel} of resource slot ${kind} (MON0${kind}.PIC) at ${where}`,
+        },
+      ],
+    };
+  };
+
+  // `0x9b58`'s `.PIC`-cel queue records: `cel:<kind>:<cel>:<site>:<depth>`.
+  // Lateral sites at depth 0 never push one (`depth > 0 || lat == 1`), so
+  // they get no slot.
+  if (cels) {
+    for (const kind of Object.keys(cels).map(Number)) {
+      for (let depth = 0; depth < 3; depth++) {
+        for (const cel of CEL_INDICES[kind]!(depth)) {
+          for (const [site, { lat, clip }] of Object.entries(CEL_SITES)) {
+            if (depth === 0 && lat !== 1) continue;
+            const [c0, c1] = clip(depth);
+            slots[`cel:${kind}:${cel}:${site}:${depth}`] = celSlot(kind, cel, CEL_X[depth * 3 + lat]!, c0, c1, `${site} depth ${depth}`);
+          }
+        }
+      }
+    }
+  }
+
+  // `LAB_0506`'s perpendicular-face cels (codes 8/9, `0x0a2ee`/`0x0a31e`):
+  // x = y = 0 plus the hotspot, clip = the whole view; the cel index
+  // already encodes side and depth, so one slot per cel.
+  if (cels) {
+    const perp: Record<number, number[]> = { 1: range(7, 18), 2: range(4, 9) };
+    for (const [kindStr, list] of Object.entries(perp)) {
+      const kind = Number(kindStr);
+      for (const cel of list) slots[`cel:${kind}:${cel}:perp`] = celSlot(kind, cel, 0, VIEW_X0, VIEW_X1, 'perp');
+    }
+  }
+
+  // feature 6's floor overlay: literal compose 0x159, mode 0, mirror-self on
+  // the POSE parity -11434 (0x0a0fe), front site depth 1 only.
+  slots['floor-overlay:front:1'] = slot(composeDraw(0x159, 0, 0));
+  slots['floor-overlay:front:1:alt'] = slot(mirroredDraw(0x159, 0x159, 0, 0));
+
   // code 14: front depth 0 only, literal compose 0x158 (§4.7.1's table)
   slots['feat14:front:0'] = slot(composeDraw(0x158, 0, 0));
   slots['feat14:front:0:alt'] = slot(mirroredDraw(0x158, 0x158, 0, 0));
@@ -374,6 +485,10 @@ function buildSlots(maze: MazeData, frameByName: (name: string) => FrameRect) {
   // receding side wall, and only that, gets a depth-3 slot.
   slots['wall-side:L:3'] = slot(composeDraw(SIDE_BASE['wall-side']!.L, 3));
   slots['wall-side:R:3'] = slot(composeDraw(SIDE_BASE['wall-side']!.R, 3));
+  // ...and it forks on `-11434(A4)` there too (mirrored partner draw), so the
+  // depth-3 side wall needs its `:alt` like every other depth.
+  slots['wall-side:L:3:alt'] = slot(mirroredDraw(SIDE_BASE['wall-side']!.R, SIDE_BASE['wall-side']!.L, 3));
+  slots['wall-side:R:3:alt'] = slot(mirroredDraw(SIDE_BASE['wall-side']!.L, SIDE_BASE['wall-side']!.R, 3));
 
   // > **Correction (2026-08-16):** there is no static ceiling/floor backdrop.
   // > `staticSlots` used to hold compose 122 + 123-125 (ceiling) and 150 +
@@ -439,7 +554,11 @@ export function exportDungeonSlots(dataDir: string): void {
     return f;
   };
 
-  const slots = buildSlots(maze, getFrame);
+  const scenario = readBinary(resolve(dataDir, 'scenario.dbs'));
+  const section8 = (rec: number) =>
+    scenario.slice(SECTION8_OFFSET + rec * SECTION8_STRIDE, SECTION8_OFFSET + (rec + 1) * SECTION8_STRIDE);
+  // slot k holds MON0k.PIC and section-8 record k (LAB_032B: (pic 1, slot 1), (pic 2, slot 2))
+  const slots = buildSlots(maze, getFrame, { 1: { section8: section8(1) }, 2: { section8: section8(2) } });
   const outDir = resolve('public/assets/wizardry6/amiga/dungeon');
   mkdirSync(outDir, { recursive: true });
   writeJson(resolve(outDir, 'slots.json'), slots);

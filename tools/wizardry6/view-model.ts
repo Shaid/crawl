@@ -198,9 +198,8 @@ const perpBlocks = (code: number, forceOcclude: boolean): boolean => code !== 0 
  *   nothing — a real asymmetry with `0x9b58`, which does handle 14. The
  *   table is skipped entirely at depth >= 3 (`LAB_050D`, `0x0a1ce`).
  *
- * Codes 8 and 9 push to the deferred-draw queue (`LAB_04B9` =
- * `CODE+0x9a52`) instead of drawing, and that queue's consumer is still
- * untraced — so they contribute only their preamble here.
+ * Codes 8 and 9 push a `.PIC`-cel record to the deferred-draw queue
+ * (`LAB_04B9` = `CODE+0x9a52`, `0x0a2ee`/`0x0a31e`) — see `sideCel`.
  */
 function sideKeys(code: number, depth: number, alt: string): string[] {
   const keys: string[] = [];
@@ -216,6 +215,19 @@ function sideKeys(code: number, depth: number, alt: string): string[] {
 }
 
 /**
+ * `LAB_0506`'s own `.PIC`-cel pushes (depth 0-2 only): code 8 = wall torch,
+ * kind 1, cel `depth*2 + base + torchFrame` (base `12(A5)`: 7 left, 13
+ * right); code 9 = kind 2, cel `depth + base` (`14(A5)`: 4 left, 7 right).
+ * Both at x = y = 0 plus the section-8 hotspot, full-view clip, tag = depth.
+ */
+function sideCel(code: number, depth: number, side: 'L' | 'R', torchFrame: number): string | null {
+  if (depth >= MAX_WALL_DEPTH) return null;
+  if (code === 8) return `cel:1:${depth * 2 + (side === 'L' ? 7 : 13) + torchFrame}:perp`;
+  if (code === 9) return `cel:2:${depth + (side === 'L' ? 4 : 7)}:perp`;
+  return null;
+}
+
+/**
  * `0x9b58`'s own per-code dispatch for the front wall and the four lateral
  * column faces (§4.7.8; the jump table `LAB_04F6` at `0x0a04c`). Returns
  * `{ now, deferred }` slot-key lists: `deferred` maps the game's
@@ -225,35 +237,45 @@ function sideKeys(code: number, depth: number, alt: string): string[] {
  *
  * `alt` is the `-11436(A4)` per-depth checkerboard parity suffix
  * (`(partyX + partyY + facing + depth) & 1`, §4.7.8) picking the mirrored
- * pair branch. The kind-1/2 `.PIC`-cel tokens the same queue also carries
- * (codes 3/4/7/8/9's depth-0/front arms) are the monster/NPC combat-
- * encounter portrait overlay, not an "animated decoration" — the
- * resolution formula IS known (§4.7.8's correction block: frame =
- * `(rec+9)-1` inside whichever `mon<NN>.pic` occupies resource-cache slot
- * `rec+8`), but which monster (if any) occupies that slot is combat-
- * encounter *runtime* state with no static per-cell representation in the
- * exported maze data — so this stays unmodelled here deliberately, not
- * for lack of a formula.
+ * pair branch.
+ *
+ * `cels` are the same queue's `.PIC`-cel records (kind 1/2). > **Correction
+ * (2026-11-22):** these were previously called the monster/NPC combat
+ * portrait overlay and left undrawn. They are static scenery: kind = the
+ * resource slot, and slots 1/2 hold `MON01.PIC` (wall torches) and
+ * `MON02.PIC` (fountain, portcullis, doorway shadow) for the whole session
+ * (`LAB_032B`). Pushed only when `depth > 0` or at the front site; `tag` is
+ * the record's depth tag (the doorway shadow is tagged `depth + 1`).
+ * `torchFrame` is `-11736(A4)`, the idle-loop torch toggle (0/1).
  */
 function frontKeys(
   site: 'front' | 'L1' | 'L2' | 'R1' | 'R2',
   code: number,
   depth: number,
   alt: string,
-): { now: string[]; deferred: string[] } {
+  torchFrame = 0,
+): { now: string[]; deferred: string[]; cels: Array<{ key: string; tag: number }> } {
   const now: string[] = [];
   const deferred: string[] = [];
+  const cels: Array<{ key: string; tag: number }> = [];
+  const celOk = depth > 0 || site === 'front';
+  const cel = (kind: number, index: number, tag: number) => {
+    if (celOk) cels.push({ key: `cel:${kind}:${index}:${site}:${depth}`, tag });
+  };
   const wallKey = site === 'front' ? `wall:front:${depth}` : `wall-lat:${site}:${depth}`;
   // preamble (`0x9bb8`): the solid wall body, codes 2 and >= 7 only.
   if (code === 2 || code >= 7) now.push(`${wallKey}${alt}`);
   switch (code) {
     case 1:
     case 4:
+      if (code === 4) cel(2, depth + 10, depth); // portcullis (0x9cb6)
       deferred.push(`wall-open:${site}:${depth}${alt}`);
+      cel(2, depth + 13, depth + 1); // doorway shadow (0x9d84)
       break;
     case 3:
       deferred.push(`door-leaf:${site}:${depth}`); // always direct (C == 0xFFFF in the push)
       deferred.push(`wall-open:${site}:${depth}${alt}`);
+      cel(2, depth + 13, depth + 1);
       break;
     case 5:
       now.push(`door:${site}:${depth}${alt}`);
@@ -264,12 +286,23 @@ function frontKeys(
     case 7:
       now.push(`feat7:${site}:${depth}${alt}`);
       break;
+    case 8: // wall torch (0x9e74)
+      cel(1, (alt && depth < 2 ? 18 : 0) + depth * 2 + torchFrame + 1, depth);
+      break;
+    case 9: // fountain (0x9ede)
+      cel(2, depth + 1, depth);
+      break;
     case 10:
+      now.push(`feat10:${site}:${depth}${alt}`);
+      break;
     case 11:
     case 12:
+      // 0x9f2c draws the feat10 base (56/58) for every code 10-13, then the code's own piece
+      now.push(`feat10:${site}:${depth}${alt}`);
       now.push(`feat${code}:${site}:${depth}${alt}`);
       break;
     case 13:
+      now.push(`feat10:${site}:${depth}${alt}`);
       now.push(`feat13:${site}:${depth}`);
       break;
     case 14:
@@ -283,7 +316,7 @@ function frontKeys(
   if (depth === 0 && site !== 'front' && (code === 1 || code === 3 || code === 4)) {
     now.push(`door:${site}:${depth}${alt}`);
   }
-  return { now, deferred };
+  return { now, deferred, cels };
 }
 
 /**
@@ -366,6 +399,8 @@ export function buildViewItems(
   slots: SlotTableFile,
   /** Global maze coordinate of the densified grid's (0,0) — the checkerboard parities use the game's absolute coordinates (`-18338/-18336(A4)`), so a level whose grid is cropped needs its origin to phase them correctly. Defaults to (0,0). */
   origin: { x: number; y: number } = { x: 0, y: 0 },
+  /** `-11736(A4)`, the torch animation frame (0/1) the game toggles in its idle loop. */
+  torchFrame = 0,
 ): DrawItem[] {
   const items: DrawItem[] = [];
   const v = freshLanes();
@@ -394,7 +429,7 @@ export function buildViewItems(
   };
 
   /** The deferred-draw queue (`LAB_04B9` -> consumer `0x0affa`, §4.7.8): codes 1/3/4's doorway/door-leaf records are appended during the walk and drawn only after the whole depth loop, deepest depth first. */
-  const deferredItems: Array<{ key: string; kind: DrawItemKind; depth: number; lateral: number; side: 'L' | 'R' | undefined; cell: { x: number; y: number } }> = [];
+  const deferredItems: Array<{ key: string; kind: DrawItemKind; depth: number; lateral: number; side: 'L' | 'R' | undefined; cell: { x: number; y: number }; cel?: boolean }> = [];
 
   /**
    * One lane's ceiling + floor continuation (§4.7.7). `0x9b58` draws the
@@ -492,10 +527,15 @@ export function buildViewItems(
     if (v.front[depth]) {
       emitLane('front', depth, 0, undefined, cell, frontGate, () => {
         if (depth >= MAX_WALL_DEPTH) return;
-        const { now, deferred } = frontKeys('front', front, depth, altD);
+        const { now, deferred, cels } = frontKeys('front', front, depth, altD, torchFrame);
         for (const k of now) emit(k, 'front', depth, 0, undefined, cell);
         for (const k of deferred) deferredItems.push({ key: k, kind: 'front', depth, lateral: 0, side: undefined, cell });
+        for (const c of cels) deferredItems.push({ key: c.key, kind: 'front', depth: c.tag, lateral: 0, side: undefined, cell, cel: true });
       });
+      // Feature 6's floor overlay (0x0a0d0): front site, depth 1, drawn
+      // straight after the plain floor (not on the alt-floor/skip paths).
+      if (depth === 1 && frontOverlay.floorOverlay && !frontGate.skipFloor && !frontGate.altFloor)
+        emit(`floor-overlay:front:1${altPose}`, 'side', depth, 0, undefined, cell);
     }
     loopBound = blockFront(v, depth, front, loopBound, frontOverlay.fog);
 
@@ -504,18 +544,24 @@ export function buildViewItems(
     // lane as the front wall. `LAB_0506` carries no ceiling/floor of its
     // own; its pair draws fork on the POSE parity `-11434` (not the
     // per-depth `-11436`), §4.7.6.2/§4.7.8.
-    if (v.front[depth])
+    if (v.front[depth]) {
       for (const k of sideKeys(perpL, depth, altPose)) {
         const [base, suffix] = k.endsWith(':alt') ? [k.slice(0, -4), ':alt'] : [k, ''];
         emit(`${base}:L:${depth}${suffix}`, 'side', depth, -1, 'L', cell);
       }
+      const c = sideCel(perpL, depth, 'L', torchFrame);
+      if (c) deferredItems.push({ key: c, kind: 'side', depth, lateral: -1, side: 'L', cell, cel: true });
+    }
     blockPerpLeft(v, depth, perpL, frontOverlay.fog); // LAB_053B reads override slot 1 (-11365), written by the front call
 
-    if (v.front[depth])
+    if (v.front[depth]) {
       for (const k of sideKeys(perpR, depth, altPose)) {
         const [base, suffix] = k.endsWith(':alt') ? [k.slice(0, -4), ':alt'] : [k, ''];
         emit(`${base}:R:${depth}${suffix}`, 'side', depth, 1, 'R', cell);
       }
+      const c = sideCel(perpR, depth, 'R', torchFrame);
+      if (c) deferredItems.push({ key: c, kind: 'side', depth, lateral: 1, side: 'R', cell, cel: true });
+    }
     blockPerpRight(v, depth, perpR, frontOverlay.fog); // LAB_053E, same slot
 
     // `LAB_0528` left (`0x0aca2`, lane `-11392`) — ceiling/floor only.
@@ -526,9 +572,10 @@ export function buildViewItems(
     // ceiling/floor run.
     const emitLatBody = (site: 'L1' | 'L2' | 'R1' | 'R2', code: number, lateral: number, side: 'L' | 'R') => {
       if (depth >= MAX_WALL_DEPTH || code === 0) return;
-      const { now, deferred } = frontKeys(site, code, depth, altD);
+      const { now, deferred, cels } = frontKeys(site, code, depth, altD, torchFrame);
       for (const k of now) emit(k, 'side', depth, lateral, side, cell);
       for (const k of deferred) deferredItems.push({ key: k, kind: 'side', depth, lateral, side, cell });
+      for (const c of cels) deferredItems.push({ key: c.key, kind: 'side', depth: c.tag, lateral, side, cell, cel: true });
     };
 
     if (v.left1[depth]) {
@@ -557,10 +604,37 @@ export function buildViewItems(
   // DESCENDING depth order (`0x0afe6`-`0x0b1ca`, the `-11438(A4)` countdown)
   // — i.e. the doorway/door-leaf pieces paint far-to-near on top of the
   // already-drawn walls, floors and ceilings, with `replace` blends.
-  deferredItems.sort((a, b) => b.depth - a.depth);
-  for (const d of deferredItems) emit(d.key, d.kind, d.depth, d.lateral, d.side, d.cell);
+  // Per depth tag the consumer makes two passes, each walking the queue
+  // from the LAST pushed record to the first (D4 = count-1 .. 0): first the
+  // kind-0xFF maze-piece records, then the `.PIC`-cel records. Tags above
+  // the final loop bound are never reached (the countdown starts at
+  // `-11440(A4)`).
+  deferredItems.reverse();
+  deferredItems.sort((a, b) => b.depth - a.depth || Number(a.cel ?? false) - Number(b.cel ?? false));
+  for (const d of deferredItems) if (d.depth <= loopBound) emit(d.key, d.kind, d.depth, d.lateral, d.side, d.cell);
 
-  return items;
+  return inGameOrder(items);
+}
+
+/**
+ * `items` is already in the game's own draw order: the depth loop near to
+ * far, then the queue consumer. `@seer-project/dungeon`'s `compositeDrawList`
+ * re-sorts by painter's order (depth descending, side before front), which
+ * is Black Crypt's rule, not this game's. Most W6 pieces are OR-blended,
+ * so the order rarely shows. It does show for the replace/mask pieces,
+ * e.g. a `.PIC` cel that front-floor OR draws would otherwise land on.
+ * > **Correction (2026-11-22, game oracle):** found by the oracle sweep.
+ * So each item's `kind`/`depth` becomes a painter rank (`depth` =
+ * items-remaining), which makes the package's stable sort the identity.
+ * The resolved kind/depth is appended to `origin` for debugging.
+ */
+function inGameOrder(items: DrawItem[]): DrawItem[] {
+  return items.map((it, i) => ({
+    ...it,
+    kind: 'side',
+    depth: items.length - i,
+    origin: `${it.origin ?? ''} {${it.kind} d${it.depth}}`,
+  }));
 }
 
 /**

@@ -153,7 +153,9 @@ export type MoveResult =
   | { kind: 'bump'; message: number }
   | { kind: 'locked'; message: number }
   | { kind: 'bounce'; message: number }
-  | { kind: 'death'; message: number };
+  | { kind: 'death'; message: number }
+  /** Step refused with no message: `TryMove`'s door-state-3 arm (`CODE+0x117f0`) calls `LAB_07AB` but, unlike the state-0 arm, never shows `-10888(A4)` when the step fails. */
+  | { kind: 'blocked'; message: 0 };
 
 /**
  * `TryMove` + `LAB_07AB`: attempt one step from `(x,y)` in compass `dir`
@@ -188,11 +190,16 @@ export function tryMove(
     return code === 3 && forward ? { kind: 'locked', message: W6_MSG.locked } : { kind: 'bump', message: W6_MSG.bump };
   }
 
+  // A failed LAB_07AB step shows -10888(A4) (the bounce text) only from the
+  // state-0 arm (LAB_07C4); the state-3 arm returns silently.
+  const bounce = (): MoveResult =>
+    state === 3 ? { kind: 'blocked', message: 0 } : { kind: 'bounce', message: W6_MSG.bounce };
+
   // LAB_07AB: step, then resolve the new cell.
   let nx = x + DELTAS[dir]!.dx;
   let ny = y + DELTAS[dir]!.dy;
   if (isOffMap(planes, nx, ny)) {
-    return offMapIsOpen(level) ? { kind: 'bounce', message: W6_MSG.bounce } : { kind: 'death', message: W6_MSG.killed };
+    return offMapIsOpen(level) ? bounce() : { kind: 'death', message: W6_MSG.killed };
   }
   const i = ny * planes.width + nx;
   const flagP = (planes.flagP?.[i] ?? 0) !== 0;
@@ -235,7 +242,7 @@ export function tryMove(
       case 12: {
         const region = planes.region?.[i] ?? -1;
         if (level === 12 && region >= 9) break;
-        if (!levitating) return { kind: 'bounce', message: W6_MSG.bounce };
+        if (!levitating) return bounce();
         break;
       }
       default:
@@ -297,6 +304,8 @@ export interface ArrivalResult {
   teleported: boolean;
   /** Set when the final position is on a different level: the caller must load it and call `arrive` again there (the game's scan continues at the destination). */
   levelChange: boolean;
+  /** A kind-5 entity ended the scan (the game leaves maze state 5 for state 0x12 there). */
+  halted?: boolean;
 }
 
 /**
@@ -318,6 +327,7 @@ export function arrive(
   let cx = x;
   let cy = y;
   let teleported = false;
+  let halted = false;
   let loc = localOf(links, planes, cx, cy);
   let start = loc ? (e.regionStart[loc.region] ?? 0) : 0;
   for (let guard = 0; loc && guard < 64; guard++) {
@@ -332,6 +342,13 @@ export function arrive(
     }
     if (found < 0) break;
     const kind = e.kind[found]!;
+    // kind 5 (CODE+0xea30): stores its +0x630 byte through -18306(A4) and
+    // sets game state -18610(A4) = 0x12, which ends the scan (the loop only
+    // continues while the state is 5) — no later entity on the cell fires.
+    if (kind === 5) {
+      halted = true;
+      break;
+    }
     if (kind === 1 && e.w000[found] !== 3 && (e.w000[found] ?? 0) <= 6) {
       triggers.mark(level, e.flagBit[found]!, (e.w240[found]! >> 10) & 3);
       const dest = links.teleportDest[found];
@@ -354,7 +371,7 @@ export function arrive(
     }
     start = found + 1;
   }
-  return { pose: { level, x: cx, y: cy }, doorState, teleported, levelChange: false };
+  return { pose: { level, x: cx, y: cy }, doorState, teleported, levelChange: false, halted };
 }
 
 /**

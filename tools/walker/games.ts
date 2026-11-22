@@ -478,6 +478,7 @@ const W6_MOVE_TEXT: Record<MoveResult['kind'], string> = {
   locked: 'the door is locked — msg 0x7e5',
   bounce: 'bounced back (water/edge; needs the -18136 timed effect) — msg 0x805',
   death: 'the game kills the party here (pit/chasm/edge) — step refused by the walker',
+  blocked: '',
 };
 
 export class Wizardry6View implements GameView {
@@ -550,7 +551,7 @@ export class Wizardry6View implements GameView {
     }
     const r = tryMove(this.planes, this.links, pose.x, pose.y, dir, pose.facing, this.doorState);
     if (r.kind !== 'moved') {
-      this.message = W6_MOVE_TEXT[r.kind];
+      this.message = W6_MOVE_TEXT[r.kind] || null; // 'blocked': the game shows nothing
       return false;
     }
     if (r.doorOpened) this.message = 'door opens (forward through a closed door)';
