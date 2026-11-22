@@ -84,7 +84,7 @@
  * `docs/ishar/TODO.md`'s closed `ishar-greyscale-atlas-normalize` row).
  */
 
-export type IsharBitmapType = 0x00 | 0x02 | 0x10 | 0x12 | 0x14 | 0x16;
+export type IsharBitmapType = 0x00 | 0x01 | 0x02 | 0x10 | 0x12 | 0x14 | 0x16;
 
 /** "draw_st_4bit_*" in the reference source -- raw 4-bit nibble, NO palette-bank byte/skip (pixel data starts at header+6, not +8). Seen almost exclusively in Crystals of Arborea. */
 const MASKED_4BIT_RAW: IsharBitmapType = 0x00;
@@ -96,7 +96,11 @@ const OPAQUE_4BIT: IsharBitmapType = 0x12;
 const MASKED_8BIT: IsharBitmapType = 0x14;
 const OPAQUE_8BIT: IsharBitmapType = 0x16;
 
+/** "draw_rect" (`image.c` `destofen`, `case 0x01`) -- no pixel data: an opaque width x height block of colour `byte[1]`. Ishar's backdrops use it for flat sky/ground panels (e.g. Ishar 1 `FOND.DO` slot 5). */
+const SOLID_RECT: IsharBitmapType = 0x01;
+
 const SUPPORTED_TYPES = new Set<number>([
+  SOLID_RECT,
   MASKED_4BIT_RAW,
   OPAQUE_4BIT_RAW,
   MASKED_4BIT,
@@ -181,6 +185,11 @@ export function decodeIsharBitmap(data: Uint8Array, index: number, headerOffset:
   const width = storedW + 1;
   const height = storedH + 1;
   if (width <= 0 || height <= 0 || width > 2000 || height > 2000) return null;
+
+  if (type === SOLID_RECT) {
+    const color = data[headerOffset + 1]!;
+    return { index, headerOffset, type: SOLID_RECT, width, height, palOffset: 0, indices: new Uint8Array(width * height).fill(color), masked: false };
+  }
 
   const isRaw4bit = type === MASKED_4BIT_RAW || type === OPAQUE_4BIT_RAW;
   const palOffset = isRaw4bit ? 0 : data[headerOffset + 6];

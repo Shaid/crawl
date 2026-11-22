@@ -38,16 +38,23 @@
  * turning/walking).
  */
 
-import { decodeAlisInstr, type AlisInstr, type AlisToken } from './alis-disasm.ts';
+import { decodeAlisInstr, scriptEntryPoint, type AlisInstr, type AlisToken } from './alis-disasm.ts';
 
 export interface PlacementCommand {
-  /** Source opcode: `cput` places at (0,0,0) with the last-set invert flag; `cputnat`/`cxputat` place at an explicit (x,y,z). */
-  op: 'cput' | 'cputnat' | 'cxputat';
+  /** Source opcode: `cput`/`cxput` place at (0,0,0); `cputnat`/`cxputat` at an explicit (x,y,z). */
+  op: 'cput' | 'cputnat' | 'cxput' | 'cxputat';
+  /** Absolute position: the script entity's own coordinates (vram words 0/2/4) plus the put's operands. */
   x: number;
   y: number;
   z: number;
   idx: number;
   numelem: number;
+  /**
+   * Mirror flag the reference engine stores in the sprite (`image.invert_x`):
+   * the script's own `xinv` bit (`cxinv`/`cxinvon`/`cxinvoff`), XOR 1 for
+   * the `cx*` put variants (`opcodes.c` `cput`/`cputnat`/`cxput`/`cxputat`).
+   */
+  invertX: boolean;
   /** Address of the placing instruction — useful for debugging which script line produced a given placement. */
   addr: number;
 }
@@ -57,27 +64,21 @@ export interface SceneEnv {
   /** `omainb(addr)`/`omainw(addr)` reads. Return 0 (and it'll show up in `warnings`) for anything not modeled. */
   readMain(addr: number): number;
   /**
-   * `omaintc(addr)` indexed array read — a direct, byte-verified port of the
-   * real VM's `tabchar()` (`github.com/maestun/alis`'s `alis.c:1431`, traced
-   * this session): `result = addr + varD7 + Σ dims[i] * pop()` for `i` in
-   * `0..count-1`, where `count`/`dims` are the array's own `cdim`-declared
-   * dimensions (a length-prefixed stride table `cdim` writes into vram just
-   * before the array's base address, per `opcodes.c:613`'s real algorithm),
-   * `varD7` is the current accumulator (`direct`, below) at the time
-   * `omaintc` executes, and each `pop()` call consumes ONE eval-stack value
-   * in LIFO order (most-recently-`opushacc`'d value first) — NOT a fixed
-   * x/y pair. `addr` is the array's base offset baked into the bytecode.
-   * Ishar 1's world-grid arrays (`basemain+0x80`/`+0x234a`) are `count=1`
-   * (a single stride = row width), so a caller only ever needs to call
-   * `pop()` once: `cell = grid[pop*stride + direct]` -- the popped value is
-   * the ROW, `direct` the COLUMN (2026-11-13 correction: this comment and
-   * all three Ishar renderers previously had it the other way round; see
-   * `ishar-firstperson.ts`'s `RegionGridSource`). Crystals of Arborea's own local
-   * scene-content array (`basemain+0x7c`, `cdim`-declared `count=2,
-   * dims=[2,114]`) needs `pop()` called TWICE — see
-   * `tools/shared/crystals-firstperson.ts`.
+   * `omaintc(addr)` indexed array read — a direct port of the reference
+   * VM's `tabchar()` (`github.com/maestun/alis`'s `alis.c:1431`):
+   * `result = addr + varD7 + Σ dims[i] * pop()` for `i` in `0..count-1`,
+   * where `count`/`dims` are the array's own `cdim`-declared dimensions,
+   * `varD7` is the current accumulator (`direct`, below) and each `pop()`
+   * consumes ONE eval-stack value in LIFO order. The Ishar world-grid arrays
+   * are `count=1` (a single stride = row width), so a caller only ever needs
+   * to call `pop()` once: `cell = grid[pop*stride + direct]` -- the popped
+   * value is the ROW, `direct` the COLUMN. Crystals of Arborea's local
+   * scene-content array (`basemain+0x7c`, `count=2, dims=[2,114]`) needs
+   * `pop()` called TWICE — see `tools/shared/crystals-firstperson.ts`.
    */
   readGrid(addr: number, pop: () => number, direct: number): number;
+  /** Optional `smain*` writes; when absent they are dropped (and warned about). */
+  writeMain?(addr: number, value: number): void;
 }
 
 const STEP_BUDGET = 200_000;
@@ -88,304 +89,504 @@ interface RunResult {
   steps: number;
 }
 
-/** One interpreter run over a single decompressed script's bytecode, starting at `entry`. */
-export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): RunResult {
-  const placements: PlacementCommand[] = [];
-  const warnings: string[] = [];
-  const seenWarnings = new Set<string>();
-  const warn = (msg: string) => {
-    if (!seenWarnings.has(msg)) {
-      seenWarnings.add(msg);
-      warnings.push(msg);
+/**
+ * How an activation ended. `stop` = `cstop`/`cstopret` (the reference VM
+ * resumes at the next instruction on the NEXT frame, without a wake-up);
+ * `sleep` = `csleep` (resumes after the next `cwakeup` from another script);
+ * `exit` = `cexit`/fell off the end (the entity is gone); `budget`/`error`
+ * = this interpreter gave up.
+ */
+export type AlisYield = 'stop' | 'sleep' | 'exit' | 'budget' | 'error';
+
+/** A retained sprite element, as the reference VM keeps it between frames (`putfin`/`killelem`). */
+export interface RetainedPlacement extends PlacementCommand {
+  /** Activation number that put it -- a put of element N kills the element-N sprites of EARLIER activations only (`putfin`: only `state == 0`, i.e. already-drawn, sprites die). */
+  gen: number;
+}
+
+const s8 = (v: number) => ((v & 0xff) ^ 0x80) - 0x80;
+const s16 = (v: number) => ((v & 0xffff) ^ 0x8000) - 0x8000;
+
+/**
+ * One ALIS script entity as a resumable coroutine: its own local memory
+ * (`dir`/`loc` operands are both offsets into the entity's vram, signed),
+ * program counter, call stack and `cstart` marker survive between
+ * activations, exactly like the reference VM's per-entity context
+ * (`alis.c` `alis_main_V2`: resume at `script_ret_offset`, run until
+ * `cstop`). Its retained sprite list (`sprites`) follows the reference
+ * element rules: a put of element `numelem` replaces that element's sprites
+ * from earlier activations (`putfin`), `ccancall`/`cerasall` drop every
+ * sprite, `cerasen n` drops element `n`.
+ *
+ * Scope: the opcodes a scene/backdrop script needs (arithmetic, branches,
+ * `cjsr`/`cret`/`cstart`, `cswitch1`/`cswitch2`, `cloop`, `omaintc`
+ * grid reads, local `cdim` arrays, the put family, mirroring, erase) are
+ * modelled; screen/palette/sound/mouse opcodes are no-ops, and anything
+ * else is recorded in `warnings` and skipped rather than throwing.
+ */
+export class AlisScriptRunner {
+  pc: number | null;
+  readonly callStack: number[] = [];
+  /** `callStack` as the first `cstart` left it (`vram+0x0c` marker); later `cstart`s restore it. */
+  private startMarker: number[] | null = null;
+  readonly locals = new Map<number, number>();
+  /** Local `cdim` arrays: base offset -> dims. */
+  private readonly arrays = new Map<number, number[]>();
+  xinv = 0;
+  sleeping = false;
+  dead = false;
+  /** Number of activations run so far. */
+  gen = 0;
+  sprites: RetainedPlacement[] = [];
+  readonly warnings: string[] = [];
+  private readonly seenWarnings = new Set<string>();
+
+  readonly data: Uint8Array;
+  readonly name: string;
+
+  constructor(data: Uint8Array, name = '', entry = scriptEntryPoint(data)) {
+    this.data = data;
+    this.name = name;
+    this.pc = entry;
+  }
+
+  private warn(msg: string): void {
+    if (!this.seenWarnings.has(msg)) {
+      this.seenWarnings.add(msg);
+      this.warnings.push(msg);
     }
-  };
+  }
 
-  const locals = new Map<number, number>();
-  const callStack: number[] = [];
-  let acc = 0;
-  let steps = 0;
+  /** Entity coordinates (`ALIS_SCR_WCX/WCY/WCZ` = vram words 0/2/4). */
+  get coords(): { x: number; y: number; z: number } {
+    return { x: this.locals.get(0) ?? 0, y: this.locals.get(2) ?? 0, z: this.locals.get(4) ?? 0 };
+  }
 
-  const readVar = (op: string, addr: number): number => {
-    switch (op) {
-      case 'oimmb': case 'oimmw':
-        return addr;
-      case 'odirb': case 'odirw': case 'odirp':
-        return locals.get(addr) ?? 0;
-      case 'omainb': case 'omainw': case 'omainp':
-        return env.readMain(addr);
-      case 'olocb': case 'olocw': case 'olocp':
-        return locals.get(0x10000 + addr) ?? 0; // separate namespace from dirb/dirw, unused by our scripts but kept distinct defensively
-      default:
-        warn(`unmodeled value opname ${op}`);
-        return 0;
-    }
-  };
+  /** Run one activation (one reference-VM frame for this entity) until it yields (or reaches a `stopAt` address, for running one routine of a bigger script). Returns the yield kind and the puts made during it. */
+  activate(env: SceneEnv, budget = STEP_BUDGET, stopAt?: ReadonlySet<number>): { yield: AlisYield; placements: PlacementCommand[]; steps: number } {
+    if (this.dead || this.pc === null) return { yield: 'exit', placements: [], steps: 0 };
+    this.gen++;
+    const gen = this.gen;
+    const warn = (m: string) => this.warn(m);
+    const locals = this.locals;
+    const callStack = this.callStack;
+    const placements: PlacementCommand[] = [];
+    const putThisGen = new Set<number>();
+    let acc = 0;
+    let steps = 0;
+    const pile: number[] = [];
 
-  const pile: number[] = [];
+    const localKey = (op: string, addr: number): number => (op.startsWith('oloc') || op.startsWith('sloc') || op.startsWith('aloc') ? s16(addr) : addr);
 
-  /** Evaluate a single token to a scalar. Handles the shapes actually produced by `alis-disasm.ts`. */
-  function evalToken(tok: AlisToken): number {
-    switch (tok.t) {
-      case 'imm':
-        if (typeof tok.value === 'string') {
-          warn(`string immediate evaluated as 0 (${tok.op})`);
+    const readVar = (op: string, addr: number): number => {
+      switch (op) {
+        case 'oimmb': case 'oimmw':
+          return addr;
+        case 'odirb': case 'odirw': case 'odirp': case 'olocb': case 'olocw': case 'olocp':
+          return locals.get(localKey(op, addr)) ?? 0;
+        case 'omainb': case 'omainw': case 'omainp':
+          return env.readMain(addr);
+        case 'ofree':
+          return 0x7fff; // free-memory probe: the reference host always has room
+        default:
+          warn(`unmodeled value opname ${op}`);
           return 0;
-        }
-        return readVar(tok.op, tok.value);
-      case 'nullary':
-        if (tok.op === 'opile') return pile.pop() ?? 0;
-        if (tok.op === 'opushacc') {
-          pile.push(acc);
-          return acc;
-        }
-        warn(`unmodeled nullary opname ${tok.op}`);
-        return 0;
-      case 'unary':
-        return applyUnaryStep(tok.op, tok.arg);
-      case 'eval':
-        return runSteps(tok.steps);
-      case 'ref':
-        warn(`unmodeled ref token ${tok.op}`);
-        return 0;
-      case 'indexed':
-        warn('indexed (seval/aeval) token evaluated as 0 -- not needed by scene scripts');
-        return 0;
-      default:
-        return 0;
-    }
-  }
+      }
+    };
 
-  /**
-   * One binary opername step `acc OP arg`. Reference semantics
-   * (`maestun/alis` `opernames.c`): every binary opername first copies D7
-   * (the accumulator) into D6, then reads its operand into D7, then computes
-   * `D6 OP D7` -- i.e. `acc OP operand`. EXCEPT when the operand is `opile`
-   * (`opernames.c:617`): `opile` itself does `D7 = D6; D6 = *acc++`, so the
-   * popped value lands in D6 and the old accumulator in D7, and the
-   * operation becomes `popped OP acc`. Only matters for non-commutative ops;
-   * in the shipped Ishar/Crystals location scripts that is exactly the four
-   * `osup[opile]` view-edge clamps per script (2026-11-13 fix -- before it,
-   * every clamp tested the wrong way round and one lateral scan bound per
-   * facing got stuck at the full distance to the region edge, the "residual
-   * quirk" `ishar3-firstperson.ts` used to describe).
-   */
-  function applyUnaryStep(op: string, arg: AlisToken): number {
-    if (arg.t === 'nullary' && arg.op === 'opile') {
-      const popped = pile.pop() ?? 0;
-      return applyBinary(op, popped, acc, warn);
-    }
-    const rhs = evalToken(arg);
-    return applyBinary(op, acc, rhs, warn);
-  }
+    /** `tabchar()` over a local `cdim` array: element index = D7 + Σ dims[i] * pop(). */
+    const localArrayIndex = (base: number, direct: number): number => {
+      const dims = this.arrays.get(base);
+      let idx = direct;
+      if (dims) for (const d of dims) idx += d * (pile.pop() ?? 0);
+      else warn(`local array 0x${base.toString(16)} read before its cdim`);
+      return base + idx;
+    };
 
-  /** Run a flat EVAL step list against the shared `acc`/`pile` machine state, returning the final acc. */
-  function runSteps(steps_: AlisToken[]): number {
-    for (const step of steps_) {
-      if (step.t === 'imm') {
-        if (typeof step.value === 'string') {
-          warn(`string immediate in EVAL (${step.op})`);
-          acc = 0;
+    const evalToken = (tok: AlisToken): number => {
+      switch (tok.t) {
+        case 'imm':
+          if (typeof tok.value === 'string') {
+            warn(`string immediate evaluated as 0 (${tok.op})`);
+            return 0;
+          }
+          return readVar(tok.op, tok.value);
+        case 'nullary':
+          if (tok.op === 'opile') return pile.pop() ?? 0;
+          if (tok.op === 'opushacc') {
+            pile.push(acc);
+            return acc;
+          }
+          warn(`unmodeled nullary opname ${tok.op}`);
+          return 0;
+        case 'unary':
+          return applyUnaryStep(tok.op, tok.arg);
+        case 'eval':
+          return runSteps(tok.steps);
+        default:
+          warn(`unmodeled token ${tok.t}`);
+          return 0;
+      }
+    };
+
+    /**
+     * One binary opername step `acc OP arg`. Reference semantics
+     * (`maestun/alis` `opernames.c`): every binary opername copies D7 (the
+     * accumulator) into D6, reads its operand into D7, then computes
+     * `D6 OP D7` -- `acc OP operand` -- EXCEPT when the operand is `opile`
+     * (`opernames.c:617`), which swaps them: `popped OP acc`.
+     */
+    const applyUnaryStep = (op: string, arg: AlisToken): number => {
+      if (arg.t === 'nullary' && arg.op === 'opile') {
+        const popped = pile.pop() ?? 0;
+        return applyBinary(op, popped, acc, warn);
+      }
+      const rhs = evalToken(arg);
+      return applyBinary(op, acc, rhs, warn);
+    };
+
+    const runSteps = (steps_: AlisToken[]): number => {
+      for (const step of steps_) {
+        if (step.t === 'imm') {
+          if (typeof step.value === 'string') {
+            warn(`string immediate in EVAL (${step.op})`);
+            acc = 0;
+            continue;
+          }
+          if (step.op === 'omaintc' || step.op === 'omainti') {
+            acc = env.readGrid(step.value, () => pile.pop() ?? 0, acc);
+          } else if (step.op === 'odirtc' || step.op === 'oloctc' || step.op === 'odirti' || step.op === 'olocti') {
+            acc = locals.get(localArrayIndex(localKey(step.op, step.value), acc)) ?? 0;
+          } else {
+            acc = readVar(step.op, step.value);
+          }
+        } else if (step.t === 'nullary') {
+          if (step.op === 'opushacc') pile.push(acc);
+          else if (step.op === 'oneg') acc = -acc;
+          else if (step.op === 'oabs') acc = Math.abs(acc);
+          else if (step.op === 'onot') acc = ~acc;
+          else if (step.op === 'osgn') acc = Math.sign(acc);
+          else if (step.op === 'opile') acc = pile.pop() ?? 0;
+          else if (step.op === 'ofree') acc = 0x7fff;
+          else warn(`unmodeled EVAL step opname ${step.op}`);
+        } else if (step.t === 'unary') {
+          acc = applyUnaryStep(step.op, step.arg);
+        } else {
+          warn(`unmodeled EVAL step shape ${step.t}`);
+        }
+      }
+      return acc;
+    };
+
+    // readexec_opername(): v<60 truncates D7 to 16 bits after every top-level operand.
+    const evalExpr = (tok: AlisToken): number => (acc = s16(tok.t === 'eval' ? runSteps(tok.steps) : evalToken(tok)));
+
+    /** Store `v` to a store/add destination token (`op` = 'set' | 'add'). */
+    const storeTo = (tok: AlisToken, v: number, mode: 'set' | 'add'): void => {
+      if (tok.t === 'indexed') {
+        // seval/aeval: the steps compute the element index into D7 (+ pile), then the array dest.
+        const saved = acc;
+        runSteps(tok.steps);
+        const dest = tok.dest;
+        if (dest.t === 'imm' && typeof dest.value === 'number' && /^[sa](dir|loc)t[ci]$/.test(dest.op)) {
+          const key = localArrayIndex(localKey(dest.op, dest.value), acc);
+          const nv = mode === 'add' ? (locals.get(key) ?? 0) + v : v;
+          locals.set(key, dest.op.endsWith('c') ? s8(nv) : s16(nv));
+        } else {
+          warn(`unmodeled indexed destination ${dest.t === 'imm' ? dest.op : dest.t}`);
+        }
+        acc = saved;
+        return;
+      }
+      if (tok.t !== 'imm' || typeof tok.value !== 'number') {
+        warn(`unmodeled store destination ${tok.t}`);
+        return;
+      }
+      const op = tok.op;
+      if (/^[sa](dir|loc)[bwp]$/.test(op)) {
+        const key = localKey(op, tok.value);
+        const nv = mode === 'add' ? (locals.get(key) ?? 0) + v : v;
+        locals.set(key, op.endsWith('b') ? s8(nv) : s16(nv));
+      } else if (/^[sa]main[bwp]$/.test(op)) {
+        if (env.writeMain) env.writeMain(tok.value, mode === 'add' ? env.readMain(tok.value) + v : v);
+        else warn(`ignored write to main global 0x${tok.value.toString(16)}`);
+      } else {
+        warn(`unmodeled store destination ${op}`);
+      }
+    };
+
+    const put = (instr: AlisInstr, x: number, y: number, z: number, idx: number, numelem: number, mirrorOp: boolean): void => {
+      const old = this.coords;
+      const p: PlacementCommand = {
+        op: instr.op as PlacementCommand['op'],
+        x: old.x + x,
+        y: old.y + y,
+        z: old.z + z,
+        idx,
+        numelem,
+        invertX: ((this.xinv & 1) ^ (mirrorOp ? 1 : 0)) === 1,
+        addr: instr.addr,
+      };
+      if (!putThisGen.has(numelem)) {
+        putThisGen.add(numelem);
+        this.sprites = this.sprites.filter((s) => s.numelem !== numelem || s.gen === gen);
+      }
+      this.sprites.push({ ...p, gen });
+      placements.push(p);
+    };
+
+    let pc: number | null = this.pc;
+    let result: AlisYield = 'exit';
+    run: while (pc !== null) {
+      if (stopAt?.has(pc)) {
+        result = 'stop';
+        break;
+      }
+      if (++steps > budget) {
+        warn('step budget exceeded -- aborting run');
+        result = 'budget';
+        break;
+      }
+      let instr: AlisInstr;
+      try {
+        instr = decodeAlisInstr(this.data, pc);
+      } catch (e) {
+        warn(`decode error at 0x${pc.toString(16)}: ${e instanceof Error ? e.message : String(e)}`);
+        result = 'error';
+        pc = null;
+        break;
+      }
+      const next = instr.next[0] ?? null;
+
+      switch (instr.op) {
+        case 'cjmp':
+          pc = instr.fields.target as number;
+          continue;
+        case 'cjsr':
+          callStack.push(next as number);
+          pc = instr.fields.target as number;
+          continue;
+        case 'cret':
+          pc = callStack.pop() ?? null;
+          continue;
+        case 'cstart': {
+          // opcodes.c cstart (fseq != 0): the first one pushes the return
+          // address and remembers that stack depth; later ones reset the stack
+          // to it. Either way, jump to the target.
+          // (The reference only moves the stack pointer back to the marker;
+          // the return address stored there is still in memory, so keep a copy.)
+          if (this.startMarker === null) {
+            callStack.push(next as number);
+            this.startMarker = [...callStack];
+          } else {
+            callStack.length = 0;
+            callStack.push(...this.startMarker);
+          }
+          pc = instr.fields.target as number;
           continue;
         }
-        if (step.op === 'omaintc' || step.op === 'omainti' || step.op === 'odirtc' || step.op === 'odirti') {
-          // Real tabchar() semantics: the callback pops as many eval-stack
-          // values (LIFO) as its own array's cdim-declared `count` needs --
-          // see SceneEnv.readGrid's doc comment.
-          acc = env.readGrid(step.value, () => pile.pop() ?? 0, acc);
-        } else {
-          acc = readVar(step.op, step.value);
+        case 'cstop':
+          pc = instr.end; // resumes here next frame (the disassembler's CFG ends the path)
+          result = 'stop';
+          break run;
+        case 'cstopret':
+          pc = callStack.pop() ?? null;
+          result = pc === null ? 'exit' : 'stop';
+          break run;
+        case 'csleep':
+          pc = instr.end;
+          this.sleeping = true;
+          result = 'sleep';
+          break run;
+        case 'cexit':
+          pc = null;
+          result = 'exit';
+          break run;
+        case 'cbz': case 'cbeq':
+          pc = acc === 0 ? (instr.fields.target as number) : next;
+          continue;
+        case 'cbnz': case 'cbne':
+          pc = acc !== 0 ? (instr.fields.target as number) : next;
+          continue;
+        case 'cloop': {
+          // add -1 to the destination, branch while it is non-zero
+          const dest = instr.fields.dest as AlisToken;
+          storeTo(dest, -1, 'add');
+          const v = dest.t === 'imm' && typeof dest.value === 'number' ? (locals.get(localKey(dest.op, dest.value)) ?? 0) : 0;
+          pc = v !== 0 ? (instr.fields.target as number) : next;
+          continue;
         }
-      } else if (step.t === 'nullary') {
-        if (step.op === 'opushacc') pile.push(acc);
-        else if (step.op === 'oneg') acc = -acc;
-        else if (step.op === 'oabs') acc = Math.abs(acc);
-        else if (step.op === 'opile') acc = pile.pop() ?? 0;
-        else warn(`unmodeled EVAL step opname ${step.op}`);
-      } else if (step.t === 'unary') {
-        acc = applyUnaryStep(step.op, step.arg);
-      } else {
-        warn(`unmodeled EVAL step shape ${step.t}`);
-      }
-    }
-    return acc;
-  }
-
-  const evalExpr = (tok: AlisToken): number => (tok.t === 'eval' ? runSteps(tok.steps) : evalToken(tok));
-
-  const destOffset = (tok: AlisToken): { local: boolean; addr: number } | null => {
-    if (tok.t !== 'imm' || typeof tok.value !== 'number') return null;
-    if (tok.op.startsWith('sdir') || tok.op.startsWith('adir')) return { local: true, addr: tok.value };
-    if (tok.op.startsWith('smain') || tok.op.startsWith('amain')) return { local: false, addr: tok.value };
-    return null;
-  };
-
-  let pc: number | null = entry;
-  while (pc !== null) {
-    if (++steps > STEP_BUDGET) {
-      warn('step budget exceeded -- aborting run');
-      break;
-    }
-    let instr: AlisInstr;
-    try {
-      instr = decodeAlisInstr(data, pc);
-    } catch (e) {
-      warn(`decode error at 0x${pc.toString(16)}: ${e instanceof Error ? e.message : String(e)}`);
-      break;
-    }
-
-    switch (instr.op) {
-      case 'cjmp':
-        pc = instr.fields.target as number;
-        continue;
-      case 'cjsr':
-        callStack.push(instr.next[0] as number);
-        pc = instr.fields.target as number;
-        continue;
-      case 'cret':
-        pc = callStack.pop() ?? null;
-        continue;
-      case 'cstop': case 'cstopret': case 'cexit':
-        pc = null;
-        continue;
-      case 'cbz': case 'cbeq':
-        pc = acc === 0 ? (instr.fields.target as number) : (instr.next[0] as number);
-        continue;
-      case 'cbnz': case 'cbne':
-        pc = acc !== 0 ? (instr.fields.target as number) : (instr.next[0] as number);
-        continue;
-      case 'ceval':
-        acc = evalExpr(instr.fields.expr as AlisToken);
-        break;
-      case 'cstore': {
-        const v = evalExpr(instr.fields.expr as AlisToken);
-        acc = v;
-        const dest = destOffset(instr.fields.dest as AlisToken);
-        if (dest) {
-          if (dest.local) locals.set(dest.addr, v);
-          else warn(`ignored write to main global 0x${dest.addr.toString(16)}`);
-        } else {
-          warn(`unmodeled cstore destination ${JSON.stringify(instr.fields.dest)}`);
+        case 'ceval':
+          acc = evalExpr(instr.fields.expr as AlisToken);
+          break;
+        case 'cstore': {
+          const v = evalExpr(instr.fields.expr as AlisToken);
+          acc = v;
+          storeTo(instr.fields.dest as AlisToken, v, 'set');
+          break;
         }
-        break;
-      }
-      case 'cadd': case 'csub': {
-        const v = evalExpr(instr.fields.expr as AlisToken);
-        const dest = destOffset(instr.fields.dest as AlisToken);
-        const sign = instr.op === 'cadd' ? 1 : -1;
-        if (dest) {
-          if (dest.local) locals.set(dest.addr, (locals.get(dest.addr) ?? 0) + sign * v);
-          else warn(`ignored cadd/csub to main global 0x${dest.addr.toString(16)}`);
+        case 'cadd': case 'csub': {
+          const v = evalExpr(instr.fields.expr as AlisToken);
+          storeTo(instr.fields.dest as AlisToken, instr.op === 'cadd' ? v : -v, 'add');
+          break;
         }
-        break;
-      }
-      case 'cswitch1': {
-        const value = evalExpr(instr.fields.expr as AlisToken);
-        acc = value;
-        const cases = instr.fields.cases as Array<{ value: number; target: number }>;
-        let target: number | null = instr.next[0] as number;
-        for (const cs of cases) {
-          if (value === cs.value) {
-            target = cs.target;
-            break;
+        case 'cdim': {
+          const off = instr.fields.off as number;
+          this.arrays.set(off, (instr.fields.dims as number[]) ?? []);
+          break;
+        }
+        case 'cswitch1': {
+          const value = evalExpr(instr.fields.expr as AlisToken);
+          acc = value;
+          const cases = instr.fields.cases as Array<{ value: number; target: number }>;
+          let target: number | null = next;
+          for (const cs of cases) {
+            if (value === cs.value) {
+              target = cs.target;
+              break;
+            }
+            if (value <= cs.value) break; // the reference's linear-scan cutoff (opcodes.c:713-737)
           }
-          if (value <= cs.value) break; // matches the real linear-scan cutoff (opcodes.c:713-737)
+          pc = target;
+          continue;
         }
-        pc = target;
-        continue;
-      }
-      case 'cswitch2': {
-        const value = evalExpr(instr.fields.expr as AlisToken);
-        acc = value;
-        const base = instr.fields.base as number;
-        const count = instr.fields.count as number;
-        const targets = instr.fields.targets as number[];
-        const index = value + base;
-        pc = index >= 0 && index <= count ? targets[index]! : (instr.next[0] as number);
-        continue;
-      }
-      case 'cput': {
-        const idx = evalExpr(instr.fields.expr as AlisToken);
-        placements.push({ op: 'cput', x: 0, y: 0, z: 0, idx, numelem: 0, addr: instr.addr });
-        break;
-      }
-      case 'cputnat': case 'cxputat': {
-        let x: number, y: number, z: number, idx: number, numelem: number;
-        if (instr.op === 'cputnat') {
-          x = evalExpr(instr.fields.x as AlisToken);
-          y = evalExpr(instr.fields.y as AlisToken);
-          z = evalExpr(instr.fields.z as AlisToken);
-          idx = evalExpr(instr.fields.idx as AlisToken);
-          numelem = evalExpr(instr.fields.numelem as AlisToken);
-        } else {
-          const args = instr.fields.args as AlisToken[];
-          x = evalExpr(args[0]!);
-          y = evalExpr(args[1]!);
-          z = evalExpr(args[2]!);
-          idx = evalExpr(args[3]!);
-          numelem = evalExpr(args[4]!);
+        case 'cswitch2': {
+          const value = evalExpr(instr.fields.expr as AlisToken);
+          acc = value;
+          const base = instr.fields.base as number;
+          const count = instr.fields.count as number;
+          const targets = instr.fields.targets as number[];
+          const index = value + base;
+          pc = index >= 0 && index <= count ? targets[index]! : next;
+          continue;
         }
-        placements.push({ op: instr.op, x, y, z, idx, numelem, addr: instr.addr });
-        break;
+        case 'cput': case 'cxput': {
+          const idx = evalExpr(instr.fields.expr as AlisToken);
+          put(instr, 0, 0, 0, idx, 0, instr.op === 'cxput');
+          break;
+        }
+        case 'cputnat': case 'cxputat': {
+          let x: number, y: number, z: number, idx: number, numelem: number;
+          if (instr.op === 'cputnat') {
+            x = evalExpr(instr.fields.x as AlisToken);
+            y = evalExpr(instr.fields.y as AlisToken);
+            z = evalExpr(instr.fields.z as AlisToken);
+            idx = evalExpr(instr.fields.idx as AlisToken);
+            numelem = evalExpr(instr.fields.numelem as AlisToken);
+          } else {
+            const args = instr.fields.args as AlisToken[];
+            x = evalExpr(args[0]!);
+            y = evalExpr(args[1]!);
+            z = evalExpr(args[2]!);
+            idx = evalExpr(args[3]!);
+            numelem = evalExpr(args[4]!);
+          }
+          put(instr, x, y, z, idx, numelem, instr.op === 'cxputat');
+          break;
+        }
+        case 'cxinv':
+          this.xinv ^= 1;
+          break;
+        case 'cxinvon':
+          this.xinv = 1;
+          break;
+        case 'cxinvoff':
+          this.xinv = 0;
+          break;
+        case 'ccancall': case 'cerasall':
+          this.sprites = [];
+          break;
+        case 'cerasen': {
+          const n = evalExpr(instr.fields.expr as AlisToken);
+          this.sprites = this.sprites.filter((s) => s.numelem !== n);
+          break;
+        }
+        // Everything below is a no-op for computing which sprites go where.
+        case 'cscreen': case 'cinteron': case 'cinteroff': case 'cscanon': case 'cscanoff': case 'cscanclr':
+        case 'credon': case 'credoff': case 'cfindtyp': case 'clinking': case 'ccancel':
+        case 'ccancen': case 'cblast': case 'cforme': case 'cdelforme': case 'cerase':
+        case 'cpalette': case 'cdefcolor': case 'csetvect': case 'cdefvect': case 'cnul':
+        case 'cnul37': case 'copensc': case 'cclosesc':
+        case 'cscmov': case 'cscset': case 'cset': case 'cmov': case 'casleep':
+        case 'casleepon': case 'casleepoff': case 'casleepfar': case 'ctstmov': case 'ctstset':
+        case 'cftstmov': case 'cftstset': case 'csuccent': case 'cpredent': case 'cnearent': case 'cneartyp':
+        case 'cnearmat': case 'cviewent': case 'cviewtyp': case 'cviewmat': case 'corient': case 'crstent':
+        case 'csend': case 'callentity': case 'ctiming': case 'czap': case 'cexplode': case 'cding':
+        case 'cnoise': case 'cinitab': case 'cfopen': case 'cfclose': case 'cfwritev': case 'cfreadb':
+        case 'cfwriteb': case 'cplot': case 'cdraw': case 'cbox': case 'cboxf': case 'cink': case 'cpmode':
+        case 'cpicture': case 'cxyscroll': case 'cmouson': case 'cmousoff': case 'cmouse': case 'cdefmouse':
+        case 'csetmouse': case 'capproach': case 'cescape': case 'cvtstmov': case 'cvftstmov': case 'cvmov':
+        case 'cdefworld': case 'cworld': case 'cfindmat': case 'cmusic': case 'cdelmusic': case 'ccadence':
+        case 'csetvolum': case 'clistent': case 'csound': case 'cmsound': case 'cdelsound': case 'ctstform':
+        case 'cmmusic': case 'cmforme': case 'csettime': case 'cgettime': case 'cvinput': case 'csinput':
+        case 'crunfilm': case 'cvpicprint': case 'cvputprint': case 'cspicprint': case 'csputprint': case 'cfont':
+        case 'cpaper': case 'ctoblack': case 'cmovcolor': case 'ctopalet': case 'cnumput': case 'cscheart':
+        case 'cscpos': case 'cscsize': case 'cschoriz': case 'cscvertic': case 'cscreduce': case 'cscscale':
+        case 'creducing': case 'cscmap': case 'cscdump': case 'cfindcla': case 'cnearcla': case 'cviewcla':
+        case 'cinstru': case 'cminstru': case 'cordspr': case 'calign': case 'cbackstar': case 'cstarring':
+        case 'cengine': case 'cautobase': case 'cquality': case 'chsprite': case 'cselpalet': case 'clinepalet':
+        case 'cautomode': case 'cautofile': case 'cscback': case 'cscrolpage': case 'cmatent': case 'cshrink':
+        case 'csavepal': case 'csczoom': case 'calloctab': case 'cfreetab': case 'cscantab': case 'cneartab':
+        case 'cscsun': case 'cdarkpal': case 'cscdark': case 'cscfollow': case 'cscview': case 'cfilm':
+        case 'cpointpix': case 'czoom': case 'cload': case 'clive': case 'cunload': case 'cwakeup':
+        case 'ckill': case 'cvprint': case 'csprinti': case 'csprinta': case 'clocate': case 'ctab':
+        case 'crandom': case 'cleave': case 'cprotect': case 'cclock':
+        case 'cwlive': case 'cswitching': case 'cclipping':
+          break;
+        default:
+          warn(`unmodeled opcode ${instr.op} at 0x${instr.addr.toString(16)}`);
+          break;
       }
-      // Everything below is a documented no-op for this interpreter's purpose (see module doc).
-      case 'cscreen': case 'cinteron': case 'cinteroff': case 'cscanon': case 'cscanoff': case 'cscanclr':
-      case 'credon': case 'credoff': case 'cfindtyp': case 'clinking': case 'ccancall': case 'ccancel':
-      case 'ccancen': case 'cblast': case 'cforme': case 'cdelforme': case 'cerase': case 'cerasen':
-      case 'cerasall': case 'cpalette': case 'cdefcolor': case 'csetvect': case 'cdefvect': case 'cnul':
-      case 'cnul37': case 'cxinv': case 'cxinvon': case 'cxinvoff': case 'copensc': case 'cclosesc':
-      case 'cscmov': case 'cscset': case 'cset': case 'cmov': case 'csleep': case 'casleep':
-      case 'casleepon': case 'casleepoff': case 'casleepfar': case 'ctstmov': case 'ctstset':
-      case 'cftstmov': case 'cftstset': case 'csuccent': case 'cpredent': case 'cnearent': case 'cneartyp':
-      case 'cnearmat': case 'cviewent': case 'cviewtyp': case 'cviewmat': case 'corient': case 'crstent':
-      case 'csend': case 'callentity': case 'ctiming': case 'czap': case 'cexplode': case 'cding':
-      case 'cnoise': case 'cinitab': case 'cfopen': case 'cfclose': case 'cfwritev': case 'cfreadb':
-      case 'cfwriteb': case 'cplot': case 'cdraw': case 'cbox': case 'cboxf': case 'cink': case 'cpmode':
-      case 'cpicture': case 'cxyscroll': case 'cmouson': case 'cmousoff': case 'cmouse': case 'cdefmouse':
-      case 'csetmouse': case 'capproach': case 'cescape': case 'cvtstmov': case 'cvftstmov': case 'cvmov':
-      case 'cdefworld': case 'cworld': case 'cfindmat': case 'cmusic': case 'cdelmusic': case 'ccadence':
-      case 'csetvolum': case 'clistent': case 'csound': case 'cmsound': case 'cdelsound': case 'ctstform':
-      case 'cxput': case 'cmput': case 'cmxput': case 'cmputat': case 'cmxputat':
-      case 'cmmusic': case 'cmforme': case 'csettime': case 'cgettime': case 'cvinput': case 'csinput':
-      case 'crunfilm': case 'cvpicprint': case 'cvputprint': case 'cspicprint': case 'csputprint': case 'cfont':
-      case 'cpaper': case 'ctoblack': case 'cmovcolor': case 'ctopalet': case 'cnumput': case 'cscheart':
-      case 'cscpos': case 'cscsize': case 'cschoriz': case 'cscvertic': case 'cscreduce': case 'cscscale':
-      case 'creducing': case 'cscmap': case 'cscdump': case 'cfindcla': case 'cnearcla': case 'cviewcla':
-      case 'cinstru': case 'cminstru': case 'cordspr': case 'calign': case 'cbackstar': case 'cstarring':
-      case 'cengine': case 'cautobase': case 'cquality': case 'chsprite': case 'cselpalet': case 'clinepalet':
-      case 'cautomode': case 'cautofile': case 'cscback': case 'cscrolpage': case 'cmatent': case 'cshrink':
-      case 'csavepal': case 'csczoom': case 'calloctab': case 'cfreetab': case 'cscantab': case 'cneartab':
-      case 'cscsun': case 'cdarkpal': case 'cscdark': case 'cscfollow': case 'cscview': case 'cfilm':
-      case 'cpointpix': case 'czoom': case 'cload': case 'clive': case 'cunload': case 'cwakeup':
-      case 'ckill': case 'cvprint': case 'csprinti': case 'csprinta': case 'clocate': case 'ctab':
-      case 'cdim': case 'crandom': case 'cloop': case 'cstart': case 'cleave': case 'cprotect': case 'cclock':
-      case 'cwlive': case 'cswitching': case 'cclipping':
-        break;
-      default:
-        warn(`unmodeled opcode ${instr.op} at 0x${instr.addr.toString(16)}`);
-        break;
+      pc = next;
     }
-    pc = instr.next[0] ?? null;
+    this.pc = pc;
+    if (result === 'exit' || result === 'error') this.dead = true;
+    return { yield: result, placements, steps };
   }
 
-  return { placements, warnings, steps };
+  /** Run activations until the script sleeps, exits or `maxFrames` frames pass (a `cstop` yield resumes on the next frame without a wake-up). */
+  settle(env: SceneEnv, maxFrames = 8): AlisYield {
+    let y: AlisYield = 'stop';
+    for (let i = 0; i < maxFrames && !this.sleeping && !this.dead; i++) y = this.activate(env).yield;
+    return y;
+  }
+
+  /** `cwakeup` from another entity: clear the sleep flag (the next frame resumes after the `csleep`). */
+  wake(): void {
+    this.sleeping = false;
+  }
+}
+
+/**
+ * One interpreter activation over a single decompressed script's bytecode,
+ * starting at `entry` and running until the script's first yield (`cstop`/
+ * `csleep`). Kept for single-frame callers; the persistent multi-script
+ * scene lives in `ishar-scene.ts`.
+ */
+export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): RunResult {
+  const r = new AlisScriptRunner(data, '', entry);
+  const { placements, steps } = r.activate(env);
+  return { placements, warnings: r.warnings, steps };
 }
 
 function applyBinary(op: string, lhs: number, rhs: number, warn: (m: string) => void): number {
+  // opernames.c: comparisons yield -1/0, and/or/xor are bitwise on D7.
   switch (op) {
     case 'oadd': return lhs + rhs;
     case 'osub': return lhs - rhs;
-    case 'omul': return lhs * rhs;
+    case 'omul': return Math.imul(lhs, rhs);
     case 'odiv': return rhs === 0 ? 0 : Math.trunc(lhs / rhs);
     case 'omod': return rhs === 0 ? 0 : lhs % rhs;
-    case 'oand': return lhs !== 0 && rhs !== 0 ? 1 : 0;
-    case 'oor': return lhs !== 0 || rhs !== 0 ? 1 : 0;
-    case 'oxor': return (lhs !== 0) !== (rhs !== 0) ? 1 : 0;
-    case 'oegal': return lhs === rhs ? 1 : 0;
-    case 'odiff': return lhs !== rhs ? 1 : 0;
-    case 'oinfeg': return lhs <= rhs ? 1 : 0;
-    case 'osupeg': return lhs >= rhs ? 1 : 0;
-    case 'oinf': return lhs < rhs ? 1 : 0;
-    case 'osup': return lhs > rhs ? 1 : 0;
+    case 'oand': return lhs & rhs;
+    case 'oor': return lhs | rhs;
+    case 'oxor': return lhs ^ rhs;
+    case 'oeqv': return ~(lhs ^ rhs);
+    case 'oegal': return lhs === rhs ? -1 : 0;
+    case 'odiff': return lhs !== rhs ? -1 : 0;
+    case 'oinfeg': return lhs <= rhs ? -1 : 0;
+    case 'osupeg': return lhs >= rhs ? -1 : 0;
+    case 'oinf': return lhs < rhs ? -1 : 0;
+    case 'osup': return lhs > rhs ? -1 : 0;
     default:
       warn(`unmodeled binary opname ${op}`);
       return lhs;

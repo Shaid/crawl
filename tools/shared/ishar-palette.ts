@@ -128,12 +128,16 @@ export function findIsharPaletteSlotIndex(data: Uint8Array): number | null {
 
 /** Resolve + decode a script's own dedicated palette resource (its first `0xFE`-marked directory slot), if any. */
 export function resolveIsharOwnPalette(data: Uint8Array): IsharPalette | null {
-  const dir = findIsharDirectory(data);
-  if (!dir) return null;
   const idx = findIsharPaletteSlotIndex(data);
-  if (idx === null) return null;
+  return idx === null ? null : resolveIsharPaletteSlot(data, idx);
+}
+
+/** Decode the palette resource at directory slot `idx` (what `cpalette idx` installs), or null if that slot is not a `0xFE` palette. */
+export function resolveIsharPaletteSlot(data: Uint8Array, idx: number): IsharPalette | null {
+  const dir = findIsharDirectory(data);
+  if (!dir || idx < 0 || idx >= dir.length) return null;
   const headerOffset = resolveIsharSlot(data, dir, idx);
-  if (headerOffset < 0) return null;
+  if (headerOffset < 0 || data[headerOffset] !== PALETTE_MARKER) return null;
   const chunk = decodePaletteChunk(data, headerOffset);
   if (!chunk) return null;
   const colors: Array<[number, number, number] | undefined> = [];

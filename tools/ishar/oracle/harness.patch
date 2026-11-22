@@ -1,0 +1,283 @@
+diff --git a/src/alis.c b/src/alis.c
+index b8719c7..3af406e 100644
+--- a/src/alis.c
++++ b/src/alis.c
+@@ -1549,7 +1549,7 @@ void alis_main_V2(void)
+                 alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
+                 savecoord(alis.script->vram_org);
+                 alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + 10 + script_offset;
+-                alis_loop();
++                { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
+                 killed = alis.restart_loop && alis.platform.version == 10;
+                 if (!killed)
+                     updtcoord(alis.script->vram_org);
+@@ -1577,7 +1577,7 @@ void alis_main_V2(void)
+                 alis.script->pc = get_0x08_script_ret_offset(alis.script->vram_org);
+                 alis.script->vacc_off = get_0x0a_vacc_offset(alis.script->vram_org);
+                 alis.fseq++;
+-                alis_loop();
++                { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
+ 
+                 sys_delay_loop();
+                 
+@@ -1592,7 +1592,7 @@ void alis_main_V2(void)
+                         alis.fseq = 0;
+                         alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
+                         alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + 6 + script_offset;
+-                        alis_loop();
++                        { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
+                     }
+                     
+                     if (alis.restart_loop == 0)
+diff --git a/src/image.c b/src/image.c
+index 26375e3..00547a1 100644
+--- a/src/image.c
++++ b/src/image.c
+@@ -6030,6 +6030,7 @@ void draw(void)
+         setphysic();
+     }
+ 
++    { extern void h_frame(void); h_frame(); }
+     sys_unlock_renderer();
+ }
+ 
+diff --git a/src/opcodes.c b/src/opcodes.c
+index 1151bed..c4b8006 100644
+--- a/src/opcodes.c
++++ b/src/opcodes.c
+@@ -1142,6 +1142,7 @@ static void cwakeup(void)
+         s32 vram = xread32(alis.atent + alis.varD7);
+         if (vram)
+         {
++            { extern void h_trace(const char *, const char *); sAlisScriptLive *w = ENTSCR(alis.varD7); h_trace("wake", w ? w->name : 0); }
+             set_0x04_cstart_csleep(vram, 1);
+         }
+     }
+@@ -1203,6 +1204,7 @@ void clivin(void)
+     if (prog)
+     {
+         sAlisScriptLive *script = script_live(prog);
++        { extern void h_trace(const char *, const char *); h_trace("live", prog->name); }
+         if (script == NULL)
+         {
+             alis.varD7 = 0;
+@@ -1316,6 +1318,7 @@ static void ckill(void)
+         return;
+     }
+ 
++     { extern void h_trace(const char *, const char *); sAlisScriptLive *w = ENTSCR(alis.varD7); h_trace("kill", w ? w->name : 0); }
+      killent(alis.varD7);
+ }
+ 
+diff --git a/src/sys/harness.inc b/src/sys/harness.inc
+new file mode 100644
+index 0000000..2c72d12
+--- /dev/null
++++ b/src/sys/harness.inc
+@@ -0,0 +1,154 @@
++// crawl Ishar oracle harness (not part of upstream alis; see crawl's
++// tools/ishar/oracle/README.md). Drives the VM from a command file named by
++// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
++// deterministic and need no wall-clock pacing. $ALIS_HARNESS_FAST=1 removes
++// the frame/loop sleeps. Output goes to $ALIS_HARNESS_OUT.
++//
++// Command lines: "<frame> <cmd> [args]" (or "<ms>" with $ALIS_HARNESS_MS=1)
++//   click X Y | rclick X Y | move X Y | up | key SDLKEY | keyup
++//   poke OFF VAL | pokew OFF VAL        (byte / big-endian word at basemain+OFF, hex OFF)
++//   peek OFF N                          (prints N signed bytes)
++//   memdump OFF N NAME                  (raw bytes at basemain+OFF -> NAME.bin)
++//   dump NAME                           (NAME.ppm frame + NAME.spr live sprite list)
++//   save | quit | mark TEXT
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <pthread.h>
++static pthread_mutex_t h_mu = PTHREAD_MUTEX_INITIALIZER;
++static FILE *h_f; static int h_init; static char h_line[256]; static int h_have;
++static long h_frameno;
++int h_key_held; int h_enabled; static int h_fast; static int h_mx = -1, h_my = -1;
++
++// $ALIS_HARNESS_MS=1: command times are wall-clock milliseconds since start
++// instead of frame numbers (for games whose waits are timed, e.g. Ishar 3).
++#include <sys/time.h>
++static int h_ms; static long h_t0;
++static long h_wall(void) { struct timeval tv; gettimeofday(&tv, 0); return tv.tv_sec * 1000L + tv.tv_usec / 1000; }
++static long h_now(void) { return h_ms ? h_wall() - h_t0 : h_frameno; }
++static void h_setup(void) {
++  if (h_init) return;
++  h_init = 1;
++  h_ms = getenv("ALIS_HARNESS_MS") != 0;
++  h_t0 = h_wall();
++  const char *s = getenv("ALIS_HARNESS");
++  if (s) { h_f = fopen(s, "r"); h_enabled = h_f != 0; }
++  h_fast = getenv("ALIS_HARNESS_FAST") != 0;
++}
++static const char *h_out(void) { const char *o = getenv("ALIS_HARNESS_OUT"); return o ? o : "."; }
++
++static void h_dump_ppm(const char *name) {
++  char p[512]; snprintf(p, sizeof p, "%s/%s.ppm", h_out(), name);
++  FILE *o = fopen(p, "wb"); if (!o) return;
++  pixelbuf_t b = host.pixelbuf;
++  fprintf(o, "P6\n%d %d\n255\n", b.w, b.h);
++  for (int y = 0; y < b.h; y++) {
++    u16 paloff = 0;
++    if (image.flinepal) {
++      int stride = 2 + (sizeof(u8 *) >> 1); s16 *cur = image.firstpal, *nxt = cur + stride;
++      while (nxt[0] != 0xff && y >= nxt[1]) { cur = nxt; nxt = cur + stride; }
++      paloff = cur[2];
++    }
++    for (int x = 0; x < b.w; x++) {
++      u32 c = b.rgb ? b.rgb[y * b.w + x] : b.palette[b.data[y * b.w + x] + paloff];
++      fputc((c >> 16) & 255, o); fputc((c >> 8) & 255, o); fputc(c & 255, o);
++    }
++  }
++  fclose(o);
++}
++
++// Live display list, in draw order, per screen: what was actually composited.
++static void h_dump_sprites(const char *name) {
++  char p[512]; snprintf(p, sizeof p, "%s/%s.spr", h_out(), name);
++  FILE *o = fopen(p, "w"); if (!o) return;
++  for (int i = 0; i < MAX_SCRIPTS; i++) {
++    sAlisScriptLive *l = alis.live_scripts[i];
++    if (l && l->name) fprintf(o, "E %d %s run=%d sleep=%d org=%x\n", i, l->name, l->running, (s8)get_0x04_cstart_csleep(l->vram_org), l->data ? l->data->data_org : 0);
++  }
++  for (u16 scn = screen.ptscreen; scn; scn = get_scr_to_next(scn)) {
++    fprintf(o, "S %u state=%d x=%d y=%d w=%d h=%d\n", scn, get_scr_state(scn), get_scr_newx(scn), get_scr_newy(scn), get_scr_width(scn), get_scr_height(scn));
++    u16 sp = get_scr_screen_id(scn);
++    if (!sp) continue;
++    while ((sp = SPRITE_VAR(sp)->link) != 0) {
++      sSprite *s = SPRITE_VAR(sp);
++      const char *owner = "?"; long off = -1;
++      for (int i = 0; i < MAX_SCRIPTS; i++) {
++        sAlisScriptData *d = alis.loaded_scripts[i];
++        if (d && s->data >= d->data_org && s->data < d->data_org + d->sz) { owner = d->name; off = (long)s->data - (long)d->data_org; break; }
++      }
++      sAlisScriptLive *ent = ENTSCR(s->script_ent);
++      fprintf(o, "P state=%d ne=%d ent=%s res=%s off=%ld dep=%d,%d,%d inv=%u new=%d,%d wh=%d,%d d=%d f=%d\n",
++        s->state, s->numelem, ent && ent->name ? ent->name : "?", owner, off, s->depx, s->depy, s->depz,
++        (unsigned)s->flaginvx, s->newx, s->newy, s->width, s->height, s->newd, (int)s->newf);
++    }
++  }
++  fclose(o);
++}
++
++static void h_exec(void) {
++  for (;;) {
++    if (!h_have) { if (!h_f || !fgets(h_line, sizeof h_line, h_f)) { if (h_f) fclose(h_f); h_f = 0; return; } h_have = 1; }
++    long t; char cmd[32]; int a = 0, b = 0; char name[160] = "";
++    if (sscanf(h_line, "%ld %31s", &t, cmd) < 2) { h_have = 0; continue; }
++    if (h_now() < t) return;
++    h_have = 0;
++    if (!strcmp(cmd, "click") || !strcmp(cmd, "rclick") || !strcmp(cmd, "move")) {
++      sscanf(h_line, "%*ld %*s %d %d", &a, &b); h_mx = a; h_my = b; mouse.x = a; mouse.y = b;
++      if (!strcmp(cmd, "click")) { mouse.lb = 1; mouse.lb_clicked = 1; }
++      else if (!strcmp(cmd, "rclick")) { mouse.rb = 1; mouse.rb_clicked = 1; }
++    }
++    else if (!strcmp(cmd, "up")) { mouse.lb = 0; mouse.rb = 0; }
++    else if (!strcmp(cmd, "key")) { sscanf(h_line, "%*ld %*s %d", &a); button.sym = a; button.scancode = SDL_GetScancodeFromKey(a); h_key_held = 1; }
++    else if (!strcmp(cmd, "keyup")) { h_key_held = 0; }
++    else if (!strcmp(cmd, "poke")) { unsigned off; int v; sscanf(h_line, "%*ld %*s %x %d", &off, &v); *(u8 *)(alis.mem + alis.basemain + off) = (u8)v; }
++    else if (!strcmp(cmd, "pokew")) { unsigned off; int v; sscanf(h_line, "%*ld %*s %x %d", &off, &v); u8 *m = alis.mem + alis.basemain + off; m[0] = (u8)(v >> 8); m[1] = (u8)v; }
++    else if (!strcmp(cmd, "peek")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d", &off, &n); fprintf(stderr, "[peek] %ld %x:", h_frameno, off); for (int i = 0; i < n; i++) fprintf(stderr, " %d", (s8) * (u8 *)(alis.mem + alis.basemain + off + i)); fprintf(stderr, "\n"); }
++    else if (!strcmp(cmd, "memdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + alis.basemain + off, 1, n, o); fclose(o); } }
++    else if (!strcmp(cmd, "dump")) { sscanf(h_line, "%*ld %*s %159s", name); h_dump_ppm(name); h_dump_sprites(name); fprintf(stderr, "[dump] %ld %s\n", h_frameno, name); }
++    else if (!strcmp(cmd, "save")) { alis.state = eAlisStateSave; }
++    else if (!strcmp(cmd, "mark")) { fprintf(stderr, "[mark] %ld %s", h_frameno, h_line); }
++    else if (!strcmp(cmd, "quit")) { fprintf(stderr, "[quit] %ld\n", h_frameno); alis.state = eAlisStateStopped; }
++  }
++}
++
++// Called by draw() once per presented frame, on the VM thread.
++void h_frame(void) {
++  h_setup();
++  if (!h_enabled) return;
++  pthread_mutex_lock(&h_mu);
++  h_frameno++;
++  if (h_mx >= 0) { mouse.x = h_mx; mouse.y = h_my; }
++  h_exec();
++  pthread_mutex_unlock(&h_mu);
++}
++
++// Called from the host poll loop (~120 Hz). Some menus wait for input without
++// calling draw(); if no frame has been presented for ~25 polls, advance the
++// frame clock anyway so the next scripted input can arrive.
++static void h_stall(void) {
++  static long last = -1; static int idle;
++  h_setup();
++  if (!h_enabled) return;
++  pthread_mutex_lock(&h_mu);
++  if (h_ms) h_exec();
++  else if (h_frameno != last) { last = h_frameno; idle = 0; }
++  else if (++idle >= 25) { idle = 0; h_frameno++; last = h_frameno; h_exec(); }
++  pthread_mutex_unlock(&h_mu);
++}
++
++// Optional lifecycle trace ($ALIS_HARNESS_TRACE=1): who loads/starts/wakes/kills which script.
++void h_trace(const char *what, const char *name) {
++  static int on = -1;
++  if (on < 0) on = getenv("ALIS_HARNESS_TRACE") != 0;
++  if (!on) return;
++  fprintf(stderr, "[trace] %ld %s by=%s pc=%x %s\n", h_frameno, what, alis.script && alis.script->name ? alis.script->name : "?",
++    alis.script ? alis.script->pc : 0, name ? name : "?");
++}
++
++// Optional memory watch ($ALIS_HARNESS_WATCH=hexoff[,hexoff...]): after each
++// script activation, report which script changed a watched basemain byte.
++void h_watch_check(void) {
++  static int init; static unsigned offs[8]; static int n; static u8 last[8];
++  if (!init) { init = 1; const char *w = getenv("ALIS_HARNESS_WATCH"); while (w && *w && n < 8) { offs[n++] = strtoul(w, (char **)&w, 16); if (*w == ',') w++; } for (int i = 0; i < n; i++) last[i] = alis.mem[alis.basemain + offs[i]]; }
++  for (int i = 0; i < n; i++) { u8 v = alis.mem[alis.basemain + offs[i]]; if (v != last[i]) { fprintf(stderr, "[watch] %ld %x %d->%d by=%s pc=%x\n", h_frameno, offs[i], (s8)last[i], (s8)v, alis.script && alis.script->name ? alis.script->name : "?", alis.script ? alis.script->pc : 0); last[i] = v; } }
++}
+diff --git a/src/sys/sys.c b/src/sys/sys.c
+index 89651c2..759d397 100644
+--- a/src/sys/sys.c
++++ b/src/sys/sys.c
+@@ -1963,7 +1963,8 @@ u8 io_inkey(void)
+     if (!currentKeyStates[button.sym])
+ #else
+     const u8 *currentKeyStates = SDL_GetKeyboardState(NULL);
+-    if (!currentKeyStates[button.scancode])
++    extern int h_key_held;
++    if (!currentKeyStates[button.scancode] && !h_key_held)
+ #endif
+     {
+         button.scancode = 0;
+diff --git a/src/sys/sys_sdl2.c b/src/sys/sys_sdl2.c
+index 9783d8a..2696da3 100644
+--- a/src/sys/sys_sdl2.c
++++ b/src/sys/sys_sdl2.c
+@@ -96,6 +96,8 @@ extern u32             isr_step;
+ extern u32             isr_counter;
+ 
+ u32                   *pixels;
++#include "screen.h"
++#include "harness.inc"
+ 
+ void sys_audio_callback_S16MSB(void *userdata, u8 *stream, s32 len);
+ void sys_audio_callback_S8(void *userdata, u8 *stream, s32 len);
+@@ -280,6 +282,7 @@ void sys_sleep_until(struct timeval *start, s32 len)
+ {
+     struct timeval now;
+     gettimeofday(&now, NULL);
++    if (h_fast) { *start = now; return; }
+     
+     s64 wait = len - ((s64)(now.tv_sec * 1000000LL + now.tv_usec) - (s64)(start->tv_sec * 1000000LL + start->tv_usec));
+     if (wait > 0 && wait <= len)
+@@ -385,6 +388,7 @@ void sys_poll_event(void)
+     sys_render(host.pixelbuf);
+     
+     // update mouse position
++    if (!h_enabled) {
+     SDL_GetMouseState(&mouse.x, &mouse.y);
+ 
+     float newx, newy;
+@@ -395,6 +399,8 @@ void sys_poll_event(void)
+     SDL_RenderGetLogicalSize(renderer, &lw, &lh);
+     mouse.x = newx;
+     mouse.y = (lh > 0) ? newy * (float)height / (float)lh : newy / aspect_ratio;
++    }
++    h_stall();
+ 
+     // Drain the event queue; quick clicks latch in mouse.lb_clicked / rb_clicked.
+     while (SDL_PollEvent(&event))
