@@ -43,6 +43,14 @@ export interface OracleTitle {
   forward: readonly [number, number];
   /** View screen geometry as the oracle's `S` line prints it. */
   viewScreen: { x: number; y: number; w: number; h: number };
+  /**
+   * Roaming NPC/monster scripts a `noNpcs` walk removes (they block cells
+   * and start fights, which interrupt long scripted walks). Removing them
+   * changes the game, so such walks only measure scenery and movement.
+   */
+  npcScripts?: readonly string[];
+  /** Main globals that are game state the scene reads (e.g. the day phase), dumped with the party every step. */
+  stateGlobals?: readonly number[];
   /** Extra environment for every run of this title (e.g. the virtual clock). */
   env?: Readonly<Record<string, string>>;
   /** Scripted boot: `[frame, command]` pairs, the last one saves the state. */
@@ -73,6 +81,7 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     col: 0x137d,
     facing: 0x137e,
     region: 0x1508,
+    npcScripts: ['orc', 'loup', 'knight', 'azal', 'naim', 'barbare', 'kiriela', 'bormin', 'dealer', 'wiz1', 'morgu'],
     facingCycle: [1, 2, 3, 4],
     facingRaw: [1, 2, 3, 4],
     turnRight: [309, 103],
@@ -93,6 +102,9 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     col: 0x2ab5,
     facing: 0x2ab6,
     region: 0x2d18,
+    npcScripts: ['pours1', 'lezard1', 'fly1', 'people1', 'people2', 'golem1', 'wizard1', 'aigle'],
+    // the day phase: MAIN advances it on a timer (frames 12965, 14965 ... of play)
+    stateGlobals: [0x519f],
     facingCycle: [1, 2, 3, 4],
     facingRaw: [1, 2, 3, 4],
     turnRight: [310, 30],
@@ -123,6 +135,7 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     turnLeft: [263, 30],
     forward: [288, 30],
     viewScreen: { x: 0, y: 13, w: 255, h: 112 },
+    npcScripts: ['affpv', 'vperso2', 'vperso5'],
     // Ishar 3 paces its intro on the 50 Hz timer, so it runs under the
     // harness's virtual clock (one timer tick per presented frame).
     env: { ALIS_HARNESS_VCLOCK: '1' },
@@ -213,6 +226,8 @@ export interface RunOptions {
   loadState?: boolean;
   trace?: boolean;
   timeoutMs?: number;
+  /** Remove these entities (script names) whenever they appear (`ALIS_HARNESS_NOENT`). */
+  noEntities?: readonly string[];
 }
 
 export interface RunResult {
@@ -238,6 +253,7 @@ export function runOracle(game: OracleGame, events: ReadonlyArray<readonly [numb
       ALIS_HARNESS_FAST: '1',
       ...(opts.trace ? { ALIS_HARNESS_TRACE: '1' } : {}),
       ...(ORACLE_TITLES[game].env ?? {}),
+      ...(opts.noEntities?.length ? { ALIS_HARNESS_NOENT: opts.noEntities.join(',').toLowerCase() } : {}),
       SDL_VIDEODRIVER: 'dummy',
       SDL_AUDIODRIVER: 'dummy',
     },
@@ -405,6 +421,8 @@ export interface WalkStep {
   col: number;
   /** Raw facing value. */
   facingRaw: number;
+  /** `stateGlobals` values after the action. */
+  globals: Record<number, number>;
   frame: OracleFrame;
 }
 
@@ -416,13 +434,16 @@ function partyDumps(t: OracleTitle, frame: number, name: string): Array<[number,
     [frame, `memdump ${t.facing.toString(16)} 1 ${name}.facing`],
   ];
   if (t.region !== undefined) ev.push([frame, `memdump ${t.region.toString(16)} 1 ${name}.region`]);
+  for (const g of t.stateGlobals ?? []) ev.push([frame, `memdump ${g.toString(16)} 1 ${name}.g${g.toString(16)}`]);
   return ev;
 }
 
-function readParty(t: OracleTitle, dir: string, name: string): { region: number; row: number; col: number; facingRaw: number } {
+function readParty(t: OracleTitle, dir: string, name: string): { region: number; row: number; col: number; facingRaw: number; globals: Record<number, number> } {
   const b = (f: string) => readFileSync(join(dir, `${name}.${f}.bin`))[0]!;
   const f = b('facing');
-  return { region: t.region !== undefined ? b('region') : t.start.region, row: b('row'), col: b('col'), facingRaw: f >= 128 ? f - 256 : f };
+  const globals: Record<number, number> = {};
+  for (const g of t.stateGlobals ?? []) globals[g] = b(`g${g.toString(16)}`);
+  return { region: t.region !== undefined ? b('region') : t.start.region, row: b('row'), col: b('col'), facingRaw: f >= 128 ? f - 256 : f, globals };
 }
 
 /** Frames per walk action (a step animates; clicks during it are dropped). */
@@ -434,7 +455,7 @@ const WALK_STRIDE = 80;
  * Nothing is poked, so every MAIN/GERDEP rule (walkability, zones, grid
  * loads, region changes) runs as in play.
  */
-export function captureWalk(game: OracleGame, actions: readonly WalkAction[], outDir: string): WalkStep[] {
+export function captureWalk(game: OracleGame, actions: readonly WalkAction[], outDir: string, opts: { noNpcs?: boolean } = {}): WalkStep[] {
   const t = ORACLE_TITLES[game];
   const ev: Array<[number, string]> = [];
   for (const m of t.bootMemdumps ?? []) ev.push([2, `memdump ${m.off.toString(16)} ${m.len} ${m.name}`]);
@@ -446,7 +467,7 @@ export function captureWalk(game: OracleGame, actions: readonly WalkAction[], ou
     ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);
   });
   ev.push([4 + actions.length * WALK_STRIDE + 2, 'quit']);
-  const r = runOracle(game, ev, outDir, { loadState: true, timeoutMs: 60_000 + actions.length * 300 });
+  const r = runOracle(game, ev, outDir, { loadState: true, timeoutMs: 60_000 + actions.length * 300, noEntities: opts.noNpcs ? t.npcScripts : undefined });
   return actions.map((action, i) => {
     if (!existsSync(join(outDir, `w${i}.ppm`))) throw new Error(`oracle did not dump walk step ${i}\n${r.stderr.slice(-2000)}`);
     return { action, ...readParty(t, outDir, `s${i}`), frame: readFrame(outDir, `w${i}`) };

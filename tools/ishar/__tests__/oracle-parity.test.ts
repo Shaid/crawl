@@ -113,3 +113,34 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar.dataD
     }
   }, 120_000);
 });
+
+/**
+ * Ishar 2: from the start (zone 4) north into the village (zone 1), then
+ * east to the lake shore (zone 3, the boat), nothing poked. Roaming NPCs
+ * (bears, lizards ...) are removed in the oracle (`noNpcs`) so they cannot
+ * block the route or start a fight; the walk measures scenery and zones.
+ * The game refuses some steps here (shore/water cells): the walkability
+ * rule is not ported yet, so moves are not asserted, only the views.
+ */
+const ISHAR2_WALK = 'LFFFFFLFFFFFFFLFFFFRFLFFFFRFFFFRFFFFRFFFFFFFFFFFFRFFFFFRRFFFRFFFFFFFFFFFFFFFFFFFFFFFLFFFFFFFFFFFFFFFFFFFFFFFFFFRFFFFFFFFFFFFFFFF';
+
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.dataDir, 'MAIN.DO')))('ishar2 real walk vs the game (alis oracle)', () => {
+  it('follows the game zones (village, boat) and matches every placement and pixel', () => {
+    const out = tempDir('ishar2-walk-test-');
+    try {
+      prepareGameDir('ishar2');
+      if (!existsSync(savestatePath('ishar2'))) bootToSavestate('ishar2', join(out, 'boot'));
+      const steps = captureWalk('ishar2', [...ISHAR2_WALK] as Array<'F' | 'L' | 'R'>, out, { noNpcs: true });
+      const data = loadTitleData('ishar2');
+      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar2.start }, steps, contLayers('ishar2', data));
+      const seen = new Set(walk.flatMap((w) => w.scripts));
+      expect(seen.has('VILLAGE1') && seen.has('BOAT')).toBe(true);
+      walk.forEach((w, i) => {
+        const r = comparePose('ishar2', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves);
+        expect({ i, matched: r.matched, crawl: r.crawl, masked: r.pixelsMasked - r.pixelsMaskedEqual }).toEqual({ i, matched: r.oracle, crawl: r.oracle, masked: 0 });
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 180_000);
+});

@@ -255,7 +255,7 @@ export interface WalkComparison {
 export function crawlWalk(
   data: TitleData,
   start: IsharPartyState,
-  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R'; region: number; row: number; col: number; facingRaw: number }>,
+  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number> }>,
   layers: (region: number) => readonly Uint8Array[] | undefined,
   initial: { A?: GridReader; B?: GridReader } = {},
 ): WalkComparison[] {
@@ -267,7 +267,7 @@ export function crawlWalk(
   const out: WalkComparison[] = [];
   for (const s of steps) {
     const facing = spec.facingRaw.indexOf(s.facingRaw);
-    const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3 };
+    const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals: s.globals };
     let predicted: IsharPartyState | null;
     if (s.action !== 'F') predicted = { ...cur, facing: ((cur.facing + (s.action === 'R' ? 1 : 3)) & 3) as 0 | 1 | 2 | 3 };
     else {
@@ -276,11 +276,12 @@ export function crawlWalk(
       predicted = t && cell < 128 ? t : cur;
     }
     const same = (a: IsharPartyState | null, b: IsharPartyState) => !!a && a.region === b.region && a.row === b.row && a.col === b.col && a.facing === b.facing;
+    const phaseChanged = JSON.stringify(cur.globals ?? {}) !== JSON.stringify(actual.globals ?? {});
     const moved = !same(cur, actual);
     if (moved) {
       scene.setGrids(buffers.update(actual));
       scene.step(actual);
-    }
+    } else if (phaseChanged) scene.refresh(actual);
     const leaves = scene.leaves();
     out.push({ predicted, actual, moveAgrees: same(predicted, actual), scripts: scene.scriptNames, leaves, canvas: compositeIsharView(leaves, spec.screen, scene.palette) });
     cur = actual;

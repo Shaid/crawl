@@ -91,3 +91,8 @@ These variables change how it runs:
   no code.
 - **Ishar 3.** Ishar 3 boots deterministically under `ALIS_HARNESS_VCLOCK=1`
   in about one second. Only its start town (Maz) has a scene spec so far.
+
+`ALIS_HARNESS_NOENT=name,...` (`captureWalk(..., { noNpcs: true })`, names from
+the title's `npcScripts`) kills those entities whenever they are alive, between
+script activations. That changes the game: use it only for long scenery walks
+that roaming NPCs would otherwise block or turn into fights.

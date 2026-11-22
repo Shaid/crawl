@@ -56,13 +56,15 @@ export interface IsharPartyState {
   col: number;
   /** Walker facing N/E/S/W = 0..3 (`facingRaw` maps it to the game's value). */
   facing: 0 | 1 | 2 | 3;
+  /** Other main globals that are game state rather than position (e.g. Ishar 2's day phase `0x519f`); override `mainGlobals`' defaults. */
+  globals?: Readonly<Record<number, number>>;
 }
 
 export interface IsharSceneGroup {
   /** Scene scripts in MAIN's `clive` order (= the entity order they run in each frame). Names without extension. */
   scripts: readonly string[];
   /** The backdrop script whose palette the view uses, and the directory slot its `cpalette` installs. */
-  paletteFrom?: { script: string; slot: number };
+  paletteFrom?: { script: string; slot: number | ((readMain: (addr: number) => number) => number) };
 }
 
 export interface IsharTitleSpec {
@@ -85,7 +87,22 @@ export interface IsharTitleSpec {
    * cells). `prevRegionLocal` is the script local holding the region the
    * party came from.
    */
-  zone?: { script: string; entry: number; exits: readonly number[]; addr: number; prevRegionLocal: number };
+  zone?: {
+    script: string;
+    entry: number;
+    exits: readonly number[];
+    addr: number;
+    /** Script local that holds the region the party came from (Ishar 1). */
+    prevRegionLocal?: number;
+    /** Other script locals the routine expects (e.g. Ishar 2's grid-B cell under the party). */
+    locals?: (state: IsharPartyState, grids: { A: GridReader; B: GridReader }) => Record<number, number>;
+    /** The game runs the routine only after a step, not a turn. */
+    onMoveOnly?: boolean;
+  };
+  /** Sub-zone value at the start of a new game (default 0). */
+  initialZone?: number;
+  /** Zones whose add-ons MAIN restarts (kill + start) every time the zone is entered. */
+  addOnRestartZones?: readonly number[];
   /** Entity coordinate offsets in script vram (`ALIS_SCR_WCX/WCY/WCZ`); default 0/2/4, engine 3.0 uses 0/8/16. */
   coordOffsets?: readonly [number, number, number];
   /**
@@ -236,7 +253,7 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
   mainGlobals(s) {
     return { 0x2ab4: s.row, 0x2ab5: s.col, 0x2ab6: this.facingRaw[s.facing], 0x2d18: s.region, 0x519f: 1, 0x4a80: 1 };
   },
-  sceneScripts: ['FOND1', 'PLAINE1'],
+  sceneScripts: ['FOND1', 'PLAINE1', 'VILLAGE1', 'BOAT', 'FORET1'],
   gridBuffers: 'layers',
   stepFrom(st, dir) {
     // Same raw-facing directions as Ishar 1 (the scripts' own facing
@@ -252,11 +269,41 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
     return { ...st, row, col };
   },
   sceneGroup(region) {
-    // Only the start area is traced so far: at the start of the game MAIN
-    // has FOND1 + PLAINE1 alive in region 1 (POURS1 = roaming bears).
-    if (region === 1) return { scripts: ['FOND1', 'PLAINE1'], paletteFrom: { script: 'FOND1', slot: 3 } };
+    // Region 1 (CONT1, the start island): MAIN keeps FOND1 + PLAINE1 alive
+    // (POURS1 = roaming bears, an NPC); the sub-zone add-ons come and go.
+    // FOND1 +0xe1: `cpalette` 3/4/5 for day phase 0x519f = 1/2/3.
+    if (region === 1) return { scripts: ['FOND1', 'PLAINE1'], paletteFrom: { script: 'FOND1', slot: (m) => [3, 3, 4, 5][m(0x519f)] ?? 3 } };
     return null;
   },
+  // GERDEP +0x162a..+0x18ff, run after each step (+0x1411) with local 20 =
+  // the grid-B cell the party stepped onto: regions 2/3/5/6/7 take the zone
+  // from door cells (|cell| - 40); regions 1 and 4 follow position gates
+  // keyed on the current zone (e.g. region 1: zone 4 -> 1 when row < 21,
+  // zone 4 -> 5 when row > 40, zone 1 -> 3 when col > 44 ...). A new game
+  // starts in zone 4.
+  zone: {
+    script: 'GERDEP',
+    entry: 0x162a,
+    exits: [0x18ff],
+    addr: 0x4ef2,
+    locals: (st, g) => ({ 20: g.B(st.row, st.col) }),
+    onMoveOnly: true,
+  },
+  initialZone: 4,
+  addOns(region, zone) {
+    // MAIN's zone switch (MAIN +0x18b2 loads / +0x24ce starts; the decoder
+    // does not get through those blocks yet, so this table was read off the
+    // oracle's start/kill trace for every zone-pair transition in CONT1):
+    // zone 1 village1, zone 3 boat, zones 5 and 9 foret1 (restarted on
+    // entering 9), zones 2 and 4 none.
+    if (region !== 1) return null;
+    if (zone === 1) return ['VILLAGE1'];
+    if (zone === 3) return ['BOAT'];
+    if (zone === 5 || zone === 9) return ['FORET1'];
+    if (zone === 2 || zone === 4) return [];
+    return null;
+  },
+  addOnRestartZones: [9],
 };
 
 /**
@@ -387,6 +434,8 @@ export class IsharScene {
   private scripts: LoadedScript[] = [];
   private groupKey = '';
   private addOnKey = '';
+  private addOnZone = -1;
+  private prevPos = '';
   private state: IsharPartyState | null = null;
   private seqCounter = 0;
   private readonly seqOf = new WeakMap<object, number>();
@@ -400,6 +449,7 @@ export class IsharScene {
 
   constructor(spec: IsharTitleSpec, load: (name: string) => Uint8Array | undefined, grids: { A: GridReader; B: GridReader }) {
     this.spec = spec;
+    this.zone = spec.initialZone ?? 0;
     this.load = load;
     this.grids = grids;
   }
@@ -415,7 +465,7 @@ export class IsharScene {
 
   private env(): SceneEnv {
     const st = this.state!;
-    const globals = { ...this.spec.mainGlobals(st), ...(this.spec.zone ? { [this.spec.zone.addr]: this.zone } : {}) };
+    const globals: Record<number, number> = { ...this.spec.mainGlobals(st), ...st.globals, ...(this.spec.zone ? { [this.spec.zone.addr]: this.zone } : {}) };
     const { stride, rows, gridA, gridB } = this.spec;
     return {
       readMain: (addr) => globals[addr] ?? 0,
@@ -455,6 +505,7 @@ export class IsharScene {
   enter(state: IsharPartyState): boolean {
     this.state = state;
     if (this.prevRegion < 0) this.prevRegion = state.region;
+    if (!this.prevPos) this.prevPos = `${state.region}:${state.row},${state.col}`;
     const group = this.spec.sceneGroup(state.region);
     const key = this.groupKeyFor(state);
     if (key !== this.groupKey) {
@@ -471,14 +522,21 @@ export class IsharScene {
         for (const s of this.scripts) s.runner.settle(env);
         this.applyAddOns();
         this.tagNewSprites();
-        if (group.paletteFrom) {
-          const { script, slot } = group.paletteFrom;
-          const pal = this.scripts.find((s) => s.name === script);
-          if (pal) this.palette = paletteOf(pal.data, slot);
-        }
       }
     }
+    this.updatePalette();
     return group !== null;
+  }
+
+  /** The backdrop's palette for the current state (some backdrops pick their slot from a main global, e.g. Ishar 2's day phase). */
+  private updatePalette(): void {
+    const group = this.state ? this.spec.sceneGroup(this.state.region) : null;
+    if (!group?.paletteFrom) return;
+    const { script, slot } = group.paletteFrom;
+    const pal = this.scripts.find((s) => s.name === script);
+    if (!pal) return;
+    const env = this.env();
+    this.palette = paletteOf(pal.data, typeof slot === 'function' ? slot(env.readMain) : slot);
   }
 
   /** Run the title's sub-zone routine for the current state (GERDEP, after every step/turn). */
@@ -496,7 +554,8 @@ export class IsharScene {
     const r = this.zoneRunner;
     r.pc = z.entry;
     r.callStack.length = 0;
-    r.locals.set(z.prevRegionLocal, this.prevRegion);
+    if (z.prevRegionLocal !== undefined) r.locals.set(z.prevRegionLocal, this.prevRegion);
+    for (const [k, v] of Object.entries(z.locals?.(this.state!, this.grids) ?? {})) r.locals.set(Number(k), v);
     r.activate(this.env(), 10_000, new Set(z.exits));
   }
 
@@ -505,10 +564,12 @@ export class IsharScene {
     const st = this.state!;
     const want = this.spec.addOns?.(st.region, this.zone);
     if (want === null || want === undefined) return;
+    const restart = !!this.spec.addOnRestartZones?.includes(this.zone) && this.zone !== this.addOnZone;
+    this.addOnZone = this.zone;
     const key = want.join(',');
-    if (key === this.addOnKey) return;
+    if (key === this.addOnKey && !restart) return;
     const base = this.spec.sceneGroup(st.region)?.scripts ?? [];
-    const keep = this.scripts.filter((s) => base.includes(s.name) || want.includes(s.name));
+    const keep = this.scripts.filter((s) => base.includes(s.name) || (want.includes(s.name) && !restart));
     const have = new Set(keep.map((s) => s.name));
     const env = this.env();
     for (const name of want) {
@@ -526,7 +587,9 @@ export class IsharScene {
   step(state: IsharPartyState): void {
     this.state = state;
     if (this.prevRegion < 0) this.prevRegion = state.region;
-    this.updateZone();
+    const pos = `${state.region}:${state.row},${state.col}`;
+    if (!this.spec.zone?.onMoveOnly || pos !== this.prevPos) this.updateZone();
+    this.prevPos = pos;
     // On a region change GERDEP still wakes the old group, then MAIN kills it
     // and starts the new one, which is not woken until the next step (oracle
     // trace: fond woken at frame n, killed n+1, re-created n+2).
@@ -541,6 +604,13 @@ export class IsharScene {
       this.tagNewSprites();
     }
     this.prevRegion = state.region;
+    this.updatePalette();
+  }
+
+  /** Game state changed without a step or turn (e.g. the day phase): nothing is woken, only state-derived things (the palette) follow. */
+  refresh(state: IsharPartyState): void {
+    this.state = state;
+    this.updatePalette();
   }
 
   private groupKeyFor(state: IsharPartyState): string {
