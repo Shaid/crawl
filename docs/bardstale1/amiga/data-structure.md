@@ -97,6 +97,64 @@ Screen positions: tables at overlay `0x831dc`/`0x83392`/`0x833ca` (see `dungeon.
 | Render big_dung as 1bpp at width 12 | Showed brick/door art but no structure; 4-plane reading from the loader's buffer carve-up is the right one |
 | Hand-guess piece geometry | Not needed: carve-up sizes and `BitMap` structs in the overlay data give exact bpr/rows |
 
-## 4. Open
+## 4. Skara Brae, the city (walker, 2026-11-22)
+
+Source of truth: overlay group 1 of `bardstale.dat` (the only overlay naming `big_city`; flattened like group 2:
+root hunks at 0x10000, group 1 at 0x80000; code hunks 144/147/151 at 0x80000/0x85be4/0x87484). Confidence:
+**confirmed from code** unless marked. Port: `tools/bardstale1/amiga/city.ts`; export `export-city.ts`.
+
+> **Correction (2026-11-22):** `bards_data/CITY/` is not an unexplained extra: the city overlay opens
+> `CITY/CITY.PATH` and `CITY/CITY.NAME` (strings 0x84800/0x8480f) and the building handlers show
+> `city/BI1`..`city/bi9` as interior pictures (shop BI1, review board BI2, the two towers BI3, Mad God BI4,
+> Roscoe's BI5, castle BI6, empty building bi7, taverns bi9). `CITY/icon3` is not named by the overlay.
+
+### Grids
+`CITY.PATH` and `CITY.NAME` each decode to 900 B = 30x30, index `row*30+col` (`muls #30`); loaded to 0x208f8 and
+0x20c7c, back to back, and **nothing bounds-checks**: row 30.. of the path grid reads the name grid (the walker
+reproduces this; reads before row 0 are treated as a plain house, **hypothesis**, only reachable looking off the
+closed north edge). Path cell: 0 = street; else `(type << 3) | facade`, facade 1..4 = which `big_city` house art
+(0 = invisible, e.g. statues `0x60` and iron gates `0x68`). Name cell: street index into the 20-name table 0x845d8
+("Alley", "Rakhir", ... "Death Archer") when <= 0x13, else "You're in the Grand Plaza" (`0x804c6`).
+
+### Pose and movement (`0x8021c`)
+Row 0x20834, column 0x20838, facing 0x2083c; facing 0..3 = north, east, south, west (the game's own
+"facing north." table 0x84642), north = row-1, east = col+1. New game (root 0x13bbc): (14,25) facing north, the
+guild one square west. Keys: forward / 1 U-turn / 2 facing+1 / 3 facing+3 (same codes as the dungeon). Forward
+into a street moves (into (27,25) puts the party on row 22, `0x802b0`); into anything else runs the handler for
+`type = byte >> 3` (`0x80650`, jump table 0x8073e): result 1 = move in, >2 = leave the city (0xff guild, 3 dungeon),
+otherwise the party turns round. Types: 0 empty building (1 in 4 an encounter), 1 Adventurers' Guild (leave),
+2 tavern (name by 29-row, 0x80ef2; only the Scarlet Bard at (24,28) offers wine, which goes to the cellar),
+3 Garth's shop, 4 temple, 5 review board, 12 guardian statue (free direction 0x22b82 per statue 0x22b64, else a
+fight), 13 iron gate (one-way free direction 0x84fd8/0x84fe0, else needs item 0x8078), 14 Mad God temple ->
+catacombs, 15 sewer portal (sets the city return square (24,27)), 16 bard hall, 17 Roscoe's, 18 Kylearan's tower,
+19 Harkyn's castle, 20 Mangar's tower, 21 city gate (snow-blocked).
+
+Dungeon entries store a dungeon id in 0x20824 and a level in 0x20857; root `0x17260` loads `levs` record
+`0x17492[id] + level - 1` (bases 0,0,1,4,7,10,11). Arrival (dungeon overlay 0x80042): (0,0) facing 0, or (16,17)
+for dungeon 1 level 4 (the sewer portal). Walker links: Scarlet Bard -> 0 (Cellars), sewer portal -> 3, Mad God
+-> 4, Harkyn -> 7, Kylearan -> 10, Mangar -> 11.
+
+### View (`0x85dce` -> `0x85ed8`, compositor `0x85fea`)
+View table 0x20840: 5 distances x (left, centre, right). Two patches: facing south at (26,25) forces distance 4 to
+(3, 0, 4); facing west on row 14 near the gate clears off-map distances (`0x85e88`). Compositor at walk frame 0
+(frames 1..3 animate a step forward and are not ported): fill rows 0..45 colour 1 / 46..87 colour 2 (`0x8694c`).
+A building straight ahead (distance 1, facade != 0) fills the view: a special type shows its `pics` picture
+(`0x86504`, table 0x8729a: guild 52, tavern 43, shop 45, temple / Mad God 42, castle 35, gate 38), else the
+front image (`0x863a8`). Otherwise front at distance 2 (or 3), then side cells far to near: a side cell whose nearer
+neighbour is empty first gets its cross-street side face (`0x86552`), then its street-wall slice (`0x86366` ->
+`0x87484`: columns of a 56x88 half image; from x 56 on the image is drawn mirrored, screen x <- source 112-x).
+Column boundaries 0x8715c = 0/34/44/51/61/68/78/111.
+
+### `big_city` (136,000 B, loader `0x869bc`)
+32 B palette, 16 x 2,464 B street-wall halves (56x88, 4 sequential planes, `[facade-1][walk frame]`), 4 x 9,480 B
+fronts, 4 x 14,656 B side faces (fronts/sides word-interleaved: per row, per 16-px column, 4 plane words). Front
+rects 0x22002 / offsets 0x21ff0 and side rects 0x8719e / offsets 0x8718c tile their images exactly, except front
+rect 1 (distance 3, walk frame 1), drawn one word wide but stored two wide (128 words; checked by the exporter).
+
+Checked: the guild picture (pic 52, "AG") appears facing west at the new-game square and the tavern goblet (pic 43)
+facing east at (24,27); street views render as continuous street walls with cross-street gaps
+(`build/cache/bardstale1/walker-frames/city-*.png`). Not checked against the running game.
+
+## 5. Open
 
 See `docs/bardstale1/TODO.md`.

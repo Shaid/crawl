@@ -575,7 +575,7 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       platform: 'amiga',
       dataDirs: ['_unexplored_/BardsTaleNTSC/data/bards_data'],
       executable: undefined,
-      expectedFiles: ['pics', 'levs', 'big_dung', 'dung_blank'],
+      expectedFiles: ['pics', 'levs', 'big_dung', 'dung_blank', 'big_city'],
       supported: true,
       assetDir: 'bardstale1',
       features: {},
@@ -585,6 +585,8 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         await exportBardsTale1Data(dataDir);
         const { exportBardsTale1Dungeon } = await import('../bardstale1/amiga/export-dungeon.ts');
         exportBardsTale1Dungeon(dataDir);
+        const { exportBardsTale1City } = await import('../bardstale1/amiga/export-city.ts');
+        exportBardsTale1City(dataDir);
       },
     }],
   },
@@ -595,7 +597,7 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       platform: 'amiga',
       dataDirs: ['_unexplored_/BardsTale2/data/bards_data'],
       executable: undefined,
-      expectedFiles: ['pics', 'levs', 'big_dung'],
+      expectedFiles: ['pics', 'levs', 'big_dung', 'big_city', 'citys'],
       supported: true,
       assetDir: 'bardstale2',
       features: {},
@@ -605,6 +607,8 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         await exportBardsTale2Data(dataDir);
         const { exportBardsTale2Dungeon } = await import('../bardstale2/amiga/export-dungeon.ts');
         exportBardsTale2Dungeon(dataDir);
+        const { exportBardsTale2City } = await import('../bardstale2/amiga/export-city.ts');
+        exportBardsTale2City(dataDir);
       },
     }],
   },

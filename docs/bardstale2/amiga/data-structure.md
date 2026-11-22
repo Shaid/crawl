@@ -111,6 +111,44 @@ swapped), which puts them on the right, mirrored. The **centre column** (col 3) 
 | Use `dung_blank` (decoded by BT1's RLE, 112x88) as palette/background | it renders a teal theme and is never referenced by `bard`; big_dung's own header palette + half-background give the consistent green set |
 | Draw right-hand pieces literally at x+56 | right wall missing/overlapping the centre; resolved by the `0x44ee0` right-half flip |
 
-## 4. Open
+## 4. Cities (walker, 2026-11-22)
+
+Source of truth: `data/bard` overlay group 2 (code 0x54100 / 0x59300, data 0x57800 / 0x5a100 in the flattened
+image; `data/bard` file offset of the 0x5a100 hunk = flat - 0x5a100 + 0x2d818). Port: `tools/bardstale2/amiga/city.ts`;
+export `export-city.ts`. Confidence: **confirmed from code** unless marked.
+
+> **Correction (2026-11-22):** `citys` is a 7-entry directory: record 0 (2,304 B) is the 48x48 wilderness grid
+> (group 3, art from `wpics`), records 1..6 (512 B) are the cities in the order of the name table 0x3a27a:
+> Tangramayne, Ephesus, Philippi, Colosse, Corinth, Thessalonica.
+
+### Grid, pose, movement (`0x542ce`)
+City record -> 0x224de: 16x16 cells (`row*16+col`) then 16x16 street names (row+16; index into the 44 names at
+0x3c46a when <= 0x2b, else "the Plaza"). Cell: high nibble = type, low nibble = facade (1..4, >4 -> (v&3)+1, 0 =
+invisible). Row 0x22346, column 0x22348, facing 0x2234a (north = row-1, tables 0x3daf6/0x3dafe), city 0x22337.
+Stepping off the grid exits to the wilderness (square 0x3bd24/0x3bd2b). 0 = street. Else handler `0x54834` by
+type: 0 empty building, 1 tavern, 2 temple, 3 guild (leaves the city), 4 review board, 5 Roscoe's, 6 iron gate
+(opens for item 0x6e), 8 shop, 9 casino (closed), 10 bank, 12/14/15 the city's dungeon (`0x549c0`: dungeon id
+0x57800[city] = 1,2,4,8,6,5; returns 4). Result 1 = move in, 0 = turn round. `levs` record = 0x18b5c[id] + level - 1
+(bases 0,0,4,7,8,13,16,20,22, root 0x1881c); the dungeon overlay starts at (0,0) facing 0 (0x5de2e). Guild-exit pose
+per city: 0x3bd40/0x3bd47/0x3bd4e (always facing away from the guild); wilderness arrival square 0x3bd32/0x3bd39.
+
+### View (`0x5956e` -> `0x595ee`, compositor `0x59826`)
+Same view table as BT1 but bounds-checked (outside = 0) and sides masked to the facade. Frame 0: sky/ground fill
+(`0x59ba8`, as BT1); left cells, then right cells drawn unflipped at x+56; d2 and d1 cells get a cross-street side
+face (`0x59300`, 9 slots, rects 0x5a148 / dest 0x5a100) when the nearer neighbour is empty, then their street-wall
+slice (`0x593b2`, 13 slots, 0x5a2d0 / 0x5a268); right half flipped (`0x44ee0`); then the centre: special building
+ahead -> `pics` picture (0x5a5b0: tavern 17, temple 16, guild 21, review 51, Roscoe 44, shop 18, type 12 16,
+type 13 15), else the front (`0x59464`, 8 slots, 0x5a4b0 / 0x5a470) at distance 1, 2 or 3. Each slot rect has four
+facade variants side by side in one bitmap.
+
+### `big_city` (92,744 B, loader `0x59c10`)
+32 B palette, then 0xe318 B carved into 13 slice + 9 side bitmaps, then 0x8710 B into 8 front bitmaps; bitmap =
+4 sequential planes, bpr = ((x1 of the 4th variant) + 16) / 16 * 2, rows = y1 + 1. The carve-up fills the file to
+the byte (checked by `bigCityLayout`).
+
+Checked: in every city the guild-exit pose faces away from a type-3 cell and turning round shows the guild picture
+(pic 21); street frames in `build/cache/bardstale2/walker-frames/`. Not checked against the running game.
+
+## 5. Open
 
 See `docs/bardstale2/TODO.md`.
