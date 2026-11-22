@@ -13,6 +13,7 @@ import {
   IsharScene,
   ISHAR1_TITLE,
   ISHAR2_TITLE,
+  ISHAR3_TITLE,
   type GridReader,
   type IsharPartyState,
   type IsharSceneLeaf,
@@ -21,7 +22,7 @@ import {
 import type { OracleFrame, OracleGame, OraclePose, OracleScreen } from './alis-oracle.ts';
 import { ORACLE_TITLES } from './alis-oracle.ts';
 
-export const TITLE_SPECS: Partial<Record<OracleGame, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE };
+export const TITLE_SPECS: Partial<Record<OracleGame, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE, ishar3: ISHAR3_TITLE };
 
 export interface TitleData {
   spec: IsharTitleSpec;

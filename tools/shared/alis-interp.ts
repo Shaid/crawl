@@ -39,6 +39,7 @@
  */
 
 import { decodeAlisInstr, scriptEntryPoint, type AlisInstr, type AlisToken } from './alis-disasm.ts';
+import { findIsharDirectory, resolveIsharSlot } from './ishar-sprites.ts';
 
 export interface PlacementCommand {
   /** Source opcode: `cput`/`cxput` place at (0,0,0); `cputnat`/`cxputat` at an explicit (x,y,z). */
@@ -98,10 +99,22 @@ interface RunResult {
  */
 export type AlisYield = 'stop' | 'sleep' | 'exit' | 'budget' | 'error';
 
-/** A retained sprite element, as the reference VM keeps it between frames (`putfin`/`killelem`). */
-export interface RetainedPlacement extends PlacementCommand {
-  /** Activation number that put it -- a put of element N kills the element-N sprites of EARLIER activations only (`putfin`: only `state == 0`, i.e. already-drawn, sprites die). */
-  gen: number;
+/**
+ * One sprite in an entity's element list, as the reference VM keeps it
+ * between frames (`image.c` `putin`/`searchelem`/`getelem`/`createlem`/
+ * `putfin`/`killelem`): always a single bitmap (composites are expanded at
+ * put time), with absolute position.
+ */
+export interface RetainedPlacement {
+  /** Directory slot of the bitmap. */
+  idx: number;
+  x: number;
+  y: number;
+  z: number;
+  numelem: number;
+  invertX: boolean;
+  /** Reference sprite state: 0 = drawn last frame, -1 = created this frame, 2 = re-put this frame. */
+  state: number;
 }
 
 const s8 = (v: number) => ((v & 0xff) ^ 0x80) - 0x80;
@@ -157,21 +170,23 @@ export class AlisScriptRunner {
     }
   }
 
-  /** Entity coordinates (`ALIS_SCR_WCX/WCY/WCZ` = vram words 0/2/4). */
+  /** Where the entity coordinates live (`ALIS_SCR_WCX/WCY/WCZ`): vram words 0/2/4, or 0/8/16 for engine version 3.0 (Ishar 3). */
+  coordOffsets: readonly [number, number, number] = [0, 2, 4];
+
+  /** Entity coordinates. */
   get coords(): { x: number; y: number; z: number } {
-    return { x: this.locals.get(0) ?? 0, y: this.locals.get(2) ?? 0, z: this.locals.get(4) ?? 0 };
+    const [ox, oy, oz] = this.coordOffsets;
+    return { x: this.locals.get(ox) ?? 0, y: this.locals.get(oy) ?? 0, z: this.locals.get(oz) ?? 0 };
   }
 
   /** Run one activation (one reference-VM frame for this entity) until it yields (or reaches a `stopAt` address, for running one routine of a bigger script). Returns the yield kind and the puts made during it. */
   activate(env: SceneEnv, budget = STEP_BUDGET, stopAt?: ReadonlySet<number>): { yield: AlisYield; placements: PlacementCommand[]; steps: number } {
     if (this.dead || this.pc === null) return { yield: 'exit', placements: [], steps: 0 };
     this.gen++;
-    const gen = this.gen;
     const warn = (m: string) => this.warn(m);
     const locals = this.locals;
     const callStack = this.callStack;
     const placements: PlacementCommand[] = [];
-    const putThisGen = new Set<number>();
     let acc = 0;
     let steps = 0;
     const pile: number[] = [];
@@ -315,6 +330,18 @@ export class AlisScriptRunner {
       }
     };
 
+    // Sprites drawn by the previous frame are "old" (state 0) for this one.
+    for (const sp of this.sprites) sp.state = 0;
+    const dir = findIsharDirectory(this.data);
+    const slotOf = (i: number) => (dir ? resolveIsharSlot(this.data, dir, i) : -1);
+    /** First index of element `n`'s group, and the index just past it (the list is ordered by element number, descending). */
+    const group = (n: number): [number, number] => {
+      let a = 0;
+      while (a < this.sprites.length && this.sprites[a]!.numelem > n) a++;
+      let b = a;
+      while (b < this.sprites.length && this.sprites[b]!.numelem === n) b++;
+      return [a, b];
+    };
     const put = (instr: AlisInstr, x: number, y: number, z: number, idx: number, numelem: number, mirrorOp: boolean): void => {
       const old = this.coords;
       const p: PlacementCommand = {
@@ -327,12 +354,37 @@ export class AlisScriptRunner {
         invertX: ((this.xinv & 1) ^ (mirrorOp ? 1 : 0)) === 1,
         addr: instr.addr,
       };
-      if (!putThisGen.has(numelem)) {
-        putThisGen.add(numelem);
-        this.sprites = this.sprites.filter((s) => s.numelem !== numelem || s.gen === gen);
-      }
-      this.sprites.push({ ...p, gen });
       placements.push(p);
+      if (!dir || idx < 0 || idx >= dir.length) return;
+      const h = slotOf(idx);
+      const type = h >= 0 ? this.data[h]! : 0;
+      if (type === 0xfe) return; // a palette: `topalette`, no sprite
+      if (type <= 0x80) {
+        // plain put (`fmuldes` = 0): reuse the FIRST sprite of this element,
+        // whatever its state, else create one at the end of the group.
+        const [a, b] = group(numelem);
+        const sp: RetainedPlacement = { idx, x: p.x, y: p.y, z: p.z, numelem, invertX: p.invertX, state: -1 };
+        if (b > a) {
+          const prev = this.sprites[a]!;
+          sp.state = prev.state > -1 ? 2 : prev.state;
+          this.sprites[a] = sp;
+        } else this.sprites.splice(b, 0, sp);
+        return;
+      }
+      // composite: each leaf takes the next old (state 0) sprite of the
+      // element, else a new one at the end of the group; then `putfin`
+      // kills the element's old sprites that were not reused.
+      for (const leaf of resolveIsharComposite(this.data, dir, idx, slotOf, p.invertX)) {
+        const sp: RetainedPlacement = { idx: leaf.index, x: p.x + leaf.dx, y: p.y + leaf.dy, z: p.z + leaf.dz, numelem, invertX: leaf.invertX, state: -1 };
+        const [a, b] = group(numelem);
+        let k = a;
+        while (k < b && this.sprites[k]!.state !== 0) k++;
+        if (k < b) {
+          sp.state = 2;
+          this.sprites[k] = sp;
+        } else this.sprites.splice(b, 0, sp);
+      }
+      this.sprites = this.sprites.filter((sp) => sp.numelem !== numelem || sp.state !== 0);
     };
 
     let pc: number | null = this.pc;
@@ -498,7 +550,7 @@ export class AlisScriptRunner {
           break;
         case 'cerasen': {
           const n = evalExpr(instr.fields.expr as AlisToken);
-          this.sprites = this.sprites.filter((s) => s.numelem !== n);
+          this.sprites = this.sprites.filter((sp) => sp.numelem !== n);
           break;
         }
         // Everything below is a no-op for computing which sprites go where.

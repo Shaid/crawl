@@ -1,5 +1,5 @@
 diff --git a/src/alis.c b/src/alis.c
-index b8719c7..3af406e 100644
+index b8719c7..40ae753 100644
 --- a/src/alis.c
 +++ b/src/alis.c
 @@ -1549,7 +1549,7 @@ void alis_main_V2(void)
@@ -24,6 +24,33 @@ index b8719c7..3af406e 100644
                          alis.fseq = 0;
                          alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
                          alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + 6 + script_offset;
+-                        alis_loop();
++                        { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
+                     }
+                     
+                     if (alis.restart_loop == 0)
+@@ -1660,7 +1660,7 @@ void alis_main_V3(void)
+                 alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
+                 savecoord(alis.script->vram_org);
+                 alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + before_vec_off + script_offset;
+-                alis_loop();
++                { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
+                 updtcoord(alis.script->vram_org);
+             }
+         }
+@@ -1685,7 +1685,7 @@ void alis_main_V3(void)
+                 alis.script->pc = get_0x08_script_ret_offset(alis.script->vram_org);
+                 alis.script->vacc_off = get_0x0a_vacc_offset(alis.script->vram_org);
+                 alis.fseq++;
+-                alis_loop();
++                { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
+ 
+                 if (alis.restart_loop == 0)
+                 {
+@@ -1698,7 +1698,7 @@ void alis_main_V3(void)
+                         alis.fseq = 0;
+                         alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
+                         alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + after_vec_off + script_offset;
 -                        alis_loop();
 +                        { alis_loop(); extern void h_watch_check(void); h_watch_check(); }
                      }
@@ -71,10 +98,10 @@ index 1151bed..c4b8006 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..2c72d12
+index 0000000..f9259fd
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,169 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -86,6 +113,7 @@ index 0000000..2c72d12
 +//   poke OFF VAL | pokew OFF VAL        (byte / big-endian word at basemain+OFF, hex OFF)
 +//   peek OFF N                          (prints N signed bytes)
 +//   memdump OFF N NAME                  (raw bytes at basemain+OFF -> NAME.bin)
++//   derefdump OFF N NAME                (N bytes of an indirect v3 array: the handle at basemain+OFF)
 +//   dump NAME                           (NAME.ppm frame + NAME.spr live sprite list)
 +//   save | quit | mark TEXT
 +#include <stdio.h>
@@ -181,6 +209,7 @@ index 0000000..2c72d12
 +    else if (!strcmp(cmd, "pokew")) { unsigned off; int v; sscanf(h_line, "%*ld %*s %x %d", &off, &v); u8 *m = alis.mem + alis.basemain + off; m[0] = (u8)(v >> 8); m[1] = (u8)v; }
 +    else if (!strcmp(cmd, "peek")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d", &off, &n); fprintf(stderr, "[peek] %ld %x:", h_frameno, off); for (int i = 0; i < n; i++) fprintf(stderr, " %d", (s8) * (u8 *)(alis.mem + alis.basemain + off + i)); fprintf(stderr, "\n"); }
 +    else if (!strcmp(cmd, "memdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + alis.basemain + off, 1, n, o); fclose(o); } }
++    else if (!strcmp(cmd, "derefdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); u32 a = xread32(xread32(alis.basemain + off)); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + a, 1, n, o); fclose(o); } }
 +    else if (!strcmp(cmd, "dump")) { sscanf(h_line, "%*ld %*s %159s", name); h_dump_ppm(name); h_dump_sprites(name); fprintf(stderr, "[dump] %ld %s\n", h_frameno, name); }
 +    else if (!strcmp(cmd, "save")) { alis.state = eAlisStateSave; }
 +    else if (!strcmp(cmd, "mark")) { fprintf(stderr, "[mark] %ld %s", h_frameno, h_line); }
@@ -188,8 +217,21 @@ index 0000000..2c72d12
 +  }
 +}
 +
++// $ALIS_HARNESS_VCLOCK=N: no SDL timer; the 50/60 Hz timer routine
++// (alis.timeclock, fades) runs N times per presented frame instead, so
++// timer-paced games (Ishar 3) run deterministically in fast mode.
++extern u32 itroutine(u32 interval, void *param);
++
++static int h_vclock = -1;
++static int h_vclock_n(void) { if (h_vclock < 0) { const char *v = getenv("ALIS_HARNESS_VCLOCK"); h_vclock = v ? atoi(v) : 0; } return h_vclock; }
++// Virtual-clock versions of the host's tick/delay (film and audio pacing
++// wait on these): one timer tick per delay call, ticks counted in 20 ms.
++static int h_vticks;
++static void h_vtick(void) { itroutine(0, 0); h_vticks++; }
++
 +// Called by draw() once per presented frame, on the VM thread.
 +void h_frame(void) {
++  for (int i = 0; i < h_vclock_n(); i++) h_vtick();
 +  h_setup();
 +  if (!h_enabled) return;
 +  pthread_mutex_lock(&h_mu);
@@ -244,19 +286,42 @@ index 89651c2..759d397 100644
      {
          button.scancode = 0;
 diff --git a/src/sys/sys_sdl2.c b/src/sys/sys_sdl2.c
-index 9783d8a..2696da3 100644
+index 9783d8a..14b77dd 100644
 --- a/src/sys/sys_sdl2.c
 +++ b/src/sys/sys_sdl2.c
-@@ -96,6 +96,8 @@ extern u32             isr_step;
+@@ -96,6 +96,10 @@ extern u32             isr_step;
  extern u32             isr_counter;
  
  u32                   *pixels;
 +#include "screen.h"
 +#include "harness.inc"
++u32 sys_ticks(void) { return h_vclock_n() ? (u32)h_vticks * 20 : SDL_GetTicks(); }
++void sys_delay(u32 ms) { if (h_vclock_n()) h_vtick(); else SDL_Delay(ms); }
  
  void sys_audio_callback_S16MSB(void *userdata, u8 *stream, s32 len);
  void sys_audio_callback_S8(void *userdata, u8 *stream, s32 len);
-@@ -280,6 +282,7 @@ void sys_sleep_until(struct timeval *start, s32 len)
+@@ -104,8 +108,8 @@ void sys_audio_callback_S8(void *userdata, u8 *stream, s32 len);
+ #pragma mark - SDL2 System init
+ // ============================================================================
+ 
+-u32 sys_ticks(void) { return SDL_GetTicks(); }
+-void sys_delay(u32 ms) { SDL_Delay(ms); }
++u32 sys_ticks(void);
++void sys_delay(u32 ms);
+ u8 *sys_get_framebuffer(int index) { (void)index; return NULL; }  // VM mallocs the render buffers
+ 
+ // Savestate load: wait out and block the audio callback
+@@ -159,7 +163,8 @@ void sys_init(sPlatform *pl, int fullscreen, int mutesound)
+     
+     {
+         u32 timer_ms = alis.platform.is_little_endian ? 17 : 20;
+-        timer_id = SDL_AddTimer(timer_ms, itroutine, NULL);
++        // crawl harness: $ALIS_HARNESS_VCLOCK drives the timer from draw() instead (deterministic).
++        timer_id = getenv("ALIS_HARNESS_VCLOCK") ? 1 : SDL_AddTimer(timer_ms, itroutine, NULL);
+         if (!timer_id)
+         {
+             fprintf(stderr, "   Could not create timer: %s\n", SDL_GetError());
+@@ -280,6 +285,7 @@ void sys_sleep_until(struct timeval *start, s32 len)
  {
      struct timeval now;
      gettimeofday(&now, NULL);
@@ -264,7 +329,7 @@ index 9783d8a..2696da3 100644
      
      s64 wait = len - ((s64)(now.tv_sec * 1000000LL + now.tv_usec) - (s64)(start->tv_sec * 1000000LL + start->tv_usec));
      if (wait > 0 && wait <= len)
-@@ -385,6 +388,7 @@ void sys_poll_event(void)
+@@ -385,6 +391,7 @@ void sys_poll_event(void)
      sys_render(host.pixelbuf);
      
      // update mouse position
@@ -272,7 +337,7 @@ index 9783d8a..2696da3 100644
      SDL_GetMouseState(&mouse.x, &mouse.y);
  
      float newx, newy;
-@@ -395,6 +399,8 @@ void sys_poll_event(void)
+@@ -395,6 +402,8 @@ void sys_poll_event(void)
      SDL_RenderGetLogicalSize(renderer, &lw, &lh);
      mouse.x = newx;
      mouse.y = (lh > 0) ? newy * (float)height / (float)lh : newy / aspect_ratio;

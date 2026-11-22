@@ -43,6 +43,8 @@ export interface OracleTitle {
   forward: readonly [number, number];
   /** View screen geometry as the oracle's `S` line prints it. */
   viewScreen: { x: number; y: number; w: number; h: number };
+  /** Extra environment for every run of this title (e.g. the virtual clock). */
+  env?: Readonly<Record<string, string>>;
   /** Scripted boot: `[frame, command]` pairs, the last one saves the state. */
   boot: ReadonlyArray<readonly [number, string]>;
   /** Memory captured at the start of every pose run (`<name>.bin` in the run directory). */
@@ -120,9 +122,68 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     turnRight: [310, 30],
     turnLeft: [263, 30],
     forward: [288, 30],
-    viewScreen: { x: 0, y: 0, w: 0, h: 0 },
-    boot: [],
-    start: { region: 1, row: 0, col: 0, facing: 0 },
+    viewScreen: { x: 0, y: 13, w: 255, h: 112 },
+    // Ishar 3 paces its intro on the 50 Hz timer, so it runs under the
+    // harness's virtual clock (one timer tick per presented frame).
+    env: { ALIS_HARNESS_VCLOCK: '1' },
+    // Clicks and spaces through logo, intro, title, team screens; "play" at
+    // frame 4000. MAIN starts the Maz town group at frame 4019 (vwall,
+    // vhouse2, vhouse1, fville, vdec1, vdec2, affpv, sville, sville2):
+    // CONT1-3 row 2 col 50, raw facing 1. Saved before any wake.
+    boot: [
+      [150, 'click 160 100'],
+      [155, 'up'],
+      [250, 'click 130 50'],
+      [255, 'up'],
+      [475, 'click 160 100'],
+      [480, 'up'],
+      [550, 'key 32'],
+      [580, 'keyup'],
+      [775, 'click 160 100'],
+      [780, 'up'],
+      [850, 'key 32'],
+      [880, 'keyup'],
+      [1075, 'click 160 100'],
+      [1080, 'up'],
+      [1150, 'key 32'],
+      [1180, 'keyup'],
+      [1375, 'click 160 100'],
+      [1380, 'up'],
+      [1450, 'key 32'],
+      [1480, 'keyup'],
+      [1675, 'click 160 100'],
+      [1680, 'up'],
+      [1750, 'key 32'],
+      [1780, 'keyup'],
+      [1975, 'click 160 100'],
+      [1980, 'up'],
+      [2050, 'key 32'],
+      [2080, 'keyup'],
+      [2275, 'click 160 100'],
+      [2280, 'up'],
+      [2350, 'key 32'],
+      [2380, 'keyup'],
+      [2575, 'click 160 100'],
+      [2580, 'up'],
+      [2650, 'key 32'],
+      [2680, 'keyup'],
+      [2875, 'click 160 100'],
+      [2880, 'up'],
+      [2950, 'key 32'],
+      [2980, 'keyup'],
+      [3175, 'click 160 100'],
+      [3180, 'up'],
+      [3250, 'key 32'],
+      [3280, 'keyup'],
+      [3475, 'click 160 100'],
+      [3480, 'up'],
+      [3550, 'key 32'],
+      [3580, 'keyup'],
+      [4000, 'click 160 168'],
+      [4005, 'up'],
+      [4060, 'save'],
+    ],
+    start: { region: 1, row: 2, col: 50, facing: 0 },
   },
 };
 
@@ -176,6 +237,7 @@ export function runOracle(game: OracleGame, events: ReadonlyArray<readonly [numb
       ALIS_HARNESS_OUT: outDir,
       ALIS_HARNESS_FAST: '1',
       ...(opts.trace ? { ALIS_HARNESS_TRACE: '1' } : {}),
+      ...(ORACLE_TITLES[game].env ?? {}),
       SDL_VIDEODRIVER: 'dummy',
       SDL_AUDIODRIVER: 'dummy',
     },
@@ -316,18 +378,18 @@ export function capturePoses(game: OracleGame, poses: readonly OraclePose[], out
     const before = t.facingCycle[(ci + t.facingCycle.length - 1) % t.facingCycle.length]!;
     ev.push([f0, `poke ${t.row.toString(16)} ${p.row}`], [f0, `poke ${t.col.toString(16)} ${p.col}`], [f0, `poke ${t.facing.toString(16)} ${before}`]);
     ev.push([f0 + 1, `click ${t.turnRight[0]} ${t.turnRight[1]}`], [f0 + 3, 'up']);
-    ev.push([f0 + POSE_SETTLE, `dump p${i}`], [f0 + POSE_SETTLE, `memdump ${t.row.toString(16)} 3 q${i}`]);
+    ev.push([f0 + POSE_SETTLE, `dump p${i}`], ...partyDumps(t, f0 + POSE_SETTLE, `q${i}`));
   });
   ev.push([4 + poses.length * POSE_STRIDE + 2, 'quit']);
   const r = runOracle(game, ev, outDir, { loadState: true, timeoutMs: 60_000 + poses.length * 200 });
   const frames: OracleFrame[] = [];
   for (let i = 0; i < poses.length; i++) {
     if (!existsSync(join(outDir, `p${i}.ppm`))) throw new Error(`oracle did not dump pose ${i}\n${r.stderr.slice(-2000)}`);
-    const q = readFileSync(join(outDir, `q${i}.bin`));
+    const q = readParty(t, outDir, `q${i}`);
     const p = poses[i]!;
     // The game ignores the turn while a dialogue or fight holds the input
     // (an NPC encounter); such a pose was neither drawn nor woken.
-    const taken = q[0] === p.row && q[1] === p.col && (q[2]! >= 128 ? q[2]! - 256 : q[2]!) === t.facingRaw[p.facing];
+    const taken = q.row === p.row && q.col === p.col && q.facingRaw === t.facingRaw[p.facing];
     frames.push({ ...readFrame(outDir, `p${i}`), taken });
   }
   return frames;
@@ -344,6 +406,23 @@ export interface WalkStep {
   /** Raw facing value. */
   facingRaw: number;
   frame: OracleFrame;
+}
+
+/** Harness commands that dump the party globals (one byte each) as `<name>.<field>.bin`. */
+function partyDumps(t: OracleTitle, frame: number, name: string): Array<[number, string]> {
+  const ev: Array<[number, string]> = [
+    [frame, `memdump ${t.row.toString(16)} 1 ${name}.row`],
+    [frame, `memdump ${t.col.toString(16)} 1 ${name}.col`],
+    [frame, `memdump ${t.facing.toString(16)} 1 ${name}.facing`],
+  ];
+  if (t.region !== undefined) ev.push([frame, `memdump ${t.region.toString(16)} 1 ${name}.region`]);
+  return ev;
+}
+
+function readParty(t: OracleTitle, dir: string, name: string): { region: number; row: number; col: number; facingRaw: number } {
+  const b = (f: string) => readFileSync(join(dir, `${name}.${f}.bin`))[0]!;
+  const f = b('facing');
+  return { region: t.region !== undefined ? b('region') : t.start.region, row: b('row'), col: b('col'), facingRaw: f >= 128 ? f - 256 : f };
 }
 
 /** Frames per walk action (a step animates; clicks during it are dropped). */
@@ -363,18 +442,14 @@ export function captureWalk(game: OracleGame, actions: readonly WalkAction[], ou
     const f0 = 4 + i * WALK_STRIDE;
     const [x, y] = a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;
     ev.push([f0, `click ${x} ${y}`], [f0 + 2, 'up']);
-    ev.push([f0 + WALK_STRIDE - 8, `memdump ${t.row.toString(16)} 3 s${i}`]);
-    if (t.region !== undefined) ev.push([f0 + WALK_STRIDE - 8, `memdump ${t.region.toString(16)} 1 r${i}`]);
+    ev.push(...partyDumps(t, f0 + WALK_STRIDE - 8, `s${i}`));
     ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);
   });
   ev.push([4 + actions.length * WALK_STRIDE + 2, 'quit']);
   const r = runOracle(game, ev, outDir, { loadState: true, timeoutMs: 60_000 + actions.length * 300 });
   return actions.map((action, i) => {
     if (!existsSync(join(outDir, `w${i}.ppm`))) throw new Error(`oracle did not dump walk step ${i}\n${r.stderr.slice(-2000)}`);
-    const s = readFileSync(join(outDir, `s${i}.bin`));
-    const sb = (v: number) => (v >= 128 ? v - 256 : v);
-    const region = t.region !== undefined ? readFileSync(join(outDir, `r${i}.bin`))[0]! : t.start.region;
-    return { action, region, row: s[0]!, col: s[1]!, facingRaw: sb(s[2]!), frame: readFrame(outDir, `w${i}`) };
+    return { action, ...readParty(t, outDir, `s${i}`), frame: readFrame(outDir, `w${i}`) };
   });
 }
 

@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { bootToSavestate, captureWalk, capturePoses, ORACLE_TITLES, oracleAvailable, prepareGameDir, savestatePath, tempDir, type OracleGame, type OraclePose } from '../oracle/alis-oracle.ts';
 import { bootGridB, comparePose, contLayers, crawlSequence, crawlWalk, loadTitleData, oracleRunGrids } from '../oracle/compare.ts';
 
-const SAMPLES: Record<'ishar' | 'ishar2', OraclePose[]> = {
+const SAMPLES: Record<'ishar' | 'ishar2' | 'ishar3', OraclePose[]> = {
   // CONT1: the start pose, both zone add-ons (lacustre west of col 46,
   // village east of it), a crossing back, and the row-53 edge.
   ishar: [
@@ -38,9 +38,18 @@ const SAMPLES: Record<'ishar' | 'ishar2', OraclePose[]> = {
     { row: 18, col: 55, facing: 2 },
     { row: 44, col: 34, facing: 0 },
   ],
+  // Maz (CONT1-3), the Ishar 3 start town; runs under the virtual clock.
+  ishar3: [
+    { row: 2, col: 50, facing: 0 },
+    { row: 7, col: 45, facing: 1 },
+    { row: 13, col: 48, facing: 2 },
+    { row: 16, col: 48, facing: 3 },
+    { row: 10, col: 50, facing: 0 },
+    { row: 4, col: 44, facing: 2 },
+  ],
 };
 
-for (const game of Object.keys(SAMPLES) as Array<'ishar' | 'ishar2'>) {
+for (const game of Object.keys(SAMPLES) as Array<'ishar' | 'ishar2' | 'ishar3'>) {
   const haveData = existsSync(join(ORACLE_TITLES[game].dataDir, 'MAIN.DO'));
   describe.skipIf(!oracleAvailable() || !haveData)(`${game} scene vs the game (alis oracle)`, () => {
     it('matches every placement and every pixel of the view', () => {

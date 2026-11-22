@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_TITLE, ISHAR2_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -249,13 +249,13 @@ const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
  * against the alis oracle, `tools/ishar/oracle/`). Ishar 3 still uses the
  * single-script test bench below.
  */
-const SCENE_SPECS: Partial<Record<IsharGameId, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE };
+const SCENE_SPECS: Partial<Record<IsharGameId, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE, ishar3: ISHAR3_TITLE };
 
 /** Start of a new game, read from the oracle (MAIN's own start-up writes). */
 const START_POSES: Record<IsharGameId, Pose> = {
   ishar: { level: 1, x: 11, y: 29, facing: 1 }, // CONT1 row 11 col 29, raw facing 2
   ishar2: { level: 1, x: 27, y: 45, facing: 1 }, // CONT1 row 27 col 45, raw facing 2
-  ishar3: { level: 1, x: 2, y: 50, facing: 0 }, // CONT1-3 row 2 col 50, raw facing 1 (facing map untraced)
+  ishar3: { level: 1, x: 2, y: 50, facing: 0 }, // CONT1-3 row 2 col 50, raw facing 1 (Maz)
 };
 
 async function tryLoadSceneScripts(base: string, spec: IsharTitleSpec): Promise<Map<string, Uint8Array> | undefined> {

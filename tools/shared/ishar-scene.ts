@@ -29,7 +29,7 @@
  * Per-title constants (addresses, region-code groups) live in the
  * `IsharTitleSpec`s below; each one cites its trace.
  */
-import { AlisScriptRunner, resolveIsharComposite, type SceneEnv } from './alis-interp.ts';
+import { AlisScriptRunner, type SceneEnv } from './alis-interp.ts';
 import { decodeIsharBitmap, findIsharDirectory, isharBitmapToNormalizedGreyscaleRGBA, resolveIsharSlot, type IsharBitmap } from './ishar-sprites.ts';
 import { isharBitmapToPaletteRGBA, resolveIsharOwnPalette, resolveIsharPaletteSlot, type IsharPalette } from './ishar-palette.ts';
 
@@ -86,6 +86,14 @@ export interface IsharTitleSpec {
    * party came from.
    */
   zone?: { script: string; entry: number; exits: readonly number[]; addr: number; prevRegionLocal: number };
+  /** Entity coordinate offsets in script vram (`ALIS_SCR_WCX/WCY/WCZ`); default 0/2/4, engine 3.0 uses 0/8/16. */
+  coordOffsets?: readonly [number, number, number];
+  /**
+   * One-dimensional main tables the scene scripts read with `omaintc` (one
+   * index, no row popped), as the game holds them at the start of a new
+   * game. Anything not listed here is a two-dimensional grid (gridA/gridB).
+   */
+  tables?: Readonly<Record<number, readonly number[]>>;
   /** Every script `sceneGroup`/`addOns` can name (anything else on the view screen, e.g. a wandering NPC, is not scenery). */
   sceneScripts: readonly string[];
   /**
@@ -252,6 +260,50 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
 };
 
 /**
+ * Ishar 3. Party globals row `0x257`, col `0x14b6`, facing `0x14b7` (raw
+ * 1, 2, -1, -2 in "turn right" order: oracle walk, raw 1 = col-1, raw 2 =
+ * row+1); grids at `0x260` (CONT layer 0) and `0x14ae` (layer 1), 57 x 82;
+ * `0x3518` = 1 in a new game (each backdrop copies it to local -2). VDEC2
+ * also reads the one-dimensional table at `0x15f8` (snapshot of a new
+ * game). Only the start town is traced: at a new game MAIN starts the Maz
+ * group (vwall, vhouse2, vhouse1, fville, vdec1, vdec2; affpv spawns the
+ * townspeople, sville/sville2 draw nothing in the view).
+ */
+export const ISHAR3_TITLE: IsharTitleSpec = {
+  game: 'ishar3',
+  stride: 57,
+  rows: 82,
+  globals: { row: 0x257, col: 0x14b6, facing: 0x14b7 },
+  facingRaw: [1, 2, -1, -2],
+  gridA: 0x260,
+  gridB: 0x14ae,
+  coordOffsets: [0, 8, 16],
+  // oracle `S 82 x=0 y=13 w=255 h=112`
+  screen: { xCenter: 127, horizonY: 65, width: 256, height: 113 },
+  mainGlobals(s) {
+    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x3518: 1 };
+  },
+  tables: { 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2'],
+  sceneGroup(region) {
+    // FVILLE `+0xfc`: `cpalette 5`.
+    if (region === 1) return { scripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
+    return null;
+  },
+  gridBuffers: 'layers',
+  stepFrom(st, dir) {
+    let { row, col } = st;
+    const raw = this.facingRaw[dir];
+    if (raw === 1) col--;
+    else if (raw === -1) col++;
+    else if (raw === 2) row++;
+    else row--;
+    if (row < 0 || col < 0 || row >= this.rows || col >= this.stride) return null;
+    return { ...st, row, col };
+  },
+};
+
+/**
  * The two grid buffers as the game holds them, fed with each title's CONT
  * files (`layers(n)` = that file's layers, storage order, signed or not).
  */
@@ -372,6 +424,8 @@ export class IsharScene {
         if (this.spec.zone && addr === this.spec.zone.addr) this.zone = v;
       },
       readGrid: (addr, pop, direct) => {
+        const table = this.spec.tables?.[addr];
+        if (table) return table[direct] ?? 0;
         const row = pop();
         const col = direct;
         if (row < 0 || col < 0 || col >= stride || row >= rows) return 0;
@@ -388,7 +442,9 @@ export class IsharScene {
       this.warnings.push(`scene script ${name} not available`);
       return null;
     }
-    return { name, data, runner: new AlisScriptRunner(data, name) };
+    const runner = new AlisScriptRunner(data, name);
+    if (this.spec.coordOffsets) runner.coordOffsets = this.spec.coordOffsets;
+    return { name, data, runner };
   }
 
   /**
@@ -503,27 +559,21 @@ export class IsharScene {
     this.scripts.forEach((s, rank) => {
       const dir = findIsharDirectory(s.data);
       if (!dir) return;
-      const resolveSlot = (i: number) => resolveIsharSlot(s.data, dir, i);
       for (const sp of s.runner.sprites) {
-        if (sp.idx < 0 || sp.idx >= dir.length) continue;
-        const seq = (n - 1 - rank) * 1e7 + (this.seqOf.get(sp) ?? 0);
-        const parts = resolveIsharComposite(s.data, dir, sp.idx, resolveSlot, sp.invertX);
-        parts.forEach((leaf, i) => {
-          const h = resolveSlot(leaf.index);
-          if (h < 0) return;
-          const bitmap = decodeIsharBitmap(s.data, leaf.index, h);
-          if (!bitmap) return;
-          out.push({
-            script: s.name,
-            index: leaf.index,
-            x: sp.x + leaf.dx,
-            y: sp.y + leaf.dy,
-            z: sp.z + leaf.dz,
-            numelem: sp.numelem,
-            invertX: leaf.invertX,
-            bitmap,
-            seq: seq * 64 + i,
-          });
+        const h = resolveIsharSlot(s.data, dir, sp.idx);
+        if (h < 0) continue;
+        const bitmap = decodeIsharBitmap(s.data, sp.idx, h);
+        if (!bitmap) continue;
+        out.push({
+          script: s.name,
+          index: sp.idx,
+          x: sp.x,
+          y: sp.y,
+          z: sp.z,
+          numelem: sp.numelem,
+          invertX: sp.invertX,
+          bitmap,
+          seq: (n - 1 - rank) * 1e7 + (this.seqOf.get(sp) ?? 0),
         });
       }
     });

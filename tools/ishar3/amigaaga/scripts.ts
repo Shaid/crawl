@@ -17,9 +17,10 @@
  * render itself is real and non-degenerate.
  */
 import { exportIsharScripts } from '../../shared/ishar-script-export.js';
+import { ISHAR3_TITLE } from '../../shared/ishar-scene.ts';
 
 const dataDir = process.argv[2] ?? 'data/ishar3/amigaaga';
-const report = exportIsharScripts(dataDir, 'ishar3', 'amigaaga', ['FORET', 'FFORET', 'JUNGLE', 'FJUNGLE']);
+const report = exportIsharScripts(dataDir, 'ishar3', 'amigaaga', [...new Set(['FORET', 'FFORET', 'JUNGLE', 'FJUNGLE', ...ISHAR3_TITLE.sceneScripts])]);
 const ok = report.filter((r) => r.ok).length;
 console.log(`ishar3/amigaaga: exported ${ok}/${report.length} first-person scripts`);
 for (const r of report) console.log(`  ${r.ok ? 'OK ' : 'ERR'} ${r.name} ${r.ok ? r.decodedLength + ' bytes' : r.error}`);

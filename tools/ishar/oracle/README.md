@@ -26,6 +26,7 @@ The script clones alis at the pinned commit `31b1811`, applies
 ```sh
 npx tsx tools/ishar/oracle/sweep.ts ishar  --poses 60 --seed 1   # random poses in CONT1
 npx tsx tools/ishar/oracle/sweep.ts ishar2 --poses 30
+npx tsx tools/ishar/oracle/sweep.ts ishar3 --poses 60                # Maz, under the virtual clock
 npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sample + a real walk
 ```
 
@@ -65,6 +66,9 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
 - `key SDLKEY`, `keyup` — keyboard input;
 - `poke` / `pokew` / `peek` / `memdump` — main-segment memory, at hex
   offsets;
+- `derefdump OFF N NAME` — dumps the data of an indirect engine-3.0 array,
+  whose handle is at main offset OFF (for example, Ishar 3's grid buffer B
+  at `0x14ae`);
 - `dump NAME` — writes the frame and the display list;
 - `save`, `mark`, `quit`.
 
@@ -73,7 +77,8 @@ These variables change how it runs:
 | Variable | Effect |
 |---|---|
 | `ALIS_HARNESS_FAST=1` | Removes the frame and loop sleeps. |
-| `ALIS_HARNESS_MS=1` | Keys commands to wall-clock milliseconds instead of frames. Ishar 3's intro waits on timers, which fast mode never satisfies. |
+| `ALIS_HARNESS_VCLOCK=N` | Drops the SDL timer. The 50/60 Hz timer routine (`alis.timeclock`, palette fades) instead runs N times per presented frame. Host tick/delay calls (film and audio pacing) also become virtual. Timer-paced games then run deterministically in fast mode. Ishar 3 uses `VCLOCK=1` (`OracleTitle.env`). |
+| `ALIS_HARNESS_MS=1` | Keys commands to wall-clock milliseconds instead of frames. This is not deterministic; it was only used before the virtual clock existed. |
 | `ALIS_HARNESS_TRACE=1` | Logs every script load, start, wake-up and kill. |
 | `ALIS_HARNESS_WATCH=hexoff,...` | Reports which script changed a main-segment byte. |
 
@@ -84,6 +89,5 @@ These variables change how it runs:
   therefore shows that crawl reproduces alis. It is not fully independent
   proof that both match the original Amiga engine. The two codebases share
   no code.
-- **Ishar 3.** Ishar 3 boots only in `ALIS_HARNESS_MS` mode, which is not
-  deterministic. Its scene spec is not traced yet, so `sweep.ts` and the
-  test cover only Ishar 1 and 2.
+- **Ishar 3.** Ishar 3 boots deterministically under `ALIS_HARNESS_VCLOCK=1`
+  in about one second. Only its start town (Maz) has a scene spec so far.
