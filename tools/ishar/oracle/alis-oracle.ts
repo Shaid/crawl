@@ -56,7 +56,15 @@ export interface OracleTitle {
   /** Scripted boot: `[frame, command]` pairs, the last one saves the state. */
   boot: ReadonlyArray<readonly [number, string]>;
   /** Main-segment tables dumped with the party after every walk step (`WalkStep.mem[name]`), e.g. the monster table the step test reads. */
-  stepMemdumps?: ReadonlyArray<{ name: string; off: number; len: number; /** a one-dimensional table the scene scripts read (`IsharPartyState.tables`), signed bytes */ table?: boolean }>;
+  stepMemdumps?: ReadonlyArray<{
+    name: string;
+    off: number;
+    len: number;
+    /** a one-dimensional table the scene scripts read (`IsharPartyState.tables`), signed bytes */
+    table?: boolean;
+    /** main globals the scene reads (`IsharPartyState.globals`), one per byte or big-endian word */
+    globals?: 'byte' | 'word';
+  }>;
   /** Memory captured at the start of every pose run (`<name>.bin` in the run directory). */
   bootMemdumps?: ReadonlyArray<{ name: string; off: number; len: number }>;
   /** Party state in the boot savestate (scene created, no wake-up yet). */
@@ -146,14 +154,25 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     row: 0x257,
     col: 0x14b6,
     facing: 0x14b7,
-    region: undefined,
+    // MAIN's region code (`0x14b9`, 1 in Maz: the switches at MAIN `+0x137c`/`+0x26e9`)
+    region: 0x14b9,
+    // MAIN's location code `0x3b33` (2 at the start): MAIN `+0x18d4` loads each location's scene add-ons on it
+    stepMemdumps: [
+      { name: 'zone', off: 0x3b33, len: 1 },
+      // the day/night palette factors MAIN `+0x135b` passes to `cdarkpal` (r, g, b words, 256 = unchanged) and its count switch
+      { name: 'dark', off: 0x3f82, len: 6, globals: 'word' },
+      { name: 'darkWide', off: 0x3da4, len: 2, globals: 'word' },
+      { name: 'clock', off: 0x3da1, len: 4 },
+    ],
     facingCycle: [1, 2, -1, -2],
     facingRaw: [1, 2, -1, -2],
     turnRight: [310, 30],
     turnLeft: [263, 30],
     forward: [288, 30],
     viewScreen: { x: 0, y: 13, w: 255, h: 112 },
-    npcScripts: ['affpv', 'vperso2', 'vperso5'],
+    // townspeople (affpv spawns them), the Maz thieves and guards, and the
+    // monsters MAIN `+0x18d4` loads per location
+    npcScripts: ['affpv', 'vperso1', 'vperso2', 'vperso3', 'vperso4', 'vperso5', 'voleur1', 'guard1', 'guard2', 'lezard1', 'moltus', 'witch7', 'chaos7', 'plasma7', 'skelet7', 'spider7', 'dragon7', 'wizard7', 'slime7', 'redfi7', 'sorcier7', 'leo3', 'zouav3', 'snake3', 'ours9', 'loup9', 'geant9', 'bee5', 'ours5', 'fly5', 'greem5', 'chaos5', 'mage5', 'typhus', 'runner'],
     // Ishar 3 paces its intro on the 50 Hz timer, so it runs under the
     // harness's virtual clock (one timer tick per presented frame).
     env: { ALIS_HARNESS_VCLOCK: '1' },
@@ -483,9 +502,18 @@ const WALK_STRIDE = 80;
  * Nothing is poked, so every MAIN/GERDEP rule (walkability, zones, grid
  * loads, region changes) runs as in play.
  */
-export function captureWalk(game: OracleGame, actions: readonly WalkAction[], outDir: string, opts: { noNpcs?: boolean } = {}): WalkStep[] {
+export function captureWalk(
+  game: OracleGame,
+  actions: readonly WalkAction[],
+  outDir: string,
+  opts: {
+    noNpcs?: boolean;
+    /** Extra harness commands keyed by walk step (run at the start of that step, before its click), e.g. a poke. */
+    commands?: ReadonlyArray<readonly [number, string]>;
+  } = {},
+): WalkStep[] {
   const t = ORACLE_TITLES[game];
-  const ev: Array<[number, string]> = [];
+  const ev: Array<[number, string]> = (opts.commands ?? []).map(([i, c]) => [3 + i * WALK_STRIDE, c] as [number, string]);
   for (const m of t.bootMemdumps ?? []) ev.push([2, `memdump ${m.off.toString(16)} ${m.len} ${m.name}`]);
   actions.forEach((a, i) => {
     const f0 = 4 + i * WALK_STRIDE;
@@ -572,6 +600,8 @@ export function captureLegWalk(
       const end = 4 + actions.length * WALK_STRIDE;
       ev.push([end, 'save'], [end + 4, 'quit']);
       const r = runOracle(game, ev, dir, { loadState: true, timeoutMs: 60_000 + actions.length * 300, noEntities: opts.noNpcs ? t.npcScripts : undefined, gameDir: own });
+      // the harness log (watch/trace/peek lines) stays with the leg's dumps
+      writeFileSync(join(dir, 'stderr.txt'), r.stderr);
       for (let i = 0; i < actions.length; i++) {
         if (!existsSync(join(dir, `w${i}.ppm`))) throw new Error(`oracle did not dump leg ${leg} step ${i}\n${r.stderr.slice(-2000)}`);
         const s = { action: actions[i]!, ...readParty(t, dir, `s${i}`), frame: readFrame(dir, `w${i}`) };

@@ -145,3 +145,38 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.data
     }
   }, 180_000);
 });
+
+/**
+ * Ishar 3: Maz from the start, south through the streets while the day
+ * turns to dusk and night. MAIN derives the phase from the game clock's
+ * hour (`0x3c08`; MAIN `+0x4dac`: 8..19 is day) and passes the phase's
+ * factors to `cdarkpal` (`ISHAR3_TITLE.darken`). The clock runs too slowly
+ * to change phase in a short walk, so the walk sets the hour twice (20 =
+ * dusk, 23 = night); nothing else is poked. Townspeople and thieves are
+ * removed (`noNpcs`); the walk measures scenery and the day/night palette.
+ */
+const ISHAR3_WALK = 'RFRFLFRFLFFFFFFLFFRFFFLFFFFRFFFRFFFFLFFFFFFFRFFFLFFRFFLFFF';
+
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 real walk vs the game (alis oracle)', () => {
+  it('moves like the game and matches every placement and pixel through dusk into night', () => {
+    const out = tempDir('ishar3-walk-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const steps = captureWalk('ishar3', [...ISHAR3_WALK] as Array<'F' | 'L' | 'R'>, out, { noNpcs: true, commands: [[20, 'pokew 3c08 20'], [40, 'pokew 3c08 23']] });
+      const data = loadTitleData('ishar3');
+      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar3.start }, steps, contLayers('ishar3', data));
+      // the walk reaches dusk and night (blue factor 256 -> 152 -> 192)
+      const factors = new Set(walk.map((w) => w.actual.globals?.[0x3f86] ?? 256));
+      expect([...factors].sort()).toEqual([152, 192, 256]);
+      expect(walk.every((w) => w.moveAgrees)).toBe(true);
+      walk.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves);
+        expect({ i, matched: r.matched, crawl: r.crawl }).toEqual({ i, matched: r.oracle, crawl: r.oracle });
+        expect(r.pixelsMaskedEqual / r.pixelsMasked, `step ${i} pixels`).toBeGreaterThan(0.995);
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 180_000);
+});

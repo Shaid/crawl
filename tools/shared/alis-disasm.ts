@@ -132,6 +132,11 @@ class Cursor {
   u8(): number {
     return this.data[this.pc++]!;
   }
+  s32(): number {
+    const hi = this.u16();
+    const lo = this.u16();
+    return ((hi << 16) | lo) | 0;
+  }
   s8(): number {
     const v = this.u8();
     return v >= 0x80 ? v - 0x100 : v;
@@ -220,8 +225,21 @@ const store = (c: Cursor): AlisToken => readToken(c, 'storename');
 const addn = (c: Cursor): AlisToken => readToken(c, 'addname');
 
 /** Decode one instruction at `pc`. Returns the instruction plus its CFG successors (element 0 = fallthrough, or null). Throws on an unrecognized opcode -- callers should catch per-branch (see `disassembleAlisScript`). */
-export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
+/**
+ * `version` is the engine's `platform.version`: 20/21 for Ishar 1/2 and
+ * Crystals (the default), 30 for Ishar 3. Engine 3.0 changes the operand
+ * shape of `cdim`, `cfreadb`/`cfwriteb` (32-bit length), `calloctab`/
+ * `cfreetab` (an address operand) and `caset`/`camov` (three expressions);
+ * `opcodes.c` `cdim`, `cfreadb`, `cfwriteb`, `calloctab`, `cfreetab`,
+ * `caset`, `camov`.
+ */
+export function decodeAlisInstr(data: Uint8Array, pc: number, version = 20): AlisInstr {
   const start = pc;
+  const v30 = version >= 30;
+  const vaddr = (): { addr: number; basemain: number | null } => {
+    const addr = c.s16();
+    return addr === 0 ? { addr, basemain: c.s16() } : { addr, basemain: null };
+  };
   const c = new Cursor(data, pc);
   const op = c.u8();
   const fin = (name: string, fields: Record<string, unknown>, ...next: Array<number | null>): AlisInstr => ({
@@ -289,7 +307,12 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
       const count = c.u8();
       const elemsz = c.u8();
       const dims: number[] = [];
-      for (let i = 0; i < count; i++) dims.push(c.u16());
+      if (v30) {
+        // engine 3.0: (count & 0xf) words (or longs when count < 0), then one long
+        const n = count & 0xf;
+        for (let i = 0; i < n; i++) dims.push(count >= 0x80 ? c.s32() : c.u16());
+        dims.push(c.s32());
+      } else for (let i = 0; i < count; i++) dims.push(c.u16());
       return fin('cdim', { off, count, elemsz, dims });
     }
     case 0x2a:
@@ -401,14 +424,16 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0x50: return fin('cerasall', {});
     case 0x51: return fin('cforme', { expr: expr(c) });
     case 0x52: return fin('cdelforme', {});
+    // The entity tests below end in `crstent` (opcodes.c), which reads a
+    // store destination for the first entity found, like `clistent`.
     case 0x53: {
       const a = expr(c); const b = expr(c); const cc = expr(c); const d = expr(c);
-      return fin('ctstmov', { a, b, c: cc, d });
+      return fin('ctstmov', { a, b, c: cc, d, dest: store(c) });
     }
     case 0x54: return fin('ctstset', {});
     case 0x55: case 0x56: {
       const args = [expr(c), expr(c), expr(c), expr(c), expr(c)];
-      return fin(op === 0x55 ? 'cftstmov' : 'cftstset', { args });
+      return fin(op === 0x55 ? 'cftstmov' : 'cftstset', { args, dest: store(c) });
     }
     case 0x57: return fin('csuccent', { dest: store(c) });
     case 0x58: return fin('cpredent', { dest: store(c) });
@@ -457,7 +482,11 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     }
     case 0x71: return fin('cfclose', {});
     case 0x75: return fin('cfwritev', { expr: expr(c) });
-    case 0x77: case 0x78: { // cfreadb/cfwriteb (v<30 form -- s16 addr, u16 len)
+    case 0x77: case 0x78: { // cfreadb/cfwriteb (v<30 form -- s16 addr, u16 len; v30 -- u32 len)
+      if (v30) {
+        const a = vaddr();
+        return fin(op === 0x77 ? 'cfreadb' : 'cfwriteb', { ...a, len: c.s32() });
+      }
       const addr = c.s16();
       let basemain: number | null = null;
       if (addr === 0) basemain = c.s16();
@@ -488,8 +517,8 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0x8a: return fin('csetvect', { value: c.u16() });
     case 0x8c: return fin('capproach', { expr: expr(c) });
     case 0x8d: return fin('cescape', { expr: expr(c) });
-    case 0x8e: return fin('cvtstmov', { expr: expr(c) });
-    case 0x8f: { const a = expr(c); const b = expr(c); return fin('cvftstmov', { a, b }); }
+    case 0x8e: { const e = expr(c); return fin('cvtstmov', { expr: e, dest: store(c) }); }
+    case 0x8f: { const a = expr(c); const b = expr(c); return fin('cvftstmov', { a, b, dest: store(c) }); }
     case 0x90: return fin('cvmov', {});
     case 0x91: {
       const off = c.u16();
@@ -500,7 +529,8 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     }
     case 0x92: { const a = c.u8(); const b = c.u8(); return fin('cworld', { a, b }); }
     case 0x93: return fin('cfindmat', {});
-    case 0x94: { const type = c.u16(); const e = expr(c); return fin('cfindtyp', { type, expr: e }); }
+    // cfindtyp (Amiga): the script id as an expression, then `crstent`'s destination
+    case 0x94: { const e = expr(c); return fin('cfindtyp', { expr: e, dest: store(c) }); }
     case 0x95: return fin('cmusic', {});
     case 0x96: return fin('cdelmusic', { expr: expr(c) });
     case 0x97: return fin('ccadence', { expr: expr(c) });
@@ -514,7 +544,7 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0x9f: return fin('credon', {});
     case 0xa0: return fin('credoff', {});
     case 0xa1: return fin('cdelsound', {});
-    case 0xa5: { const a = expr(c); const b = expr(c); return fin('ctstform', { a, b }); }
+    case 0xa5: { const a = expr(c); const b = expr(c); return fin('ctstform', { a, b, dest: store(c) }); }
     case 0xa6: return fin('cxput', { expr: expr(c) });
     case 0xa8: return fin('cmput', { expr: expr(c) });
     case 0xaa: return fin('cmxput', { expr: expr(c) });
@@ -560,7 +590,7 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0xc7: { const a = expr(c); const b = expr(c); return fin('creducing', { a, b }); }
     case 0xc8: { const e = expr(c); const a = c.u16(); const b = c.u16(); return fin('cscmap', { e, a, b }); }
     case 0xc9: return fin('cscdump', {});
-    case 0xca: return fin('cfindcla', { expr: expr(c) });
+    case 0xca: { const e = expr(c); return fin('cfindcla', { expr: e, dest: store(c) }); }
     case 0xcb: return fin('cnearcla', {});
     case 0xcc: return fin('cviewcla', {});
     case 0xcd: case 0xce: {
@@ -589,13 +619,21 @@ export function decodeAlisInstr(data: Uint8Array, pc: number): AlisInstr {
     case 0xe2: { const a = expr(c); const b = expr(c); return fin('cshrink', { a, b }); }
     case 0xe6: return fin('csavepal', { expr: expr(c) });
     case 0xe7: return fin('csczoom', {});
-    case 0xe9: { const a = c.u16(); const b = c.u16(); return fin('calloctab', { a, b }); }
-    case 0xea: return fin('cfreetab', {});
+    case 0xe9: {
+      if (v30) return fin('calloctab', vaddr());
+      const a = c.u16(); const b = c.u16(); return fin('calloctab', { a, b });
+    }
+    case 0xea: return fin('cfreetab', v30 ? vaddr() : {});
     case 0xeb: return fin('cscantab', {});
     case 0xec: return fin('cneartab', {});
     case 0xed: return fin('cscsun', {});
     case 0xee: { const args = Array.from({ length: 5 }, () => expr(c)); return fin('cdarkpal', { args }); }
     case 0xef: { const args = Array.from({ length: 3 }, () => expr(c)); return fin('cscdark', { args }); }
+    case 0xf0: case 0xf1: {
+      if (!v30) throw new Error(`unimplemented opcode 0x${op.toString(16)} at 0x${start.toString(16)}`);
+      const args = Array.from({ length: 3 }, () => expr(c));
+      return fin(op === 0xf0 ? 'caset' : 'camov', { args });
+    }
     case 0xf4: { const args = Array.from({ length: 8 }, () => expr(c)); return fin('cscfollow', { args }); }
     case 0xf5: { const args = Array.from({ length: 6 }, () => expr(c)); return fin('cscview', { args }); }
     case 0xf6: { const args = Array.from({ length: 3 }, () => expr(c)); return fin('cfilm', { args }); }
@@ -612,7 +650,7 @@ export interface AlisDisasmResult {
 }
 
 /** Worklist CFG walk from one or more entry points. Mirrors `alisdis.py`'s `disasm()`. */
-export function disassembleAlisScript(data: Uint8Array, entries: number[]): AlisDisasmResult {
+export function disassembleAlisScript(data: Uint8Array, entries: number[], version = 20): AlisDisasmResult {
   const instrs = new Map<number, AlisInstr>();
   const errors: Array<{ addr: number; message: string }> = [];
   const worklist = [...entries];
@@ -623,7 +661,7 @@ export function disassembleAlisScript(data: Uint8Array, entries: number[]): Alis
       visited.add(pc);
       let instr: AlisInstr;
       try {
-        instr = decodeAlisInstr(data, pc);
+        instr = decodeAlisInstr(data, pc, version);
       } catch (e) {
         errors.push({ addr: pc, message: e instanceof Error ? e.message : String(e) });
         break;

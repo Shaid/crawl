@@ -1819,6 +1819,42 @@ approximates that by start order.
     regions 1-7 (`ISHAR2_TRAVEL`). Selector -3 returns to a saved position;
     GESORT sends it. The sender of the island selectors is not found.
 
+16. **Ishar 3's MAIN (2026-11-24).** Ishar 3 runs engine version 3.0,
+    whose `cdim`, `cfreadb`/`cfwriteb` (32-bit length), `calloctab`/
+    `cfreetab` (an address operand) and `caset`/`camov` operands differ
+    from Ishar 1/2. With those shapes (`decodeAlisInstr(..., version)`)
+    MAIN decodes:
+    - **Region code `0x14b9`** (1 in Maz). Switches on it: `+0x137c`,
+      `+0x26e9` (unloads per region pair 1/2, 3/4, 5/6, 7, 8, 9/10) and
+      the map-name switch `+0x415f` (ten regions).
+    - **Location code `0x3b33`** (2 at the start). MAIN `+0x18d4`
+      (`cswitch2`, base -1, 57 arms) loads each location's scripts:
+      1 vrampart/vhouse1/varche; 2-3 vhouse2/vhouse1/vwall (the start
+      group); 4 + lezard1; 5 vbank/vhouse3/vrampart/varcade + guards;
+      6 vrampart/vjardin/moltus; 8 vtheatre; 9 vcasino; 10 vbibli/varche2;
+      11 vobs; 12 vpalais; 13 vmatter; 21-28 the dungeons (dj1-dj4, fdj*,
+      djlave, with their monsters); 30/31/35 leo3/zouav3/snake3; 40-47
+      ours9/loup9/geant9/generat9; 50-57 bee5/ours5/fly5/greem5/zoltar/fee5/
+      chaos5/mage5. `+0x18a2` checks the data disk per location: 1-4 and
+      13 need CONT1-3, 5-12 CONT4-3 (`+0x45bc`/`+0x460e`).
+    - GERDEP rewrites the location as the party walks (watched: 2 -> 1
+      at CONT1-3 (44,48)); within CONT1-3 that change starts no new
+      script, the Maz group stays.
+    - **Day and night.** MAIN `+0x4dac` sets the phase `0x3da1` from the
+      game clock's hour (`0x3c08`; 8..19 day) and the factors
+      `0x3f82`/`0x3f84`/`0x3f86` (day 256/256/256, dusk 256/120/152, night
+      50/64/192, dawn 256/128/64). On a phase change `+0x135b`/`+0x136d`
+      call `cdarkpal` with them on entries 1.. (175 of them when `0x3da4`
+      is set, 15 otherwise). The engine then scales those palette entries
+      by factor/256 on every `cpalette` and sets entry 0 to black.
+      `ISHAR3_TITLE.darken` models it. Before this, Maz walks long enough
+      to reach dusk scored 24.6% of masked pixels; now 99.99%.
+    - Decoder fix found on the way: the entity tests and searches that
+      end in `crstent` (`cfindtyp`, `cfindcla`, `ctstmov`, `cftstmov`,
+      `cftstset`, `cvtstmov`, `cvftstmov`, `ctstform`) read a store
+      destination. FVILLE's `cfindcla` (taken when `0x3da4` is set)
+      desynchronised without it and drew the wrong sky.
+
 **Measured 2026-11-23 (later), with roaming monsters removed and hp kept
 at 500.** All values are placements / pixels outside NPC boxes:
 
@@ -1838,7 +1874,8 @@ regions 3-6, the town/cave codes and Ishar 3's boot, all measured since):
 
 - how doors and levers are worked in play (the walks poke them open);
 - Ishar 2 outside its start group (`ishar2-scene-groups`);
-- Ishar 3 outside Maz;
+- Ishar 3 outside Maz (MAIN's location table is decoded, item 16; the
+  travel between regions is not traced);
 - NPCs and monsters in the view;
 - Crystals of Arborea.
 

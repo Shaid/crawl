@@ -137,6 +137,14 @@ export interface IsharTitleSpec {
    * null when the game refuses it. Default: refused on a negative cell.
    */
   enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number, occupied?: IsharOccupancy): IsharPartyState | null;
+  /**
+   * The engine's day/night darkening (`cdarkpal r g b first count`): when
+   * any factor is not 256, every `cpalette` scales palette entries
+   * [first, first + count) by factor/256 per channel (truncated) and
+   * entry 0 to black (`image.c` palette load, `opcodes.c` `cdarkpal`).
+   * Returns the current call's arguments from the main globals.
+   */
+  darken?(readMain: (addr: number) => number): { factors: readonly [number, number, number]; first: number; count: number } | null;
   /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
   addOns?(region: number, zone: number, state: IsharPartyState): readonly string[] | null;
 }
@@ -616,7 +624,15 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   // oracle `S 82 x=0 y=13 w=255 h=112`
   screen: { xCenter: 127, horizonY: 65, width: 256, height: 113 },
   mainGlobals(s) {
-    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x3518: 1 };
+    // 0x3f82/0x3f84/0x3f86: the day/night factors (256 = daylight, a new game)
+    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x3518: 1, 0x3da4: 1, 0x3f82: 256, 0x3f84: 256, 0x3f86: 256 };
+  },
+  // MAIN +0x135b / +0x136d: `cdarkpal` with the factors in 0x3f82/0x3f84/
+  // 0x3f86 on entries 1.., 15 of them when 0x3da4 = 0, else 175. MAIN steps
+  // the factors through the day (oracle walk, Maz: 256/256/256 day,
+  // 256/120/152 dusk, 50/64/192 night, 256/128/64 dawn).
+  darken(m) {
+    return { factors: [m(0x3f82), m(0x3f84), m(0x3f86)], first: 1, count: m(0x3da4) === 0 ? 15 : 175 };
   },
   tables: { 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
   sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2'],
@@ -863,7 +879,9 @@ export class IsharScene {
     const pal = this.scripts.find((s) => s.name === script);
     if (!pal) return;
     const env = this.env();
-    this.palette = paletteOf(pal.data, typeof slot === 'function' ? slot(env.readMain) : slot);
+    const base = paletteOf(pal.data, typeof slot === 'function' ? slot(env.readMain) : slot);
+    const dk = base && this.spec.darken?.(env.readMain);
+    this.palette = base && dk && dk.factors.some((f) => f !== 256) ? darkenPalette(base, dk) : base;
   }
 
   /** Run the title's sub-zone routine for the current state (GERDEP, after every step/turn). */
@@ -994,6 +1012,17 @@ function paletteOf(data: Uint8Array, slot: number): IsharPalette | null {
   if (!m) paletteCache.set(data, (m = new Map()));
   if (!m.has(slot)) m.set(slot, slot < 0 ? resolveIsharOwnPalette(data) : resolveIsharPaletteSlot(data, slot));
   return m.get(slot)!;
+}
+
+/** `cdarkpal`'s effect on a palette load: entries [first, first + count) scaled per channel by factor/256 (truncated), entry 0 black. */
+export function darkenPalette(p: IsharPalette, dk: { factors: readonly [number, number, number]; first: number; count: number }): IsharPalette {
+  const colors = p.colors.map((c, i): [number, number, number] | undefined => {
+    if (!c) return c;
+    if (i === 0) return [0, 0, 0];
+    if (i < dk.first || i >= dk.first + dk.count) return c;
+    return [Math.trunc((c[0] * dk.factors[0]) / 256), Math.trunc((c[1] * dk.factors[1]) / 256), Math.trunc((c[2] * dk.factors[2]) / 256)];
+  });
+  return { ...p, colors };
 }
 
 /** Top-left pixel of a leaf, exactly as `deptopix()` (v<60) computes it: centre-anchored on the projected point. */

@@ -584,31 +584,34 @@ export class AlisScriptRunner {
         // The entity list: the scene runs no other entities, so every list
         // is empty and these store its end marker (-1).
         case 'clistent': case 'crstent': case 'csuccent': case 'cpredent':
+        // the entity tests and searches that end in `crstent`
+        case 'cfindtyp': case 'cfindcla': case 'ctstmov': case 'cftstmov': case 'cftstset':
+        case 'cvtstmov': case 'cvftstmov': case 'ctstform':
           acc = -1;
           storeTo(instr.fields.dest as AlisToken, -1, 'set');
           break;
         // Everything below is a no-op for computing which sprites go where.
         case 'cscreen': case 'cinteron': case 'cinteroff': case 'cscanon': case 'cscanoff': case 'cscanclr':
-        case 'credon': case 'credoff': case 'cfindtyp': case 'clinking': case 'ccancel':
+        case 'credon': case 'credoff': case 'clinking': case 'ccancel':
         case 'ccancen': case 'cblast': case 'cforme': case 'cdelforme': case 'cerase':
         case 'cpalette': case 'cdefcolor': case 'csetvect': case 'cdefvect': case 'cnul':
         case 'cnul37': case 'copensc': case 'cclosesc':
         case 'cscmov': case 'cscset': case 'cset': case 'cmov': case 'casleep':
-        case 'casleepon': case 'casleepoff': case 'casleepfar': case 'ctstmov': case 'ctstset':
-        case 'cftstmov': case 'cftstset': case 'cnearent': case 'cneartyp':
+        case 'casleepon': case 'casleepoff': case 'casleepfar': case 'ctstset':
+        case 'cnearent': case 'cneartyp':
         case 'cnearmat': case 'cviewent': case 'cviewtyp': case 'cviewmat': case 'corient':
         case 'csend': case 'callentity': case 'ctiming': case 'czap': case 'cexplode': case 'cding':
         case 'cnoise': case 'cinitab': case 'cfopen': case 'cfclose': case 'cfwritev': case 'cfreadb':
         case 'cfwriteb': case 'cplot': case 'cdraw': case 'cbox': case 'cboxf': case 'cink': case 'cpmode':
         case 'cpicture': case 'cxyscroll': case 'cmouson': case 'cmousoff': case 'cmouse': case 'cdefmouse':
-        case 'csetmouse': case 'capproach': case 'cescape': case 'cvtstmov': case 'cvftstmov': case 'cvmov':
+        case 'csetmouse': case 'capproach': case 'cescape': case 'cvmov':
         case 'cdefworld': case 'cworld': case 'cfindmat': case 'cmusic': case 'cdelmusic': case 'ccadence':
-        case 'csetvolum': case 'csound': case 'cmsound': case 'cdelsound': case 'ctstform':
+        case 'csetvolum': case 'csound': case 'cmsound': case 'cdelsound':
         case 'cmmusic': case 'cmforme': case 'csettime': case 'cgettime': case 'cvinput': case 'csinput':
         case 'crunfilm': case 'cvpicprint': case 'cvputprint': case 'cspicprint': case 'csputprint': case 'cfont':
         case 'cpaper': case 'ctoblack': case 'cmovcolor': case 'ctopalet': case 'cnumput': case 'cscheart':
         case 'cscpos': case 'cscsize': case 'cschoriz': case 'cscvertic': case 'cscreduce': case 'cscscale':
-        case 'creducing': case 'cscmap': case 'cscdump': case 'cfindcla': case 'cnearcla': case 'cviewcla':
+        case 'creducing': case 'cscmap': case 'cscdump': case 'cnearcla': case 'cviewcla':
         case 'cinstru': case 'cminstru': case 'cordspr': case 'calign': case 'cbackstar': case 'cstarring':
         case 'cengine': case 'cautobase': case 'cquality': case 'chsprite': case 'cselpalet': case 'clinepalet':
         case 'cautomode': case 'cautofile': case 'cscback': case 'cscrolpage': case 'cmatent': case 'cshrink':
