@@ -138,7 +138,7 @@ export interface IsharTitleSpec {
    */
   enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number, occupied?: IsharOccupancy): IsharPartyState | null;
   /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
-  addOns?(region: number, zone: number): readonly string[] | null;
+  addOns?(region: number, zone: number, state: IsharPartyState): readonly string[] | null;
 }
 
 /**
@@ -292,16 +292,39 @@ export function isharEnter(to: IsharPartyState, v: number, occupied?: IsharOccup
 }
 
 /**
- * The CONT5 cave mouth, measured in the oracle (the writer is MAIN
- * `+0x1b11`, in a part the disassembler does not reach yet): stepping onto
- * CONT5 (13,24), the only cell holding 81, switches the region code from 5
- * to 15 (TELEP.DO asks a manual word first); stepping from it back north
- * to (12,24) switches it back. Inside, the cave is drawn on the same CONT5
- * grid.
+ * MAIN's cave and town gateways (the per-step position checks at MAIN
+ * `+0xfb3..+0x149c`, reached from the region switch `+0xe41`). Each one is a
+ * fixed (row, col) on a CONT grid. Standing on the inner cell with the plain
+ * region code calls `+0x3039` (caves: code + 10, flag `0x4255` = 1) or
+ * `+0x306b` (towns: code + 10, flag `0x4256` = 1). Standing on the outer cell
+ * with the +10 code calls `+0x3052`/`+0x3081`, which subtract 10 again. Both
+ * then reload the region's scene group (`+0x188d`, `+0x1c88`).
+ *
+ * | code | inner cell | outer cell | what |
+ * |---|---|---|---|
+ * | 2 <-> 12 | CONT2 (27,37), value 80 | (27,38) | cave |
+ * | 5 <-> 15 | CONT5 (13,24), value 81 | (12,24) | cave (TELEP.DO asks a manual word first) |
+ * | 3 <-> 13 | CONT3 (18,73) and (32,57) | (17,73) and (32,56) | town |
+ * | 4 <-> 14 | CONT4 (26,72) and (33,65) | (25,72) and (33,64) | town |
+ *
+ * There is no CONT1 cave or town: code 11 has no arm. The outer cells hold
+ * the gate values 80/81 (caves) and 109/110 (towns).
  */
-export function ishar1CavePortal(from: IsharPartyState, to: IsharPartyState): IsharPartyState {
-  if (to.region === 5 && to.row === 13 && to.col === 24) return { ...to, region: 15 };
-  if (from.region === 15 && from.row === 13 && from.col === 24 && to.row === 12 && to.col === 24) return { ...to, region: 5 };
+export const ISHAR1_PORTALS: ReadonlyArray<{ code: number; inner: readonly [number, number]; outer: readonly [number, number]; kind: 'cave' | 'town' }> = [
+  { code: 2, inner: [27, 37], outer: [27, 38], kind: 'cave' },
+  { code: 5, inner: [13, 24], outer: [12, 24], kind: 'cave' },
+  { code: 3, inner: [18, 73], outer: [17, 73], kind: 'town' },
+  { code: 3, inner: [32, 57], outer: [32, 56], kind: 'town' },
+  { code: 4, inner: [26, 72], outer: [25, 72], kind: 'town' },
+  { code: 4, inner: [33, 65], outer: [33, 64], kind: 'town' },
+];
+
+/** The region code after a step onto `to` (MAIN's gateway checks, `ISHAR1_PORTALS`). */
+export function ishar1RegionPortal(_from: IsharPartyState, to: IsharPartyState): IsharPartyState {
+  for (const p of ISHAR1_PORTALS) {
+    if (to.region === p.code && to.row === p.inner[0] && to.col === p.inner[1]) return { ...to, region: p.code + 10 };
+    if (to.region === p.code + 10 && to.row === p.outer[0] && to.col === p.outer[1]) return { ...to, region: p.code };
+  }
   return to;
 }
 
@@ -399,9 +422,9 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
         return { scripts: ['FTEMPLE', 'TEMPLE'], paletteFrom: { script: 'FTEMPLE', slot: -1 } };
       case 13: case 14:
         return { scripts: ['FVILLE', 'VILLE', 'FONTAINE'], paletteFrom: { script: 'FVILLE', slot: -1 } };
-      case 15:
-        // the CONT5 cave behind the (13,24) gate cell (value 81): oracle
-        // start order. MCAVE starts PCAVE (the doors) itself.
+      case 12: case 15:
+        // the CONT2 and CONT5 caves (ISHAR1_PORTALS): oracle start order.
+        // MCAVE starts PCAVE (the doors) itself.
         return { scripts: ['MCAVE', 'FCAVE2', 'SCAVE', 'COLCAVE'], paletteFrom: { script: 'FCAVE2', slot: -1 } };
       default:
         return null;
@@ -435,14 +458,26 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
   enter(from, to, cell, occupied) {
     if (ishar1DoorShut(from, to, cell, from.tables?.[0x3b64] ?? this.tables![0x3b64]!)) return null;
     const r = isharEnter(to, cell(to.region, to.row, to.col), occupied, from);
-    return r && ishar1CavePortal(from, r);
+    return r && ishar1RegionPortal(from, r);
   },
   zone: { script: 'GERDEP', entry: 0x1baf, exits: [0x1d34, 0x2278], addr: 0x3eac, prevRegionLocal: 25 },
-  addOns(region, zone) {
+  addOns(region, zone, st) {
     // MAIN +0xe41 (cswitch2 on the region code) and the loaders it calls:
     // +0x31b2 lacustre, +0x3097 village (unloads lacustre/rampart/inville),
     // +0x3127 rampart + inville (unloads village).
     switch (region) {
+      case 2:
+        // MAIN +0x1031 / +0x1070 (flag 0x425a): INCAVE, the CONT2 cave
+        // mouth's facade, starts in zone 4 west of col 47 on rows 26..28 and
+        // goes away above row 24 or below row 30 (in between it stays as it was).
+        if (zone !== 4 || st.col >= 47) return null;
+        if (st.row > 25 && st.row < 29) return ['INCAVE'];
+        if (st.row < 24 || st.row > 30) return [];
+        return null;
+      case 5:
+        // MAIN +0x11e4 / +0x121a: INCAVE at CONT5 cols 23..25 south of row 6
+        // (the corridor down to the (13,24) cave mouth).
+        return st.col >= 23 && st.col <= 25 && st.row > 6 ? ['INCAVE'] : [];
       case 1:
         if (zone === 0) return ['LACUSTRE'];
         if (zone >= 1 && zone <= 3) return ['VILLAGE'];
@@ -832,7 +867,7 @@ export class IsharScene {
   /** Swap MAIN's zone add-on scripts to match the current zone (kills drop their sprites; new ones run their start-up code). */
   private applyAddOns(): void {
     const st = this.state!;
-    const want = this.spec.addOns?.(st.region, this.zone);
+    const want = this.spec.addOns?.(st.region, this.zone, st);
     if (want === null || want === undefined) return;
     const restart = !!this.spec.addOnRestartZones?.includes(this.zone) && this.zone !== this.addOnZone;
     this.addOnZone = this.zone;
@@ -847,7 +882,10 @@ export class IsharScene {
       const s = this.create(name);
       if (!s) continue;
       s.runner.settle(env);
-      keep.push(s);
+      // An add-on wins equal-depth ties against the region group (oracle,
+      // CONT5 7..12,24: INCAVE's wall covers FORET's tree root at depth 99;
+      // INCAVE got entity slot 13, FORET 12). Unchanged on the CONT1-4 walks.
+      keep.unshift(s);
     }
     this.scripts = keep;
     this.addOnKey = key;
@@ -956,6 +994,10 @@ export function compositeIsharView(leaves: IsharSceneLeaf[], screen: IsharViewSc
     canvas[i * 4 + 3] = 255;
   }
   for (const leaf of leaves) {
+    // A sprite behind the viewer (depth < 0) stays in the display list but
+    // is not drawn (the reference renderer tests `newd > -1`); oracle, town
+    // CONT3 (32,57): VILLE's depth -18/-20 walls are listed, not shown.
+    if (leaf.y < 0) continue;
     const bmp = leaf.bitmap;
     const src = palette ? isharBitmapToPaletteRGBA(bmp, palette) : isharBitmapToNormalizedGreyscaleRGBA(bmp);
     const { x: dx, y: dy } = leafTopLeft(leaf, screen);

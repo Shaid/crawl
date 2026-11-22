@@ -6,7 +6,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ISHAR1_TITLE, ishar1CavePortal, ishar1DoorShut, ishar1MonsterTableFromEn1, ishar1Occupancy, isharEnter } from '../../shared/ishar-scene.ts';
+import { ISHAR1_TITLE, ishar1RegionPortal, ishar1DoorShut, ishar1MonsterTableFromEn1, ishar1Occupancy, isharEnter } from '../../shared/ishar-scene.ts';
 
 const EN1 = 'data/ishar/amigaaga/EN1.FIC';
 const cont = (n: number) => new Uint8Array(readFileSync(`data/ishar/amigaaga/CONT${n}.FIC`));
@@ -70,8 +70,16 @@ describe.skipIf(!existsSync(EN1))('Ishar 1 caves: doors, passages, the cave mout
     expect(ISHAR1_TITLE.enter!({ ...at(15, 49, 19), tables: { 0x3b64: new Array(41).fill(1) } }, at(15, 49, 20), cell)).toEqual(at(15, 36, 27));
   });
   it('CONT5 (13,24) is the cave mouth', () => {
-    expect(ishar1CavePortal(at(5, 12, 24), at(5, 13, 24))).toEqual(at(15, 13, 24));
-    expect(ishar1CavePortal(at(15, 13, 24), at(15, 12, 24))).toEqual(at(5, 12, 24));
+    expect(ishar1RegionPortal(at(5, 12, 24), at(5, 13, 24))).toEqual(at(15, 13, 24));
+    expect(ishar1RegionPortal(at(15, 13, 24), at(15, 12, 24))).toEqual(at(5, 12, 24));
+    // MAIN +0xfb3..+0x149c: the CONT2 cave and the CONT3/CONT4 towns
+    expect(ishar1RegionPortal(at(2, 27, 38), at(2, 27, 37))).toEqual(at(12, 27, 37));
+    expect(ishar1RegionPortal(at(12, 27, 37), at(12, 27, 38))).toEqual(at(2, 27, 38));
+    expect(ishar1RegionPortal(at(3, 17, 73), at(3, 18, 73))).toEqual(at(13, 18, 73));
+    expect(ishar1RegionPortal(at(13, 33, 56), at(13, 32, 56))).toEqual(at(3, 32, 56));
+    expect(ishar1RegionPortal(at(4, 33, 64), at(4, 33, 65))).toEqual(at(14, 33, 65));
+    // no CONT1 arm
+    expect(ishar1RegionPortal(at(1, 27, 38), at(1, 27, 37))).toEqual(at(1, 27, 37));
   });
 });
 
@@ -86,5 +94,20 @@ describe.skipIf(!existsSync('data/ishar/amigaaga/TELEP.DO'))('Ishar 1 manual-pro
     expect(t).toHaveLength(8);
     expect(m[3]).toEqual({ page: 8, line: 1, word: 2, answer: Buffer.from('VEVBTQ==', 'base64').toString() });
     expect(t.find((e) => e.page === 10 && e.line === 1 && e.word === 1)?.answer).toBe(Buffer.from('UkVDUlVJVA==', 'base64').toString());
+  });
+});
+
+describe('Ishar 1 INCAVE add-on (MAIN +0x1031/+0x1070, +0x11e4/+0x121a)', () => {
+  const st = (region: number, row: number, col: number) => ({ region, row, col, facing: 0 as const });
+  it('CONT5: alive on cols 23..25 south of row 6', () => {
+    expect(ISHAR1_TITLE.addOns!(5, 6, st(5, 7, 24))).toEqual(['INCAVE']);
+    expect(ISHAR1_TITLE.addOns!(5, 6, st(5, 6, 24))).toEqual([]);
+    expect(ISHAR1_TITLE.addOns!(5, 6, st(5, 9, 26))).toEqual([]);
+  });
+  it('CONT2: zone 4 west of col 47, started on rows 26..28 and kept from 24 to 30', () => {
+    expect(ISHAR1_TITLE.addOns!(2, 4, st(2, 27, 44))).toEqual(['INCAVE']);
+    expect(ISHAR1_TITLE.addOns!(2, 4, st(2, 24, 44))).toBeNull();
+    expect(ISHAR1_TITLE.addOns!(2, 4, st(2, 23, 44))).toEqual([]);
+    expect(ISHAR1_TITLE.addOns!(2, 5, st(2, 27, 44))).toBeNull();
   });
 });

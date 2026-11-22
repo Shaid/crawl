@@ -263,10 +263,14 @@ export function crawlWalk(
   initial: { A?: GridReader; B?: GridReader } = {},
   /** Extra scene wakes at the start pose: a walk that starts from a mid-game savestate meets scripts with a per-wake phase (FOND's alternation) already advanced. */
   startWakes = 0,
+  /** The sub-zone global at the start pose (a mid-game savestate). Default: the first step's `zone` dump when that step is a turn (a turn keeps the zone), else 0. */
+  startZone?: number,
 ): WalkComparison[] {
   const spec = data.spec;
   const buffers = new IsharGridBuffers(spec, layers, initial);
   const scene = new IsharScene(spec, data.load, buffers.update(start));
+  const z0 = startZone ?? (steps[0] && steps[0].action !== 'F' ? steps[0].mem?.zone?.[0] : undefined);
+  if (z0 !== undefined) scene.zone = z0;
   scene.enter(start);
   for (let i = 0; i < startWakes; i++) scene.step(start);
   let cur = start;

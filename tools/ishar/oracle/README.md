@@ -105,7 +105,10 @@ never touched). `plan` returns the next leg's actions and expected states
 title's step test). The harness command `expect OFF VAL` holds all further
 input once a main-global byte differs, so a leg stops where the game
 stopped following it. Use `startState`/`finalState` to chain walks and
-`legCommands` for per-leg pokes.
+`legCommands` for per-leg pokes. A walk from a mid-game savestate must give
+the scene the game's sub-zone (`crawlWalk(..., startZone)`; Ishar 1 dumps
+`0x3eac` as `zone` each step, and a walk whose first action is a turn
+takes it from there).
 
 `ALIS_HARNESS_STRCMP=1` logs the engine's string compares and key reads,
 with the script and pc of each `ogetkey`. That is how the Ishar 1 CONT3

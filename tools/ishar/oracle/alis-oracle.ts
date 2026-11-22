@@ -110,6 +110,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
       { name: 'doorOpen', off: 0x3b64, len: 41, table: true },
       // and the lever states MCAVE reads next to the lever list 0x3c68/0x3c9c
       { name: 'leverState', off: 0x3b98, len: 50, table: true },
+      // GERDEP's sub-zone (MAIN swaps the zone add-ons on it)
+      { name: 'zone', off: 0x3eac, len: 1 },
     ],
   },
   ishar2: {

@@ -1759,6 +1759,43 @@ plausibility.
     the entity lists as empty, storing -1. It routes `ohim`/`shim` to
     `clive` children.
 
+11. **Cave and town gateways (Ishar 1, 2026-11-23).** The region code
+    changes at fixed cells, not by cell value. MAIN's region switch
+    `+0xe41` runs per-region position checks (`+0xfb3..+0x149c`). Standing
+    on an inner cell with the plain code calls `+0x3039` (cave) or
+    `+0x306b` (town); both add 10 to `0x1508` and reload the group.
+    Standing on the matching outer cell with the +10 code calls
+    `+0x3052`/`+0x3081`, which subtract 10. Flags `0x4255` (cave) and
+    `0x4256` (town) record which side the party is on.
+
+    | Codes | Inner cell | Outer cell |
+    |---|---|---|
+    | 2 / 12 (cave) | CONT2 (27,37) | (27,38) |
+    | 5 / 15 (cave) | CONT5 (13,24) | (12,24) |
+    | 3 / 13 (town) | CONT3 (18,73), (32,57) | (17,73), (32,56) |
+    | 4 / 14 (town) | CONT4 (26,72), (33,65) | (25,72), (33,64) |
+
+    Code 11 has no arm: CONT1 has no cave or town. Group switch `+0x188d`:
+    12 and 15 run MCAVE, FCAVE2, SCAVE and COLCAVE; 13 and 14 run FVILLE,
+    VILLE and FONTAINE. Ported as `ISHAR1_PORTALS`/`ishar1RegionPortal`.
+    Leaving a town back into CONT3 runs MONSTRE.DO's manual prompt again.
+    Entering a town fills the roaming slots 60-69 with town guards
+    (kind -4) next to the gate.
+12. **INCAVE**, the cave-mouth facade, is a position add-on, not a zone
+    one. MAIN `+0x11e4`/`+0x121a`: in region 5 it lives on cols 23..25
+    south of row 6. MAIN `+0x1031`/`+0x1070`: in region 2, in zone 4 west of
+    col 47, it starts on rows 26..28 and stops above row 24 or below row 30.
+    An add-on wins equal-depth ties against the region group: INCAVE's wall
+    covers FORET's tree root at depth 99 (INCAVE got entity slot 13, FORET
+    12).
+13. **Sprites behind the viewer.** A sprite with depth < 0 stays in the
+    display list but is not drawn: the reference renderer tests
+    `newd > -1`. VILLE puts walls at depth -18/-20 on some town turns.
+14. **Mid-game starts.** A walk from a savestate must start with the game's
+    sub-zone `0x3eac`. With zone 0, CONT3's (27,42) gate rule never fires
+    and RAMPART/INVILLE stay missing. The oracle now dumps the zone each
+    step (`stepMemdumps` `zone`).
+
 **Measured:**
 
 | Title | Sample | Old walker (best single script) | New `IsharScene` | Null control (pose i vs game pose i+1) |
@@ -1775,14 +1812,27 @@ sprites overlap in the opposite order there, 5 pixels each. The game's
 tie order follows the entity slot each new script was given, and crawl
 approximates that by start order.
 
-**Not covered yet:**
+**Measured 2026-11-23 (later), with roaming monsters removed and hp kept
+at 500.** All values are placements / pixels outside NPC boxes:
 
-- the Ishar 1 town and cave codes (11-15);
-- Ishar 1 regions 3-6 against the game. The rules are traced, but a real
-  walk there died in an encounter in CONT2.
-- Ishar 2 outside its start group;
-- all of Ishar 3: its scripted boot needs `ALIS_HARNESS_MS`, it is not
-  deterministic, and its scene groups are untraced;
+| Area | View frames | Placements | Pixels | Moves as predicted |
+|---|---|---|---|---|
+| Town 13 (CONT3 town), entered at (32,57) | 48 + 3 | 100% | 100% | 51/51 |
+| Town 14 (CONT4 town), entered at (33,65) | 13 | 100% | 100% | 12/13 |
+| Cave 12 (CONT2 cave), in and out | 1 + 41 + 17 | 100% | 100% | 59/59 |
+| CONT2 with INCAVE | 58 + 15 | 100% | 100% | 73/73 |
+| CONT5 cave corridor with INCAVE | 14 | 100% | 100% | 14/14 |
+
+The town-14 miss is the walk's own poke: it killed the guards spawned at
+the gate between two legs.
+
+**Not covered yet** (rewritten 2026-11-23 later; the earlier list named
+regions 3-6, the town/cave codes and Ishar 3's boot, all measured since):
+
+- how doors and levers are worked in play (the walks poke them open);
+- Ishar 2 outside its start group (`ishar2-scene-groups`);
+- Ishar 3 outside Maz;
+- NPCs and monsters in the view;
 - Crystals of Arborea.
 
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED

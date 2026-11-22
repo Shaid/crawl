@@ -56,9 +56,13 @@ Results, all at 100% of placements and of pixels outside NPC boxes:
 
 Still open:
 - how doors and levers are worked in play (the walks poked them open);
-- town codes 13/14 (FVILLE, VILLE, FONTAINE) and the other cave codes (11/12, for example CONT2's 51-65 door cells);
-- the zone add-on INCAVE at the cave mouth (oracle: started at CONT5 7,24);
-- the walker does not model region 15 (its world has no cave layer).
+- ~~town codes 13/14 and the other cave codes~~ (done, see below);
+- ~~the zone add-on INCAVE~~ (done, see below);
+- the walker does not model regions 12-15 (its world has no cave or town layer).
+
+**2026-11-23 (later): gateways, towns and the second cave, measured.** The region code changes at fixed cells, traced in MAIN's per-region position checks `+0xfb3..+0x149c` (writers `+0x3039`/`+0x3052` caves, `+0x306b`/`+0x3081` towns, each ±10). Inner -> outer cells: CONT2 cave (27,37) -> (27,38); CONT5 cave (13,24) -> (12,24); CONT3 town (18,73) -> (17,73) and (32,57) -> (32,56); CONT4 town (26,72) -> (25,72) and (33,65) -> (33,64). There is no code 11. `ishar1RegionPortal` replaces `ishar1CavePortal`. INCAVE is a position add-on (MAIN `+0x11e4`/`+0x121a` region 5, `+0x1031`/`+0x1070` region 2), and it wins equal-depth ties over the group. Sprites with depth < 0 are listed but not drawn. Mid-game walks must start with the game's zone (`0x3eac`, now dumped each step). Results, all 100% of placements and of pixels outside NPC boxes: town 13 (51 frames), town 14 (13), cave 12 (59, in and out), CONT2 with INCAVE (73), CONT5 corridor with INCAVE (14). Moves: all as predicted except one where the walk's own poke removed the town guards between legs. Leaving town 13 runs MONSTRE's manual prompt again. Entering a town spawns guards (kind -4) into slots 60-69. Savestates: `town13`, `town14`, `cave12`.
+
+Doors, partly traced: PCAVE gives a door a click form (`cforme`) only when it is adjacent and its index is below 24 or above 40; index 40 also needs item -24 in a party inventory (`0x1568`); PCAVE `+0x1c4` then sets the door's PARAM flag. Negative indices are levers (state `0x3b98`; lever drawn up at 0, down at 1/2). Clicking the door, or ACTION then the door, in the oracle did not open CONT5 door 11 (16,24): the click has to hit the form in the mouse entity's coordinates, not yet worked out. The ACTION menu offers PICK LOCK.
 
 The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONSTRE's and TELEP's tables and answers a prompt by trying the words (verified at the cave mouth, about 60 s per try). | `docs/ishar-container-format.md` §8.8 | 2026-11-23 |
 | ishar-scene-tie-slots | open (low) | After a region change the game's equal-depth tie order follows each new script's entity slot (slots freed by the killed group are reused); `IsharScene` uses start order. Costs 10 pixels over a 129-frame walk. Model slot allocation (`script_live` slot reuse) if it ever matters | `tools/ishar/__tests__/oracle-parity.test.ts` (walk test comment) | 2026-11-22 |
