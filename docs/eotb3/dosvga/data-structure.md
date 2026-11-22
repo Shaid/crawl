@@ -892,8 +892,8 @@ Built `daesop` from ThirdEye (`apps/daesop`, g++ one-liner) and read `-j dungeon
 - `draw floor` = `draw_bitmap(view, wallset, 18, 0,0)`: shape 18 of the wall set is the 176x120 backdrop. `wallset` (dungeon static L@7168) is a bitmap resource id set by the area class's `enter level` (msg 256): e.g. mauslvl1 -> 253 "Mausoleum walls", plus `set_palette(1..3, ...)`.
 - `draw walls`: 25 slots (dx,dy tables per facing, `table270/374`, 4x26); cell = `lvlmap[y*32+x]` (0xFF = open, 0/1 = the two wall variants); shape = `table170[type*26+slot]` (0..18), x = `table66[slot]`, y = `table14[slot]`, mirror = `table118[slot]` (shapes 15/14/17 map to 8/13/16 mirrored). `draw_bitmap(page, table, number, x, y, scale, flip, fade_tbl, fade_lvl)`; flip bit0 = X.
 - `draw objects`: per view cell (3 planes of 32x32 words in `lvlobj`: features, items, monsters) sends `draw`(30) down the `W:next` chain. `features.draw` calls the subclass `report`(18) (arg 4 = bitmap resource id, arg 1 = flags) and `render`(112); shapes use the same 0..18 wall layout, `doors.render` adds `18*state`.
-- Level objects: `SAVEGAME/LVLnn.TMP` = SF_BIN stream `0x1A` then `{u16 slot, u32 class, u16 size}` + raw statics (ThirdEye `lvl_tmp.cpp`); LVL01 = 231 objects, LVL03 = 331 (matches ThirdEye). Statics layout entities: place@0 (y*32+x), x@2, y@3, lvl@4, region@5, next@6, prev@8; the class chain follows (features `decflags`).
-- Move rule (kernel `step`, `eye.cpp` step_X/Y): N=-y, E=+x, wrap 32; blocked iff `dungeon.impedance`(95)(mover=kernel,x,y) < 0 (-1 wall, -2 special event, no move). Verified: impedance blocks 100% of non-0xFF cells on level 1.
+- Level objects: `SAVEGAME/LVLnn.TMP` = SF_BIN stream `0x1A` then `{u16 slot, u32 class, u16 size}` + raw statics (layout re-derived from the game in 10.3); LVL01 = 231 objects, LVL03 = 331. Statics layout entities: place@0 (y*32+x), x@2, y@3, lvl@4, region@5, next@6, prev@8; the class chain follows (features `decflags`).
+- Move rule (kernel `step`, natives step_X/step_Y, INTERP.EXE 0x17890/0x17930, see 10.3): N=-y, E=+x, wrap 32; blocked iff `dungeon.impedance`(95)(mover=kernel,x,y) < 0 (-1 wall, -2 special event, no move). Verified: impedance blocks 100% of non-0xFF cells on level 1.
 - Palette: Fixed palette (id 335) at DAC 0, then `set_palette` bases `{0,0xB0,0xC0,0xE0,0xB0}`.
 
 Exports: `scripts/extract_eotb3_walker.py` -> `public/assets/eotb3/dosvga/data/walker/` (classes, levels, palettes, raw VFX). Frames: `npx tsx tools/eotb3/render-frames.ts` -> `build/cache/eotb3/walker-frames/`.
@@ -914,6 +914,25 @@ Exports: `scripts/extract_eotb3_walker.py` -> `public/assets/eotb3/dosvga/data/w
 - Not covered by that oracle: opcodes the dungeon-view classes never execute (the other 300+ classes: combat, spells, AI) are implemented from the compiler's emission pattern only and have not been run; `DIV`/`MOD` by zero return 0, `SHR` is logical, `EXP` is integer repeated multiplication (hypotheses).
 
 ---
+
+### 10.3 Provenance change: step tables, palette regions and the LVLnn.TMP loader (2026-11-22)
+
+The walker's step tables, region first-colours and `LVLnn.TMP` loader were first taken from ThirdEye (GPLv3). They are now derived from the game's own `INTERP.EXE` (DOS/4GW LE; object 1 = code at vaddr 0x10000 = file+0x9400, object 2 = data at vaddr 0x30000 = file+0x24400) and from the data files, with committed from-bytes checks in `scripts/verify_eotb3_step_tables.py` (all pass, plus null controls). ThirdEye's `lvl_tmp.cpp` was not opened and the old loader body was not read for the rewrite. **confirmed**
+
+- **step_X / step_Y** (same natives as Dungeon Hack's seg 0f36): `INTERP.EXE` vaddr 0x17890 (X) and 0x17930 (Y). Signature `(v, fdir, mtype, dist)`; `dist==0` returns `v`; mtype 7/8/9 are composite diagonal steps (cmp 7/9/8 at 0x178ab/0x178c6/0x178e7); otherwise `(v + s8(table[(mtype<<2)+fdir]) * dist) & 31` (`imul byte [ebx+0x1196]`, `and cl,0x1f` at 0x1791f). X indexes the signed-byte table at vaddr 0x31196 (file+0x25596), Y the same table at 0x311ae (`+0x18`), so the Y rows overlap the tail of the X rows (the same overlapped layout Dungeon Hack's `stepAxis` documents). Rows are 4 bytes (fdir N,E,S,W): mtype 2 forward `0,1,0,-1` (X) / `-1,0,1,0` (Y); 4 strafe-left, 5 back, 6 strafe-right follow. `DX`/`DY` in `tools/walker/games-eotb3.ts` equal the natives' result for mtype 2/4/5/6, 16/16 per axis (null control: table read one byte late fails).
+- **Palette region first colours** `{0x00,0xB0,0xC0,0xE0,0xB0}`: u16[5] at vaddr 0x30fb8 (file+0x253b8), read by the palette routine at 0x16884 (`mov di, word [eax*2+0xfb8]`) and byte-wise at 0x16a04. `FIRST_COLOR` in `tools/eotb3/engine.ts` matches (5/5).
+- **`LVLnn.TMP` / `ITEMS.TMP` stream** (writer `save_range` at vaddr 0x139e0, reader `load_range` at 0x137d0; the level range literals `1000`..`1999` are pushed at 0x19000-0x19005 for the `LVLxx_yy.TXT`->`.BIN` copy, and the paths `SAVEGAME\LVLxx.TMP` / `ITEMS.TMP` sit at file+0x25574 / +0x25587):
+
+  | Offset | Size | Field | Notes |
+  |---|---|---|---|
+  | 0 | 1 | tag `0x1A` | writer `mov ah,0x1a` 0x13a15; reader compares at 0x13818 |
+  | per slot, ascending | 2 | slot | checked against the loop counter (0x138be) |
+  | +2 | 4 | class | `0xFFFFFFFF` = free slot (0x138d0, writer 0x13aa7) |
+  | +6 | 2 | size | statics bytes that follow (writer: object length-4, 0x13ae2); 0 when free |
+  | +8 | size | statics | copied verbatim to object+4 (0x13980-0x13989); then message 2 (restore) is sent when the caller's flag is set (0x1399a) |
+
+  All 14 `LVLnn.TMP` files: exactly slots 1000..1999 in order, `size==0` iff class free, record walk ends at EOF (14/14; 2,144 live objects). `parse_lvl_tmp` was rewritten from this layout: `levels.json` is **byte-identical** (sha256 `4c30c024...`) to the previous output, and 28,696 walker frames (every open cell x 4 facings, 14 levels, engine composite hashed) are identical to the pre-swap render. Unverified: the walker's relink of placed objects into the `lvlobj` cell chains (engine.ts `placeObjects`) is its own stand-in for the restore handlers' work, not game-verified.
+- Remaining ThirdEye cross-check mentions live in `scripts/eotb3lib/*.py` (resource/bitmap/CPS/palette-region readers), outside this change.
 
 ## Still open
 

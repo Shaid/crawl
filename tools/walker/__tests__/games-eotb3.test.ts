@@ -39,7 +39,7 @@ describe('AESOP VM (synthetic)', () => {
   });
 });
 
-describe('EOB3 step geometry (EYE.C DX/DY tables)', () => {
+describe('EOB3 step geometry (INTERP.EXE step_X/step_Y table)', () => {
   const fake = { impedance: () => 0 } as unknown as Eotb3Engine;
   it('forward: N=-y, E=+x, S=+y, W=-x, wrapping at 32', () => {
     expect(tryStep(fake, 5, 5, 0, 2)).toMatchObject({ x: 5, y: 4 });
