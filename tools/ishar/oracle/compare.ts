@@ -21,6 +21,7 @@ import {
   type IsharOccupancy,
   ishar1MonsterTableFromDumps,
   ishar1Occupancy,
+  isharContOf,
 } from '../../shared/ishar-scene.ts';
 import type { OracleFrame, OracleGame, OraclePose, OracleScreen } from './alis-oracle.ts';
 import { ORACLE_TITLES } from './alis-oracle.ts';
@@ -342,7 +343,7 @@ export function stepOccupancy(game: OracleGame, mem: Readonly<Record<string, Uin
 /** CONT layers for a title, storage order (layer 0 first). */
 /** The title's step test (`spec.enter`; default: refused on a negative layer-0 cell). */
 export function enterCell(spec: IsharTitleSpec, layers: (region: number) => readonly Uint8Array[] | undefined, from: IsharPartyState, to: IsharPartyState, occupied?: IsharOccupancy): IsharPartyState | null {
-  const cell = (region: number, row: number, col: number) => s8(layers(region % 10)?.[0]?.[row * spec.stride + col] ?? 0);
+  const cell = (region: number, row: number, col: number) => s8(layers(isharContOf(spec, region))?.[0]?.[row * spec.stride + col] ?? 0);
   if (spec.enter) return spec.enter(from, to, cell, occupied);
   return cell(to.region, to.row, to.col) < 0 ? null : to;
 }

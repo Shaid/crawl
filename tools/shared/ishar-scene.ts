@@ -145,6 +145,8 @@ export interface IsharTitleSpec {
    * Returns the current call's arguments from the main globals.
    */
   darken?(readMain: (addr: number) => number): { factors: readonly [number, number, number]; first: number; count: number } | null;
+  /** The CONT file a region code reads (default: `region % 10`, Ishar 1/2's town/cave codes +10 share their region's file). */
+  contOf?(region: number): number;
   /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
   addOns?(region: number, zone: number, state: IsharPartyState): readonly string[] | null;
 }
@@ -635,13 +637,34 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     return { factors: [m(0x3f82), m(0x3f84), m(0x3f86)], first: 1, count: m(0x3da4) === 0 ? 15 : 175 };
   },
   tables: { 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2'],
+  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2', 'FORET', 'FFORET'],
+  // MAIN +0x4a3c: CONT1-3 / CONT2-3 for the two Maz codes, then one file per
+  // region pair (3/4 jungle, 5/6 forest, 7/8 dungeons, 9/10 mountains).
+  contOf(region) {
+    return region <= 2 ? region : Math.floor((region + 1) / 2) + 1;
+  },
   sceneGroup(region) {
+    // MAIN +0x16b1 (cswitch2 on the region code) loads the region's scripts:
+    // 1/2 fville, affpv, vdec1, vdec2; 3/4 fjungle, jungle; 5/6 foret,
+    // fforet; 7 pcave, djtrap (+ djdec2, djdec); 8 pcave; 9/10 fmont,
+    // montagne. The location loader (+0x18d4) adds the Maz houses (start
+    // location 2: vwall, vhouse2, vhouse1) and the dungeons' walls.
     // FVILLE `+0xfc`: `cpalette 5`.
     if (region === 1) return { scripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
+    // oracle start order after a gate trip (MAIN +0x3e0f): foret, fforet
+    if (region === 5 || region === 6) return { scripts: ['FORET', 'FFORET'], paletteFrom: { script: 'FFORET', slot: -1 } };
     return null;
   },
   gridBuffers: 'layers',
+  // GERDEP's step test (+0xdb8 .. +0x13b7): a negative layer-0 cell refuses
+  // the step except -2 (while 0x3b34 = 0, as in every oracle run); -5 in Maz
+  // is a door (MAIN message 17 opens the building instead); grid-B 100 is a
+  // gate (message 38, a trip: `+0xe04`); a monster in EN1 slots 60.. on the
+  // cell (`+0xf13`) also refuses it (not modelled: walks remove monsters).
+  enter(_from, to, cell) {
+    const v = cell(to.region, to.row, to.col);
+    return v < 0 && v !== -2 ? null : to;
+  },
   stepFrom(st, dir) {
     let { row, col } = st;
     const raw = this.facingRaw[dir];
@@ -653,6 +676,11 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     return { ...st, row, col };
   },
 };
+
+/** The CONT file number `region` reads (`IsharTitleSpec.contOf`). */
+export function isharContOf(spec: IsharTitleSpec, region: number): number {
+  return spec.contOf ? spec.contOf(region) : region % 10;
+}
 
 /**
  * The two grid buffers as the game holds them, fed with each title's CONT
@@ -684,7 +712,7 @@ export class IsharGridBuffers {
 
   /** Update after the party arrived at `st` (MAIN's post-move loads) and return the readers. */
   update(st: IsharPartyState): { A: GridReader; B: GridReader } {
-    const code = st.region % 10;
+    const code = isharContOf(this.spec, st.region);
     if (this.spec.gridBuffers === 'layers') return { A: this.reader(code, 0), B: this.reader(code, 1) };
     const put = (n: number) => {
       if (n % 2 === 1) this.held.A = n;
@@ -964,7 +992,7 @@ export class IsharScene {
 
   private groupKeyFor(state: IsharPartyState): string {
     const group = this.spec.sceneGroup(state.region);
-    return group ? `${state.region % 10}:${group.scripts.join(',')}` : '';
+    return group ? `${isharContOf(this.spec, state.region)}:${group.scripts.join(',')}` : '';
   }
 
   private tagNewSprites(): void {

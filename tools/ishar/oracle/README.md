@@ -69,6 +69,8 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
 - `derefdump OFF N NAME` — dumps the data of an indirect engine-3.0 array,
   whose handle is at main offset OFF (for example, Ishar 3's grid buffer B
   at `0x14ae`);
+- `derefpoke OFF IDX VAL` — writes byte IDX (decimal) of such an array
+  (for example, a gate value 100 into Ishar 3's buffer B to drive a trip);
 - `dump NAME` — writes the frame and the display list;
 - `save`, `mark`, `quit`.
 
@@ -122,3 +124,16 @@ stateOut, words, lead)` plays `lead` from a savestate (the engine does not
 save while the prompt waits), types each word and keeps the first one after
 which a turn click works. The prompt runs in real time, about 60 s per try,
 and a wrong word waits out the 150 s timeout, so pass the likely word first.
+
+Ishar 3 gate trips (`build/cache/ishar-oracle/states/i3-foret5.state`, the
+forest after a trip): GERDEP `+0xe04` sends MAIN message 38 when the party
+steps forward onto a grid-B cell of 100 (the gates are on CONT2-3 to CONT6-3).
+MAIN `+0x3cdc` then picks the destination from the region and location
+(`+0x41ed`), plays SPACE2 and loads the new region. Region 1 (CONT1-3) has no
+gate cell, so the oracle drives a trip by setting the location to 13 and
+writing 100 into buffer B in front of the party (`derefpoke 14ae 163 100` at
+the new-game start, facing west): the party arrives in the forest (region 5,
+CONT4-3) at (3,5). Caveat: every savestate load advances Ishar 3's game
+clock by hours (the clock is not in the saved state the same way), so
+multi-leg walks jump through day and night; use single-leg walks for
+measurements.

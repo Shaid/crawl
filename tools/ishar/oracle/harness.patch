@@ -139,10 +139,10 @@ index d3b0040..e68f4f2 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..3188242
+index 0000000..7e0d903
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,199 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -155,6 +155,7 @@ index 0000000..3188242
 +//   peek OFF N                          (prints N signed bytes)
 +//   memdump OFF N NAME                  (raw bytes at basemain+OFF -> NAME.bin)
 +//   derefdump OFF N NAME                (N bytes of an indirect v3 array: the handle at basemain+OFF)
++//   derefpoke OFF IDX VAL               (byte IDX of that array := VAL, IDX decimal)
 +//   dump NAME                           (NAME.ppm frame + NAME.spr live sprite list)
 +//   save | quit | mark TEXT
 +#include <stdio.h>
@@ -257,6 +258,7 @@ index 0000000..3188242
 +    else if (!strcmp(cmd, "peek")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d", &off, &n); fprintf(stderr, "[peek] %ld %x:", h_frameno, off); for (int i = 0; i < n; i++) fprintf(stderr, " %d", (s8) * (u8 *)(alis.mem + alis.basemain + off + i)); fprintf(stderr, "\n"); }
 +    else if (!strcmp(cmd, "memdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + alis.basemain + off, 1, n, o); fclose(o); } }
 +    else if (!strcmp(cmd, "derefdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); u32 a = xread32(xread32(alis.basemain + off)); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + a, 1, n, o); fclose(o); } }
++    else if (!strcmp(cmd, "derefpoke")) { unsigned off; int idx, v; sscanf(h_line, "%*ld %*s %x %d %d", &off, &idx, &v); u32 a = xread32(xread32(alis.basemain + off)); *(u8 *)(alis.mem + a + idx) = (u8)v; }
 +    else if (!strcmp(cmd, "dump")) { sscanf(h_line, "%*ld %*s %159s", name); h_dump_ppm(name); h_dump_sprites(name); fprintf(stderr, "[dump] %ld %s\n", h_frameno, name); }
 +    else if (!strcmp(cmd, "save")) { alis.state = eAlisStateSave; }
 +    else if (!strcmp(cmd, "mark")) { fprintf(stderr, "[mark] %ld %s", h_frameno, h_line); }

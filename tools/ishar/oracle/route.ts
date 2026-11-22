@@ -6,7 +6,7 @@
  * (monsters standing on cells). Returns the
  * actions and the state each one should leave.
  */
-import type { IsharOccupancy, IsharPartyState, IsharTitleSpec } from '../../shared/ishar-scene.ts';
+import { isharContOf, type IsharOccupancy, type IsharPartyState, type IsharTitleSpec } from '../../shared/ishar-scene.ts';
 import type { WalkAction } from './alis-oracle.ts';
 import { enterCell } from './compare.ts';
 
@@ -27,7 +27,7 @@ export function planRoute(
 ): { actions: WalkAction[]; states: IsharPartyState[] } | null {
   const forward = (s: IsharPartyState): IsharPartyState | null => {
     const t = spec.stepFrom(s, s.facing);
-    if (!t || extraBlocked.has(cellKey(t.region, t.row, t.col)) || !layers(t.region % 10) || avoid?.(t.region, t.row, t.col)) return null;
+    if (!t || extraBlocked.has(cellKey(t.region, t.row, t.col)) || !layers(isharContOf(spec, t.region)) || avoid?.(t.region, t.row, t.col)) return null;
     return enterCell(spec, layers, s, t, occupied);
   };
   const key = (s: IsharPartyState) => `${s.region}:${s.row}:${s.col}:${s.facing}`;

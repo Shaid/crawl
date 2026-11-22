@@ -1849,7 +1849,44 @@ approximates that by start order.
       by factor/256 on every `cpalette` and sets entry 0 to black.
       `ISHAR3_TITLE.darken` models it. Before this, Maz walks long enough
       to reach dusk scored 24.6% of masked pixels; now 99.99%.
-    - Decoder fix found on the way: the entity tests and searches that
+    - **Regions and their files (later the same day).** MAIN `+0x16b1`
+      loads each region's group: 1/2 fville, affpv, vdec1, vdec2 (Maz);
+      3/4 fjungle, jungle; 5/6 foret, fforet; 7 pcave, djtrap (+ djdec2,
+      djdec); 8 pcave; 9/10 fmont, montagne. MAIN `+0x4a3c` reads CONT1-3
+      for region 1, CONT2-3 for 2, then CONT3-3 .. CONT6-3 for the pairs
+      3/4, 5/6, 7/8, 9/10 (`ISHAR3_TITLE.contOf`).
+    - **Gate trips.** GERDEP `+0xe04` sends MAIN message 38 when the party
+      steps forward onto a grid-B cell of 100 (location 4 needs `0x3e12`
+      odd, location 6 needs `0x3e11` = 1). MAIN's message switch (`+0x60e`,
+      message 38 -> `+0x3cdc`) then calls `+0x41ed`, which picks the
+      destination from region and location: from Maz, location 4 -> region
+      7 (4,53) or 8 (37,53) by the hour; 6 -> 9 (21,36) or 10 (62,36); 8 ->
+      3 (5,4) or 4 (46,4), alternating; 13 -> 5 (3,5) or 6 (44,5). Each
+      destination is next to that region's own gate cell, and the way back
+      leads to Maz location 4, 6, 8 or 13. `+0x3e0f` plays SPACE2, then
+      `+0x3edb` unloads, sets region `0x14b9` and location `0x3b33`, and
+      loads the CONT file and the group. CONT1-3 has no gate cell (the
+      gates are on CONT2-3, Maz's second state, and CONT3-3..CONT6-3).
+    - **GERDEP's location rule** (`+0x1d36`): in regions 1, 2, 5, 7 and 8
+      stepping onto a grid-B cell in -99..-41 sets the location to
+      |cell| - 40; regions 9 and 10 use position bands (col > 34, row > 6
+      / 46).
+    - **GERDEP's step test** (`+0xdb8`..`+0x13b7`): a negative grid-A cell
+      refuses the step except -2; -5 in Maz is a door (message 17 opens
+      the building); a monster in EN1 slots 60.. on the cell (location
+      `0x2f0a`, row `0x1e22`, col `0x1f04`) refuses it.
+    - **Forest, measured.** The oracle drove a real trip (location 13,
+      gate value written into buffer B with the new harness command
+      `derefpoke`). FORET + FFORET over 80 frames of a walk: placements
+      3911/3991 (98.0%), masked pixels 100.000%. The residual is one
+      FFORET sprite per frame (directory slot 5, a solid rectangle inside
+      the slot-4 composite) that the game places at height 20 and crawl
+      at 0; its pixels agree. The walk stopped at CONT4-3 (7,8) after 8
+      steps: the game refused every direction from there, cause not
+      traced (no monster slot holds the location; possibly the party
+      status check at `+0xdc2`).
+    - Decoder fixes found on the way: `cblast` reads an expression (it is
+      `ckill` with erase). The entity tests and searches that
       end in `crstent` (`cfindtyp`, `cfindcla`, `ctstmov`, `cftstmov`,
       `cftstset`, `cvtstmov`, `cvftstmov`, `ctstform`) read a store
       destination. FVILLE's `cfindcla` (taken when `0x3da4` is set)
@@ -1874,8 +1911,8 @@ regions 3-6, the town/cave codes and Ishar 3's boot, all measured since):
 
 - how doors and levers are worked in play (the walks poke them open);
 - Ishar 2 outside its start group (`ishar2-scene-groups`);
-- Ishar 3 outside Maz (MAIN's location table is decoded, item 16; the
-  travel between regions is not traced);
+- Ishar 3 beyond Maz and the forest (item 16: the jungle, dungeon and
+  mountain groups are decoded but not measured);
 - NPCs and monsters in the view;
 - Crystals of Arborea.
 

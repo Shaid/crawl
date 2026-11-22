@@ -612,7 +612,7 @@ export function decodeAlisInstr(data: Uint8Array, pc: number, version = 20): Ali
     case 0xdb: return fin('ccancel', {});
     case 0xdc: return fin('ccancall', {});
     case 0xdd: return fin('ccancen', {});
-    case 0xde: return fin('cblast', {});
+    case 0xde: return fin('cblast', { expr: expr(c) }); // ckill with erase (opcodes.c cblast)
     case 0xdf: { const args = Array.from({ length: 6 }, () => expr(c)); return fin('cscback', { args }); }
     case 0xe0: { const args = Array.from({ length: 4 }, () => expr(c)); return fin('cscrolpage', { args }); }
     case 0xe1: return fin('cmatent', { dest: store(c) });
