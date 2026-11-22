@@ -111,3 +111,11 @@ stopped following it. Use `startState`/`finalState` to chain walks and
 with the script and pc of each `ogetkey`. That is how the Ishar 1 CONT3
 manual-protection answer table (MONSTRE.DO) was found.
 
+
+Manual-protection prompts (Ishar 1, `manual.ts`): `isharManualTable` reads the
+8-entry answer table a protection script builds (MONSTRE.DO for CONT3,
+TELEP.DO for the CONT5 cave mouth). `answerManualPrompt(game, stateIn,
+stateOut, words, lead)` plays `lead` from a savestate (the engine does not
+save while the prompt waits), types each word and keeps the first one after
+which a turn click works. The prompt runs in real time, about 60 s per try,
+and a wrong word waits out the 150 s timeout, so pass the likely word first.

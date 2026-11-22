@@ -58,7 +58,9 @@ Still open:
 - how doors and levers are worked in play (the walks poked them open);
 - town codes 13/14 (FVILLE, VILLE, FONTAINE) and the other cave codes (11/12, for example CONT2's 51-65 door cells);
 - the zone add-on INCAVE at the cave mouth (oracle: started at CONT5 7,24);
-- the walker does not model region 15 (its world has no cave layer). | `docs/ishar-container-format.md` §8.8 | 2026-11-23 |
+- the walker does not model region 15 (its world has no cave layer).
+
+The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONSTRE's and TELEP's tables and answers a prompt by trying the words (verified at the cave mouth, about 60 s per try). | `docs/ishar-container-format.md` §8.8 | 2026-11-23 |
 | ishar-scene-tie-slots | open (low) | After a region change the game's equal-depth tie order follows each new script's entity slot (slots freed by the killed group are reused); `IsharScene` uses start order. Costs 10 pixels over a 129-frame walk. Model slot allocation (`script_live` slot reuse) if it ever matters | `tools/ishar/__tests__/oracle-parity.test.ts` (walk test comment) | 2026-11-22 |
 
 ## Session log

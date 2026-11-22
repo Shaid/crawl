@@ -74,3 +74,17 @@ describe.skipIf(!existsSync(EN1))('Ishar 1 caves: doors, passages, the cave mout
     expect(ishar1CavePortal(at(15, 13, 24), at(15, 12, 24))).toEqual(at(5, 12, 24));
   });
 });
+
+describe.skipIf(!existsSync('data/ishar/amigaaga/TELEP.DO'))('Ishar 1 manual-protection tables', () => {
+  it('reads MONSTRE and TELEP answer tables', async () => {
+    const { unpackIsharScript } = await import('../../shared/ishar-firstperson.ts');
+    const { isharManualTable } = await import('../oracle/manual.ts');
+    const table = (n: string) => isharManualTable(unpackIsharScript(new Uint8Array(readFileSync(`data/ishar/amigaaga/${n}.DO`))));
+    const m = table('MONSTRE');
+    const t = table('TELEP');
+    expect(m).toHaveLength(8);
+    expect(t).toHaveLength(8);
+    expect(m[3]).toEqual({ page: 8, line: 1, word: 2, answer: Buffer.from('VEVBTQ==', 'base64').toString() });
+    expect(t.find((e) => e.page === 10 && e.line === 1 && e.word === 1)?.answer).toBe(Buffer.from('UkVDUlVJVA==', 'base64').toString());
+  });
+});
