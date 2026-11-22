@@ -1,37 +1,23 @@
 /**
- * SNES W6 view-model tests (v2 faithful walk, `data-structure.md`
- * §3.14.12).
+ * SNES W6 view-model unit tests (v5, `data-structure.md` §3.14.13). These
+ * pin the pure helpers on synthetic windows; parity with the game itself is
+ * `oracle-parity.test.ts` (ROM-driven, skips without the ROM).
  *
- * Two levels:
- *
- * 1. **Pure unit tests** (no assets): wall-field extraction, feature
- *    decode, densify seeding, movement.
- *
- * 2. **Real-data golden test** (skips when the exported assets are
- *    absent): `resolveViewWords` must reproduce, word-for-word, the
- *    compose lists produced by an INDEPENDENT Python re-implementation of
- *    the same disassembly (`truewalk.py`, the session's verification
- *    oracle -- the fixtures below are copied from its actual output, per
- *    `hand-computed-test-fixture-vs-real-run.md`: fixtures come from a
- *    real run of a second implementation, never hand-computed). The two
- *    implementations were written against the same disassembly but share
- *    no code, so agreement pins the whole dispatch chain: evaluator
- *    codes, DE4E/variant word selection, DE1B second draws, DE2C
- *    visibility propagation, DE3D/$78 deferral + $c85e flush order, the
- *    floor/ceiling pass, and the final 0x834A backdrop.
+ * The v2-v4 "golden" fixture that used to live here came from a Python
+ * re-implementation of the same reading of the disassembly, so it could
+ * only show the walker agreeing with itself -- it is gone (§3.14.13
+ * correction 2).
  */
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
-  densifyMazeLevel,
   wallForFacing,
   featureOf,
-  canStepSnes,
-  resolveViewWords,
+  windowCell,
+  inCentreRegion,
+  canStepWindow,
   extractPoolIndices,
   compositeSnesView,
-  type MazeLevelRaw,
+  type MazeWindow,
   type ViewPiecesFile,
 } from '../view-model';
 
@@ -50,113 +36,71 @@ describe('featureOf', () => {
   it('normalises the 0x0D/0x0E "no feature" sentinels to 0', () => {
     expect(featureOf(0x0d).feature).toBe(0);
     expect(featureOf(0x0e).feature).toBe(0);
-    expect(featureOf(0x4e).feature).toBe(0); // top bits set, masked off
+    expect(featureOf(0x4e).feature).toBe(0);
   });
   it('passes through a real feature code and splits orientation', () => {
-    const byte = (2 << 4) | 6; // orient=2, feature=6 (door)
-    expect(featureOf(byte)).toEqual({ feature: 6, orient: 2 });
+    expect(featureOf((2 << 4) | 6)).toEqual({ feature: 6, orient: 2 });
   });
 });
 
-describe('densifyMazeLevel', () => {
-  const level: MazeLevelRaw = {
+function emptyWindow(): MazeWindow {
+  return {
     level: 0,
-    origins: [{ x: 10, y: 10 }],
-    cells: [
-      { region: 0, major: 7, minor: 0, wall: 0x11, feature: 0x0d }, // -> global (10,10)
-      { region: 0, major: 0, minor: 7, wall: 0x22, feature: 6 }, // -> global (17,17)
-    ],
+    region: 0,
+    be: 0,
+    originX: 100,
+    originY: 200,
+    wall: new Uint8Array(576),
+    feature: new Uint8Array(576).fill(0x0d),
+    variant: new Uint8Array(576),
+    dbc0: new Uint8Array(576),
   };
+}
 
-  it('places cells at the confirmed major-axis-reversed global position and records the origin', () => {
-    const grid = densifyMazeLevel(level, 0x0e, [], [], 0);
-    expect(grid.width).toBe(8);
-    expect(grid.height).toBe(8);
-    expect(grid.originX).toBe(10);
-    expect(grid.originY).toBe(10);
-    expect(grid.wall[0 * grid.width + 0]).toBe(0x11);
-    expect(grid.wall[7 * grid.width + 7]).toBe(0x22);
-    expect(grid.feature[7 * grid.width + 7]).toBe(6);
+describe('window geometry ($80:C6DA, $80:D039)', () => {
+  const w = emptyWindow();
+  it('puts the centre-region origin at row 15, col 8 and +Y one row up', () => {
+    expect(windowCell(w, 100, 200)).toBe(15 * 24 + 8);
+    expect(windowCell(w, 100, 201)).toBe(14 * 24 + 8);
+    expect(windowCell(w, 101, 200)).toBe(15 * 24 + 9);
   });
-
-  it("fills unvisited cells with the game's own level-load seeds (wall 0, DB8D feature byte)", () => {
-    const grid = densifyMazeLevel(level, 0x0e, [], [], 0);
-    // local (1,1) was never written by a cell record
-    expect(grid.wall[1 * grid.width + 1]).toBe(0);
-    expect(grid.feature[1 * grid.width + 1]).toBe(0x0e);
+  it('keeps the window only inside its 8x8 centre region on its own level', () => {
+    expect(inCentreRegion(w, 0, 107, 207)).toBe(true);
+    expect(inCentreRegion(w, 0, 108, 207)).toBe(false);
+    expect(inCentreRegion(w, 0, 100, 199)).toBe(false);
+    expect(inCentreRegion(w, 1, 100, 200)).toBe(false);
   });
 });
 
-describe('canStepSnes', () => {
-  const grid = densifyMazeLevel(
-    {
-      level: 0,
-      origins: [{ x: 0, y: 0 }],
-      cells: [{ region: 0, major: 7, minor: 0, wall: 0, feature: 0x0d }],
-    },
-    0x0d,
-    [],
-    [],
-    0,
-  );
-
-  it('allows stepping through an open sub-field', () => {
-    expect(canStepSnes(grid, 0, 0, 0)).toBe(true); // N wall bits = 0
+describe('canStepWindow ($80:C40B)', () => {
+  // only the tables the decision reads
+  const c685 = [0x80, 0x80, 0x01, 0x02, 0x81, 0x81, 0x01, 0x01, 0x01, 0x80, 0x04, 0x01, 0x01, 0x01, 0x01, 0x01];
+  const f = {
+    tables: { d700: [-1, -24, 1, 24, -1, -24], c685, de1b: new Array(16).fill(0), de2c: new Array(16).fill(0) },
+    doorWord: 0x2e8,
+  } as unknown as ViewPiecesFile;
+  it('passes wall values 0 (open) and 1 (doorway) and blocks 2/3', () => {
+    const w = emptyWindow();
+    const c = windowCell(w, 100, 200);
+    w.wall[c] = 0b11_10_01_00; // N open, E doorway, S wall, W door
+    expect(canStepWindow(f, w, 100, 200, 0, 0)).toBe(true);
+    expect(canStepWindow(f, w, 100, 200, 0, 1)).toBe(true);
+    expect(canStepWindow(f, w, 100, 200, 0, 2)).toBe(false);
+    expect(canStepWindow(f, w, 100, 200, 0, 3)).toBe(false);
   });
-  it('blocks off-map steps', () => {
-    expect(canStepSnes(grid, 0, 0, 2)).toBe(false); // S would leave the 1x1 grid
+  it('refuses a (feature & 0xC0) == 0x40 stairs/pit cell but not 0x4E', () => {
+    const w = emptyWindow();
+    w.feature[windowCell(w, 100, 201)] = 0x41;
+    expect(canStepWindow(f, w, 100, 200, 0, 0)).toBe(false);
+    w.feature[windowCell(w, 100, 201)] = 0x4e;
+    expect(canStepWindow(f, w, 100, 200, 0, 0)).toBe(true);
   });
-});
-
-// ── Real-data golden test ────────────────────────────────────────────────
-
-const assetBase = resolve('public/assets/wizardry6/snes');
-const viewPiecesPath = resolve(assetBase, 'dungeon/view-pieces.json');
-const mazePath = resolve(assetBase, 'data/maze.json');
-const haveAssets = existsSync(viewPiecesPath) && existsSync(mazePath);
-
-/**
- * Golden compose-word lists from the independent Python oracle
- * (`truewalk.py`), pose coordinates in GLOBAL maze space. Each verified
- * against the ROM's own art by decisive renders (closed wooden door /
- * open doorway / plain corridor / forest, session log in
- * `docs/wizardry6/plan.md`).
- */
-const GOLDEN: Array<{ level: number; gx: number; gy: number; facing: number; words: number[] }> = [
-  {
-    // level 2 castle, closed door (wall value 3) dead ahead
-    level: 2,
-    gx: 123,
-    gy: 122,
-    facing: 0,
-    words: [
-      0x102, 0x104, 0x52, 0x4a, 0x106, 0x10a, 0x1c8, 0x10e, 0x362, 0x1c0, 0xb6, 0x846, 0x90c, 0x8004, 0x8006, 0x800c,
-      0x800e, 0x8014, 0x8016, 0x801c, 0x801e, 0x8024, 0x8026, 0x802c, 0x802e, 0x8034, 0x8036, 0x803c, 0x803e, 0x8044,
-      0x8046, 0x804c, 0x804e, 0x8054, 0x8056, 0x805c, 0x805e, 0x8064, 0x8066, 0x806c, 0x806e, 0x8074, 0x8076, 0x807c,
-      0x807e, 0x8084, 0x8086, 0x808c, 0x808e, 0x8094, 0x8096, 0x809c, 0x809e, 0x80a4, 0x80a6, 0x80ac, 0x80ae, 0x80b4,
-      0x80b6, 0x80bc, 0x568, 0x80c4, 0x80c6, 0x80cc, 0x80ce, 0x834a,
-    ],
-  },
-];
-
-describe.skipIf(!haveAssets)('resolveViewWords (real data, golden fixtures from the independent Python oracle)', () => {
-  const maze: MazeLevelRaw[] = haveAssets ? JSON.parse(readFileSync(mazePath, 'utf8')) : [];
-  const viewPieces: ViewPiecesFile = haveAssets ? JSON.parse(readFileSync(viewPiecesPath, 'utf8')) : (null as never);
-
-  for (const g of GOLDEN) {
-    it(`level ${g.level} pose (${g.gx},${g.gy}) facing ${g.facing} matches word-for-word`, () => {
-      const lvl = maze.find((l) => l.level === g.level)!;
-      const seedVariant = viewPieces.variants[g.level] ?? 0;
-      const grid = densifyMazeLevel(lvl, viewPieces.tables.db8d[g.level] ?? 0x0d, viewPieces.da2e, viewPieces.db9b, seedVariant);
-      const words = resolveViewWords(viewPieces, grid, g.level, g.gx - grid.originX, g.gy - grid.originY, g.facing);
-      expect(words.map((w) => `0x${w.toString(16)}`)).toEqual(g.words.map((w) => `0x${w.toString(16)}`));
-    });
-  }
-
-  it('door pose includes the EB1A closed-door word pair (0x52 appended + deferred doorway 0x4a)', () => {
-    const g = GOLDEN[0]!;
-    expect(g.words).toContain(0x52); // EB1A word 3 = wall value 3, the door-leaf art
-    expect(g.words).toContain(0x4a); // EB1A word 1 = the doorway frame (DE1B second draw, deferred via $78)
+  it('uses the promoted feature code for the edge the feature faces', () => {
+    const w = emptyWindow();
+    const c = windowCell(w, 100, 200);
+    w.feature[c] = (0 << 4) | 7; // feature 7 facing N -> code 10 -> C685 0x04: blocked
+    expect(canStepWindow(f, w, 100, 200, 0, 0)).toBe(false);
+    expect(canStepWindow(f, w, 100, 200, 0, 1)).toBe(true); // E edge unaffected
   });
 });
 

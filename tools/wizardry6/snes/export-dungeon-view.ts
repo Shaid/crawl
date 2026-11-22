@@ -1,32 +1,27 @@
 /**
  * Exports the browser-consumable asset set for the SNES Wizardry 6 dungeon
- * walker (walker UI "Graphics variant" -> SNES): a true-indexed atlas of
- * the dungeon-art tile pool, plus `dungeon/view-pieces.json` -- the full
- * data set for the **faithful v2 view walk** (`view-model.ts`, a port of
- * the game's own `$80:C69F` 26-slot walk, `data-structure.md` §3.14.12):
- * the ROM dispatch tables (`$80:DD4B`/`$DE1B`/`$DE2C`/`$DE3D`/`$DE4E`/
- * `$DB7F`/`$DB8D`/`$C85E`), the 26 slot handlers' bank-`$89` art-record
- * tables (39 words + 4 override bytes each), the `$80:DED8` floor/ceiling
- * per-slot piece tables, and every referenced compose word resolved to a
- * placed piece.
+ * walker: a true-indexed atlas of the dungeon-art tile pool, plus
+ * `dungeon/view-pieces.json` -- every ROM table the v5 view walk
+ * (`view-model.ts`, a port of `$80:C69F`, `data-structure.md` §3.14.13)
+ * reads, the 26 slot handlers' bank-`$89` art records (39 words + 4
+ * override bytes each), the `$80:DED8` floor/ceiling per-slot tables, the
+ * `$89:FE5E` floor-transition lists, and every compose word the walk can
+ * emit resolved to a placed piece. The maze itself comes from
+ * `export-maze-windows.ts` (the game's own window builder).
  *
- * v4 (this session, §3.14.12 "per-region palette -- CONFIRMED"): both the
- * `$7E:4780` art-family variant AND the §3.14.10 palette group are now
- * resolved per-cell/per-region from real ROM data -- `da2e`/`db9b`
- * (`resolveCellVariant`) and `level-palettes.json`'s `groups`+`perRegion`
- * pair (`resolveRegionPalettes`/`resolveRegionPaletteGroup`), superseding
- * the earlier per-level-uniform approximations for both. See
- * `view-model.ts`'s module comment and `docs/wizardry6/TODO.md` for the
- * real remaining caveat (within-region multi-trigger majority voting).
+ * All tables are exported raw: the `$80:DD4B` frustum keeps facing 1
+ * slot 24's -90 and `$80:DB7F` keeps its 0x80 bytes, because the game
+ * executes them as stored (§3.14.13 corrections).
  *
  * Usage: npx tsx tools/wizardry6/snes/export-dungeon-view.ts <path-to-sfc>
  */
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { readBinary, writeJson, writePNG } from '@seer-project/pipeline';
 import { decodeTile4bpp, TILE_BYTES_4BPP, TILE_SIZE_PX } from '../../shared/snes-ppu';
 import { resolveComposeWord } from './decode-dungeon-composer';
-import type { HandlerSpec, ViewPiece, WalkRecord, WalkTables } from './view-model';
+import type { HandlerSpec, ViewPiece, ViewPiecesFile, WalkRecord, WalkTables } from './view-model';
 
 const BANK_START = 0x080000; // file offset, CPU $10:8000 -- dungeon-art pool start
 // v2: pool extended through bank $1B -- §3.14.6's cross-check found ~4% of
@@ -112,16 +107,23 @@ const OFF_DE3D = 0x05e3d;
 const OFF_DE4E = 0x05e4e; // 69 u16 record byte offsets
 const OFF_DED8 = 0x05ed8; // 21 u16 CPU addrs (bank $89) of 27-word floor/ceiling tables
 const OFF_DB7F = 0x05b7f;
-const OFF_DB8D = 0x05b8d;
-const OFF_DA2E = 0x05a2e; // 168 entries (level*12+region), §3.14.12 v3
-const OFF_DB9B = 0x05b9b; // 16-byte pattern rows referenced by da2e's bit7-set entries
+const OFF_D700 = 0x05700; // 6 i16 left/ahead/right neighbour deltas ($80:CC72, $80:C426)
+const OFF_D6D0 = 0x056d0; // 4x3 i16 neighbour-mask deltas ($80:CFA2)
+const OFF_D6E8 = 0x056e8; // 12 per-slot floor-transition columns ($80:CF4E)
+const OFF_DAD7 = 0x05ad7; // 168 (level*12+region) sky-suppress bytes ($80:D01B)
+const OFF_DF01 = 0x05f01; // 27 per-slot sky latch values ($80:D031)
+const OFF_C685 = 0x04685; // 16 per-code movement bytes ($80:C47C)
+const OFF_FE5E = 0x4fe5e; // bank-$89 floor-transition list pointers ($80:CF6A)
 const REGION_COUNT = 12;
 // $82:F842's per-level environment-record table (§3.14.10): 14 x u16 list
 // pointers, then 3-byte [key u16][value u8] records (0-terminated).
 const OFF_ENV_PTRS = 0x178b1; // file offset, CPU $82:F8B1
 const OFF_C85E = 0x0485e; // 27 bytes, $78-flush flags per slot
 const DOOR_WORD = 0x02e8; // fixed door piece ($00:CD8F)
-const BACKDROP_WORD = 0x834a; // final always-appended backdrop ($00:C81B)
+const BACKDROP_WORD = 0x834a; // final always-appended backdrop ($80:C81B)
+const SKY_WORDS = [0x02e6, 0x02ea]; // $80:C7D3: 0x02E6 | ($6e & 4)
+const LIGHT_WORD = 0x02ec; // $80:C7F0: replaces the slot-0 floor word while $094D is set (runtime)
+const CEIL24_BASES = [0x84a6, 0x84dc]; // $80:CF01/CF06: slot-0 kind-0x24 ceiling lists, 4 words each
 
 /**
  * Slot handler metadata 1-26, transcribed from the handler bodies at
@@ -211,21 +213,27 @@ function poolIndexOf(cell: { bank: number; tile: number } | null): number | null
   return (realBank - 0x10) * 1024 + cell.tile;
 }
 
-function main() {
-  const romPath = process.argv[2];
-  if (!romPath) {
-    console.error('Usage: npx tsx tools/wizardry6/snes/export-dungeon-view.ts <path-to-sfc>');
-    process.exit(1);
-  }
-  const data = readBinary(romPath);
+function fail(msg: string): never {
+  throw new Error(`Oracle check FAILED: ${msg}`);
+}
+
+export interface DungeonViewBuild {
+  viewPieces: ViewPiecesFile & { note: string };
+  /** Indexed pool atlas: R = 4bpp index, alpha mask. */
+  atlas: { rgba: Uint8Array; width: number; height: number; tileCount: number };
+  regionEnv: unknown;
+  levelPalettes: unknown;
+  log: string[];
+}
+
+/** Build every dungeon-view asset from the ROM bytes, in memory (no I/O) -- shared by `main` and the parity test. */
+export function buildDungeonView(data: Uint8Array): DungeonViewBuild {
+  const log: string[] = [];
 
   // ── Indexed tile-pool atlas (index in R channel, alpha mask).
   const size = BANK_END - BANK_START;
   const tileCount = Math.floor(size / TILE_BYTES_4BPP);
-  if (size % TILE_BYTES_4BPP !== 0) {
-    console.error(`Oracle check FAILED: pool span not an exact multiple of ${TILE_BYTES_4BPP}.`);
-    process.exit(1);
-  }
+  if (size % TILE_BYTES_4BPP !== 0) fail(`pool span not an exact multiple of ${TILE_BYTES_4BPP}.`);
   const rows = Math.ceil(tileCount / POOL_COLS);
   const atlasW = POOL_COLS * TILE_SIZE_PX;
   const atlasH = rows * TILE_SIZE_PX;
@@ -246,87 +254,69 @@ function main() {
     }
   }
 
-  const outDir = resolve('public/assets/wizardry6/snes');
-  const dungeonDir = resolve(outDir, 'dungeon');
-  mkdirSync(dungeonDir, { recursive: true });
-  writePNG(resolve(dungeonDir, 'dungeon-art-indexed.png'), rgba, atlasW, atlasH);
-  writeJson(resolve(dungeonDir, 'dungeon-art-indexed.json'), {
-    width: atlasW,
-    height: atlasH,
-    tileSize: TILE_SIZE_PX,
-    cols: POOL_COLS,
-    tileCount,
-    encoding: 'index-in-red-channel-alpha-mask',
-    note: 'Raw 4bpp pool index (0-15) in the R channel of every 8x8 tile cell (banks $10-$1B); alpha 0 = transparent. Palette applied client-side (dungeon/level-palettes.json + ../palettes/dungeon-region-<group>.json).',
-  });
-  console.log(`Wrote indexed tile-pool atlas: ${tileCount} tiles, ${atlasW}x${atlasH}.`);
+  log.push(`indexed tile-pool atlas: ${tileCount} tiles, ${atlasW}x${atlasH}.`);
 
-  // ── ROM dispatch tables.
-  // Frustum: decompose each dd4b offset (24-wide grid units) into
-  // (ahead, lateral). Oracle: all 4 facings' blocks must decompose under
-  // that facing's own (ahead, right) unit vectors to the SAME 26
-  // (ahead, lateral) pairs -- a zero-deviation structural check.
-  const AHEAD_UNIT = [-24, 1, 24, -1]; // grid delta of one step ahead, facing 0-3 (row = -gy... see §3.14.12)
+  // ── ROM dispatch tables, all raw.
+  // Structural check on the $80:DD4B frustum: every facing's 26 i16 window
+  // deltas must decompose under that facing's own (ahead, right) unit
+  // vectors into the same (ahead, lateral) pairs as facing 0 -- except the
+  // one slip the ROM really holds (facing 1, slot 24: -90 where the
+  // rotation gives -92). The game executes -90 as stored, so the table is
+  // exported raw and the walk uses it raw (§3.14.13 correction 5).
+  const AHEAD_UNIT = [-24, 1, 24, -1];
   const RIGHT_UNIT = [1, 24, -1, -24];
-  let frustum: Array<{ ahead: number; lateral: number }> | null = null;
-  for (let f = 0; f < 4; f++) {
-    const pairs: Array<{ ahead: number; lateral: number }> = [];
-    for (let s = 0; s < 26; s++) {
-      const d = i16At(data, OFF_DD4B + f * 52 + s * 2);
-      let found: { ahead: number; lateral: number } | null = null;
-      for (let a = 0; a <= 4 && !found; a++) {
-        for (let l = -4; l <= 4; l++) {
-          if (a * AHEAD_UNIT[f]! + l * RIGHT_UNIT[f]! === d) {
-            found = { ahead: a, lateral: l };
-            break;
-          }
-        }
+  const dd4b = Array.from({ length: 104 }, (_, k) => i16At(data, OFF_DD4B + 2 * k));
+  const pairsFor = (f: number) =>
+    Array.from({ length: 26 }, (_, s) => {
+      const d = dd4b[f * 26 + s]!;
+      for (let a = 0; a <= 4; a++) for (let l = -4; l <= 4; l++) if (a * AHEAD_UNIT[f]! + l * RIGHT_UNIT[f]! === d) return `${a},${l}`;
+      return null;
+    });
+  const base = pairsFor(0);
+  const slips: string[] = [];
+  for (let f = 1; f < 4; f++) {
+    pairsFor(f).forEach((p, s) => {
+      if (p !== base[s]) slips.push(`facing ${f} slot ${s + 1} = ${dd4b[f * 26 + s]}`);
+    });
+  }
+  if (slips.length !== 1 || slips[0] !== 'facing 1 slot 24 = -90') fail(`unexpected $80:DD4B deviations: ${JSON.stringify(slips)}`);
+  log.push(`frustum: 103/104 entries are exact rotations of facing 0; the one ROM slip (${slips[0]}) is kept raw.`);
+
+  // $89:FE5E floor-transition lists, keyed (mask<<1)|d6e8[slot] for mask 1-7.
+  const d6e8 = Array.from(data.subarray(OFF_D6E8, OFF_D6E8 + 12));
+  const fe5e: Record<string, number[]> = {};
+  for (const col of d6e8) {
+    if (!col) continue;
+    for (let mask = 1; mask < 8; mask++) {
+      const idx = (mask << 1) | col;
+      const ptr = u16At(data, OFF_FE5E + idx);
+      const list: number[] = [];
+      for (let o = bank89FileOffset(ptr); ; o += 2) {
+        const w = u16At(data, o);
+        if (w === 0) break;
+        list.push(w);
+        if (list.length > 64) fail(`$89:FE5E list ${idx.toString(16)} is not 0-terminated within 64 words`);
       }
-      if (!found) {
-        // Known single deviation in the game's own data: facing 1, slot 23
-        // holds -90 where the rotation of facing 0's (ahead=4, lateral=-4)
-        // gives -92 -- an authoring slip in the ROM table (facings 0/2/3
-        // decompose perfectly, 78/78). We use the consistent rotation.
-        if (f === 1 && s === 23 && d === -90) {
-          pairs.push({ ahead: 4, lateral: -4 });
-          continue;
-        }
-        console.error(`Oracle check FAILED: dd4b[${f}][${s}] = ${d} does not decompose into (ahead, lateral).`);
-        process.exit(1);
-      }
-      pairs.push(found);
-    }
-    if (!frustum) frustum = pairs;
-    else {
-      for (let s = 0; s < 26; s++) {
-        if (frustum[s]!.ahead !== pairs[s]!.ahead || frustum[s]!.lateral !== pairs[s]!.lateral) {
-          console.error(`Oracle check FAILED: facing ${f} frustum slot ${s} decomposes differently from facing 0.`);
-          process.exit(1);
-        }
-      }
+      fe5e[idx.toString(16)] = list;
     }
   }
-  console.log('Frustum oracle: all 4 facings decompose to identical (ahead, lateral) pairs, 104/104.');
 
   const tables: WalkTables = {
-    frustum: frustum!,
+    dd4b,
+    d700: Array.from({ length: 6 }, (_, k) => i16At(data, OFF_D700 + 2 * k)),
+    d6d0: Array.from({ length: 12 }, (_, k) => i16At(data, OFF_D6D0 + 2 * k)),
+    d6e8,
     de1b: Array.from(data.subarray(OFF_DE1B, OFF_DE1B + 16)),
-    de2c: Array.from(data.subarray(OFF_DE2C, OFF_DE2C + 16)).map((v) => v & 0x7f),
+    de2c: Array.from(data.subarray(OFF_DE2C, OFF_DE2C + 16)),
     de3d: Array.from(data.subarray(OFF_DE3D, OFF_DE3D + 16)),
     de4e: Array.from({ length: 69 }, (_, k) => u16At(data, OFF_DE4E + 2 * k)),
-    db7f: Array.from(data.subarray(OFF_DB7F, OFF_DB7F + 14)),
-    db8d: Array.from(data.subarray(OFF_DB8D, OFF_DB8D + 14)),
+    db7f: Array.from(data.subarray(OFF_DB7F, OFF_DB7F + LEVEL_COUNT)),
     c85e: Array.from(data.subarray(OFF_C85E, OFF_C85E + 27)),
+    dad7: Array.from(data.subarray(OFF_DAD7, OFF_DAD7 + LEVEL_COUNT * REGION_COUNT)),
+    df01: Array.from(data.subarray(OFF_DF01, OFF_DF01 + 27)),
+    c685: Array.from(data.subarray(OFF_C685, OFF_C685 + 16)),
+    fe5e,
   };
-
-  // ── §3.14.12 v3: the real per-region variant table ($80:DA2E, 168
-  // entries = level*12+region) and its referenced $80:DB9B pattern rows.
-  const da2e = Array.from(data.subarray(OFF_DA2E, OFF_DA2E + LEVEL_COUNT * REGION_COUNT));
-  let maxRow = -1;
-  for (const v of da2e) if (v & 0x80) maxRow = Math.max(maxRow, v & 0x7f);
-  const db9bLen = (maxRow + 1) * 16;
-  const db9b = Array.from(data.subarray(OFF_DB9B, OFF_DB9B + db9bLen));
-  console.log(`da2e: ${da2e.length} region-variant entries; db9b: ${maxRow + 1} pattern rows (${db9bLen} bytes) referenced.`);
 
   // ── Art records (39 words + 4 override bytes each).
   const tableKeys = new Set<string>([SLOT0.left, SLOT0.right, SLOT0.front]);
@@ -343,7 +333,10 @@ function main() {
     }
   }
   const records: Record<string, WalkRecord> = {};
-  const allWords = new Set<number>([DOOR_WORD, BACKDROP_WORD]);
+  const allWords = new Set<number>([DOOR_WORD, BACKDROP_WORD, ...SKY_WORDS, LIGHT_WORD]);
+  for (const b of CEIL24_BASES) for (let k = 0; k < 4; k++) allWords.add(b + 2 * k);
+  // $80:CF79: each FE5E list word is appended as-is or + 0x36 ($0C28, set when the cell's variant byte is non-zero)
+  for (const list of Object.values(fe5e)) for (const w of list) for (const add of [0, 0x36]) allWords.add((w + add) & 0xffff);
   for (const key of tableKeys) {
     const off = bank89FileOffset(parseInt(key, 16));
     const words = Array.from({ length: 39 }, (_, i) => u16At(data, off + 2 * i));
@@ -388,7 +381,7 @@ function main() {
     };
     resolved++;
   }
-  console.log(`Resolved ${resolved} distinct compose words (${skipped} non-drawable sentinels skipped).`);
+  log.push(`resolved ${resolved} distinct compose words (${skipped} non-drawable sentinels skipped).`);
 
   // Placement oracle (regression vs. §3.14.5's cited placements): the
   // front/side wall tables' word 1 (wall value 1 -- the open-doorway art,
@@ -412,16 +405,10 @@ function main() {
     checks++;
     if (p && p.x === exp[0] && p.y === exp[1] && p.w === exp[2] && p.h === exp[3]) ok++;
   }
-  console.log(`Placement oracle: ${ok}/${checks} word-1 pieces match §3.14.5's cited (x,y,w,h) exactly.`);
-  if (ok !== checks) {
-    console.error('Oracle check FAILED: a wall-table word-1 placement drifted from the confirmed §3.14.5 table.');
-    process.exit(1);
-  }
+  log.push(`placement oracle: ${ok}/${checks} word-1 pieces match §3.14.5's cited (x,y,w,h) exactly.`);
+  if (ok !== checks) fail('a wall-table word-1 placement drifted from the confirmed §3.14.5 table.');
 
-  // ── Per-level off-grid/seed variant (real in-grid cells use da2e/db9b via resolveCellVariant -- §3.14.12 v3).
-  const variants = tables.db7f.map((v) => (v === 0x80 ? 0x40 : v));
-
-  writeJson(resolve(dungeonDir, 'view-pieces.json'), {
+  const viewPieces: ViewPiecesFile & { note: string } = {
     viewport: { w: 18, h: 15 },
     tileSize: TILE_SIZE_PX,
     poolAtlas: 'dungeon-art-indexed.png',
@@ -435,16 +422,12 @@ function main() {
     pieces,
     doorWord: DOOR_WORD,
     backdropWord: BACKDROP_WORD,
-    variants,
-    da2e,
-    db9b,
     note:
-      'v3 faithful view-walk data (see tools/wizardry6/snes/view-model.ts + data-structure.md §3.14.12). ' +
-      'records = the bank-$89 39-word art tables (word index = code + variant/2 via de4e; codes: 0-3 wall values, 4-15 = feature+3). ' +
-      'variants[] is the off-grid/level-default seed ONLY -- real per-cell art-variant resolution is da2e[level*12+region] + db9b (resolveCellVariant). ' +
-      'Palette group is still resolved separately -- see dungeon/region-env.json + resolveRegionPaletteGroup for the per-region/per-cell resolution ' +
-      '($82:F842\'s own algorithm, confirmed statically computable but only actually re-run by the live game at 7 scripted screen-fade transitions).',
-  });
+      'v5 view-walk data (tools/wizardry6/snes/view-model.ts, data-structure.md §3.14.13): every table raw from the ROM. ' +
+      'records = the bank-$89 39-word art tables (word = record[de4e[((variant or far variant) + $0f) & 0xFE >> 1]]). ' +
+      'The maze is not here: dungeon/maze-windows.json holds the 24x24 windows the game builds ($80:D073). ' +
+      'Palette group: dungeon/level-palettes.json + resolveRegionPaletteGroup (path-dependent in the game; see docs/wizardry6/TODO.md).',
+  };
 
   // ── §3.14.12 v4: the real per-level environment-record table ($82:F842)
   // decoded to genuine per-(level,region) palette groups (resolveRegionPalettes)
@@ -466,11 +449,11 @@ function main() {
       if (hi >> 4 !== level || (hi & 0x0f) > 11 || lo > 0x77) violations++;
     }
   }
-  console.log(
+  log.push(
     `region-env: ${totalEnvRecords} >=0x50 records decoded to (level,region,dy,dx) keys, ${violations} violations ` +
       `(expect 0 -- key structure ((level<<4)|region)<<8|((dy<<4)|dx) confirmed by disassembly at $82:F878-F883).`,
   );
-  writeJson(resolve(dungeonDir, 'region-env.json'), {
+  const regionEnv = {
     levels: envRecords.map((r, level) => ({
       level,
       fallbackGroup: regionPalettes[level]!.fallbackGroup,
@@ -488,9 +471,9 @@ function main() {
       '(whole-ROM JSL census), so the true in-game palette is path/entry-point-dependent within a region that has >1 record; ' +
       'perRegionGroup is the per-region majority vote, a real improvement over the old per-level-only approximation but still an ' +
       'approximation where a region has multiple distinct triggered groups (see docs/wizardry6/TODO.md).',
-  });
+  };
 
-  writeJson(resolve(dungeonDir, 'level-palettes.json'), {
+  const levelPalettes = {
     groups: regionPalettes.map((r) => r.fallbackGroup),
     perRegion: regionPalettes.map((r) => r.perRegion),
     note:
@@ -498,11 +481,40 @@ function main() {
       'picked by a cross-level-aggregated record count and mis-picked level 12 as group 40 instead of the level\'s real majority, group 42). ' +
       'perRegion[level][region] = the region\'s own majority group, -1 if that region has no $82:F842 record (fall back to groups[level]). ' +
       'See region-env.json for the raw per-key data and data-structure.md §3.14.12 v4. Colours: ../palettes/dungeon-region-<group>.json.',
-  });
-  console.log(
-    `Wrote dungeon/view-pieces.json, dungeon/region-env.json, dungeon/level-palettes.json (per-region + per-level fallback). ` +
-      `Level->fallback group: ${JSON.stringify(regionPalettes.map((r) => r.fallbackGroup))}`,
-  );
+  };
+  log.push(`level -> fallback palette group: ${JSON.stringify(regionPalettes.map((r) => r.fallbackGroup))}`);
+  return { viewPieces, atlas: { rgba, width: atlasW, height: atlasH, tileCount }, regionEnv, levelPalettes, log };
 }
 
-main();
+function main() {
+  const romPath = process.argv[2];
+  if (!romPath) {
+    console.error('Usage: npx tsx tools/wizardry6/snes/export-dungeon-view.ts <path-to-sfc>');
+    process.exit(1);
+  }
+  exportDungeonView(romPath);
+}
+
+/** Write `dungeon/{dungeon-art-indexed.{png,json},view-pieces.json,region-env.json,level-palettes.json}`. */
+export function exportDungeonView(romPath: string, outDir = resolve('public/assets/wizardry6/snes')): void {
+  const b = buildDungeonView(readBinary(romPath));
+  for (const line of b.log) console.log(`  ${line}`);
+  const dungeonDir = resolve(outDir, 'dungeon');
+  mkdirSync(dungeonDir, { recursive: true });
+  writePNG(resolve(dungeonDir, 'dungeon-art-indexed.png'), b.atlas.rgba, b.atlas.width, b.atlas.height);
+  writeJson(resolve(dungeonDir, 'dungeon-art-indexed.json'), {
+    width: b.atlas.width,
+    height: b.atlas.height,
+    tileSize: TILE_SIZE_PX,
+    cols: POOL_COLS,
+    tileCount: b.atlas.tileCount,
+    encoding: 'index-in-red-channel-alpha-mask',
+    note: 'Raw 4bpp pool index (0-15) in the R channel of every 8x8 tile cell (banks $10-$1B); alpha 0 = transparent. Palette applied client-side (dungeon/level-palettes.json + ../palettes/dungeon-region-<group>.json).',
+  });
+  writeJson(resolve(dungeonDir, 'view-pieces.json'), b.viewPieces);
+  writeJson(resolve(dungeonDir, 'region-env.json'), b.regionEnv);
+  writeJson(resolve(dungeonDir, 'level-palettes.json'), b.levelPalettes);
+  console.log('  wrote dungeon/view-pieces.json, region-env.json, level-palettes.json, dungeon-art-indexed.{png,json}');
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

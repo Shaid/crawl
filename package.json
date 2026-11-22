@@ -22,6 +22,8 @@
     "w6:through": "npx tsx tools/wizardry6/render-through-dungeon.ts",
     "w6:snes:view": "npx tsx tools/wizardry6/snes/export-dungeon-view.ts \"data/wizardry6/snes/Wizardry VI - Kindan no Mahitsu (Japan).sfc\"",
     "w6:snes:through": "npx tsx tools/wizardry6/snes/render-through-dungeon.ts",
+    "w6:snes:windows": "npx tsx tools/wizardry6/snes/export-maze-windows.ts \"data/wizardry6/snes/Wizardry VI - Kindan no Mahitsu (Japan).sfc\"",
+    "w6:snes:parity": "bash tools/wizardry6/snes/oracle/sweep-all.sh",
     "mm1:maps": "npx tsx tools/mm1/export-maps.ts data/mm1/dosega",
     "mm1:gfx": "python3 scripts/extract_mm1_gfx.py",
     "mm1:misc": "python3 scripts/extract_mm1_misc.py",

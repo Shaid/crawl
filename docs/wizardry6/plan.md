@@ -2901,3 +2901,20 @@ deleted, `dungeon-walker-cell-render-dispatch` updated), regenerated
 slots). `tsc --noEmit`/`eslint` clean on every touched file (a pre-existing,
 concurrent-sibling-agent-caused `tools/eotb/*` type error is unrelated and
 out of scope).
+
+## SNES — Session (2026-11-22) — walker checked against the game, fixed to parity
+
+A same-day audit ran the ROM's own view, maze-load and palette routines in
+a 65816 core and found the v4 SNES walker wrong on 36.4% of poses: every
+earlier verification had compared the walker with a re-implementation of
+itself. This session committed that core as tooling
+(`tools/wizardry6/snes/oracle/`), added `export-maze-windows.ts` (the
+24x24 windows the ROM's builder `$80:D073` produces, captured per party
+cell from new-game WRAM; 191 windows), and rewrote the walk as a port of
+`$80:C69F` in window-index space (`view-model.ts` v5) with ten fixes, each
+tied to a ROM site. Result: 0 differing word lists, 0 differing pixels and
+152,576/152,576 step decisions over all 38,144 party-cell poses, plus
+`$80:D039` window retention on every in-region step. Ten false claims in
+§3.14.7-§3.14.12 carry dated corrections; new §3.14.13; `snes-*` TODO rows
+split into the runtime state still unmodelled. Full sweep:
+`npm run w6:snes:parity`; regression subset: `__tests__/oracle-parity.test.ts`.

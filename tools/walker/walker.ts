@@ -474,10 +474,11 @@ const CONFIDENCE_NOTES: Partial<Record<GameId, string>> = {
 /**
  * Wizardry 6 graphics-variant plumbing (the `#variant` selector, anticipated
  * by `index.html` but unwired until this session). Amiga is the existing
- * default; SNES (`games-w6-snes.ts`) is the compose-piece-library-driven v1
- * dungeon-view renderer -- see its module doc comment for what's confirmed
- * vs. approximate. Only `wizardry6` currently has more than one variant, so
- * this stays a small local map rather than a generalized per-game axis.
+ * default; SNES (`games-w6-snes.ts`) ports the game's own view walk onto
+ * the maze windows the ROM builds -- see its module doc comment and
+ * `docs/wizardry6/snes/data-structure.md` §3.14.13 for what is verified.
+ * Only `wizardry6` currently has more than one variant, so this stays a
+ * small local map rather than a generalized per-game axis.
  */
 const W6_VARIANTS = [
   { id: 'amiga', label: 'Amiga', platform: 'amiga' as const },
@@ -580,7 +581,7 @@ async function main() {
           : await g.loader(assetBase, levelId, pose);
     const confidenceNote =
       game === 'wizardry6' && w6Variant === 'snes'
-        ? 'SNES: confirmed backdrop + door, approximate generic wall art -- see tools/wizardry6/snes/view-model.ts'
+        ? 'SNES: view words, pixels and movement match the ROM on all 38,144 party-cell poses (65816 oracle sweep, new-game state); palette group, scripted overlays and door/stairs state are not yet modelled -- see docs/wizardry6/snes/data-structure.md §3.14.13'
         : (CONFIDENCE_NOTES[game] ?? 'W6 wall values are a rendered key');
     setConfidenceBanner(view.id === 'blackcrypt' ? 'confirmed' : 'rendered', `${g.label} (${confidenceNote})`);
 

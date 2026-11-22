@@ -1924,6 +1924,15 @@ per-level scalar tables:
   level types (fully-enclosed arena, unique encounter).
 - `$7E:4300` and `$7E:DBC0` are seeded uniformly to `0x00`.
 
+> **Correction (2026-11-22):** the `$7E:4540` seed is **not** always `$80:DB8D[level]`.
+> The seeding routine (`$80:D2BE`-`$80:D2F9`) replaces a `0x0D` seed with
+> `0x0E` when `$be < 0x18` -- i.e. level 0, regions 0-5 seed `0x0E`
+> (`LDA $DB8D,Y; CMP #$0D; BNE; LDY $be; CPY #$0018; BCS; LDA #$0E`). It
+> also latches `$0896 = $80:DAD7[$be/4] & 0x80`, the flag that stops the
+> window builder after the centre region (§3.14.13). The earlier reading
+> was checked only by the walker against its own densified grid; running
+> `$80:D073` itself in the 65816 core (§3.14.13) shows the real seeds.
+
 A second, **region-shaped** default-fill routine (`$80:D450`-`$80:D49D`,
 file `0x005450`-`0x00549d`) then overlays per-region uniform fills: a
 per-level record list at `$80:D510` indexes (via `$80:D49C`, an
@@ -2103,6 +2112,17 @@ patch lists as structured per-level metadata (condition byte, resolved
 plane/cell index, values) but does not bake a guessed flag state into the
 rendered base-layout maps, consistent with the project's convention of
 not asserting an unverified fact.
+
+> **Correction (2026-11-22):** "there is no single correct static maze" was wrong as a
+> reason not to model the maze the game shows. A new game has exactly one
+> quest-flag state (all clear), and from it the game builds one definite
+> set of 24x24 windows (`$80:D073`). Those windows are now captured by
+> running the builder itself (§3.14.13, `dungeon/maze-windows.json`), and
+> they differ from any densified `maze.json` grid in ways the old walker
+> never saw because it was only ever compared with itself: per-entry-cell
+> neighbour placement, region seeds, the `$0896` early stop and the
+> level-8 `$7E:DBC0` flag. The quest-flag variants of the patches remain
+> open (`snes-quest-flag-maze-variants`).
 
 **Region-origin table `$80:D78E` — confirmed.** 12 entries/level, 4 bytes
 each (`u16 originX`, `u16 originY`), 48 bytes/level, 14 levels. The
@@ -2876,6 +2896,12 @@ handler cascade** plus a second floor/ceiling pass:
   `-90` where the rotation gives `-92`, the other 78 rotated entries are
   exact); the skip-flag array `$7E:3B00[1..26]` is initialised **all-ones**
   (= skip).
+
+  > **Correction (2026-11-22):** (slot 24 counting from 1.) The game executes `-90`
+  as stored -- `$80:CDF0` adds the raw table entry to `$50` -- so facing 1
+  slot 24 really evaluates the cell 4 rows up and 6 columns right, not the
+  rotated `(4,-4)`. The exporter's "normalise to the rotation" was a
+  guess; it is now exported and used raw (§3.14.13).
 - **Slot 0** (`$00:C879`): evaluates the party's own cell's left/right/
   front edges against tables `$89:F356`/`$89:F6C6`/`$89:EB1A` (so `EB1A`,
   §3.14.5's "front depth 0", is really the *own-cell* front edge), enabling
@@ -2942,6 +2968,10 @@ Callers pass **`$0f = code*2`**. The resolver:
    `$DD4B`, but `$D700` is this real, separate delta-triple table.)
 2. If the far cell's feature byte is `>= 0xC0` and `code == 2`: appends the
    record's word at byte offset `0x44` (a marked-cell extra piece).
+
+   > **Correction (2026-11-22):** the test is `$0f == 2`, and `$0f` is the
+   *doubled* code (`$80:CC89`: `LDA $0F; CMP #$02`) -- so the extra piece
+   fires for **code 1** (the open doorway), not code 2.
 3. **Per-facing override** (record bytes `0x4C|facing`): when the byte for
    the current facing is nonzero, code 10 (feature 7, the portcullis) uses
    index `0x84` and code 3 (closed door) uses `0x86`/`0x88` (by variant) —
@@ -2973,12 +3003,31 @@ Callers pass **`$0f = code*2`**. The resolver:
    default `$0e`, the far-side cell's variant is used instead; otherwise
    the evaluated cell's own — an art-transition rule at variant borders.
 
+   > **Correction (2026-11-22):** `view-model.ts` (v2-v4, line 430) called this fork a
+   "still-open minor nuance" and did not implement it, and the exporter
+   rewrote `$80:DB7F`'s `0x80` bytes to `0x40`, so even a fork would have
+   compared against the wrong value. The fork (`$80:CCDE`-`CCF0`:
+   `LDA $4E; CMP $0E; BNE`) compares against the **raw** `DB7F` byte, which
+   is also the raw off-map seed of `$7E:4780`; it applies to the door
+   override index (`$80:CCC0`) as well. Not minor: it decided the art of
+   every wall bordering an unfilled cell.
+
 **Second-stage draws**: after the main draw, if `$42 = DE1B[code] != 0`
 (codes 3,6-9,11,12 → extra piece; codes 14,15 → `0x18`), the handler
 draws again with `$0f = $42` (with `$42 == 4` replaced by `$6e = $8e*2`,
 the parity), and for `$42 == 0x18` at slots < 6 a third draw with
 `$0f = 4`. **This is how wall value 3 gets its two-piece render**: word 3
 (the door leaf) plus — via `DE1B[3] = 2` → word 1 — the doorway frame.
+
+> **Correction (2026-11-22):** neither rule is universal. The `$42 == 4 -> $6e`
+> substitution happens only in the **receding-edge** bodies (slot 0's
+> left/right edges `$80:C8A4`, the front handlers' edges `$80:C993`, the
+> lateral handlers' receding side `$80:CB71`); the side/perpendicular
+> bodies (`$80:CA3A`, `$80:CAA4`) and the front faces (`$80:C8F5`,
+> `$80:C9E6`) draw `$42` raw. The `0x18` third draw exists only in those
+> side/perpendicular/front-face bodies; receding edges never make it. The
+> v2 port applied both everywhere, and its "independent" Python oracle did
+> the same, so the identity check could not see it.
 
 **Parity alternation**: the front handlers' left/right-edge draws and the
 lateral side draws substitute `code 2 → $8e` (0 or 2), so plain receding
@@ -3021,6 +3070,15 @@ larger cave-mouth arch, word 6 (feature 3) = a **globe lamp**, word 10
 > wall-value-**0** edges 102/102; features 3-5 and 7-12 sit on
 > wall-value-**2** edges (wall decorations); neither ever sits on 1/3.
 
+> **Correction (2026-11-22):** the walker contradicted this table: `canStepSnes`
+> allowed a step only when the wall sub-field was 0, so every open doorway
+> (value 1) was impassable in the walker. The game's step decision
+> (`$80:C40B`-`C4AA`) passes iff `$80:C685[code] & 0x80`, with `code` the
+> evaluator's own-cell code including feature promotion: codes 0, 1, 4, 5
+> and 9 are passable. It also refuses stepping onto a `(feature & 0xC0) ==
+> 0x40` stairs/pit cell other than `0x4E` (`$80:C441`-`C44D`). Now
+> `canStepWindow` (§3.14.13).
+
 ##### The floor/ceiling pass (`$00:CE4C`/`$00:CE4F`)
 
 After the wall walk, all 27 slots are re-walked (all of them when the
@@ -3040,6 +3098,26 @@ floor. **This is the SNES's floor/ceiling mechanism** — closing the "no
 floor/ceiling continuation piece" walker gap — and it finally explains
 the `0x0D` vs `0x0E` "empty" sentinels: they are **floor/ceiling style
 selectors**.
+
+> **Correction (2026-11-22):** this description is incomplete, and the v2-v4 walker
+> implemented only this much. The real pass (`$80:CE4F`-`CF9F`) also:
+> (a) for `feature >= 0x80` other than `0x8E`/`0x8F` uses ceiling `0x10`
+> and floor `Yv+4`; `(feature & 0x0F) == 0x0F` below `0x40` uses ceiling
+> `0x24`; (b) at slot 0 with ceiling kind `0x24`, instead of the table word
+> appends the 4-word list at `0x84DC` (party cell variant non-zero) or
+> `0x84A6`, or only its last two words when bit 0 of the `$80:CFA2`
+> neighbour mask is clear; (c) for floor kind `0x20` at slots 0-11 with
+> `$80:D6E8[slot] != 0`, when the `$80:CFA2` mask (bit 0/1/2 = the ahead/
+> right/left neighbour, deltas `$80:D6D0`, holds a feature other than
+> `0x0D`/`0x0E`/`0x4E`) is non-zero, appends the 0-terminated list at
+> `$89:FE5E[(mask << 1) | D6E8[slot]]`, each word `+ 0x36` when the cell's
+> variant is non-zero, instead of the table word; (d) appends table words
+> unfiltered, `0x0000` included. Before the pass, `$80:C7C6` appends the
+> sky piece `0x02E6 | ($6e & 4)` when `$80:D01B` latched `$d0` (any visible
+> slot with `$80:DF01[slot] != 0` while `$80:DAD7[level*12+region]` bit 0
+> is clear). The `$7E:DBC0` flag is set by the region blitter only on
+> level 8 (`$80:D238`-`D251`: region staging offset `0x80` gets
+> `$DBC3,X = 1` when `$096C == 0`). All ported in §3.14.13.
 
 ##### Handler catalog (dispatch table `$80:C829`, slots 1-26)
 
@@ -3240,15 +3318,28 @@ group 40, unchanged).
    **word-for-word on 7/7 test poses** across levels 0/2/4, facings
    0/1/2/3 (55-71 words per pose, zero deviations) — two independent
    implementations of the same disassembly, no shared code.
+
+   > **Correction (2026-11-22):** this check compared the walker with itself. Both
+   implementations were written in one session from one reading of the
+   disassembly, so they shared every misreading (universal substitution
+   and third draw, `code == 2`, the incomplete floor/ceiling pass, the
+   normalised frustum, the missing fork) and agreed on all of them. The
+   first comparison against the game's own code (§3.14.13) found the walker
+   wrong on 36.4% of 38,912 poses and 73.2% of word lists.
 3. **Structural invariants** (exporter oracles, run on every export):
    all 4 facings' frustum blocks decompose to identical (ahead, lateral)
    pairs (104/104, with the one known ROM authoring slip at facing 1 slot
    23 documented and normalised); 9/9 wall-table word-1 placements match
    §3.14.5's cited rects; 1,557 distinct referenced compose words resolve
    to valid in-viewport pieces (3 non-drawable sentinels).
+   **Correction (2026-11-22):** "normalised" was a choice, not a finding:
+   the game uses the slip raw (see the prologue correction above).
 4. Golden-fixture unit test (`__tests__/view-model.test.ts`): the TS walk
    must reproduce the Python oracle's word list for the closed-door pose
    exactly (66/66); plus painter-order and seeding unit tests.
+   **Correction (2026-11-22):** the same self-comparison as item 2 (the
+   fixture was the Python port's output); removed in favour of the
+   ROM-driven `__tests__/oracle-parity.test.ts` (§3.14.13).
 
 Implementation: `tools/wizardry6/snes/view-model.ts` (v2 walk + painter, v3
 per-cell variant, v4 per-region palette), `export-dungeon-view.ts` (v2 data
@@ -3265,10 +3356,168 @@ per-region palette selection (`$82:F842`'s 16-bit key decode, the
 `docs/wizardry6/TODO.md` for the residual within-region multi-trigger
 caveat, tracked as a much narrower item than before.
 
+> **Correction (2026-11-22):** the residuals were not "much narrower". That judgement
+> rested on the walker agreeing with a re-implementation of itself. Run
+> against the game (§3.14.13), the v4 walker differed on 14,164 of 38,912
+> poses' pixels and 28,465 word lists, and on 9.5% of forward steps.
+
 **Still open** (tracked in `docs/wizardry6/TODO.md`): the `$7E:AC00`
 trigger-overlay draw pass (`$00:CE00`, runs before each handler —
 scripted decorations, not modelled); the `$7E:DBC0` stairs/pit flag
 array's writer; the `$094d`/`0x02EC` post-walk overwrite.
+
+> **Correction (2026-11-22):** the `$7E:DBC0` writer is the level-8 branch
+> of the region blitter (`$80:D231`-`D251`), and `$7E:AC00` / `$094d` are
+> runtime state a new game leaves clear -- see §3.14.13.
+
+#### 3.14.13 Game-driven parity: the 65816 oracle, the ROM's maze windows, walker v5 — confirmed (2026-11-22)
+
+Everything in §3.14.12 was checked against re-implementations of itself.
+This section is the first check against the game's own code, and the fix
+it forced.
+
+##### The oracle (`tools/wizardry6/snes/oracle/`)
+
+`cpu65816.ts` is a 65816 interpreter written for this project from the
+instruction-set semantics (no emulator code), with just enough of the
+SNES bus to run the dungeon routines: LoROM mapping, WRAM, the
+`$4202`-`$4217` multiply/divide unit, and general DMA to VRAM/CGRAM/the
+WRAM port. There is no PPU timing, APU, interrupt or RESET; unknown
+opcodes throw. `machine.ts` enters real ROM routines with the registers
+their callers set up:
+
+| step | entry | what it does |
+|---|---|---|
+| window | `$80:D06C` → `$80:D073` | `$8B:DE64` maze reload + the 24x24 window builder |
+| palette | `$82:F842`, `$82:867F` | dungeon CGRAM |
+| tilemap | `$83:E1CC` | BG2 tilemap install |
+| view | `$83:E223` | `$8e` parity, `JSL $80:C69F` (the walk), `$82:F810` + `$83:E25A` painter into `$7E:5000` |
+| DMA | `$80:BF78` | the NMI-side flush to VRAM |
+| keep | `$80:D039` | after a step: keep the window, or rebuild it |
+| step | `$80:C40B` + 4·rel | the movement decision; the accept path `$80:C4AA` is hooked |
+
+Harness-only changes: WRAM starts zeroed (a new game: every quest flag,
+`$096C`, `$094D`, `$0964`, `$0B74`... clear), the boot task's CGRAM shadow
+(file `0x127E4`) is installed, the one-frame yield `$80:8267` and the bump
+message `$80:BDAE` return at once. Pixels are read back from VRAM through
+the BG2 tilemap (`$7800`, chars `$2000`, cols 7-24, rows 3-17).
+
+##### The maze window (`$80:D073`) — the walker now uses the game's own
+
+The view never reads a whole-level grid. `$80:D073` builds a 24x24 window
+in WRAM — `$7E:4300` wall, `$7E:4540` feature, `$7E:4780` variant,
+`$7E:DBC0` stairs flag; index `row*24 + col`, row 0 = north — around the
+party's region:
+
+- `$8B:DE64` loads the level's 12 regions into the `$7E:9A00` staging
+  block and applies the quest-flag patches (§3.14.8);
+- `$80:D2BE` seeds the window: wall/`DBC0` 0, variant `$80:DB7F[level]`
+  raw, feature `$80:DB8D[level]` except `0x0E` for level 0 regions 0-5;
+  and latches `$0896 = $80:DAD7[$be/4] & 0x80`;
+- nine probe points (party cell + `$80:D758` offsets, ±8) are each matched
+  against the region origins `$80:D78E`; the centre probe sets `$a8`/`$aa`
+  (the centre region's origin y/x), `$c0` (region) and `$be`
+  (`level*48 + region*4`), and each hit region is blitted (`$80:D15A` →
+  `$80:D25B`) at its slot, with variant bytes from `$80:DA2E`/`$80:DB9B`
+  (`$80:D15A`-`D1B7`); `$0896` set stops after the centre region;
+- on level 8, the blitter sets `$7E:DBC3,X = 1` for the region at staging
+  offset `0x80` when `$094D == 0` and `$096C == 0` (`$80:D231`-`D251`) —
+  the `$7E:DBC0` writer §3.14.12 listed as missing. With `$096C != 0` it
+  writes `$096C` into `$DC24,X` for staging offset 0 instead.
+
+Which neighbours land in the window depends on the cell the party entered
+the region at, so one region can have several windows: **191 distinct
+windows** over 9,536 party cells (12-32 per level). The builder is
+memoryless — rebuilding any cell from another cell's WRAM gives the same
+window as from clear WRAM (checked on every cell). `$80:D039` keeps the
+window while `0 <= gx - $aa < 8` and `0 <= gy - $a8 < 8` on the same level
+and otherwise rebuilds (without the maze reload; staging is unchanged).
+
+`export-maze-windows.ts` runs the builder once per party cell (the region
+8x8 boxes of `$80:D78E`, minus the `(0,0)` placeholder slots of levels
+10/11/13, which all shadow each other) and writes
+`dungeon/maze-windows.json`: the windows (planes base64, ~590 KB), a
+`cells[level]["gx,gy"]` → window map, and the new-game start
+(`$80:891B` entry 0, loaded by `$80:88B8`: level 0, x 127, y 121, facing
+N, `$094C = 0x50`). The walker takes the window of the arrival cell when
+the party leaves the centre region, which reproduces the game's
+path-dependence exactly.
+
+##### Walker v5 (`view-model.ts`)
+
+`resolveViewWords` is a line-by-line port of `$80:C69F` in window-index
+space: the slot cell is `$50 + $80:DD4B[facing*26 + slot-1]` raw, the
+far cell `$0a + $80:D700[facing + {0,1,2}]`, the `$80:CFA2` neighbours
+`$0a + $80:D6D0[facing*3 + k]`. On top of §3.14.12 (as corrected there):
+
+| # | rule | ROM |
+|---|---|---|
+| 1 | full floor/ceiling pass: `>= 0x80` and `0x0F` ceilings, slot-0 kind-`0x24` lists `0x84A6`/`0x84DC`, the `$89:FE5E` floor lists keyed by the `$80:CFA2` mask and `$80:D6E8`, `+0x36` on non-zero variant, the `$7E:DBC0` stairs floor `0x1C`, unfiltered words | `$80:CE4F`-`CF9F`, `$80:CFA2`-`D01A` |
+| 2 | sky piece `0x02E6 \| ($6e & 4)` when a visible slot has `$80:DF01[slot] != 0` and `$80:DAD7[$be/4]` bit 0 is clear | `$80:D01B`, `$80:C7C6`-`C7DC` |
+| 3 | far-side variant fork against the raw `$0e` | `$80:CCC0`, `$80:CCDE` |
+| 4 | `$42 == 4 → $6e` only on receding edges; `0x18` third draw only in side/perpendicular/front-face bodies | `$80:C8A4`, `C993`, `CB71` vs `CA3A`, `CAA4`, `C9E6`, `C8ED` |
+| 5 | frustum raw (facing 1 slot 24 = -90) | `$80:CDF0` |
+| 6 | marked-cell extra for `$0f == 2` (code 1) | `$80:CC89` |
+| 7 | level-8 stairs flag | window plane `dbc0` |
+| 8 | ROM start pose; no placeholder regions | `$80:891B` |
+| 9 | step iff `$80:C685[code] & 0x80` (code = own-cell evaluator code); refuse `(feature & 0xC0) == 0x40` destinations other than `0x4E` | `$80:C40B`-`C4AA` |
+| 10 | 51 compose words now exported as pieces (`0x02E6`/`0x02EA`, the `0x84A6`/`0x84DC` lists, every `$89:FE5E` word with and without `+0x36`) | `export-dungeon-view.ts` |
+
+Note that `$5a` is 1, not 0, while slot 0 runs (`$80:C74B`), and the
+`$78` flush tests the cell the *last visible* handler evaluated.
+
+##### Result
+
+Full sweep (`npm run w6:snes:parity`; `oracle/sweep-parity.ts`, one
+process per level): every party cell × 4 facings, the game's pixels and
+word list vs the walker's, plus the game's step decision in all four
+relative directions, plus — for every accepted forward step that stays in
+the centre region — the game continuing from the previous pose's WRAM
+(`$80:D039`) vs the walker keeping its window. "Before" is the v4 walker
+(HEAD `view-model.ts` on its own assets) on the same poses.
+
+| level | poses | pixel-mismatch poses / differing px, before | after | word lists differ, before | after | step decisions agree, before | after | window retention, after |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 3,072 | 1,522 (49.5%) / 1,919,199 px | 0 / 0 px | 2,344 (76.3%) | 0 | 11,612/12,288 (2,903/3,072 fwd) | 12,288/12,288 | 1,911/1,911 |
+| 1 | 3,072 | 918 (29.9%) / 995,911 px | 0 / 0 px | 2,243 (73.0%) | 0 | 11,992/12,288 (2,998/3,072 fwd) | 12,288/12,288 | 1,832/1,832 |
+| 2 | 3,072 | 420 (13.7%) / 994,139 px | 0 / 0 px | 1,017 (33.1%) | 0 | 12,012/12,288 (3,003/3,072 fwd) | 12,288/12,288 | 1,540/1,540 |
+| 3 | 3,072 | 1,957 (63.7%) / 5,877,317 px | 0 / 0 px | 2,749 (89.5%) | 0 | 12,144/12,288 (3,036/3,072 fwd) | 12,288/12,288 | 1,664/1,664 |
+| 4 | 3,072 | 1,595 (51.9%) / 2,105,862 px | 0 / 0 px | 2,366 (77.0%) | 0 | 11,564/12,288 (2,891/3,072 fwd) | 12,288/12,288 | 2,045/2,045 |
+| 5 | 3,072 | 243 (7.9%) / 125,836 px | 0 / 0 px | 2,365 (77.0%) | 0 | 11,940/12,288 (2,985/3,072 fwd) | 12,288/12,288 | 1,316/1,316 |
+| 6 | 3,072 | 1,602 (52.1%) / 1,012,809 px | 0 / 0 px | 2,167 (70.5%) | 0 | 12,032/12,288 (3,008/3,072 fwd) | 12,288/12,288 | 2,095/2,095 |
+| 7 | 3,072 | 689 (22.4%) / 450,406 px | 0 / 0 px | 1,896 (61.7%) | 0 | 12,232/12,288 (3,058/3,072 fwd) | 12,288/12,288 | 2,324/2,324 |
+| 8 | 3,072 | 474 (15.4%) / 232,873 px | 0 / 0 px | 2,500 (81.4%) | 0 | 5,460/12,288 (1,365/3,072 fwd) | 12,288/12,288 | 267/267 |
+| 9 | 3,072 | 516 (16.8%) / 873,637 px | 0 / 0 px | 2,421 (78.8%) | 0 | 11,032/12,288 (2,758/3,072 fwd) | 12,288/12,288 | 1,404/1,404 |
+| 10 | 1,024 | 576 (56.2%) / 272,004 px | 0 / 0 px | 599 (58.5%) | 0 | 3,068/4,096 (767/1,024 fwd) | 4,096/4,096 | 350/350 |
+| 11 | 1,536 | 526 (34.2%) / 517,676 px | 0 / 0 px | 1,497 (97.5%) | 0 | 5,744/6,144 (1,436/1,536 fwd) | 6,144/6,144 | 1,040/1,040 |
+| 12 | 3,072 | 1,696 (55.2%) / 1,922,014 px | 0 / 0 px | 1,857 (60.4%) | 0 | 10,104/12,288 (2,526/3,072 fwd) | 12,288/12,288 | 956/956 |
+| 13 | 1,792 | 662 (36.9%) / 289,104 px | 0 / 0 px | 1,676 (93.5%) | 0 | 7,076/7,168 (1,769/1,792 fwd) | 7,168/7,168 | 1,179/1,179 |
+| **all** | **38,144** | **13,396 (35.1%) / 17,588,787 px** | **0 / 0 px** | **27,697 (72.6%)** | **0** | **138,012/152,576 (34,503/38,144 fwd, 9.5% wrong)** | **152,576/152,576** | **19,923/19,923** |
+
+Pixels are 4bpp indices over the full 144x120 view (the palette is
+compared separately, see below); 38,144 = every party cell x 4 facings
+(the audit's 38,912 also counted the shadowed `(0,0)` placeholder cells
+of levels 10/11/13). Mutation check on the vitest: reverting any one of
+fixes 1-7, 9 or 10 in the table above (12 separate reverts) fails it.
+
+
+The vitest `__tests__/oracle-parity.test.ts` runs a fixed 6 cells × 4
+facings per level plus a 200-step right-hand-rule walk from the ROM start
+that crosses regions; it needs only the ROM and skips without it. The v4
+walker fails all 14 of its level cases.
+
+##### Not modelled (each a `docs/wizardry6/TODO.md` row)
+
+Runtime state a new game leaves clear, which the walker holds at its
+new-game value: the quest-flag maze patches (`snes-quest-flag-maze-variants`);
+the `$7E:AC00` scripted overlay (`$80:CE00`, written by `$82:D245` and
+accumulating along the party's path; `snes-ac00-overlay`); `$0850`,
+`$094D`/`0x02EC`, `$0964`, `$0B74`-`$0B7B`, `$096C`
+(`snes-runtime-view-flags`); runtime wall mutation, which edits the window
+only (`snes-door-mutation`). Also: the stairs command
+(`snes-stairs-transition`), the palette's trigger-path dependence (the
+sweep compares indices, not colours; `snes-palette-path-dependence`), and
+the BG1/BG3 layers (`snes-bg1-bg3`).
 
 ---
 

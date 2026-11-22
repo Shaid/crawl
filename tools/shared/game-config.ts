@@ -233,10 +233,28 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       platform: 'snes',
       dataDirs: ['wizardry6/snes'],
       executable: undefined,
-      expectedFiles: [],
-      supported: false,
+      expectedFiles: ['Wizardry VI - Kindan no Mahitsu (Japan).sfc'],
+      supported: true,
       assetDir: 'wizardry6',
       features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // The SNES walker's assets: dungeon palettes (decode-dungeon-composer),
+        // the view-walk tables + tile pool (export-dungeon-view), and the
+        // maze windows captured from the ROM's own builder running in the
+        // 65816 oracle core (export-maze-windows, docs/wizardry6/snes §3.14.13).
+        const { readdirSync } = await import('node:fs');
+        const sfc = readdirSync(dataDir).find((f) => f.toLowerCase().endsWith('.sfc'));
+        if (!sfc) throw new Error(`wizardry6/snes: no .sfc ROM in ${dataDir}`);
+        const rom = resolve(dataDir, sfc);
+        const { execFileSync } = await import('node:child_process');
+        execFileSync('npx', ['tsx', 'tools/wizardry6/snes/decode-dungeon-composer.ts', rom], { stdio: 'inherit', cwd: process.cwd() });
+        const { exportDungeonView } = await import('../wizardry6/snes/export-dungeon-view.ts');
+        exportDungeonView(rom);
+        const { exportMazeWindows } = await import('../wizardry6/snes/export-maze-windows.ts');
+        exportMazeWindows(rom);
+        console.log('  wizardry6/snes: palettes + view pieces + maze windows exported');
+      },
     }],
   },
   {

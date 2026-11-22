@@ -1,97 +1,46 @@
 /**
  * Browser-safe SNES Wizardry 6 dungeon-view model. Pure (no Node/DOM
- * imports) so both a Node verification renderer and the browser walker
- * harness (`tools/walker/games-w6-snes.ts`) share it -- same pattern as
- * the Amiga port's `view-model.ts`.
+ * imports) so the Node renderer, the parity sweep and the browser walker
+ * (`tools/walker/games-w6-snes.ts`) share it.
  *
- * v2: a **faithful port of the game's own 26-slot view walk**
- * (`$80:C69F`, `data-structure.md` §3.14.12 -- disassembly-traced this
- * session), replacing v1's "index-1 generic wall" approximation:
+ * v5 (2026-11-22, `data-structure.md` §3.14.13): a line-by-line port of
+ * the game's own view walk `$80:C69F`, run in the game's own coordinate
+ * space -- the 24x24 maze **window** `$80:D073` builds around the party
+ * (`$7E:4300` wall / `$7E:4540` feature / `$7E:4780` variant / `$7E:DBC0`
+ * stairs flag, cell index = row*24+col, row 0 = north edge). The windows
+ * are not reconstructed here: `export-maze-windows.ts` runs the ROM's own
+ * builder in a 65816 core (`oracle/`) at export time and ships the result
+ * (`dungeon/maze-windows.json`). Verified against the same core on every
+ * party cell x 4 facings of all 14 levels (`oracle/sweep-parity.ts`).
  *
- * - the evaluator (`$00:CD36` family): per-edge 2-bit wall value, feature/
- *   orientation promotion (`code = feature+3` when the feature faces the
- *   evaluated edge), the fixed door piece `0x02E8` at frustum slot 3 for
- *   `feature==6`;
- * - the resolver (`$00:CC72`): piece word = `record[DE4E[(code*2 + variant)
- *   & 0xFE]]` -- so wall values 0-3 and features 1-12 each select their own
- *   record word, and the per-cell variant byte (`$7E:4780`) shifts the
- *   whole lookup into a different art family (castle/cave/forest/...);
- * - `DE1B` second-stage draws (extra pieces for codes 3/6-9/11/12/14/15),
- *   `DE2C` see-through flags (doorways and closed doors keep visibility
- *   recursion alive; solid walls stop it), `DE3D`-gated `$78` deferral
- *   (front-facing walls/doors appended at the `$c85e` depth-group
- *   boundaries so they z-order after that group's side edges);
- * - visibility propagation via the `$7E:3B00` skip-flag array (init
- *   all-skip; slot 0 and each handler enable deeper slots as edges prove
- *   open or see-through);
- * - the floor/ceiling pass (`$00:CE4C`): per-slot ceiling+floor piece from
- *   the `$80:DED8` kind tables, keyed by the cell's variant byte, the walk
- *   parity `$8e`, and the `0x0D`/`0x0E` feature sentinels (which turn out
- *   to be floor/ceiling style selectors, not just "no feature" markers);
- * - the always-appended final backdrop piece `0x834A`.
+ * v1-v4 walked a grid densified from `data/maze.json` and were checked only
+ * against re-implementations of themselves; the game-driven sweep found
+ * them wrong on 36.4% of poses. What v5 fixes, each tied to its ROM site:
  *
- * v3 (this session, `data-structure.md` §3.14.12 "per-region art-variant"):
- * **true per-cell variant resolution**, closing the previous per-level
- * uniform approximation. Disassembly of `$80:D073`-`$80:D1B7` found the
- * real chain: `$be` (the region cursor) is resolved by a bounding-box scan
- * over the level's 12 known region origins against the party's current
- * cell (with a cheap cached-region short-circuit); the variant byte is
- * then `$80:DA2E[level*12+region]` (an XBA-stashed accumulator recovered
- * across an `$09F0` flag test that is **provably always false** -- bit 2 of
- * `$09F0` has zero writers anywhere in the ROM, so the "runtime-gated"
- * framing in the prior session's docs was a misreading of an always-taken
- * branch, not a real live gate). Bit 7 of the DA2E byte selects a 16-byte
- * pattern row from `$80:DB9B`, unpacked 2-bit-per-cell into the region's
- * 64 `(major,minor)` slots (`g = major*2 + (minor>>2)`, `f = minor & 3`);
- * bit 7 clear means a uniform fill. See `resolveCellVariant` below and
- * `DenseMazeGrid.variant` -- the per-cell equivalent of the real `$7E:4780`
- * array. (The `$0B19` value the prior session guessed fed this lookup is
- * a *different*, unrelated mechanism -- a small 1-10 scripted per-region
- * event-trigger id, consumed by `$80:9B1A`/`$80:BC74` into `$091E`/`$0842`,
- * not a `$80:DA2E` index at all; corrected in the doc.)
+ * - floor/ceiling pass `$80:CE4F`-`CF9F` ported exactly: the `$80:CFA2`
+ *   neighbour mask (deltas `$80:D6D0`), the slot-0 kind-0x24 ceiling lists
+ *   (`0x84A6`/`0x84DC`), the floor transition lists at `$89:FE5E` keyed by
+ *   `$80:D6E8`, the `0x0F` and `>= 0x80` ceiling rules, the `$7E:DBC0`
+ *   stairs-floor flag, and no filtering of 0/0xFFFF words (the game
+ *   appends whatever the table holds);
+ * - the sky piece: `$80:D01B` latches `$d0 = $80:DF01[slot]` for visible
+ *   slots when `$80:DAD7[level*12+region]` bit 0 is clear, and `$80:C7C6`
+ *   appends `0x02E6 | ($6e & 4)`;
+ * - the `$80:CCDE` far-side variant fork compares against the RAW
+ *   `$80:DB7F` byte (0x80 is not normalised to 0x40);
+ * - the second draw substitutes `$6e` for `$42 == 4` only on receding edges
+ *   (`$80:C8A4`, `C993`, `CB71`), and the `0x18` third draw happens only in
+ *   the side/perpendicular/front-face bodies (`$80:CA3A`/`CAA4`/`C9E6`);
+ * - the `$80:DD4B` frustum is used raw (facing 1 slot 24 is -90);
+ * - the marked-cell extra draw fires for `$0f == 2` (code 1, `$80:CC89`);
+ * - movement is the game's `$80:C40B` decision (`canStepWindow`).
  *
- * v4 (this session, §3.14.12 "per-region palette -- CONFIRMED"): **true
- * per-region palette resolution**, closing the palette half of the same
- * gap. A same-session earlier pass wrongly refuted this (compared the
- * FULL 16-bit `$82:F842` record key against the small range only its LOW
- * byte should occupy); re-disassembling the key's high-byte setup
- * (`$82:F878`-`$82:F883`) found `key = ((level<<4)|region)<<8 |
- * ((dy<<4)|dx)` -- `region` is the plain 0-11 index held in direct-page
- * `$c0`, set by the same bounding-box scan that resolves `$be`. See
- * `resolveRegionPaletteGroup` below and the real caveat it documents:
- * `$82:F842` only actually re-runs at 7 hardcoded scripted transitions
- * engine-wide, so a region with more than one distinct triggered group is
- * resolved by majority vote, not a perfect reconstruction of live state.
+ * Runtime state the walk reads that a new game leaves clear, and which
+ * this model therefore holds at its new-game value: `$0850` (a pre-word),
+ * `$094D` (replaces the slot-0 floor word with `0x02EC`), `$7E:AC00` (the
+ * scripted per-cell overlay `$80:CE00`, written by `$82:D245`), `$0964`,
+ * `$0B74`-`$0B7B`. See `docs/wizardry6/TODO.md`.
  */
-
-export interface DenseMazeGrid {
-  width: number;
-  height: number;
-  /** Raw SNES wall byte per cell, row-major (`y*width+x`). Bits 0-1 = wall
-   * on the +Y (`facing===0`, north) side, 2-3 = +X (east), 4-5 = -Y
-   * (south), 6-7 = -X (west) -- confirmed absolute mapping,
-   * `data-structure.md` §3.14.8's cross-platform table. Off-map cells are
-   * filled with the game's own level-load seed (wall `0x00`). */
-  wall: Uint8Array;
-  /** Raw SNES feature byte per cell (§3.14.8); off-map cells are filled
-   * with the level's own `$80:DB8D` seed byte. */
-  feature: Uint8Array;
-  /** Off-map/seed feature byte used beyond the grid bounds. */
-  seedFeature: number;
-  /** Per-cell floor/ceiling/art-family variant byte (the real `$7E:4780`
-   * equivalent, §3.14.12 v3) -- resolved per `(level,region)` from
-   * `$80:DA2E`/`$80:DB9B`, NOT a pose-wide constant. Off-map cells hold
-   * `seedVariant`. */
-  variant: Uint8Array;
-  /** Off-map/seed variant byte (the level's `$80:DB7F` default, `0x80`
-   * normalised to `0x40` per the exporter). */
-  seedVariant: number;
-  /** Global maze coordinate of grid cell (0,0) -- needed because the walk
-   * parity `$8e = ((globalX ^ globalY ^ facing) & 1) * 2` uses the game's
-   * own global coordinates, not grid-local ones. */
-  originX: number;
-  originY: number;
-}
 
 export interface MazeLevelRaw {
   level: number;
@@ -99,120 +48,76 @@ export interface MazeLevelRaw {
   cells: Array<{ region: number; major: number; minor: number; wall: number; feature: number }>;
 }
 
-/**
- * Resolve one cell's real `$7E:4780`-equivalent variant byte from
- * `$80:DA2E[level*12+region]` (§3.14.12 v3). Byte-verified against
- * `$80:D181`-`$80:D1AD`: bit 7 clear -> uniform fill (the DA2E byte
- * itself); bit 7 set -> row `value & 0x7f` of the 16-byte `$80:DB9B` table,
- * unpacked 2-bit-per-cell (`g = major*2 + (minor>>2)` selects the source
- * byte within the row, `f = minor & 3` selects which of its four 2-bit
- * fields), each field scaled into `{0x00,0x20,0x40,0x60}` via the game's
- * own per-field shift (`f=0`: `(b&0xC0)>>1`; `f=1`: `(b&0x30)<<1`; `f=2`:
- * `(b&0x0C)<<3`; `f=3`: `(b&0x03)<<5`).
- */
-export function resolveCellVariant(da2e: number[], db9b: number[], level: number, region: number, major: number, minor: number): number {
-  const v = da2e[level * 12 + region] ?? 0;
-  if ((v & 0x80) === 0) return v;
-  const row = v & 0x7f;
-  const g = major * 2 + (minor >> 2);
-  const src = db9b[row * 16 + g] ?? 0;
-  const f = minor & 3;
-  if (f === 0) return (src & 0xc0) >> 1;
-  if (f === 1) return (src & 0x30) << 1;
-  if (f === 2) return (src & 0x0c) << 3;
-  return (src & 0x03) << 5;
+/** One 24x24 maze window as `$80:D073` leaves it in WRAM. */
+export interface MazeWindow {
+  level: number;
+  /** `$c0`, the centre region 0-11. */
+  region: number;
+  /** `$be` = level*48 + region*4. */
+  be: number;
+  /** `$aa`/`$a8`: global x/y of the centre region's origin. The centre region is `[originX, originX+8) x [originY, originY+8)`. */
+  originX: number;
+  originY: number;
+  wall: Uint8Array;
+  feature: Uint8Array;
+  variant: Uint8Array;
+  dbc0: Uint8Array;
+}
+
+/** `dungeon/maze-windows.json` (written by `export-maze-windows.ts`). Planes are base64; a `null` plane is all zero. */
+export interface MazeWindowsFile {
+  windows: Array<{ level: number; region: number; be: number; originX: number; originY: number; wall: string; feature: string; variant: string; dbc0: string | null }>;
+  /** Per level: `"gx,gy"` -> index into `windows` -- the window `$80:D073` builds when the party arrives at that cell from elsewhere. */
+  cells: Array<Record<string, number>>;
+  /** The new-game start (`$80:891B` entry 0). */
+  start: { level: number; x: number; y: number; facing: number; palette094c: number };
+}
+
+function b64(s: string | null): Uint8Array {
+  const out = new Uint8Array(576);
+  if (s === null) return out;
+  const bin = atob(s);
+  for (let i = 0; i < bin.length && i < 576; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export function decodeMazeWindow(f: MazeWindowsFile, index: number): MazeWindow {
+  const w = f.windows[index]!;
+  return {
+    level: w.level,
+    region: w.region,
+    be: w.be,
+    originX: w.originX,
+    originY: w.originY,
+    wall: b64(w.wall),
+    feature: b64(w.feature),
+    variant: b64(w.variant),
+    dbc0: b64(w.dbc0),
+  };
+}
+
+/** Whether global (gx, gy) is inside the window's centre region -- the `$80:D039` keep-the-window test. */
+export function inCentreRegion(w: MazeWindow, level: number, gx: number, gy: number): boolean {
+  const dx = gx - w.originX;
+  const dy = gy - w.originY;
+  return w.level === level && dx >= 0 && dx < 8 && dy >= 0 && dy < 8;
 }
 
 /**
- * Densify one level's region/major/minor cell list (raw `data/maze.json`
- * shape, `decode-maze.ts`) into a flat grid, tight-cropped to the active
- * regions' bounding box. `major`/`minor` place a cell within its region:
- * **global Y = originY + (7 - major)`, global X = originX + minor`** (the
- * confirmed major-axis reversal, §3.14.8). Off-map cells hold the game's
- * own level-load seeds (wall 0, feature `$80:DB8D[level]`) rather than a
- * synthetic "solid" fill -- matching `$8B:DE64`/`$80:D2D3`. `da2e`/`db9b`
- * (from `view-pieces.json`'s `tables`) give the real per-region variant
- * (§3.14.12 v3); `seedVariant` (the level's `$80:DB7F` default) fills
- * off-map cells only.
+ * The window the game holds after the party moves to (gx, gy): `current`
+ * if the cell is still in its centre region (`$80:D039`), else the window
+ * `$80:D073` builds for that cell. Returns `null` when the cell is in no
+ * region the builder knows (the caller keeps whatever it had).
  */
-export function densifyMazeLevel(level: MazeLevelRaw, seedFeature: number, da2e: number[], db9b: number[], seedVariant: number): DenseMazeGrid {
-  const usedRegions = new Set(level.cells.map((c) => c.region));
-  const origins = level.origins.filter((_, i) => usedRegions.has(i));
-  const minX = Math.min(...origins.map((o) => o.x));
-  const minY = Math.min(...origins.map((o) => o.y));
-  const maxX = Math.max(...origins.map((o) => o.x + 7));
-  const maxY = Math.max(...origins.map((o) => o.y + 7));
-
-  const width = maxX - minX + 1;
-  const height = maxY - minY + 1;
-  const wall = new Uint8Array(width * height); // seed: wall 0 (open), the game's own fill
-  const feature = new Uint8Array(width * height).fill(seedFeature);
-  const variant = new Uint8Array(width * height).fill(seedVariant);
-
-  for (const cell of level.cells) {
-    const origin = level.origins[cell.region];
-    if (!origin) continue;
-    const gx = origin.x + cell.minor - minX;
-    const gy = origin.y + (7 - cell.major) - minY;
-    if (gx < 0 || gy < 0 || gx >= width || gy >= height) continue;
-    const idx = gy * width + gx;
-    wall[idx] = cell.wall;
-    feature[idx] = cell.feature;
-    variant[idx] = resolveCellVariant(da2e, db9b, level.level, cell.region, cell.major, cell.minor);
-  }
-
-  return { width, height, wall, feature, seedFeature, variant, seedVariant, originX: minX, originY: minY };
+export function windowIndexFor(f: MazeWindowsFile, level: number, gx: number, gy: number): number | null {
+  const i = f.cells[level]?.[`${gx},${gy}`];
+  return i === undefined ? null : i;
 }
 
-/**
- * Resolve which of the level's 12 regions contains global cell `(gx,gy)`,
- * plus the cell's local `(major,minor)` within it -- the same bounding-box
- * scan the game runs at `$80:D0C2`-`$80:D0DE` (regions tried in ascending
- * order, first match wins). Returns `null` if no region contains the cell
- * (matches the ROM's own out-of-region fallback path).
- */
-export function resolveRegionForCell(level: MazeLevelRaw, gx: number, gy: number): { region: number; major: number; minor: number } | null {
-  for (let region = 0; region < level.origins.length; region++) {
-    const o = level.origins[region];
-    if (!o) continue;
-    const minor = gx - o.x;
-    if (minor < 0 || minor > 7) continue;
-    const flipped = gy - o.y; // = 7 - major
-    if (flipped < 0 || flipped > 7) continue;
-    return { region, major: 7 - flipped, minor };
-  }
-  return null;
+/** `$50`: the party's window cell index -- `(a8 + 7 - gy)*24 + (gx - aa) + 0xC8` (`$80:C6DA`-`C6FC`). */
+export function windowCell(w: MazeWindow, gx: number, gy: number): number {
+  return (w.originY + 7 - gy) * 24 + (gx - w.originX) + 0xc8;
 }
-
-// CORRECTION (this session, §3.14.12 v4): an earlier draft of this module
-// shipped a `resolveRegionPaletteGroup` that assumed `$82:F842`'s stored
-// record `key` was a small `(minor<<4)|(7-major)` in-region local offset
-// (0-119), found the real stored keys were all far larger (9793-53521),
-// and concluded the field couldn't be a per-cell function at all -- WRONG:
-// that comparison checked the FULL 16-bit key against the range only its
-// LOW byte should occupy. Re-disassembling `$82:F878`-`$82:F883` (the
-// $43-byte setup immediately preceding the table scan) found:
-//
-//   $82:F878  SEP #$20
-//   $82:F87A  LDA $0905        ; dungeon level (0-13)
-//   $82:F87D  ASL x4           ; level << 4
-//   $82:F881  ORA $c0          ; direct-page $c0, NOT an immediate -- see below
-//   $82:F883  STA $43          ; high byte of the 16-bit key ($42/$43)
-//
-// `$c0` is set by the SAME bounding-box region-scan that resolves `$be`
-// (file 0x0050f6, `STA $c0` right after `TXA; EOR #$00FF; ADC #$000C`
-// recovers the ascending region index from the scan's descending counter)
-// -- i.e. `$c0` holds the plain 0-11 region index, not a pre-scaled offset
-// like `$be`. So the full key is:
-//
-//   key = ((level << 4) | region) << 8 | ((dy << 4) | dx)
-//
-// Verified against every real record: 0/170 `>=0x50` records violate
-// `region <= 11`, `keyHigh >> 4 == level`, or `keyLow <= 0x77`, across all
-// 14 levels (`region-env.json`'s own export-time census reports the same
-// 0 violations). Every environment record is therefore addressable by
-// (level, region, local dy, local dx) -- see `resolveRegionPaletteGroup`
-// below, and the caveat there about within-region path-dependence.
 
 /** `dungeon/level-palettes.json`'s shape (§3.14.12 v4). */
 export interface LevelPalettesFile {
@@ -223,21 +128,11 @@ export interface LevelPalettesFile {
 }
 
 /**
- * §3.14.12 v4: resolve the palette group for a specific region of a level,
- * falling back to the level's own dominant group when that region has no
- * `$82:F842` environment record. `region` may be `null` (party position
- * outside every known region, e.g. an off-grid seed cell).
- *
- * Caveat (real, not just an approximation gap): `$82:F842` only actually
- * re-runs at 7 hardcoded scripted screen-fade transitions engine-wide, not
- * on every region crossing -- so a region's TRUE in-game palette at any
- * given moment depends on which entry/exit trigger the party last crossed,
- * not just "which region contains them right now". Where a region carries
- * more than one distinct triggered group (real for a handful of regions,
- * e.g. level 12 region 1: group 42 x2 vs. group 52 x1), this resolves to
- * the region's own majority vote -- a real improvement over the old
- * per-level-only approximation, but still an approximation for those
- * specific multi-trigger regions. See `docs/wizardry6/TODO.md`.
+ * §3.14.12 v4: the palette group for a region of a level, falling back to
+ * the level's dominant group. Still an approximation: `$82:F842` re-runs
+ * only at 7 scripted screen-fade transitions, so the live palette depends
+ * on the last trigger the party crossed (`snes-palette-path-dependence` in
+ * `docs/wizardry6/TODO.md`).
  */
 export function resolveRegionPaletteGroup(levelPalettes: LevelPalettesFile, level: number, region: number | null): number {
   const fallback = levelPalettes.groups[level] ?? DEFAULT_PALETTE_GROUP;
@@ -260,57 +155,30 @@ export function featureOf(byte: number): { feature: number; orient: number } {
   return { feature: isEmpty ? 0 : nibble, orient: (byte >> 4) & 0x3 };
 }
 
-const FACING_DELTAS: ReadonlyArray<{ dx: number; dy: number }> = [
-  { dx: 0, dy: 1 }, // 0 = N (+Y)
-  { dx: 1, dy: 0 }, // 1 = E (+X)
-  { dx: 0, dy: -1 }, // 2 = S (-Y)
-  { dx: -1, dy: 0 }, // 3 = W (-X)
-];
-
-export function stepForward(x: number, y: number, facing: number, depth: number): { x: number; y: number } {
-  const d = FACING_DELTAS[facing]!;
-  return { x: x + d.dx * depth, y: y + d.dy * depth };
-}
-
-function inBounds(grid: DenseMazeGrid, x: number, y: number): boolean {
-  return x >= 0 && x < grid.width && y >= 0 && y < grid.height;
-}
-
-function cellWallByte(grid: DenseMazeGrid, x: number, y: number): number {
-  return inBounds(grid, x, y) ? grid.wall[y * grid.width + x]! : 0;
-}
-
-function cellFeatureByte(grid: DenseMazeGrid, x: number, y: number): number {
-  return inBounds(grid, x, y) ? grid.feature[y * grid.width + x]! : grid.seedFeature;
-}
-
-/** The real `$7E:4780`-equivalent variant byte for a cell (§3.14.12 v3, `resolveCellVariant`). Off-grid cells use the level's `$80:DB7F` seed. */
-function cellVariantByte(grid: DenseMazeGrid, x: number, y: number): number {
-  return inBounds(grid, x, y) ? grid.variant[y * grid.width + x]! : grid.seedVariant;
-}
-
-/** Whether the party can step one cell in compass direction `dir` from `(x, y)` -- open iff that direction's wall sub-field is 0 (in-grid only). */
-export function canStepSnes(grid: DenseMazeGrid, x: number, y: number, dir: 0 | 1 | 2 | 3): boolean {
-  const dest = stepForward(x, y, dir, 1);
-  if (!inBounds(grid, dest.x, dest.y)) return false;
-  return wallForFacing(cellWallByte(grid, x, y), dir) === 0;
-}
-
 // ─────────────────────────────────────────────────────────────────────────
-// The faithful view walk ($80:C69F, §3.14.12).
+// ROM data the walk reads (exported by `export-dungeon-view.ts`).
 // ─────────────────────────────────────────────────────────────────────────
 
-/** ROM dispatch tables exported by `export-dungeon-view.ts` (all byte/word arrays read straight from the ROM at the doc-cited offsets). */
 export interface WalkTables {
-  /** `$80:DD4B`: 4 facings x 26 frustum slot offsets, decomposed by the exporter into `(ahead, lateral)` pairs (grid-unit-free). */
-  frustum: Array<{ ahead: number; lateral: number }>;
+  /** `$80:DD4B`: 4 facings x 26 raw i16 window-index deltas (slot cell = `$50 + dd4b[facing*26 + slot-1]`). */
+  dd4b: number[];
+  /** `$80:D700`: 6 i16 deltas; facing f's left / ahead / right neighbour = `d700[f]`, `d700[f+1]`, `d700[f+2]`. */
+  d700: number[];
+  /** `$80:D6D0`: 4 x 3 i16 deltas (ahead, right, left) for the `$80:CFA2` neighbour mask. */
+  d6d0: number[];
+  /** `$80:D6E8`: 12 bytes, per-slot floor-transition column into `$89:FE5E`. */
+  d6e8: number[];
   de1b: number[]; // $80:DE1B second-stage byte per code 0-15
-  de2c: number[]; // $80:DE2C see-through/visibility byte per code (bit7 = sfx trigger, masked off by the exporter)
+  de2c: number[]; // $80:DE2C raw (bit 7 = "see-through + sfx", read as 1)
   de3d: number[]; // $80:DE3D front-deferral gate per code
-  de4e: number[]; // $80:DE4E (code*2+variant)&0xFE -> record byte offset (69 entries)
-  db7f: number[]; // per-level default variant byte ($0e)
-  db8d: number[]; // per-level feature seed byte
-  c85e: number[]; // per-slot $78 flush flags (index 1-26)
+  de4e: number[]; // $80:DE4E (idx & 0xFE) / 2 -> record byte offset
+  db7f: number[]; // $80:DB7F raw per-level default variant ($0e)
+  c85e: number[]; // $80:C85E per-slot $78 flush flags (index 1-26)
+  dad7: number[]; // $80:DAD7 per (level*12+region): bit 0 set = no sky
+  df01: number[]; // $80:DF01 per-slot sky latch value
+  c685: number[]; // $80:C685 per-code movement byte (bit 7 = passable)
+  /** `$89:FE5E[(mask<<1) | d6e8[slot]]` -> 0-terminated floor word list (hex index keys). */
+  fe5e: Record<string, number[]>;
 }
 
 export type HandlerSpec =
@@ -321,7 +189,7 @@ export type HandlerSpec =
 export interface WalkRecord {
   /** The record's 39 u16 words (byte offsets 0-0x4C). */
   words: number[];
-  /** The 4 per-facing override bytes at record offsets 0x4C-0x4F (door/gate far-side art swap, §3.14.12). */
+  /** The 4 per-facing override bytes at record offsets 0x4C-0x4F (door/gate far-side art swap). */
   override: number[];
 }
 
@@ -344,311 +212,341 @@ export interface ViewPiecesFile {
   tables: WalkTables;
   /** Slot handlers 1-26 (index 0 unused -- slot 0 is the fixed own-cell handler below). */
   handlers: Array<HandlerSpec | null>;
-  /** Slot 0's own-cell edge/front tables (`$c879`): left `$89:F356`, right `$89:F6C6`, front `$89:EB1A`. */
+  /** Slot 0's own-cell edge/front tables (`$80:C879`): left `$89:F356`, right `$89:F6C6`, front `$89:EB1A`. */
   slot0: { left: string; right: string; front: string };
   records: Record<string, WalkRecord>;
   /** `$80:DED8` kind table: 21 entries, each the key of a 27-word per-slot floor/ceiling piece table. */
   ded8: string[];
   fcTables: Record<string, number[]>;
-  /** Every referenced compose word, resolved (hex-keyed). Words that resolve to nothing drawable (e.g. the odd `0x101` sentinel) are absent. */
+  /** Every compose word the walk can emit, resolved (hex-keyed). Words that resolve to nothing drawable (e.g. `0x0101`, `0x0000`) are absent. */
   pieces: Record<string, ViewPiece>;
   doorWord: number; // 0x02E8
   backdropWord: number; // 0x834A -- appended last (painter's-algorithm backstop)
-  /** Per-level `$80:DB7F` default variant byte -- used ONLY as the off-map/out-of-region seed (`DenseMazeGrid.seedVariant`); real in-grid cells resolve via `resolveCellVariant`/`$80:DA2E` instead (§3.14.12 v3). */
-  variants: number[];
-  /** `$80:DA2E`, 168 entries (`level*12+region`) -- the real per-region variant/art-family selector (§3.14.12 v3). */
-  da2e: number[];
-  /** `$80:DB9B`, flat `(maxRow+1)*16`-byte pattern-row table referenced by `da2e`'s bit-7-set entries. */
-  db9b: number[];
 }
 
-interface WalkState {
-  grid: DenseMazeGrid;
-  t: WalkTables;
+// ─────────────────────────────────────────────────────────────────────────
+// The walk ($80:C69F). Variable names follow the game's direct page.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface Walk {
   f: ViewPiecesFile;
+  t: WalkTables;
+  w: MazeWindow;
   facing: number;
-  level: number;
-  parity: number; // $8e: ((x^y^facing)&1)*2
-  e0: number; // $0e = db7f[level] (off-grid/level-default seed only; see cellVariantByte for the real per-cell source)
   words: number[];
-  vis: number[]; // $7e3b00 skip flags, 1 = skip
-  p78: number; // deferred front piece
-  slot: number;
-  slotX: number;
-  slotY: number;
-  v42: number;
-  v43: number;
-  /** $c9 != 0: the party's own cell carries the >=0xC0 marker ("darkness" zone) -- every $cc48 append is suppressed. */
-  partyMarked: boolean;
+  e0: number; // $0e = DB7F[level], raw
+  p8e: number; // $8e = ((gy ^ gx ^ facing) & 1) << 1
+  p6e: number; // $6e = $8e << 1
+  c9: number; // 1 = party cell carries the >= 0xC0 marker
+  d0: number; // sky latch
+  vis: number[]; // $7E:3B00, 1 = skip
+  p78: number; // deferred front word
+  slot: number; // $5a
+  a0a: number; // $0a, the cell the last handler evaluated
+  v42: number; // DE1B second-stage value
+  v43: number; // DE2C see-through
+  v4e: number; // variant byte of the last evaluated cell
 }
 
-function slotCell(s: WalkState, px: number, py: number, slot: number): { x: number; y: number } {
-  const fr = s.f.tables.frustum[slot - 1]!;
-  const a = FACING_DELTAS[s.facing]!;
-  const r = FACING_DELTAS[(s.facing + 1) % 4]!;
-  return { x: px + fr.ahead * a.dx + fr.lateral * r.dx, y: py + fr.ahead * a.dy + fr.lateral * r.dy };
-}
+type Role = 'left' | 'ahead' | 'right' | 'behind';
+const ROLE_DIR: Record<Role, number> = { ahead: 0, right: 1, behind: 2, left: 3 };
+/** `$80:CC3B`/`CC40`/`CC45` resolver Y: 0 = left, 2 = ahead, 4 = right neighbour (`$80:D700`). */
+const ROLE_FAR: Record<'left' | 'ahead' | 'right', number> = { left: 0, ahead: 1, right: 2 };
 
-/** role offsets rotate the compass: ahead=+0, right=+1, behind=+2, left=+3. */
-const ROLE_OFFSET = { ahead: 0, right: 1, behind: 2, left: 3 } as const;
-type Role = keyof typeof ROLE_OFFSET;
+const feat = (s: Walk, i: number): number => s.w.feature[i] ?? 0;
 
-function evaluate(s: WalkState, x: number, y: number, role: Role): number {
-  const dir = ((s.facing + ROLE_OFFSET[role]) % 4) as 0 | 1 | 2 | 3;
-  const w = wallForFacing(cellWallByte(s.grid, x, y), dir);
-  const raw = cellFeatureByte(s.grid, x, y) & 0x3f;
-  let code = w;
+/** `$80:CD36`-`CDEF`: evaluate one edge of cell `i`. Returns the code; sets `$42`/`$43`/`$4e`. */
+function evaluate(s: Walk, i: number, role: Role): number {
+  const dir = (s.facing + ROLE_DIR[role]) & 3;
+  const wallv = ((s.w.wall[i] ?? 0) >> (dir * 2)) & 3;
+  s.v4e = s.w.variant[i] ?? 0;
+  const raw = feat(s, i) & 0x3f;
+  let code = wallv;
   if (raw !== 0) {
-    const lowf = raw & 0x0f;
-    if (lowf === 6) {
-      if (s.slot === 3) s.words.push(s.f.doorWord);
-    } else if ((raw >> 4) === dir && lowf < 13) {
-      code = lowf + 3;
+    if ((raw & 0x0f) === 6) {
+      if (s.slot === 3) s.words.push(s.f.doorWord); // $80:CD8F
+    } else if ((raw & 0x30) === dir << 4 && (raw & 0x0f) < 0x0d) {
+      code = (raw & 0x0f) + 3;
     }
   }
   s.v42 = s.t.de1b[code]!;
-  if (code === 12 && s.slot < 6) s.v42 = 4;
-  s.v43 = s.t.de2c[code]! & 0x7f;
+  if (code === 0x0c && s.slot < 6) s.v42 = 4;
+  const v = s.t.de2c[code]!;
+  s.v43 = v & 0x80 ? 1 : v;
   return code;
 }
 
-/** $00:CC72 -- resolve one draw into a piece word. `a2x` = the doubled code ($0f); `farRole` = which neighbour of the slot cell supplies variant/marker state (left/ahead/right). */
-function resolveWord(s: WalkState, table: string, a2x: number, farRole: Role): number {
+/** `$80:CC72`: resolve one draw (`a2x` = `$0f`) of record `table` against the evaluated cell `$0a`. 0xFFFF = nothing. */
+function resolve(s: Walk, table: string, a2x: number, role: 'left' | 'ahead' | 'right'): number {
   const rec = s.f.records[table];
   if (!rec) return 0xffff;
-  const dir = ((s.facing + ROLE_OFFSET[farRole]) % 4) as 0 | 1 | 2 | 3;
-  const d = FACING_DELTAS[dir]!;
-  const fx = s.slotX + d.dx;
-  const fy = s.slotY + d.dy;
-  const farFeat = cellFeatureByte(s.grid, fx, fy);
-  // marked-cell extra ($cc8f): raw >= 0xC0 and code==2 -> append rec word at byte offset 0x44
-  if (farFeat >= 0xc0 && a2x === 4) {
-    const extra = rec.words[0x44 >> 1];
-    if (extra !== undefined && extra !== 0xffff) s.words.push(extra);
+  const far = s.a0a + s.t.d700[s.facing + ROLE_FAR[role]]!;
+  if (feat(s, far) >= 0xc0 && a2x === 2) {
+    const extra = rec.words[0x44 >> 1]!;
+    if (extra !== 0xffff) s.words.push(extra);
   }
-  // the evaluated (slot) cell's own real per-cell variant (§3.14.12 v3) --
-  // NOT yet the full $ccde fork (evaluated-cell-equals-level-default ->
-  // use the far cell's variant instead), which needs a byte-exact trace of
-  // $00:CC72's own comparison target; still-open minor nuance, see the doc.
-  const variant = cellVariantByte(s.grid, s.slotX, s.slotY);
-  // per-facing override (door/gate far-side art swap)
+  const farVariant = s.w.variant[far] ?? 0;
   let idx: number | null = null;
   if (rec.override[s.facing]! !== 0) {
     if (a2x === 0x14) idx = 0x84;
-    else if (a2x === 0x06) idx = variant === 0x60 ? 0x88 : 0x86;
+    else if (a2x === 0x06) idx = (s.v4e === s.e0 ? farVariant : s.v4e) === 0x60 ? 0x88 : 0x86;
   }
-  if (idx === null) {
-    idx = (a2x + variant) & 0xff;
-  }
-  const k = (idx & 0xfe) >> 1;
-  const byteOff = s.t.de4e[k];
+  if (idx === null) idx = ((s.v4e === s.e0 ? farVariant : s.v4e) + a2x) & 0xff;
+  const byteOff = s.t.de4e[(idx & 0xfe) >> 1];
   if (byteOff === undefined) return 0xffff;
-  const w = rec.words[byteOff >> 1];
-  return w === undefined ? 0xffff : w;
+  const word = rec.words[byteOff >> 1];
+  return word === undefined ? 0xffff : word;
 }
 
-/** $cc48-style append (skipped when the party or slot cell carries the >=0xC0 marker). */
-function drawAppend(s: WalkState, table: string, a2x: number, farRole: Role): void {
-  if (s.partyMarked) return;
-  if (cellFeatureByte(s.grid, s.slotX, s.slotY) >= 0xc0) return;
-  const w = resolveWord(s, table, a2x, farRole);
+/** `$80:CC48`: append unless the party (`$c9 == 1`) or the evaluated cell carries the marker. */
+function draw(s: Walk, table: string, a2x: number, role: 'left' | 'ahead' | 'right'): void {
+  if (s.c9 === 1) return;
+  if (feat(s, s.a0a) >= 0xc0) return;
+  const w = resolve(s, table, a2x, role);
   if (w !== 0xffff) s.words.push(w);
 }
 
-/** $cc0f-style front draw: DE3D-gated deferral into $78, else append. */
-function drawFront(s: WalkState, table: string, a2x: number): void {
-  const code = a2x >> 1;
-  if (code < 16 && s.t.de3d[code]) {
-    const w = resolveWord(s, table, a2x, 'ahead');
+/** `$80:CC0F`: front draw -- `DE3D`-gated codes defer into `$78`, else append. */
+function drawFront(s: Walk, table: string, a2x: number): void {
+  if (s.t.de3d[a2x >> 1]) {
+    const w = resolve(s, table, a2x, 'ahead');
     if (w !== 0xffff) s.p78 = w;
     return;
   }
-  drawAppend(s, table, a2x, 'ahead');
+  draw(s, table, a2x, 'ahead');
 }
 
-/** The DE1B-driven second (and third) draws shared by every handler. */
-function secondDraws(s: WalkState, table: string, farRole: Role, front: boolean): void {
+/** Receding edge (`$80:C8A4`/`C993`/`CB71`): code 2 -> `$8e`, second draw with `$42 == 4` -> `$6e`, no third draw. */
+function recedingEdge(s: Walk, table: string, code: number, role: 'left' | 'right'): void {
+  draw(s, table, (code === 2 ? s.p8e : code) << 1, role);
   if (s.v42 === 0) return;
-  const a = s.v42 === 4 ? s.parity * 2 : s.v42;
-  if (front) drawFront(s, table, a);
-  else drawAppend(s, table, a, farRole);
-  if (s.v42 === 0x18 && s.slot < 6) {
-    if (front) drawFront(s, table, 4);
-    else drawAppend(s, table, 4, farRole);
+  draw(s, table, s.v42 === 4 ? s.p6e : s.v42, role);
+}
+
+/** Side / perpendicular body (`$80:CA3A`, `CAA4`): drawn against the ahead neighbour, raw second draw, `0x18` third draw. */
+function sideBody(s: Walk, table: string, enable: number): void {
+  const code = evaluate(s, s.a0a, 'ahead');
+  if (code === 0) {
+    if (enable) s.vis[enable] = 0;
+    return;
   }
+  draw(s, table, code << 1, 'ahead');
+  if (s.v43 === 0 && enable) s.vis[enable] = 0;
+  if (s.v42 === 0) return;
+  draw(s, table, s.v42, 'ahead');
+  if (s.v42 === 0x18 && s.slot < 6) draw(s, table, 4, 'ahead');
 }
 
-/** Front-handler edge draw ($cc3b/$cc45 entries with the $8e parity substitution for code 2). */
-function edgeDraw(s: WalkState, table: string, code: number, farRole: Role): void {
-  const a = code === 2 ? s.parity : code;
-  drawAppend(s, table, a * 2, farRole);
-  secondDraws(s, table, farRole, false);
-}
-
-function runHandler(s: WalkState, spec: HandlerSpec): void {
-  if (spec.kind === 'side') {
-    const code = evaluate(s, s.slotX, s.slotY, 'ahead');
+function runHandler(s: Walk, h: HandlerSpec): void {
+  if (h.kind === 'side') {
+    sideBody(s, h.table, h.enable);
+  } else if (h.kind === 'front') {
+    // $80:C981
+    let code = evaluate(s, s.a0a, 'left');
+    if (code === 0) s.vis[h.enLeft] = 0;
+    else recedingEdge(s, h.edgeL, code, 'left');
+    code = evaluate(s, s.a0a, 'right');
+    if (code === 0) s.vis[h.enRight] = 0;
+    else recedingEdge(s, h.edgeR, code, 'right');
+    code = evaluate(s, s.a0a, 'ahead');
     if (code === 0) {
-      if (spec.enable) s.vis[spec.enable] = 0;
+      if (h.enAhead) s.vis[h.enAhead] = 0;
       return;
     }
-    drawAppend(s, spec.table, code * 2, 'ahead');
-    if (s.v43 === 0 && spec.enable) s.vis[spec.enable] = 0;
-    secondDraws(s, spec.table, 'ahead', false);
-  } else if (spec.kind === 'front') {
-    let code = evaluate(s, s.slotX, s.slotY, 'left');
-    if (code === 0) {
-      if (spec.enLeft) s.vis[spec.enLeft] = 0;
-    } else edgeDraw(s, spec.edgeL, code, 'left');
-    code = evaluate(s, s.slotX, s.slotY, 'right');
-    if (code === 0) {
-      if (spec.enRight) s.vis[spec.enRight] = 0;
-    } else edgeDraw(s, spec.edgeR, code, 'right');
-    code = evaluate(s, s.slotX, s.slotY, 'ahead');
-    if (code === 0) {
-      if (spec.enAhead) s.vis[spec.enAhead] = 0;
-      return;
-    }
-    drawFront(s, spec.front, code * 2);
-    if (s.v43 === 0 && spec.enAhead) s.vis[spec.enAhead] = 0;
-    secondDraws(s, spec.front, 'ahead', true);
+    drawFront(s, h.front, code << 1);
+    if (s.v43 === 0) s.vis[h.enAhead] = 0;
+    if (s.v42 === 0) return;
+    drawFront(s, h.front, s.v42);
+    if (s.v42 === 0x18 && s.slot < 6) drawFront(s, h.front, 4);
   } else {
-    // lateral: perpendicular (ahead-face) eval + receding-side eval
-    let code = evaluate(s, s.slotX, s.slotY, 'ahead');
+    // $80:CAE9..CBF4: perpendicular face, then the receding side
+    sideBody(s, h.perp, h.enPerp);
+    const role = h.side === 'L' ? 'left' : 'right';
+    const code = evaluate(s, s.a0a, role);
     if (code === 0) {
-      if (spec.enPerp) s.vis[spec.enPerp] = 0;
-    } else {
-      drawAppend(s, spec.perp, code * 2, 'ahead');
-      if (s.v43 === 0 && spec.enPerp) s.vis[spec.enPerp] = 0;
-      secondDraws(s, spec.perp, 'ahead', false);
-    }
-    const role: Role = spec.side === 'L' ? 'left' : 'right';
-    code = evaluate(s, s.slotX, s.slotY, role);
-    if (code === 0) {
-      if (spec.enSide) s.vis[spec.enSide] = 0;
+      if (h.enSide) s.vis[h.enSide] = 0;
       return;
     }
-    const a = code === 2 ? s.parity : code;
-    drawAppend(s, spec.sideTable, a * 2, role);
-    secondDraws(s, spec.sideTable, role, false);
+    recedingEdge(s, h.sideTable, code, role);
   }
 }
 
-/** The floor/ceiling pass ($00:CE4C) for one slot. */
-function fcCell(s: WalkState, x: number, y: number, slot: number): void {
-  const raw = cellFeatureByte(s.grid, x, y);
-  const variant = cellVariantByte(s.grid, x, y);
-  const yv = ((variant & 0x60) >> 2) | s.parity;
+/** `$80:CFA2`: bit 0/1/2 = the ahead/right/left neighbour of `$0a` holds a non-empty feature (not 0x0D/0x0E/0x4E); also returns `$0C28`. */
+function neighbourMask(s: Walk): { mask: number; add: number } {
+  let mask = 0;
+  for (let k = 0; k < 3; k++) {
+    const v = feat(s, s.a0a + s.t.d6d0[s.facing * 3 + k]!);
+    if (v !== 0x0d && v !== 0x0e && v !== 0x4e) mask |= 1 << k;
+  }
+  return { mask, add: (s.w.variant[s.a0a] ?? 0) !== 0 ? 0x36 : 0 };
+}
+
+function fcTable(s: Walk, kind: number): number[] {
+  return s.f.fcTables[s.f.ded8[kind >> 1]!]!;
+}
+
+/** `$80:CE4F`-`CFA1`: the floor/ceiling words for the cell `$0a` at slot `$5a`. */
+function floorCeiling(s: Walk, cell50: number): void {
+  const i = s.a0a;
+  const f = feat(s, i);
+  const yv = (((s.w.variant[i] ?? 0) & 0x60) >> 2) | s.p8e;
   let ceil: number;
   let floor: number;
-  if (raw === 0x8f) {
+  if (f === 0x8f) {
     ceil = 0x10;
-    floor = s.parity + 0x26;
-  } else if (raw === 0x8e) {
+    floor = s.p8e + 0x26;
+  } else if (f === 0x8e) {
     ceil = 0x24;
     floor = yv + 4;
-  } else if (raw === 0x4e) {
+  } else if (f === 0x4e) {
     ceil = 0x24;
     floor = 0x20;
-  } else if ((raw & 0xc0) === 0x40 && raw >= 0x40) {
-    ceil = yv;
-    floor = 0x22; // stairs/pit family ($7E:DBC0 flag not modelled -> the non-flagged branch)
+  } else if (f >= 0x40) {
+    if ((f & 0xc0) === 0x40) {
+      ceil = yv; // stairs / pit
+      floor = (s.w.dbc0[i] ?? 0) !== 0 ? 0x1c : 0x22;
+    } else {
+      ceil = 0x10;
+      floor = yv + 4;
+    }
   } else {
-    const lowf = raw & 0x0f;
-    if (lowf === 0x0d) {
+    const lo = f & 0x0f;
+    if (lo < 0x0d) {
+      ceil = yv;
+      floor = yv + 4;
+    } else if (lo === 0x0d) {
       ceil = 0x10;
       floor = 0x20;
-    } else if (lowf === 0x0e) {
+    } else if (lo === 0x0e) {
       ceil = yv;
       floor = 0x20;
     } else {
-      ceil = yv;
+      ceil = 0x24;
       floor = yv + 4;
     }
   }
-  for (const kind of [ceil, floor]) {
-    const key = s.f.ded8[kind >> 1];
-    if (!key) continue;
-    const tab = s.f.fcTables[key];
-    if (!tab) continue;
-    const w = tab[slot];
-    if (w !== undefined && w !== 0 && w !== 0xffff) s.words.push(w);
+  if (ceil === 0x24 && s.slot === 0) {
+    const { mask } = neighbourMask(s);
+    const base = (s.w.variant[cell50] ?? 0) !== 0 ? 0x84dc : 0x84a6;
+    if (mask & 1) s.words.push(base, base + 2, base + 4, base + 6);
+    else s.words.push(base + 4, base + 6);
+  } else {
+    s.words.push(fcTable(s, ceil)[s.slot]!);
   }
+  if (floor === 0x20 && s.slot < 12 && s.t.d6e8[s.slot]) {
+    const { mask, add } = neighbourMask(s);
+    if (mask) {
+      const list = s.t.fe5e[((mask << 1) | s.t.d6e8[s.slot]!).toString(16)] ?? [];
+      for (const w of list) s.words.push((w + add) & 0xffff);
+      return;
+    }
+  }
+  s.words.push(fcTable(s, floor)[s.slot]!);
 }
 
 /**
- * Resolve one pose into the game's own ordered compose-word list
- * (near-to-far -- the FIRST piece to claim a cell wins, per §3.14.4's
- * painter's algorithm; `compositeSnesView` implements that order).
+ * Resolve one pose into the game's own ordered compose-word list (the
+ * `$7E:421C` list `$80:C69F` builds; near-to-far, first piece to claim a
+ * cell wins -- `compositeSnesView`). (gx, gy) are global maze coordinates;
+ * the party must be inside `w`'s centre region or a neighbour the window
+ * covers.
  */
-export function resolveViewWords(f: ViewPiecesFile, grid: DenseMazeGrid, level: number, x: number, y: number, facing: number): number[] {
-  const s: WalkState = {
-    grid,
-    t: f.tables,
+export function resolveViewWords(f: ViewPiecesFile, w: MazeWindow, gx: number, gy: number, facing: number): number[] {
+  const t = f.tables;
+  const cell50 = windowCell(w, gx, gy);
+  const p8e = ((gy ^ gx ^ facing) & 1) << 1;
+  const s: Walk = {
     f,
+    t,
+    w,
     facing,
-    level,
-    parity: (((x + grid.originX) ^ (y + grid.originY) ^ facing) & 1) * 2,
-    e0: f.tables.db7f[level] ?? 0,
     words: [],
+    e0: t.db7f[w.level]!,
+    p8e,
+    p6e: p8e << 1,
+    c9: 0,
+    d0: 0,
     vis: new Array(27).fill(1),
     p78: 0,
-    slot: 0,
-    slotX: x,
-    slotY: y,
+    slot: 1, // $5a is 1 while slot 0 runs ($80:C74B)
+    a0a: cell50,
     v42: 0,
     v43: 0,
-    partyMarked: cellFeatureByte(grid, x, y) >= 0xc0,
+    v4e: 0,
   };
-  const marked = s.partyMarked;
 
-  // slot 0 ($c879): own-cell left/right edges + front edge
-  s.slot = 0;
-  s.slotX = x;
-  s.slotY = y;
-  let code = evaluate(s, x, y, 'left');
+  // slot 0 ($80:C879)
+  if (feat(s, cell50) >= 0xc0) s.c9 = 1;
+  let code = evaluate(s, cell50, 'left');
   if (code === 0) s.vis[1] = 0;
-  else edgeDraw(s, f.slot0.left, code, 'left');
-  code = evaluate(s, x, y, 'right');
+  else recedingEdge(s, f.slot0.left, code, 'left');
+  code = evaluate(s, cell50, 'right');
   if (code === 0) s.vis[2] = 0;
-  else edgeDraw(s, f.slot0.right, code, 'right');
-  code = evaluate(s, x, y, 'ahead');
+  else recedingEdge(s, f.slot0.right, code, 'right');
+  code = evaluate(s, cell50, 'ahead');
   if (code === 0) s.vis[3] = 0;
   else {
-    drawFront(s, f.slot0.front, code * 2);
+    drawFront(s, f.slot0.front, code << 1);
     if (s.v43 === 0) s.vis[3] = 0;
-    secondDraws(s, f.slot0.front, 'ahead', true);
+    if (s.v42) {
+      drawFront(s, f.slot0.front, s.v42);
+      if (s.v42 === 0x18) drawFront(s, f.slot0.front, 4);
+    }
   }
 
   // slots 1-26
+  const dd = s.facing * 26;
+  const dad7 = t.dad7[w.be >> 2] ?? 0;
   for (let slot = 1; slot <= 26; slot++) {
-    s.slot = slot;
     if (s.vis[slot] === 0) {
-      const spec = f.handlers[slot];
-      const c = slotCell(s, x, y, slot);
-      s.slotX = c.x;
-      s.slotY = c.y;
-      if (spec) runHandler(s, spec);
+      s.slot = slot;
+      s.a0a = cell50 + t.dd4b[dd + slot - 1]!;
+      const h = f.handlers[slot];
+      if (h) runHandler(s, h);
+      // $80:D01B
+      if ((dad7 & 1) === 0 && t.df01[slot]) s.d0 = t.df01[slot]!;
     }
-    if (f.tables.c85e[slot]) {
-      const blocked = marked || cellFeatureByte(grid, s.slotX, s.slotY) >= 0xc0;
-      if (!blocked && s.p78) s.words.push(s.p78);
+    if (t.c85e[slot]) {
+      if (s.c9 !== 1 && feat(s, s.a0a) < 0xc0 && s.p78) s.words.push(s.p78);
       s.p78 = 0;
     }
   }
 
-  // floor/ceiling pass (all slots when the party cell is unmarked; §3.14.12)
-  if (!marked) {
+  if (s.c9 !== 1) {
+    if (s.d0) s.words.push(0x02e6 | (s.p6e & 4)); // $80:C7C6
     s.slot = 0;
-    fcCell(s, x, y, 0);
+    s.a0a = cell50;
+    floorCeiling(s, cell50);
     for (let slot = 1; slot <= 26; slot++) {
-      const c = slotCell(s, x, y, slot);
-      fcCell(s, c.x, c.y, slot);
+      s.slot = slot;
+      s.a0a = cell50 + t.dd4b[dd + slot - 1]!;
+      floorCeiling(s, cell50);
     }
   }
-
   s.words.push(f.backdropWord);
   return s.words;
+}
+
+/** The walk's own-cell edge codes `$44`-`$47` for relative direction 0 = ahead, 1 = right, 2 = behind, 3 = left (no side effects). */
+export function ownCellCode(f: ViewPiecesFile, w: MazeWindow, gx: number, gy: number, facing: number, rel: number): number {
+  const s = { f, t: f.tables, w, facing, words: [] as number[], slot: 1, v42: 0, v43: 0, v4e: 0 } as unknown as Walk;
+  const roles: Role[] = ['ahead', 'right', 'behind', 'left'];
+  return evaluate(s, windowCell(w, gx, gy), roles[rel & 3]!);
+}
+
+/**
+ * `$80:C40B`-`C4AA`: may the party step in absolute direction `dir`?
+ * Refused onto a `(feature & 0xC0) == 0x40` stairs/pit cell other than
+ * `0x4E` (the game takes stairs through a separate command); otherwise
+ * allowed iff `$80:C685[code] & 0x80`, where `code` is the evaluator's
+ * own-cell code for that edge (feature promotion included).
+ */
+export function canStepWindow(f: ViewPiecesFile, w: MazeWindow, gx: number, gy: number, facing: number, dir: number): boolean {
+  const rel = (dir - facing) & 3;
+  const dest = windowCell(w, gx, gy) + f.tables.d700[(dir & 3) + 1]!;
+  const df = w.feature[dest] ?? 0;
+  if (df !== 0x4e && (df & 0xc0) === 0x40) return false;
+  return (f.tables.c685[ownCellCode(f, w, gx, gy, facing, rel)]! & 0x80) !== 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
