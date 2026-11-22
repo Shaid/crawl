@@ -627,6 +627,8 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         exportBardsTale3Maps(dataDir);
         const { exportBardsTale3Dungeon } = await import('../bardstale3/amiga/export-dungeon.ts');
         exportBardsTale3Dungeon(dataDir);
+        const { exportBardsTale3Cities } = await import('../bardstale3/amiga/export-city.ts');
+        exportBardsTale3Cities(dataDir);
       },
     }],
   },

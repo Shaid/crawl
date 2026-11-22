@@ -158,6 +158,57 @@ Unreferenced: `D0WAL.GRP` (no name string in bard3). Extractor: `tools/bardstale
 (tables read from bard3, never typed in) -> `public/assets/bardstale3/amiga/data/dungeon/`; logic
 `tools/bardstale3/amiga/dungeon.ts`; walker `tools/walker/games-bardstale3.ts`.
 
-## 5. Open
+## 5. City / wilderness walker trace (2026-11-22, bard3 -- CONFIRMED from code)
+
+> **Correction (2026-11-22):** the §3 "grid" header reading (`2 flag bytes, (h+2) u16BE words, word 0 unresolved,
+> rows at 0x14 + 2(h+2)`) was off by one field. The layout below is read off the loader at 0x2332; the row table is
+> u16**LE** at 0x17 (so the first row byte lands at 0x17 + 2H, which is what the old formula happened to hit).
+> The "solid block or open" cell hypothesis is replaced by the cell byte below.
+
+**Loader** 0x2332 (state 2 of the main loop 0x1c28; dungeons are state 4, 0x1cb2): map index 0x268d8 -> 0x9634, then
+
+| Offset | Meaning | Consumer |
+|---|---|---|
+| 0x10 / 0x11 | width W / height H | 0x28c32 / 0x28c33 |
+| 0x12 | bit 0 random encounters (1/32 per step), bit 1 coordinates wrap (else the edge stops the party) | 0x2464, 0x28c34 -> 0x2cec / 0x25ec |
+| 0x13 | monster set | 0x97d2 |
+| 0x14 | bits 6-7 wall-art file `DATA 0x20698[v]` (0 wildwal.grp, 1/2 skara.grp, 3 gdung.grp); bits 0-2 encounter level | 0x9754, 0x26947 |
+| 0x15 | u16LE special-square list (same `count + [y][x][u16LE script]` layout as the dungeons, matched every step by 0xe9b6; y = 0x7f any row, x = 0xff any column, y bit 7 = only the other pass) | 0x24a6 |
+| 0x17 | u16LE[H] row offsets, row 0 stored last; **cell = 1 byte** at row[y] + x | 0x23ea, 0x2cec |
+
+Shipped values: Wilderness/Arboria/Gelidia/Lucencia/Nowhere/Dark Copse use wildwal.grp and wrap; Skara Brae, Ciera
+Brannia, Celaria Bree and Black Scar use skara.grp and are bounded.
+
+**Cell byte**: low nibble = art piece (0 none; n -> piece n-1); high nibble = function. Passability 0x2736: high
+0 -> passable (whatever the piece -- the wilderness `0x04` trees and Gelidia's `0x04` are walk-through), 0xe -> solid,
+0xf -> passable special (9 of the 11 dungeon exits sit on `0xf?` cells: the entrances), 1..9 -> passable only with
+piece 0. High 1..9 is a building entered from the front (0x2780 jump table): 1 Camp (0x4e62, "Thou art in the Camp of
+Skara Brae"), 2 tavern 0x5468, 3 temple 0x5c00, 4 empty building 0x65a6 (1/4 encounter), 5 none, 6 storage building
+0x6626, 7 guild elder / review 0x177b0, 8 hall of wizards 0x19312, 9 Bard's Hall 0x1b37c; every handler ends with the
+U-turn 0xcd58.
+
+**Movement** (0x257c / 0x259c): position = row 0x268de, column 0x268e0 (so the special list's [y][x] is [row][col]);
+forward = row - `DATA 0x20aa2[f]`, column + `DATA 0x20aaa[f]` (N = +row, E = +col, the dungeon frame). The 0x4800 key
+only checks 0x2736 on the cell ahead; the 0x4b / 0x4c00 commands run the building handler first (0x2780). Turns
+0x4b00 / 0x4d00 / 0x5000 as in the dungeon. Opcode 3 (0xcff2) in a city: target bit 7 = dungeon index, else city
+map (in a dungeon it is the other way round). New game (0x2dda): map 0 (Wilderness), row 11, column 15, facing N.
+Orientation check: all 16 dungeon exits + city teleport arrivals land on passable cells (mirrored rows: 10/16).
+
+**View** 0x287e: 21 view cells per facing (`DATA 0x20b5a` -> 4 x 21 (dcol, drow)); the 112x88 buffer is cleared to
+byte 0xbb for 0xa10 bytes (sky, colour 11) and 0x44 for 0x930 bytes (ground, colour 4) (immediates at 0x28fc / 0x2900,
+lengths in 0x1d040); then 17 draw steps, far to near: view cell `DATA 0x20c21[s]`, slot `DATA 0x20f33[s]` (slots
+30-34, 42/43, 45-47, 54-58, 59/60 of the shared 61-slot geometry, §4; the dungeon's enable table is not consulted),
+piece = cell & 15 drawn by the same 0x9b92 with a 20-byte directory limit (entries slotGrp/2 + 2(piece-1)). No
+ceiling/floor bitmaps, no light level. **Palette**: DATA 0x20868 by day, DATA 0x208c8 by night (flag 0x28c36 = hour
+0x2693c < 6 or > 18, 0x35e2 / 0x728a). Art: wildwal.grp = tree (side + front), 2 more front-only pieces, and the
+65x55 Camp tent (piece 4, the Wilderness `0x15` square); skara.grp = 4 half-timbered house facades (side + front).
+**BT1/BT2's `big_city` model is not involved**: BT3 has no `big_city`/`citys` bank; its towns are drawn from GRP
+pieces through the same slot geometry as its dungeons.
+
+Extractor `tools/bardstale3/amiga/export-city.ts` -> `public/assets/bardstale3/amiga/data/city/`; logic
+`tools/bardstale3/amiga/city.ts`; frames `tools/bardstale3/amiga/render-city-frames.ts` ->
+`build/cache/bardstale3/walker-frames/city*.png`.
+
+## 6. Open
 
 See `docs/bardstale3/TODO.md`.
