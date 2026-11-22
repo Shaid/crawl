@@ -1,0 +1,37 @@
+/**
+ * Ishar 1's step test (GERDEP `+0xc38`) on the shipped data: the EN1.FIC
+ * monster table and the monster check (`+0x1584`). The table offsets were
+ * checked byte-exact against the oracle's boot memory; this pins them on
+ * the retail file without the oracle.
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { ISHAR1_TITLE, ishar1MonsterTableFromEn1, ishar1Occupancy, isharEnter } from '../../shared/ishar-scene.ts';
+
+const EN1 = 'data/ishar/amigaaga/EN1.FIC';
+const cont = (n: number) => new Uint8Array(readFileSync(`data/ishar/amigaaga/CONT${n}.FIC`));
+
+describe.skipIf(!existsSync(EN1))('Ishar 1 step test', () => {
+  const table = ishar1MonsterTableFromEn1(new Uint8Array(readFileSync(EN1)));
+  const occupied = ishar1Occupancy(table);
+
+  it('reads the EN1.FIC monster arrays at the loader offsets', () => {
+    // slot 46: the CONT3 causeway guard; slot 28: Bormin (an NPC, kind >= 0)
+    expect([table.row[46], table.col[46], table.hp[46], table.kind[46], table.region[46], table.z[46]]).toEqual([9, 26, 70, -1, 3, 0]);
+    expect([table.row[28], table.col[28], table.kind[28], table.region[28]]).toEqual([15, 29, 15, 1]);
+    // slots 60+ are empty until ENCONT spawns roaming monsters into them
+    expect(table.hp.slice(60)).toEqual(new Array(10).fill(0));
+  });
+
+  it('refuses a step onto a monster that holds its cell, not onto an NPC', () => {
+    const c3 = cont(3);
+    expect(c3[9 * 90 + 26]).toBe(1); // a plain causeway cell
+    const to = { region: 3, row: 9, col: 26, facing: 1 as const };
+    expect(isharEnter(to, 1)).toEqual(to);
+    expect(isharEnter(to, 1, occupied)).toBeNull();
+    const bormin = { region: 1, row: 15, col: 29, facing: 1 as const };
+    expect(isharEnter(bormin, cont(1)[15 * 90 + 29]!, occupied)).toEqual(bormin);
+    // the spec passes the occupancy through
+    expect(ISHAR1_TITLE.enter!(to, to, () => 1, occupied)).toBeNull();
+  });
+});

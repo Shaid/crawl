@@ -134,7 +134,7 @@ export interface IsharTitleSpec {
    * party state after the step (a passage can move the party elsewhere) or
    * null when the game refuses it. Default: refused on a negative cell.
    */
-  enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number): IsharPartyState | null;
+  enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number, occupied?: IsharOccupancy): IsharPartyState | null;
   /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
   addOns?(region: number, zone: number): readonly string[] | null;
 }
@@ -149,21 +149,108 @@ export interface IsharTitleSpec {
  * its neighbour at the same time.
  */
 /**
- * Ishar 1 GERDEP `+0xc38` (the step test every move calls), for a party
- * with someone alive and no monster on the target (monsters, `+0x1584`,
- * are not modelled):
+ * True when a monster stands on (region, row, col) in the sense of GERDEP's
+ * monster check (Ishar 1 `+0x1584`). Absent = nothing is known to stand
+ * anywhere (the walker does not simulate monsters).
+ */
+export type IsharOccupancy = (region: number, row: number, col: number) => boolean;
+
+/**
+ * Ishar 1's monster table: 70 slots, loaded from `EN1.FIC` by MAIN
+ * `+0x4a97` (28 `cfreadb`s into separate main-segment arrays, written back
+ * on save). The step test reads six of the arrays; the file offset of each
+ * is the sum of the read sizes before it (checked byte-exact against the
+ * oracle's boot memory).
+ */
+export interface Ishar1MonsterTable {
+  row: readonly number[];
+  col: readonly number[];
+  /** `0x1b22` (word); > 0 = alive. */
+  hp: readonly number[];
+  /** `0x22f2` (signed byte); < 0 = a monster that holds its cell, >= 0 = an NPC/event the party walks onto. */
+  kind: readonly number[];
+  /** `0x3910`; the full region code (`0x1508`), 0 = not placed. */
+  region: readonly number[];
+  /** `0x3a48` (word); must be 0 to block. */
+  z: readonly number[];
+}
+
+/** Main-segment address and `EN1.FIC` file offset of each array the step test reads. */
+export const ISHAR1_MONSTER_ARRAYS = {
+  row: { addr: 0x1978, file: 0, word: true },
+  col: { addr: 0x1a06, file: 140, word: true },
+  hp: { addr: 0x1b22, file: 420, word: true },
+  kind: { addr: 0x22f2, file: 2520, word: false },
+  region: { addr: 0x3910, file: 3150, word: false },
+  z: { addr: 0x3a48, file: 3360, word: true },
+} as const;
+export const ISHAR1_MONSTER_SLOTS = 70;
+/** GERDEP `+0x1584` scans slots 28 .. count-1 (`0x3697` = 70); 0..27 are the encounter templates ENCONT copies from. */
+export const ISHAR1_MONSTER_FIRST_SLOT = 28;
+
+function readMonsterArrays(get: (field: keyof typeof ISHAR1_MONSTER_ARRAYS) => Uint8Array, at: 'file' | 'dump'): Ishar1MonsterTable {
+  const out: Record<string, number[]> = {};
+  for (const [k, a] of Object.entries(ISHAR1_MONSTER_ARRAYS)) {
+    const b = get(k as keyof typeof ISHAR1_MONSTER_ARRAYS);
+    const o = at === 'file' ? a.file : 0;
+    const v: number[] = [];
+    for (let i = 0; i < ISHAR1_MONSTER_SLOTS; i++) {
+      if (a.word) v.push((((b[o + 2 * i] ?? 0) << 8 | (b[o + 2 * i + 1] ?? 0)) << 16) >> 16);
+      else v.push(((b[o + i] ?? 0) << 24) >> 24);
+    }
+    out[k] = v;
+  }
+  // the region code is unsigned
+  out.region = out.region!.map((r) => r & 0xff);
+  return out as unknown as Ishar1MonsterTable;
+}
+
+/** The new-game monster table, from the shipped `EN1.FIC`. */
+export function ishar1MonsterTableFromEn1(en1: Uint8Array): Ishar1MonsterTable {
+  return readMonsterArrays(() => en1, 'file');
+}
+
+/** The live monster table, from per-array memory dumps keyed `monRow`, `monCol`, ... (the oracle's `stepMemdumps`). */
+export function ishar1MonsterTableFromDumps(mem: Readonly<Record<string, Uint8Array>>): Ishar1MonsterTable | null {
+  const name = (k: string) => 'mon' + k[0]!.toUpperCase() + k.slice(1);
+  if (!Object.keys(ISHAR1_MONSTER_ARRAYS).every((k) => mem[name(k)])) return null;
+  return readMonsterArrays((k) => mem[name(k)]!, 'dump');
+}
+
+/** GERDEP `+0x1584`'s per-slot test, as an occupancy predicate. */
+export function ishar1Occupancy(t: Ishar1MonsterTable): IsharOccupancy {
+  const at = new Set<string>();
+  for (let i = ISHAR1_MONSTER_FIRST_SLOT; i < ISHAR1_MONSTER_SLOTS; i++) {
+    if (t.hp[i]! > 0 && t.kind[i]! < 0 && t.z[i] === 0) at.add(`${t.region[i]}:${t.row[i]}:${t.col[i]}`);
+  }
+  return (region, row, col) => at.has(`${region}:${row}:${col}`);
+}
+
+/**
+ * Ishar 1 GERDEP `+0xc38` (the step test every move calls; the horizontal
+ * moves set the target `0x3fd0`/`0x3fd1` at `+0xbe0`, the vertical ones at
+ * `+0x934`/`+0xa8a` after any region change):
+ * - nobody in the party alive (`0x3908`/`0x1542`/`0x15ec`, 5 slots): refused;
  * - target -25..-1 and -43..-40: refused (doors, locks, buildings: a
  *   forward press there opens the building or prints a message instead);
  * - -80 / -81 / -82: passages (`+0x101c..+0x11be`) that move the party;
  *   -82 (CONT5 50,49) leads to region 6;
- * - any other negative target: refused (`+0x11c3`).
- * Not ported: the side-wall codes -46..-8 of the cell the party stands on
- * (`+0x11d5`, `+0x13a9`) with their gate check (`+0x1637`, a 40-entry
- * (row, col, open) table PARAM fills at `0x3c00`/`0x3c34`/`0x3b64`); the
- * party cannot normally stand on such a cell. Applying that gate table to
- * plain cells refuses steps the game allows (oracle walk).
+ * - any other negative target: refused (`+0x11c3`);
+ * - a monster on the target: refused (`+0x1584`). Slots 28..69 of the
+ *   EN1 table with hp > 0, the target's region code, kind < 0 and z = 0
+ *   (`occupied`, `ishar1Occupancy`). These are the static guards (CONT3
+ *   9,26 on the causeway is slot 46) and the roaming monsters ENCONT
+ *   spawns into slots 60+, which follow the party.
+ * Not ported, because no cell the party can stand on reaches it: the
+ * side-wall switch on the current cell (`+0x11d5`, codes -46..-8, which
+ * calls the gate check `+0x1629` on PARAM's 50-entry (row, col, open)
+ * table at `0x3c00`/`0x3c34`/`0x3b64`, skipped when `0x41e7` = 1). Every
+ * negative target is refused before it, and the passage destinations are
+ * -80/-81 cells. Its twin on the target cell (`+0x13a9`) is unreachable for
+ * the same reason. Applying the gate table to plain cells refuses steps
+ * the game allows (oracle walk).
  */
-export function isharEnter(to: IsharPartyState, v: number): IsharPartyState | null {
+export function isharEnter(to: IsharPartyState, v: number, occupied?: IsharOccupancy): IsharPartyState | null {
   if (v === -80 || v === -81) {
     const dest: Record<number, readonly [number, number]> = v === -80
       ? { 1: [17, 67], 3: [45, 24], 4: [50, 50], 15: [36, 26] }
@@ -173,6 +260,7 @@ export function isharEnter(to: IsharPartyState, v: number): IsharPartyState | nu
   }
   if (v === -82) return { ...to, region: 6, row: 20, col: 71 };
   if (v < 0) return null;
+  if (occupied?.(to.region, to.row, to.col)) return null;
   return to;
 }
 
@@ -241,8 +329,8 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
     }
     return { ...st, region, row, col };
   },
-  enter(_from, to, cell) {
-    return isharEnter(to, cell(to.region, to.row, to.col));
+  enter(_from, to, cell, occupied) {
+    return isharEnter(to, cell(to.region, to.row, to.col), occupied);
   },
   zone: { script: 'GERDEP', entry: 0x1baf, exits: [0x1d34, 0x2278], addr: 0x3eac, prevRegionLocal: 25 },
   addOns(region, zone) {

@@ -18,6 +18,9 @@ import {
   type IsharPartyState,
   type IsharSceneLeaf,
   type IsharTitleSpec,
+  type IsharOccupancy,
+  ishar1MonsterTableFromDumps,
+  ishar1Occupancy,
 } from '../../shared/ishar-scene.ts';
 import type { OracleFrame, OracleGame, OraclePose, OracleScreen } from './alis-oracle.ts';
 import { ORACLE_TITLES } from './alis-oracle.ts';
@@ -255,7 +258,7 @@ export interface WalkComparison {
 export function crawlWalk(
   data: TitleData,
   start: IsharPartyState,
-  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number> }>,
+  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number>; mem?: Record<string, Uint8Array> }>,
   layers: (region: number) => readonly Uint8Array[] | undefined,
   initial: { A?: GridReader; B?: GridReader } = {},
   /** Extra scene wakes at the start pose: a walk that starts from a mid-game savestate meets scripts with a per-wake phase (FOND's alternation) already advanced. */
@@ -268,6 +271,9 @@ export function crawlWalk(
   for (let i = 0; i < startWakes; i++) scene.step(start);
   let cur = start;
   const out: WalkComparison[] = [];
+  // the monster table the step test saw: the dump after the previous action
+  // (the first step uses its own dump; monsters may have moved by one cell)
+  let occupied = stepOccupancy(game(data), steps[0]?.mem);
   for (const s of steps) {
     const facing = spec.facingRaw.indexOf(s.facingRaw);
     const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals: s.globals };
@@ -275,8 +281,9 @@ export function crawlWalk(
     if (s.action !== 'F') predicted = { ...cur, facing: ((cur.facing + (s.action === 'R' ? 1 : 3)) & 3) as 0 | 1 | 2 | 3 };
     else {
       const t = spec.stepFrom(cur, cur.facing);
-      predicted = (t && enterCell(spec, layers, cur, t)) ?? cur;
+      predicted = (t && enterCell(spec, layers, cur, t, occupied)) ?? cur;
     }
+    occupied = stepOccupancy(game(data), s.mem) ?? occupied;
     const same = (a: IsharPartyState | null, b: IsharPartyState) => !!a && a.region === b.region && a.row === b.row && a.col === b.col && a.facing === b.facing;
     const phaseChanged = JSON.stringify(cur.globals ?? {}) !== JSON.stringify(actual.globals ?? {});
     const moved = !same(cur, actual);
@@ -291,11 +298,20 @@ export function crawlWalk(
   return out;
 }
 
+const game = (data: TitleData): OracleGame => data.spec.game as OracleGame;
+
+/** GERDEP's monster occupancy from a walk step's `stepMemdumps` (Ishar 1 only). */
+export function stepOccupancy(game: OracleGame, mem: Readonly<Record<string, Uint8Array>> | undefined): IsharOccupancy | undefined {
+  if (game !== 'ishar' || !mem) return undefined;
+  const t = ishar1MonsterTableFromDumps(mem);
+  return t ? ishar1Occupancy(t) : undefined;
+}
+
 /** CONT layers for a title, storage order (layer 0 first). */
 /** The title's step test (`spec.enter`; default: refused on a negative layer-0 cell). */
-export function enterCell(spec: IsharTitleSpec, layers: (region: number) => readonly Uint8Array[] | undefined, from: IsharPartyState, to: IsharPartyState): IsharPartyState | null {
+export function enterCell(spec: IsharTitleSpec, layers: (region: number) => readonly Uint8Array[] | undefined, from: IsharPartyState, to: IsharPartyState, occupied?: IsharOccupancy): IsharPartyState | null {
   const cell = (region: number, row: number, col: number) => s8(layers(region % 10)?.[0]?.[row * spec.stride + col] ?? 0);
-  if (spec.enter) return spec.enter(from, to, cell);
+  if (spec.enter) return spec.enter(from, to, cell, occupied);
   return cell(to.region, to.row, to.col) < 0 ? null : to;
 }
 

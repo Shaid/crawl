@@ -55,6 +55,8 @@ export interface OracleTitle {
   env?: Readonly<Record<string, string>>;
   /** Scripted boot: `[frame, command]` pairs, the last one saves the state. */
   boot: ReadonlyArray<readonly [number, string]>;
+  /** Main-segment tables dumped with the party after every walk step (`WalkStep.mem[name]`), e.g. the monster table the step test reads. */
+  stepMemdumps?: ReadonlyArray<{ name: string; off: number; len: number }>;
   /** Memory captured at the start of every pose run (`<name>.bin` in the run directory). */
   bootMemdumps?: ReadonlyArray<{ name: string; off: number; len: number }>;
   /** Party state in the boot savestate (scene created, no wake-up yet). */
@@ -96,6 +98,15 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     // Poking the position never makes MAIN preload a neighbour region, so
     // buffer B keeps whatever it held at boot; the comparison reads it back.
     bootMemdumps: [{ name: 'gridB', off: 0x234a, len: 4860 }],
+    // The EN1.FIC monster table GERDEP's step test reads (`ISHAR1_MONSTER_TABLE`).
+    stepMemdumps: [
+      { name: 'monRow', off: 0x1978, len: 140 },
+      { name: 'monCol', off: 0x1a06, len: 140 },
+      { name: 'monHp', off: 0x1b22, len: 140 },
+      { name: 'monKind', off: 0x22f2, len: 70 },
+      { name: 'monRegion', off: 0x3910, len: 70 },
+      { name: 'monZ', off: 0x3a48, len: 140 },
+    ],
   },
   ishar2: {
     dataDir: 'data/ishar2/amigaaga',
@@ -426,6 +437,8 @@ export interface WalkStep {
   facingRaw: number;
   /** `stateGlobals` values after the action. */
   globals: Record<number, number>;
+  /** `stepMemdumps` after the action. */
+  mem?: Record<string, Uint8Array>;
   frame: OracleFrame;
 }
 
@@ -438,15 +451,21 @@ function partyDumps(t: OracleTitle, frame: number, name: string): Array<[number,
   ];
   if (t.region !== undefined) ev.push([frame, `memdump ${t.region.toString(16)} 1 ${name}.region`]);
   for (const g of t.stateGlobals ?? []) ev.push([frame, `memdump ${g.toString(16)} 1 ${name}.g${g.toString(16)}`]);
+  for (const m of t.stepMemdumps ?? []) ev.push([frame, `memdump ${m.off.toString(16)} ${m.len} ${name}.m-${m.name}`]);
   return ev;
 }
 
-function readParty(t: OracleTitle, dir: string, name: string): { region: number; row: number; col: number; facingRaw: number; globals: Record<number, number> } {
+function readParty(t: OracleTitle, dir: string, name: string): { region: number; row: number; col: number; facingRaw: number; globals: Record<number, number>; mem?: Record<string, Uint8Array> } {
   const b = (f: string) => readFileSync(join(dir, `${name}.${f}.bin`))[0]!;
   const f = b('facing');
   const globals: Record<number, number> = {};
   for (const g of t.stateGlobals ?? []) globals[g] = b(`g${g.toString(16)}`);
-  return { region: t.region !== undefined ? b('region') : t.start.region, row: b('row'), col: b('col'), facingRaw: f >= 128 ? f - 256 : f, globals };
+  let mem: Record<string, Uint8Array> | undefined;
+  if (t.stepMemdumps?.length) {
+    mem = {};
+    for (const m of t.stepMemdumps) mem[m.name] = new Uint8Array(readFileSync(join(dir, `${name}.m-${m.name}.bin`)));
+  }
+  return { region: t.region !== undefined ? b('region') : t.start.region, row: b('row'), col: b('col'), facingRaw: f >= 128 ? f - 256 : f, globals, ...(mem ? { mem } : {}) };
 }
 
 /** Frames per walk action (a step animates; clicks during it are dropped). */

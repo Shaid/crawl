@@ -1714,6 +1714,12 @@ plausibility.
    "Turn right" is +1 (4 wraps to 1) and "turn left" is -1. A new Ishar 1
    game starts at CONT1 (11,29), raw facing 2. Ishar 2 starts at CONT1
    (27,45), raw facing 2. Ishar 3 starts at CONT1-3 (2,50), raw facing 1.
+7. **The step test (Ishar 1, 2026-11-23).** GERDEP `+0xc38` refuses a step
+   onto a negative cell, except the passages -80, -81 and -82. It also
+   refuses a step onto a cell that a monster holds (`+0x1584`, the EN1
+   table in §9.3). Ported as `isharEnter` with an occupancy predicate.
+   On a 359-action read-back walk, move agreement rose from 85.8% to 99.7%.
+   The one disagreement left is a press swallowed by an NPC message.
 
 **Measured:**
 
@@ -1856,6 +1862,16 @@ items. See `docs/ishar/TODO.md`.
   write-twin at `+0x4ae4`). So EN1 is a concatenation of the game's
   monster/encounter arrays in vram order, sizes byte-exact from the
   bytecode.
+  **Ishar 1 monster table (2026-11-23):** the reads are 70-slot arrays.
+  GERDEP's step test reads six of them: row `0x1978` (word, file offset
+  0), col `0x1a06` (140), hp `0x1b22` (420), kind `0x22f2` (signed byte,
+  2520), region code `0x3910` (3150) and z `0x3a48` (3360). The offsets
+  are checked byte-exact against the oracle's boot memory. Slots 0-27 are
+  the encounter templates, 28-59 placed monsters and NPCs, and 60-69 the
+  slots ENCONT spawns roaming monsters into. A slot blocks a step onto
+  its cell (GERDEP `+0x1584`) when hp > 0, kind < 0 and z = 0. Kind >= 0
+  is an NPC the party can walk onto, for example Bormin (slot 28, CONT1
+  15,29).
 - **`TAB1.FIC`** (Ishar 1, 361 B) — loaded whole by
   `MAIN.bin+0x4b2c`: `cfopen("TAB1.FIC", 2); cfreadb(vram+0x379c, 0x169);
   cfclose` (0x169 = 361 exactly), and declared by `cdim` at `MAIN.bin+0x1bc`

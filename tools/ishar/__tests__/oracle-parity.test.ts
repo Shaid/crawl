@@ -77,7 +77,7 @@ for (const game of Object.keys(SAMPLES) as Array<'ishar' | 'ishar2' | 'ishar3'>)
   });
 }
 
-/** Ishar 1: start -> east into the village zone -> south across into CONT2 (route planned on the grids; step 4 repeats one the game refuses while an orc stands in the way). */
+/** Ishar 1: start -> east into the village zone -> south across into CONT2 (route planned on the grids; step 4 repeats a press the game drops: GEREN has started MESSAGEE.DO as the party nears Bormin, an NPC at CONT1 15,29, and the message swallows it). */
 const ISHAR1_WALK = 'FFFFFFFFFFFFFFFRFFFFFFFFFFFFFFFFFFFFFFFFFFRFFFFFRFFFFFFFFFFFFFFFRFFFLFRFLFFFRFFFFFFFFFFFFFFFFFFFFFFLFRFLFRFFFFFFFLFRFLFRFLFFRFFFF';
 
 describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar.dataDir, 'MAIN.DO')))('ishar real walk vs the game (alis oracle)', () => {
@@ -91,7 +91,8 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar.dataD
       const t = ORACLE_TITLES.ishar;
       const walk = crawlWalk(data, { ...t.start }, steps, contLayers('ishar', data), { B: bootGridB(data, out) });
       expect(steps.at(-1)).toMatchObject({ region: 2 });
-      // the one refused step is an NPC in the way (not modelled)
+      // the one dropped press is the Bormin message (not modelled); monsters
+      // on cells are (GERDEP +0x1584, from the per-step monster-table dumps)
       expect(walk.filter((w) => !w.moveAgrees).length).toBeLessThanOrEqual(1);
       let px = 0;
       let bad = 0;

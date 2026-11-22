@@ -2,10 +2,11 @@
  * Route planning on the CONT grids for oracle walks (`captureLegWalk`):
  * breadth-first over (region, row, col, facing) with the title's own
  * `stepFrom` and step test (`enterCell`, which also applies passages), plus
- * `extraBlocked` (cells the game refused during the walk). Returns the
+ * `extraBlocked` (cells the game refused during the walk) and `occupied`
+ * (monsters standing on cells). Returns the
  * actions and the state each one should leave.
  */
-import type { IsharPartyState, IsharTitleSpec } from '../../shared/ishar-scene.ts';
+import type { IsharOccupancy, IsharPartyState, IsharTitleSpec } from '../../shared/ishar-scene.ts';
 import type { WalkAction } from './alis-oracle.ts';
 import { enterCell } from './compare.ts';
 
@@ -19,11 +20,13 @@ export function planRoute(
   goal: (s: IsharPartyState) => boolean,
   extraBlocked: ReadonlySet<CellKey> = new Set(),
   maxNodes = 400_000,
+  /** Monsters known to stand on cells (GERDEP's monster check; e.g. `stepOccupancy` of the last step). */
+  occupied?: IsharOccupancy,
 ): { actions: WalkAction[]; states: IsharPartyState[] } | null {
   const forward = (s: IsharPartyState): IsharPartyState | null => {
     const t = spec.stepFrom(s, s.facing);
     if (!t || extraBlocked.has(cellKey(t.region, t.row, t.col)) || !layers(t.region % 10)) return null;
-    return enterCell(spec, layers, s, t);
+    return enterCell(spec, layers, s, t, occupied);
   };
   const key = (s: IsharPartyState) => `${s.region}:${s.row}:${s.col}:${s.facing}`;
   const prev = new Map<string, { k: string; a: WalkAction; s: IsharPartyState } | null>([[key(from), null]]);
