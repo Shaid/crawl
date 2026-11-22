@@ -555,9 +555,9 @@ export class IsharView implements GameView {
   /**
    * The cell one step away in walker direction `dir` (N/E/S/W = -y/+x/+y/-x
    * = raw facing 1/2/3/4), chaining Ishar 1's regions north-south, or null
-   * if blocked. Walkability is still the HYPOTHESIS-level `isBlocked()`
-   * (cell < 0); GERDEP's own test (`+0xc38`: negative ranges plus a party
-   * table) is not ported.
+   * if blocked. With a scene spec that has the game's step test
+   * (`spec.enter`: Ishar 1 GERDEP `+0xc38`, passages included) that test
+   * decides; otherwise a negative cell blocks (`isBlocked`).
    */
   private stepTarget(dir: 0 | 1 | 2 | 3): Pose | null {
     const sc = this.data.scene;
@@ -574,6 +574,16 @@ export class IsharView implements GameView {
     const region = this.data.regions.find((r) => r.id === target.level);
     if (!region || target.x < 0 || target.y < 0 || target.x >= region.width || target.y >= region.height) return null;
     const cell = region.terrain[target.y * region.width + target.x]!;
+    if (sc?.spec.enter && !this.noclip) {
+      const cellAt = (lv: number, row: number, col: number) => {
+        const r = this.data.regions.find((x) => x.id === lv);
+        const v = r ? (r.terrain[col * r.width + row] ?? 0) : 0;
+        return v >= 128 ? v - 256 : v;
+      };
+      const from = this.partyState();
+      const to = sc.spec.enter(from, { ...from, region: target.level, row: target.x, col: target.y }, cellAt);
+      return to ? { level: to.region, x: to.row, y: to.col, facing: this.pose_.facing } : null;
+    }
     if (!this.noclip && isBlocked(cell)) return null;
     return target;
   }

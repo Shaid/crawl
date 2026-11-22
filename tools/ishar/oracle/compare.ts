@@ -272,8 +272,7 @@ export function crawlWalk(
     if (s.action !== 'F') predicted = { ...cur, facing: ((cur.facing + (s.action === 'R' ? 1 : 3)) & 3) as 0 | 1 | 2 | 3 };
     else {
       const t = spec.stepFrom(cur, cur.facing);
-      const cell = t ? (layers(t.region % 10)?.[0]?.[t.row * spec.stride + t.col] ?? 0) : 0;
-      predicted = t && cell < 128 ? t : cur;
+      predicted = (t && enterCell(spec, layers, cur, t)) ?? cur;
     }
     const same = (a: IsharPartyState | null, b: IsharPartyState) => !!a && a.region === b.region && a.row === b.row && a.col === b.col && a.facing === b.facing;
     const phaseChanged = JSON.stringify(cur.globals ?? {}) !== JSON.stringify(actual.globals ?? {});
@@ -290,6 +289,13 @@ export function crawlWalk(
 }
 
 /** CONT layers for a title, storage order (layer 0 first). */
+/** The title's step test (`spec.enter`; default: refused on a negative layer-0 cell). */
+export function enterCell(spec: IsharTitleSpec, layers: (region: number) => readonly Uint8Array[] | undefined, from: IsharPartyState, to: IsharPartyState): IsharPartyState | null {
+  const cell = (region: number, row: number, col: number) => s8(layers(region % 10)?.[0]?.[row * spec.stride + col] ?? 0);
+  if (spec.enter) return spec.enter(from, to, cell);
+  return cell(to.region, to.row, to.col) < 0 ? null : to;
+}
+
 export function contLayers(game: OracleGame, data: TitleData, repoRoot = resolve('.')): (region: number) => readonly Uint8Array[] | undefined {
   const dir = join(repoRoot, ORACLE_TITLES[game].dataDir);
   const cells = data.spec.stride * data.spec.rows;

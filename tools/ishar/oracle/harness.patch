@@ -98,10 +98,10 @@ index 1151bed..c4b8006 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..07d76a3
+index 0000000..3188242
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,197 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -197,7 +197,13 @@ index 0000000..07d76a3
 +    if (sscanf(h_line, "%ld %31s", &t, cmd) < 2) { h_have = 0; continue; }
 +    if (h_now() < t) return;
 +    h_have = 0;
-+    if (!strcmp(cmd, "click") || !strcmp(cmd, "rclick") || !strcmp(cmd, "move")) {
++    // `expect OFF VAL`: if the main-global byte differs, input commands
++    // (click/rclick/move/key) are ignored from here on -- a scripted walk
++    // stops where the game stopped following it (read-back legs).
++    static int h_hold;
++    if (!strcmp(cmd, "expect")) { unsigned off; int v; sscanf(h_line, "%*ld %*s %x %d", &off, &v); if (*(u8 *)(alis.mem + alis.basemain + off) != (u8)v) { if (!h_hold) fprintf(stderr, "[expect] %ld %x: %d != %d, holding input\n", h_frameno, off, *(u8 *)(alis.mem + alis.basemain + off), v); h_hold = 1; } }
++    else if (h_hold && (!strcmp(cmd, "click") || !strcmp(cmd, "rclick") || !strcmp(cmd, "move") || !strcmp(cmd, "key"))) { }
++    else if (!strcmp(cmd, "click") || !strcmp(cmd, "rclick") || !strcmp(cmd, "move")) {
 +      sscanf(h_line, "%*ld %*s %d %d", &a, &b); h_mx = a; h_my = b; mouse.x = a; mouse.y = b;
 +      if (!strcmp(cmd, "click")) { mouse.lb = 1; mouse.lb_clicked = 1; }
 +      else if (!strcmp(cmd, "rclick")) { mouse.rb = 1; mouse.rb_clicked = 1; }

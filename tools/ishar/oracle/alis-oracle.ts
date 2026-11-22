@@ -15,8 +15,8 @@
  *   itself redraws; it returns the dumped frame and live display list.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, linkSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 export type OracleGame = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -81,7 +81,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     col: 0x137d,
     facing: 0x137e,
     region: 0x1508,
-    npcScripts: ['orc', 'loup', 'knight', 'azal', 'naim', 'barbare', 'kiriela', 'bormin', 'dealer', 'wiz1', 'morgu'],
+    // ENCONT spawns the roaming monsters; the rest are the monsters and NPCs themselves.
+    npcScripts: ['encont', 'orc', 'loup', 'knight', 'azal', 'naim', 'barbare', 'kiriela', 'bormin', 'dealer', 'wiz1', 'morgu', 'wardog', 'dragon', 'dwarrior', 'geant', 'goul', 'krog', 'medus', 'minotor', 'momo', 'monstre', 'predator', 'saub', 'skelet', 'spectre', 'spider', 'zombi', 'darkm', 'darkwiz', 'sorcier', 'fragorn'],
     facingCycle: [1, 2, 3, 4],
     facingRaw: [1, 2, 3, 4],
     turnRight: [309, 103],
@@ -228,6 +229,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Remove these entities (script names) whenever they appear (`ALIS_HARNESS_NOENT`). */
   noEntities?: readonly string[];
+  /** Game directory to run from instead of the shared `gameDir(game)` (a private copy with its own `alis.state`). */
+  gameDir?: string;
 }
 
 export interface RunResult {
@@ -242,7 +245,7 @@ export function runOracle(game: OracleGame, events: ReadonlyArray<readonly [numb
   const script = [...events].sort((a, b) => a[0] - b[0]).map(([f, c]) => `${f} ${c}`).join('\n') + '\n';
   const hfile = join(outDir, 'harness.txt');
   writeFileSync(hfile, script);
-  const args = ['-m', gameDir(game) + '/'];
+  const args = ['-m', (opts.gameDir ?? gameDir(game)) + '/'];
   if (opts.loadState) args.push('--load-state');
   const r = spawnSync(ORACLE_BIN, args, {
     cwd: join(ORACLE_ROOT, 'alis'),
@@ -472,6 +475,92 @@ export function captureWalk(game: OracleGame, actions: readonly WalkAction[], ou
     if (!existsSync(join(outDir, `w${i}.ppm`))) throw new Error(`oracle did not dump walk step ${i}\n${r.stderr.slice(-2000)}`);
     return { action, ...readParty(t, outDir, `s${i}`), frame: readFrame(outDir, `w${i}`) };
   });
+}
+
+/**
+ * A read-back walk: play the game in legs, each leg starting from the
+ * savestate the previous one left, and ask `plan` for the next leg's actions
+ * from the position the game actually reached (`null` or `[]` ends the
+ * walk). This keeps a long route in step with the game when it drops a
+ * press or refuses a step, which an open-loop `captureWalk` cannot. With
+ * `expect` states the harness also holds input from the first action the
+ * game did not follow, and the leg's steps stop there. Runs in a private
+ * copy of the game directory, so the shared boot savestate is untouched.
+ */
+export interface LegPlan {
+  actions: readonly WalkAction[];
+  /** Party state each action should leave; the harness holds input from the first mismatch (`expect`). */
+  expect?: ReadonlyArray<{ region: number; row: number; col: number; facingRaw: number }>;
+}
+
+export function captureLegWalk(
+  game: OracleGame,
+  plan: (cur: { region: number; row: number; col: number; facingRaw: number | null }, done: readonly WalkStep[]) => LegPlan | readonly WalkAction[] | null,
+  outDir: string,
+  opts: {
+    noNpcs?: boolean;
+    maxLegs?: number;
+    /** Start from this savestate (e.g. a previous walk's `finalState`) instead of the boot state; `start` is then where it stands. */
+    startState?: string;
+    start?: { region: number; row: number; col: number; facingRaw: number };
+    /** Keep the savestate the last leg left here. */
+    finalState?: string;
+  } = {},
+): WalkStep[] {
+  const t = ORACLE_TITLES[game];
+  // A private game directory (links to the shared files, its own copy of
+  // the boot savestate), so the legs' saves never touch the shared state
+  // other runs and tests load.
+  // (Hard links: the engine's platform detection does not follow symlinks.)
+  const own = join(tempDir(`${game}-legs-`), 'game');
+  mkdirSync(own, { recursive: true });
+  for (const f of readdirSync(gameDir(game))) {
+    const d = join(own, f);
+    if (f === 'alis.state') copyFileSync(opts.startState ?? join(gameDir(game), f), d);
+    else linkSync(join(gameDir(game), f), d);
+  }
+  const steps: WalkStep[] = [];
+  // facingRaw null = the title's start facing (`start.facing`, walker order)
+  let cur: { region: number; row: number; col: number; facingRaw: number | null } = opts.start ?? { region: t.start.region, row: t.start.row, col: t.start.col, facingRaw: null };
+  try {
+    for (let leg = 0; leg < (opts.maxLegs ?? 50); leg++) {
+      const p = plan(cur, steps);
+      const actions = p === null ? null : 'actions' in p ? p.actions : p;
+      const expect = p !== null && 'actions' in p ? p.expect : undefined;
+      if (!actions || actions.length === 0) break;
+      const dir = join(outDir, `leg${leg}`);
+      const ev: Array<[number, string]> = [];
+      actions.forEach((a, i) => {
+        const f0 = 4 + i * WALK_STRIDE;
+        const [x, y] = a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;
+        ev.push([f0, `click ${x} ${y}`], [f0 + 2, 'up']);
+        ev.push(...partyDumps(t, f0 + WALK_STRIDE - 8, `s${i}`));
+        ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);
+        const e = expect?.[i];
+        if (e) {
+          ev.push([f0 + WALK_STRIDE - 6, `expect ${t.row.toString(16)} ${e.row}`], [f0 + WALK_STRIDE - 6, `expect ${t.col.toString(16)} ${e.col}`], [f0 + WALK_STRIDE - 6, `expect ${t.facing.toString(16)} ${e.facingRaw & 0xff}`]);
+          if (t.region !== undefined) ev.push([f0 + WALK_STRIDE - 6, `expect ${t.region.toString(16)} ${e.region}`]);
+        }
+      });
+      const end = 4 + actions.length * WALK_STRIDE;
+      ev.push([end, 'save'], [end + 4, 'quit']);
+      const r = runOracle(game, ev, dir, { loadState: true, timeoutMs: 60_000 + actions.length * 300, noEntities: opts.noNpcs ? t.npcScripts : undefined, gameDir: own });
+      for (let i = 0; i < actions.length; i++) {
+        if (!existsSync(join(dir, `w${i}.ppm`))) throw new Error(`oracle did not dump leg ${leg} step ${i}\n${r.stderr.slice(-2000)}`);
+        const s = { action: actions[i]!, ...readParty(t, dir, `s${i}`), frame: readFrame(dir, `w${i}`) };
+        steps.push(s);
+        // input is held after the first deviation; later steps did not happen
+        const e = expect?.[i];
+        if (e && (s.row !== e.row || s.col !== e.col || s.facingRaw !== e.facingRaw || (t.region !== undefined && s.region !== e.region))) break;
+      }
+      const last = steps[steps.length - 1]!;
+      cur = { region: last.region, row: last.row, col: last.col, facingRaw: last.facingRaw };
+    }
+    if (opts.finalState) copyFileSync(join(own, 'alis.state'), opts.finalState);
+  } finally {
+    rmSync(dirname(own), { recursive: true, force: true });
+  }
+  return steps;
 }
 
 export function tempDir(prefix: string): string {

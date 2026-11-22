@@ -128,6 +128,13 @@ export interface IsharTitleSpec {
    * 1..6). Returns null when the step leaves the modelled world.
    */
   stepFrom(state: IsharPartyState, dir: 0 | 1 | 2 | 3): IsharPartyState | null;
+  /**
+   * The game's step test for entering `to` (the `stepFrom` result), with
+   * `cell(region, row, col)` = the signed layer-0 CONT value. Returns the
+   * party state after the step (a passage can move the party elsewhere) or
+   * null when the game refuses it. Default: refused on a negative cell.
+   */
+  enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number): IsharPartyState | null;
   /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
   addOns?(region: number, zone: number): readonly string[] | null;
 }
@@ -141,6 +148,34 @@ export interface IsharTitleSpec {
  * `+0x234a` (MAIN `+0x49c2`), so the scripts see the current region and
  * its neighbour at the same time.
  */
+/**
+ * Ishar 1 GERDEP `+0xc38` (the step test every move calls), for a party
+ * with someone alive and no monster on the target (monsters, `+0x1584`,
+ * are not modelled):
+ * - target -25..-1 and -43..-40: refused (doors, locks, buildings: a
+ *   forward press there opens the building or prints a message instead);
+ * - -80 / -81 / -82: passages (`+0x101c..+0x11be`) that move the party;
+ *   -82 (CONT5 50,49) leads to region 6;
+ * - any other negative target: refused (`+0x11c3`).
+ * Not ported: the side-wall codes -46..-8 of the cell the party stands on
+ * (`+0x11d5`, `+0x13a9`) with their gate check (`+0x1637`, a 40-entry
+ * (row, col, open) table PARAM fills at `0x3c00`/`0x3c34`/`0x3b64`); the
+ * party cannot normally stand on such a cell. Applying that gate table to
+ * plain cells refuses steps the game allows (oracle walk).
+ */
+export function isharEnter(to: IsharPartyState, v: number): IsharPartyState | null {
+  if (v === -80 || v === -81) {
+    const dest: Record<number, readonly [number, number]> = v === -80
+      ? { 1: [17, 67], 3: [45, 24], 4: [50, 50], 15: [36, 26] }
+      : { 1: [21, 14], 3: [4, 52], 4: [46, 13], 15: [49, 20] };
+    const d = dest[to.region];
+    return d ? { ...to, row: d[0], col: d[1] } : null;
+  }
+  if (v === -82) return { ...to, region: 6, row: 20, col: 71 };
+  if (v < 0) return null;
+  return to;
+}
+
 /** FOND.DO `+0x68`: `cpalette 8` on its first resume. */
 const FOND_PALETTE = { script: 'FOND', slot: 8 } as const;
 
@@ -205,6 +240,9 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
       row = this.rows - 1;
     }
     return { ...st, region, row, col };
+  },
+  enter(_from, to, cell) {
+    return isharEnter(to, cell(to.region, to.row, to.col));
   },
   zone: { script: 'GERDEP', entry: 0x1baf, exits: [0x1d34, 0x2278], addr: 0x3eac, prevRegionLocal: 25 },
   addOns(region, zone) {
