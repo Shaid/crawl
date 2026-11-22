@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_PORTALS, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -410,9 +410,9 @@ export class IsharView implements GameView {
     this.id = id;
     this.gameLabel = gameLabel;
     this.data = data;
-    this.region = data.regions.find((r) => r.id === startLevel) ?? data.regions[0]!;
+    this.region = this.gridOf(startLevel) ?? data.regions[0]!;
     const gameStart = START_POSES[id];
-    if (startPose && startPose.level === this.region.id) {
+    if (startPose && this.gridOf(startPose.level) === this.region) {
       this.pose_ = startPose;
     } else if (gameStart.level === this.region.id) {
       this.pose_ = { ...gameStart };
@@ -423,7 +423,17 @@ export class IsharView implements GameView {
     this.sceneStep();
   }
 
-  /** The party state in the game's terms: pose.x = storage row, pose.y = storage column, region code = CONT number. */
+  /**
+   * The CONT grid a region code is drawn on. Ishar 1's caves and towns keep
+   * the grid and add 10 to the code (MAIN `+0x3039`/`+0x306b`, entered at
+   * fixed gateway cells, `ISHAR1_PORTALS`): code 15 is the CONT5 cave, 13
+   * the CONT3 town.
+   */
+  private gridOf(level: number): IsharRegion | undefined {
+    return this.data.regions.find((r) => r.id === level) ?? (level > 10 ? this.data.regions.find((r) => r.id === level % 10) : undefined);
+  }
+
+  /** The party state in the game's terms: pose.x = storage row, pose.y = storage column, region code = CONT number (+10 in a cave or town). */
   private partyState(pose: Pose = this.pose_): IsharPartyState {
     return { region: pose.level, row: pose.x, col: pose.y, facing: (pose.facing & 3) as 0 | 1 | 2 | 3 };
   }
@@ -464,7 +474,10 @@ export class IsharView implements GameView {
     return this.region.id;
   }
   get levelLabel(): string {
-    return this.region.label;
+    const code = this.pose_.level;
+    if (code === this.region.id) return this.region.label;
+    const kind = this.id === 'ishar' ? ISHAR1_PORTALS.find((p) => p.code + 10 === code)?.kind : undefined;
+    return `${this.region.label}, ${kind ?? 'region'} code ${code}`;
   }
   get pose(): Pose {
     return this.pose_;
@@ -489,7 +502,7 @@ export class IsharView implements GameView {
    * region will render few or no placements, which is expected, not a bug.
    */
   get firstPersonAvailable(): boolean {
-    if (this.data.scene) return this.data.scene.spec.sceneGroup(this.region.id) !== null;
+    if (this.data.scene) return this.data.scene.spec.sceneGroup(this.pose_.level) !== null;
     const locations = this.data.firstPerson?.locations;
     if (!locations || locations.length === 0) return false;
     return locations.some((loc) => loc.regionPattern.test(this.region.name));
@@ -539,11 +552,9 @@ export class IsharView implements GameView {
       const dir = ((this.pose_.facing + (move < 0 ? 2 : 0)) & 3) as 0 | 1 | 2 | 3;
       const next = this.stepTarget(dir);
       if (!next) return null;
-      if (next.level !== this.region.id) {
-        const region = this.data.regions.find((r) => r.id === next.level);
-        if (!region) return null;
-        this.region = region;
-      }
+      const region = this.gridOf(next.level);
+      if (!region) return null;
+      this.region = region;
       this.pose_ = next;
     }
     this.stepCooldown = STEP_COOLDOWN_MS;
@@ -571,12 +582,12 @@ export class IsharView implements GameView {
       const [dx, dy] = d[dir]!;
       target = { ...this.pose_, x: this.pose_.x + dx, y: this.pose_.y + dy };
     }
-    const region = this.data.regions.find((r) => r.id === target.level);
+    const region = this.gridOf(target.level);
     if (!region || target.x < 0 || target.y < 0 || target.x >= region.width || target.y >= region.height) return null;
     const cell = region.terrain[target.y * region.width + target.x]!;
     if (sc?.spec.enter && !this.noclip) {
       const cellAt = (lv: number, row: number, col: number) => {
-        const r = this.data.regions.find((x) => x.id === lv);
+        const r = this.gridOf(lv);
         const v = r ? (r.terrain[col * r.width + row] ?? 0) : 0;
         return v >= 128 ? v - 256 : v;
       };
@@ -589,7 +600,7 @@ export class IsharView implements GameView {
   }
 
   setPose(pose: Pose): void {
-    const region = this.data.regions.find((r) => r.id === pose.level);
+    const region = this.gridOf(pose.level);
     if (region) this.region = region;
     this.pose_ = pose;
     this.scene = null;
