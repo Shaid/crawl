@@ -3,7 +3,9 @@
  * scripts needed by tools/walker's first-person renderer as binary web
  * assets. NOT wired into package.json (per this task's constraints) — run
  * directly: `npx tsx tools/ishar/amigaaga/scripts.ts [dataDir]`.
- * Output: public/assets/ishar/amigaaga/scripts/{foret,fond,village,plaine,rampart,temple,ftemple}.bin
+ * Output: public/assets/ishar/amigaaga/scripts/<name>.bin -- the old
+ * test-bench set plus every scene script and the zone script the walker's
+ * `IsharScene` needs (`ISHAR1_TITLE`, 2026-11-22).
  *
  * `PLAINE.bin` (plains) and `RAMPART.bin` (fortress) added 2026-09-02 —
  * both RENDERED end-to-end against real `CONT*.FIC` cells matching each
@@ -17,9 +19,10 @@
  * §8.7.
  */
 import { exportIsharScripts } from '../../shared/ishar-script-export.js';
+import { ISHAR1_TITLE } from '../../shared/ishar-scene.ts';
 
 const dataDir = process.argv[2] ?? 'data/ishar/amigaaga';
-const report = exportIsharScripts(dataDir, 'ishar', 'amigaaga', ['FORET', 'FOND', 'VILLAGE', 'PLAINE', 'RAMPART', 'TEMPLE', 'FTEMPLE']);
+const report = exportIsharScripts(dataDir, 'ishar', 'amigaaga', [...new Set(['FORET', 'FOND', 'VILLAGE', 'PLAINE', 'RAMPART', 'TEMPLE', 'FTEMPLE', ...ISHAR1_TITLE.sceneScripts, ISHAR1_TITLE.zone!.script])]);
 const ok = report.filter((r) => r.ok).length;
 console.log(`ishar/amigaaga: exported ${ok}/${report.length} first-person scripts`);
 for (const r of report) console.log(`  ${r.ok ? 'OK ' : 'ERR'} ${r.name} ${r.ok ? r.decodedLength + ' bytes' : r.error}`);

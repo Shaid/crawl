@@ -108,6 +108,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_TITLE, ISHAR2_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -158,6 +159,13 @@ interface IsharData {
   game: IsharGameId;
   layout: IsharRegionLayout;
   regions: IsharRegion[];
+  /** Every layer of each region in STORAGE order (`row*stride + col`), by region id. */
+  storage: Map<number, Uint8Array[]>;
+  /**
+   * The game's own scene model (`tools/shared/ishar-scene.ts`), for titles
+   * that have one traced: every scene + zone script it can run, by name.
+   */
+  scene?: { spec: IsharTitleSpec; scripts: Map<string, Uint8Array> };
   /**
    * Every location script fetched successfully for this game (empty/absent
    * if the export step hasn't been run: `tools/ishar/amigaaga/scripts.ts` /
@@ -222,6 +230,36 @@ const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
   ],
 };
 
+/**
+ * Titles whose first-person view is the game's own scene model (verified
+ * against the alis oracle, `tools/ishar/oracle/`). Ishar 3 still uses the
+ * single-script test bench below.
+ */
+const SCENE_SPECS: Partial<Record<IsharGameId, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE };
+
+/** Start of a new game, read from the oracle (MAIN's own start-up writes). */
+const START_POSES: Record<IsharGameId, Pose> = {
+  ishar: { level: 1, x: 11, y: 29, facing: 1 }, // CONT1 row 11 col 29, raw facing 2
+  ishar2: { level: 1, x: 27, y: 45, facing: 1 }, // CONT1 row 27 col 45, raw facing 2
+  ishar3: { level: 1, x: 2, y: 50, facing: 0 }, // CONT1-3 row 2 col 50, raw facing 1 (facing map untraced)
+};
+
+async function tryLoadSceneScripts(base: string, spec: IsharTitleSpec): Promise<Map<string, Uint8Array> | undefined> {
+  const names = [...spec.sceneScripts, ...(spec.zone ? [spec.zone.script] : [])];
+  try {
+    const out = new Map<string, Uint8Array>();
+    await Promise.all(
+      names.map(async (n) => {
+        const res = await fetch(`${base}/scripts/${n.toLowerCase()}.bin`);
+        if (res.ok) out.set(n.toUpperCase(), new Uint8Array(await res.arrayBuffer()));
+      }),
+    );
+    return out.size ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const RENDER_FRAME: Record<IsharGameId, LocationFrameRenderer> = {
   ishar: renderIsharLocationFrame,
   ishar2: renderIshar2LocationFrame,
@@ -270,6 +308,8 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
     const json = (await fetch(`${base}/data/regions.json`).then((r) => r.json())) as RegionsJson;
     const stride = json.width;
     const rows = json.height;
+    const storage = new Map<number, Uint8Array[]>();
+    for (const r of json.regions) storage.set(regionId(r.name), r.layers.map((l) => Uint8Array.from(l)));
     const regions: IsharRegion[] = json.regions
       .map((r) => {
         const id = regionId(r.name);
@@ -292,7 +332,9 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
       .sort((a, b) => a.id - b.id);
     // First-person scripts are wired up for all three games (see module doc).
     const firstPerson = await tryLoadFirstPersonAssets(base, game);
-    return { game, layout, regions, firstPerson };
+    const spec = SCENE_SPECS[game];
+    const sceneScripts = spec ? await tryLoadSceneScripts(base, spec) : undefined;
+    return { game, layout, regions, storage, firstPerson, scene: spec && sceneScripts ? { spec, scripts: sceneScripts } : undefined };
   })();
   loadPromises.set(game, promise);
   return promise;
@@ -345,18 +387,63 @@ export class IsharView implements GameView {
   private locationIndex = 0;
   private fpCache: { key: string; frame: ReturnType<typeof renderIsharLocationFrame> } | null = null;
   private fpCanvas: HTMLCanvasElement | null = null;
+  /** The game's scene for this title (persistent across steps: backdrops alternate per step), when traced. */
+  private scene: IsharScene | null = null;
+  private gridBuffers: IsharGridBuffers | null = null;
+  private sceneFrame: { key: string; rgba: Uint8Array; placements: number } | null = null;
 
   constructor(id: IsharGameId, gameLabel: string, data: IsharData, startLevel: number, startPose: Pose | null) {
     this.id = id;
     this.gameLabel = gameLabel;
     this.data = data;
     this.region = data.regions.find((r) => r.id === startLevel) ?? data.regions[0]!;
+    const gameStart = START_POSES[id];
     if (startPose && startPose.level === this.region.id) {
       this.pose_ = startPose;
+    } else if (gameStart.level === this.region.id) {
+      this.pose_ = { ...gameStart };
     } else {
       const [x, y] = findWalkable(this.region);
       this.pose_ = { level: this.region.id, x, y, facing: 0 };
     }
+    this.sceneStep();
+  }
+
+  /** The party state in the game's terms: pose.x = storage row, pose.y = storage column, region code = CONT number. */
+  private partyState(pose: Pose = this.pose_): IsharPartyState {
+    return { region: pose.level, row: pose.x, col: pose.y, facing: (pose.facing & 3) as 0 | 1 | 2 | 3 };
+  }
+
+  /**
+   * One wake-up of the game's scene (every step or turn, GERDEP): MAIN's
+   * grid-buffer loads, then the zone rules, then every scene script redraws.
+   * A teleport (`setPose`) or a region without a scene drops the scene, so
+   * the next step starts it fresh like a load.
+   */
+  private sceneStep(): void {
+    const sc = this.data.scene;
+    if (!sc) return;
+    const st = this.partyState();
+    if (!sc.spec.sceneGroup(st.region)) {
+      this.scene = null;
+      return;
+    }
+    if (!this.gridBuffers) this.gridBuffers = new IsharGridBuffers(sc.spec, (n) => this.data.storage.get(n));
+    const grids = this.gridBuffers.update(st);
+    if (!this.scene) {
+      // A new game (or a load): the scripts start, nothing is woken yet.
+      this.scene = new IsharScene(sc.spec, (n) => sc.scripts.get(n.toUpperCase()), grids);
+      this.scene.enter(st);
+    } else {
+      this.scene.setGrids(grids);
+      this.scene.step(st);
+    }
+    const leaves = this.scene.leaves();
+    this.sceneFrame = {
+      key: `${st.region}:${st.row},${st.col},${st.facing}`,
+      rgba: compositeIsharView(leaves, sc.spec.screen, this.scene.palette),
+      placements: leaves.length,
+    };
   }
 
   get levelId(): number {
@@ -388,6 +475,7 @@ export class IsharView implements GameView {
    * region will render few or no placements, which is expected, not a bug.
    */
   get firstPersonAvailable(): boolean {
+    if (this.data.scene) return this.data.scene.spec.sceneGroup(this.region.id) !== null;
     const locations = this.data.firstPerson?.locations;
     if (!locations || locations.length === 0) return false;
     return locations.some((loc) => loc.regionPattern.test(this.region.name));
@@ -406,6 +494,7 @@ export class IsharView implements GameView {
     const toggleDown = keys.isDown('KeyF');
     if (toggleDown && !this.toggleKeyWasDown && this.firstPersonAvailable) {
       this.firstPerson = !this.firstPerson;
+      if (this.firstPerson && this.data.scene && !this.scene) this.sceneStep();
     }
     this.toggleKeyWasDown = toggleDown;
 
@@ -424,31 +513,65 @@ export class IsharView implements GameView {
 
     if (this.stepCooldown > 0) return null;
 
-    let dx = 0;
-    let dy = 0;
-    if (keys.isDown('KeyW') || keys.isDown('ArrowUp')) dy = -1;
-    else if (keys.isDown('KeyS') || keys.isDown('ArrowDown')) dy = 1;
-    else if (keys.isDown('KeyA') || keys.isDown('ArrowLeft')) dx = -1;
-    else if (keys.isDown('KeyD') || keys.isDown('ArrowRight')) dx = 1;
-    if (dx === 0 && dy === 0) return null;
+    // Up/W = forward, Down/S = back, Left/A and Right/D = turn on the spot
+    // (the game's own controls: GERDEP turns and steps relative to facing).
+    const turn = keys.isDown('KeyA') || keys.isDown('ArrowLeft') ? -1 : keys.isDown('KeyD') || keys.isDown('ArrowRight') ? 1 : 0;
+    const move = keys.isDown('KeyW') || keys.isDown('ArrowUp') ? 1 : keys.isDown('KeyS') || keys.isDown('ArrowDown') ? -1 : 0;
+    if (turn === 0 && move === 0) return null;
 
-    const { x, y } = this.pose_;
-    const nx = x + dx;
-    const ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= this.region.width || ny >= this.region.height) return null;
-    const cell = this.region.terrain[ny * this.region.width + nx]!;
-    if (!this.noclip && isBlocked(cell)) return null;
-
-    const facing: Pose['facing'] = dx === 1 ? 1 : dx === -1 ? 3 : dy === 1 ? 2 : 0;
-    this.pose_ = { level: this.region.id, x: nx, y: ny, facing };
+    if (turn !== 0) {
+      this.pose_ = { ...this.pose_, facing: ((this.pose_.facing + turn + 4) & 3) as Pose['facing'] };
+    } else {
+      const dir = ((this.pose_.facing + (move < 0 ? 2 : 0)) & 3) as 0 | 1 | 2 | 3;
+      const next = this.stepTarget(dir);
+      if (!next) return null;
+      if (next.level !== this.region.id) {
+        const region = this.data.regions.find((r) => r.id === next.level);
+        if (!region) return null;
+        this.region = region;
+      }
+      this.pose_ = next;
+    }
     this.stepCooldown = STEP_COOLDOWN_MS;
+    // The game wakes its scene on every step or turn whichever view is up.
+    if (this.data.scene) this.sceneStep();
     return this.pose_;
+  }
+
+  /**
+   * The cell one step away in walker direction `dir` (N/E/S/W = -y/+x/+y/-x
+   * = raw facing 1/2/3/4), chaining Ishar 1's regions north-south, or null
+   * if blocked. Walkability is still the HYPOTHESIS-level `isBlocked()`
+   * (cell < 0); GERDEP's own test (`+0xc38`: negative ranges plus a party
+   * table) is not ported.
+   */
+  private stepTarget(dir: 0 | 1 | 2 | 3): Pose | null {
+    const sc = this.data.scene;
+    let target: Pose;
+    if (sc) {
+      const st = sc.spec.stepFrom({ ...this.partyState(), facing: dir }, dir);
+      if (!st) return null;
+      target = { level: st.region, x: st.row, y: st.col, facing: this.pose_.facing };
+    } else {
+      const d: Array<[number, number]> = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+      const [dx, dy] = d[dir]!;
+      target = { ...this.pose_, x: this.pose_.x + dx, y: this.pose_.y + dy };
+    }
+    const region = this.data.regions.find((r) => r.id === target.level);
+    if (!region || target.x < 0 || target.y < 0 || target.x >= region.width || target.y >= region.height) return null;
+    const cell = region.terrain[target.y * region.width + target.x]!;
+    if (!this.noclip && isBlocked(cell)) return null;
+    return target;
   }
 
   setPose(pose: Pose): void {
     const region = this.data.regions.find((r) => r.id === pose.level);
     if (region) this.region = region;
     this.pose_ = pose;
+    this.scene = null;
+    this.gridBuffers?.reset();
+    this.sceneFrame = null;
+    this.sceneStep();
   }
   setNoclip(on: boolean): void {
     this.noclip = on;
@@ -507,6 +630,10 @@ export class IsharView implements GameView {
    * switched, not every animation-frame tick.
    */
   private renderFirstPerson(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    if (this.data.scene) {
+      this.renderScene(ctx, w, h);
+      return;
+    }
     const firstPerson = this.data.firstPerson!;
     const location = this.currentLocation;
     if (!location) return;
@@ -575,6 +702,31 @@ export class IsharView implements GameView {
       ctx.fillStyle = '#ff8080';
       ctx.fillText('0 sprites placed at this position/facing', 4, 36);
     }
+  }
+
+  /** The game's own scene (see `sceneStep`), drawn at the real view size. */
+  private renderScene(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    if (!this.scene || !this.sceneFrame) this.sceneStep();
+    const frame = this.sceneFrame;
+    const screen = this.data.scene!.spec.screen;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    if (frame) {
+      if (!this.fpCanvas) this.fpCanvas = document.createElement('canvas');
+      this.fpCanvas.width = screen.width;
+      this.fpCanvas.height = screen.height;
+      this.fpCanvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(frame.rgba), screen.width, screen.height), 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      const scale = Math.min(w / screen.width, h / screen.height);
+      ctx.drawImage(this.fpCanvas, (w - screen.width * scale) / 2, (h - screen.height * scale) / 2, screen.width * scale, screen.height * scale);
+      ctx.imageSmoothingEnabled = true;
+    }
+    ctx.fillStyle = '#ffe080';
+    ctx.font = '10px monospace';
+    const scripts = this.scene?.scriptNames.join(', ') ?? '';
+    ctx.fillText(`${this.region.label} - first-person: the game's scene (${scripts}); matches the alis oracle pose for pose`, 4, 12);
+    ctx.fillText('F: top-down.  Up/Down: step, Left/Right: turn.', 4, 24);
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
