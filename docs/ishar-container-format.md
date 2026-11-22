@@ -983,6 +983,18 @@ interpreter's output:
   > `ishar-firstperson.ts`'s backdrop compositing — none was needed. See
   > `docs/ishar/TODO.md` (`ishar-firstperson-backdrop-anchor`, closed).
 
+  > **Correction (2026-11-22):** the "fixed anchors" verdict is wrong. It
+  > read only FOND's code up to its first `cstop`. The script is a
+  > coroutine: GERDEP `cwakeup`s it on every step and turn, and it resumes
+  > after its `csleep`. On each wake it re-puts element 6 at
+  > `x = 16*s17 + 1` and then negates `s17`. When the facing has changed it
+  > also negates `s14` and re-puts element 7 at `x = 32*s14`. So the
+  > backdrop alternates between two phases per step, and differently per
+  > turn. The alis oracle shows exactly this, and `tools/shared/ishar-scene.ts`
+  > reproduces it pose for pose. FOND is also not alone: the
+  > whole region group (FOND, RPLAINE, PLAINE, ARBRE, ...) draws at once.
+  > See §8.8.
+
 **NOT generalized this session** (deliberately, per the task's "don't force
 false generality" instruction):
 
@@ -1122,6 +1134,13 @@ of many small ones.
 > `docs/crystalsofarborea/amiga/data-structure.md` §8 for the per-title
 > write-up). Wired into `tools/walker/games-crystalsofarborea.ts` (`KeyF`
 > toggle, `KeyC` cycles `ARBRE`/`NPLAINE`).
+>
+> **Correction (2026-11-22):** "SOLVED"/"visually confirmed" means the
+> frames look coherent. Crystals of Arborea has not been checked against
+> the game. The Ishar 1/2 oracle pass (§8.8) showed that coherent-looking
+> single-script frames can still be far from the real view: the game draws
+> a union of scripts, the backdrop alternates, and the background is
+> palette 0. Read ARBRE/NPLAINE as RENDERED.
 
 ARBRE/PLAGES/NPLAINE/CAVINT's own `omaintc(0x7c)` reads push **TWO**
 values before the indexed read (`[odirb(0x24) opushacc odirb(0x25) opushacc
@@ -1482,6 +1501,17 @@ module doc no longer claims a working render, and it is NOT wired into
 > now dispatch to `renderIshar3LocationFrame()` exactly like Ishar 1/2 — `KeyF`/
 > `KeyC` work identically for Ishar 3 now. `ishar3-firstperson.ts`'s module doc
 > has been rewritten to match (CONFIRMED, not "attempted, not achieved").
+>
+> **Correction (2026-11-22):** "CONFIRMED" here meant "renders coherent
+> frames", not "matches the game". The oracle pass (§8.8) found:
+>
+> - In Ishar 1/2 the game never runs one location script alone.
+> - The single-script renderers reached 0-31% of the game's placements.
+> - Ishar 3's FORET/JUNGLE frames have not been compared against the game
+>   at all. Its scripted boot works only in wall-clock mode and its scene
+>   group is untraced.
+>
+> Read FORET/JUNGLE as RENDERED, not CONFIRMED.
 
 ### 8.7 Fifth pass on Ishar 1 (2026-09-02) — `TEMPLE.bin` RENDERED, superseding the §8.3 INCONCLUSIVE verdict
 
@@ -1623,6 +1653,93 @@ own confirmed companion asset per the manifest evidence above.
 |---|---|---|
 | §8.3: scan `CONT*.FIC` for `cswitch2` value range `[-10,-4]` (formula `value = index + base`), render the one real hit | 4 matches corpus-wide; rendered frame showed no visible foreground structure | Wrong formula — should be `value = index - base`, confirmed against `opcodes.c` source and two already-shipped dispatches (RAMPART, VILLAGE) using the same formula correctly |
 | §8.7 (this pass): re-derive from `opcodes.c` source, scan for `[10,16]` | 165-1,112 matches per region, 6/6 test poses render real, varied, temple-coherent content (paired pillars) | Correct formula; the earlier session's range was simply computed backwards for this one instance (RAMPART/VILLAGE happened to be computed correctly) |
+
+### 8.8 Oracle pass (2026-11-22) — what the game actually draws, measured pose by pose
+
+This pass checked crawl against the game itself. `tools/ishar/oracle/`
+builds [`maestun/alis`](https://github.com/maestun/alis) (MIT) with a small
+harness patch. The harness runs the retail scripts headless, frame-locked
+and from a savestate. It dumps the frame and the live display list, which
+gives every sprite's owner script, slot, depth, mirror flag and screen box.
+Crawl's interpreter was partly written from the alis sources, so agreement
+is not a fully independent check of the Amiga original. It is, however, a
+direct check of crawl against a running game rather than against
+plausibility.
+
+**What the game does (Ishar 1, traced; Ishar 2's start region, measured):**
+
+1. **The view is the union of a script group.** MAIN keeps a region code
+   (`0x1508`). Its `cswitch2` at `+0x188d`/`+0x1c88` loads and starts a whole
+   group:
+   - region 1/3/4: FOND, RPLAINE, PLAINE, ARBRE;
+   - region 2/5: FOND, RPLAINE, FORET, FBUIS;
+   - region 6: FTEMPLE + TEMPLE;
+   - towns 13/14: FVILLE, VILLE, FONTAINE.
+
+   Every script in the group scans the view and draws only its own cell
+   values. The walker's one-script `KeyC` cycle never matched any real
+   frame.
+2. **Zone add-ons.** GERDEP `+0x1baf` holds per-region gate rules that
+   rewrite the sub-zone `0x3eac` after each step. For example, in region 1:
+   - zone 0 -> 1 at col >= 46;
+   - zone 1 -> 0 at col < 46;
+   - zone 1 -> 3 at (25,60).
+
+   MAIN `+0xe41` swaps in add-on scripts by zone: LACUSTRE, VILLAGE, or
+   RAMPART + INVILLE. Crawl runs GERDEP's own rule bytecode for this.
+3. **Scripts are coroutines, woken once per step or turn.** Sprites persist
+   between wakes under the element rules. That is why FOND alternates (the
+   §8.2 correction above). On a region change the old group is woken once
+   more and then killed. The new group starts but is not woken until the
+   next step.
+4. **Two grid buffers.** MAIN `+0x49c2` puts odd CONT files in buffer A
+   (`+0x80`) and even ones in B (`+0x234a`). After each move, MAIN `+0xb0f`
+   preloads the neighbour into the other buffer:
+   - the next region when row > 45, except in the last region;
+   - the previous region when row < 8.
+
+   The scripts read both buffers. Regions chain north-south: world row is
+   `54*(region-1) + row`, and stepping past row 53 enters the next CONT at
+   row 0.
+5. **Display and mirroring.** Display order is:
+   - depth descending;
+   - then element number descending;
+   - then the most recently started script first;
+   - then put order.
+
+   `cxput`/`cxputat` mirror against the script's `xinv`. Type `0x01`
+   resources are solid rectangles. Uncovered pixels are palette index 0
+   (`clrfen`); there is no sky/ground fill.
+6. **Movement.** Raw facing 1/2/3/4 steps col-1 / row+1 / col+1 / row-1.
+   "Turn right" is +1 (4 wraps to 1) and "turn left" is -1. A new Ishar 1
+   game starts at CONT1 (11,29), raw facing 2. Ishar 2 starts at CONT1
+   (27,45), raw facing 2. Ishar 3 starts at CONT1-3 (2,50), raw facing 1.
+
+**Measured:**
+
+| Title | Sample | Old walker (best single script) | New `IsharScene` | Null control (pose i vs game pose i+1) |
+|---|---|---|---|---|
+| Ishar 1 | CONT1, 60 random poses (seed 1; one pose dropped because an NPC dialogue swallowed the input) | 31.3% placements (PLAINE; FORET 7.8%), 50.6% pixels | **100.00% placements, 99.50% pixels, 100.00% outside NPC boxes** | 5.1% / 31.6% |
+| Ishar 1 | real 129-action walk from the new-game start into CONT2, nothing poked | — | moves 128/129 (the other is an orc blocking a cell); 100.00% placements; 10 pixels differ over 129 frames | — |
+| Ishar 2 | CONT1 start area, 30 random poses | 11.2% placements (FORET1), 50.4% pixels | **100.00% placements, 84.4% pixels (the rest is roaming bears), 100.00% outside NPC boxes** | 9.1% / 35.9% |
+
+The old-walker column scores placements by screen box (owner, position,
+size, mirror), because the old renderer did not record slots.
+
+The residual is two frames just after a region change. Two equal-depth
+sprites overlap in the opposite order there, 5 pixels each. The game's
+tie order follows the entity slot each new script was given, and crawl
+approximates that by start order.
+
+**Not covered yet:**
+
+- the Ishar 1 town and cave codes (11-15);
+- Ishar 1 regions 3-6 against the game. The rules are traced, but a real
+  walk there died in an encounter in CONT2.
+- Ishar 2 outside its start group;
+- all of Ishar 3: its scripted boot needs `ALIS_HARNESS_MS`, it is not
+  deterministic, and its scene groups are untraced;
+- Crystals of Arborea.
 
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 

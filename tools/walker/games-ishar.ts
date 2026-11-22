@@ -2,6 +2,19 @@
  * Ishar 1/2/3 (Amiga AGA) walker views — `GameView` implementations for the
  * shared walker harness (`tools/walker/walker.ts`).
  *
+ * > **Correction (2026-11-22):** for Ishar 1 and 2 the first-person view is
+ * > now the game's own scene (`tools/shared/ishar-scene.ts`). That is the
+ * > region code's whole script group, woken once per step or turn, with
+ * > zone add-ons, both grid buffers and a palette-0 background. It is
+ * > measured pose for pose against the alis oracle (`tools/ishar/oracle/`):
+ * > 100% of placements and of pixels outside NPC boxes, see
+ * > `docs/ishar-container-format.md` §8.8. Movement is relative to facing
+ * > and regions chain as in the game. The history below describes the old
+ * > one-script test bench, which reached 0-31% of the game's placements.
+ * > Its "CONFIRMED" verdicts (FORET, Ishar 3 FORET/JUNGLE) meant coherent
+ * > frames, not agreement with the game. Only Ishar 3 still uses that
+ * > bench.
+ *
  * PRIMARILY a TOP-DOWN world-region grid walker, with a narrow, honestly-
  * scoped first-person addition. Originally this view assumed Ishar's
  * first-person mode was a heightfield/voxel-column terrain raycaster (the
@@ -218,8 +231,9 @@ const LOCATION_SCRIPTS: Record<IsharGameId, LocationScriptSpec[]> = {
     { key: 'foret1', label: 'Forest (FORET1.bin)', fondKey: 'fond1', regionPattern: /^CONT1$/i },
     { key: 'ville', label: 'Village (VILLE.bin)', fondKey: 'fville', regionPattern: /^CONT3$/i },
   ],
-  // Ishar 3: FORET.bin CONFIRMED (see module doc + docs/ishar-container-
-  // format.md §8.6's correction) against real CONT4-3.FIC forest cells;
+  // Ishar 3 (still the one-script bench; RENDERED, not checked against the
+  // game -- see the 2026-11-22 correction in the module doc): FORET.bin
+  // against real CONT4-3.FIC forest cells;
   // JUNGLE.bin also RENDERED (coherent, non-degenerate) against the same
   // region, though its own canonical CONT<n>-3.FIC region isn't
   // independently pinned (its cell-value dispatch range is too broad to
