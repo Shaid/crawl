@@ -662,6 +662,29 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     }],
   },
   {
+    id: 'dungeonhack',
+    displayName: 'Dungeon Hack',
+    platforms: [{
+      platform: 'dosvga',
+      dataDirs: ['dungeonhack/dosvga'],
+      executable: 'HACK.BAT',
+      expectedFiles: ['HACK.RES'],
+      supported: true,
+      assetDir: 'dungeonhack',
+      features: {},
+
+      async buildAssets() {
+        // Walker pack (AESOP classes, old-format bitmaps, MAZE.EXE-generated mazes).
+        // Maze generation runs the game's own MAZE.EXE under Unicorn (`pip install unicorn`).
+        const { execFileSync } = await import('node:child_process');
+        const repo = process.cwd();
+        const py = process.env.PYTHON ?? 'python3';
+        execFileSync(py, [resolve(repo, 'scripts/extract_dungeonhack_walker.py')], { stdio: 'inherit', cwd: repo });
+        console.log('  dungeonhack/dosvga: walker pack extracted (python)');
+      },
+    }],
+  },
+  {
     id: 'mm3',
     displayName: 'Might & Magic III: Isles of Terra',
     platforms: [{

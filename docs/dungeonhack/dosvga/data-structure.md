@@ -550,6 +550,47 @@ asset content expected.
 
 ---
 
+## 9. Walker: native view code, MAZE.EXE harness, generated-maze formats (2026-11-21)
+
+> **Correction (2026-11-21):** §6 and `dungeonhack-maze-exe-algorithm` said MAZE.EXE's output was
+> "session-generated, no fixed instance to decode against" and left it out of scope. The generator
+> is run as-is instead of reimplemented: `scripts/dungeonhacklib/mazeemu.py` is a Unicorn
+> real-mode harness (CPU core only, analogous to the musashi harnesses) with a thin INT 21h shim
+> that executes the game's own `MAZE.EXE` headlessly. **Confirmed** for determinism: the same
+> `SETTINGS.DAT` seed gives identical output; 4 jobs (shipped seed `0x000156E0`, seeds 1-3) x 25
+> levels each produce 25 `LEVELS` maps + 25 `FEA` files. Traps hit (documented in the harness):
+> the IDTR limit must be set for INT hooks to fire; Borland `fopen("w")` probes with AH=43h and
+> creates only on AX=2 (ENOENT); file handles must be reused lowest-free-first or handle >= 20 fails.
+> `scripts/run_dungeonhack_maze.py` -> `build/cache/dungeonhack/maze/<name>/`.
+
+**Native view code (AESOP.EXE, seg 0f36), all ported to `tools/dungeonhack/engine.ts` and
+checked against the real x86 under Unicorn** (`scripts/verify_dungeonhack_natives.py` ->
+`tools/walker/__tests__/dungeonhack-natives-fixture.json`; vitest `games-dungeonhack.test.ts`):
+`init_viewspace` 0f36:040f (120/120), `build_clipping` 0f36:05f4 (150/150, incl. the lvlvis side
+effect), `draw_walls` 0f36:0785 blit sequence x,y,flip,shape (200/200), `step_X/step_Y` 0f36:0006/00d0
+(400/400), R250 `seed_random` 0a4f:0f87 / `rnd` 0a4f:107c (5 seeds x 300 draws). **Confirmed**.
+Null controls (reversed step table, wrong seed) diverge. Tables are read from the AESOP.EXE data
+segment (DGROUP 0x1ABF; EXE header 0x1600) by `scripts/extract_dungeonhack_walker.py`.
+
+- Windows: page 0 visible, page 1 staging; subwindows share the parent buffer; the view pane is
+  (138,13) 176x120. Draw coordinates (native `draw_walls` and bytecode `draw_bitmap`) are absolute
+  page coordinates clipped to the pane.
+- DAC regions: first_color = [0,0xF0,0xE0,0xE0,0x10]; fixed palette 204 is 225 colours; wall palette
+  = region 1 (0xF0), floor = region 2 (0xE0), selected by the kernel's wallpal/floorpal. This
+  resolves the dungeon-art half of `dungeonhack-wall-sel-palette-resolution`.
+- Collision: `dungeon.impedance` (msg 244) < 0 blocks; -2 marks stairs. Level entry = first FEA record
+  (type 0: x, y, facing); level 1 of the shipped seed starts at (3,26) beside the up stairs (3,27).
+- Level load = the game's own `load level` bytecode with helper objects 2003 (tables), 2004, 2005 (magic)
+  created as phase two / `enter game` do. Not wired: ~25 runtime fns are stubbed to 0 and counted
+  (`engine.stubbed`).
+
+**Hypotheses (not confirmed):** (a) per-level wall/floor themes come from `randomize graphics` using
+our R250 seeded with the maze seed -- the real game seeds from the clock; (b) `step_FDIR` turn table
+(mtype 1/3) unverified at AESOP.EXE image 0xf4fa; (c) `randomize_array` permutation semantics guessed;
+(d) arrival pose on levels > 1 = open cell beside the previous level's down stairs;
+(e) only door `notify` timers are pumped; NPC/spell timers are not (they hit the VM step limit
+when delivered synchronously).
+
 ## Still open
 
 | Item | Status | Notes |

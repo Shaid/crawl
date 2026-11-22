@@ -64,6 +64,12 @@ export const VIEWER_CONFIGS: Record<GameId, ViewerConfig> = {
     defaultPlatform: 'dosvga',
     supportedPlatforms: ['dosvga'],
   },
+  dungeonhack: {
+    gameId: 'dungeonhack',
+    name: GAME_DISPLAY_NAMES.dungeonhack,
+    defaultPlatform: 'dosvga',
+    supportedPlatforms: ['dosvga'],
+  },
   landsoflore: {
     gameId: 'landsoflore',
     name: GAME_DISPLAY_NAMES.landsoflore,
