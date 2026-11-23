@@ -116,6 +116,9 @@ export function extractRulesTables(s1: Uint8Array, s2: Uint8Array, bcdfp: Uint8A
       // party square-enter test +0x27BAA verdicts (harness)
       enterVerdicts: { 0: 'free', 1: 'blocked', 2: 'stairs / pit relocation', 3: 'teleporter (+0x10 == 2 or 3)', 4: 'teleporter (+0x10 == 4, no position change)', 5: 'glyph kind 3', 6: 'trap 0x1E', 7: 'glyph kind 2', 8: 'monster', 9: 'teleporter with message' },
     },
+    // pass 8: per-level dungeon colour ramp (S_2 +0x39E, 13 words; the stairs / teleporter follow-up +0x16C62 and the executor's ramp ops write it) and the item-use effect map (rules-item.ts, harness)
+    levelRamps: words(0x39e, 13),
+    itemEffectsPass8: { dispatch: 'S_1 +0x136FA, effect = object word +0xE, table 0x80..0x9F; 0x95 rolls rand16(10)+0x80 first; effects 0x96..0xA9 except 0x9E spend a charge (byte +7 unless 0xFF) and AdjustVitals(-1,0,0)', routines: { 0x80: 0x58c6, 0x81: 0x4c46, 0x82: 0x6d9a, 0x84: 0x5070, 0x86: 0x5070, 0x8b: 0x5cfa, 0x8d: 0x78da, 0x8e: 0x79c2, 0x8f: 0x7b2e, 0x90: 0x7c40 }, inline: [0x8a, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9f] },
     classes, spells,
     // the spell book as the memorise / recharge / refresh routines read it (S_2 +0x1F2: 15 page records of 6 bytes = owned word?, head word, next-page word; spell records +0x12 + 8*i)
     spellBook: {

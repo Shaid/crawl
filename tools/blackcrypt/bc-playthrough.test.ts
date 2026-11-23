@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { startingParty } from './combat-sim';
 import { BcSim, type Cmd } from './bc-sim';
-import { OBJ } from './rules-spell9';
+import { OBJ, CELL, lookupType } from './rules-spell9';
 import { cfg, mon, V } from './bc-sim-fixtures';
 const CH = (k: number) => 0x1758 + 0xa8 * k;
 
@@ -103,3 +103,130 @@ describe('reference playthrough (unified world): two rooms, a door, a trap, a ra
     expect(w.s.log.some(l => l.what === 'trap')).toBe(true);
   });
 });
+
+// ====================================================================================================================================================================================
+// Reference playthrough 2 (pass 8): the world effects. One corridor, in walking order:
+//   (12,11) a TRAP square whose action records burn the party (fire, executor op 0x1C) and raise a wall behind it (op 0x10)      -> walk-in verdict 6, TriggerActionsAt, executor
+//   (13,11) a PRESSURE PLATE (trigger command) whose delayed record (event 0x28, 2 ticks) toggles the door ahead                  -> event queue, effect slot, executor op 0x18
+//   (14,11) a poison GLYPH (kind 4)                                                                                                -> glyph effect, the glyph is consumed
+//   (16,11) a LOCKED DOOR (state 2) with a one-key lock; the key opens, unlocks and consumes                                       -> bump, key-on-lock, door click
+//   (18,11) a PIT whose destination is (22,11)                                                                                     -> pit damage, relocation
+//   (22,11) a healing potion (use), then the RAM BOSS at (23,11): PROTECTOR, SOULFREEZER, VORTEX, FORCEHAMMER                      -> item dispatcher, boss stage machine, FORCEHAMMER
+// ====================================================================================================================================================================================
+const SEED2 = 'a27740bfd561';
+function records(s: BcSim, structure: number, recs: { op: number; x: number; y: number; v?: number; delay?: number }[], base: number) {
+  const a = s.a;
+  recs.forEach((r, i) => {
+    const o = 0x836 + 8 * (base + i);
+    a.setB(o, r.op); a.setB(o + 1, 1); a.setB(o + 2, r.x); a.setB(o + 3, r.y); a.setB(o + 4, 255); a.setB(o + 5, r.delay ?? 0); a.setB(o + 6, r.v ?? 0); a.setB(o + 7, i + 1 < recs.length ? base + i + 1 : 0);
+  });
+  a.setB(OBJ(structure) + 0xd, base); a.setB(OBJ(structure) + 0x11, 0);
+}
+export function playthrough2(seed: string) {
+  const s = new BcSim(cfg({ seed }));
+  s.room(10, 10, 24, 12);
+  s.party(11, 11, 1);
+  startingParty(V.tables).forEach((c, k) => s.setChar(k, { ...c, hp: 120, maxHp: 120 }));
+  const trap = s.structure(12, 11, { b5: 0x1e, wA: 0, wE: 1 });
+  records(s, trap, [{ op: 0x1c, x: 12, y: 11, v: 2 }, { op: 0x10, x: 11, y: 11, v: 3 }], 1);           // fire (5 + rand16(10) each), wall bit 3 on the square behind
+  const plate = s.structure(13, 11, { b5: 0x1d, wA: 0 });
+  const door = s.structure(16, 11, { b5: 0x11, wE: 2 });
+  const lock = s.structure(16, 11, { b5: 0x22, wC: 7, wE: 1 });
+  records(s, plate, [{ op: 0x0b, x: 12, y: 12, delay: 2 }], 3);                                           // delayed: teleporter off at an unused square (visible only as the event firing)
+  const glyph = s.structure(14, 11, { b5: 0x10, wC: 3, wA: 0, wE: 0, w10: 4 });
+  const pit = s.structure(18, 11, { b5: 0x14, wA: 0, wC: 22, wE: 11, w10: 3, w8: 0 });
+  const key = s.item(40, { gfx: 0x20, b5: 6, extra: 7, weight: 1 });
+  s.give(1, key, 0x16 + 12 + 2);
+  const potion = s.item(41, { gfx: 0x30, weight: 1 }); s.a.setW(OBJ(potion) + 0xe, 0x96); s.a.setB(OBJ(potion) + 7, 2);
+  s.give(3, potion, 0x16 + 12);
+  s.structure(12, 17, { b5: 0x12, wA: 1 });
+  const boss = s.addMonster(mon({ x: 23, y: 11, gfx: 0x80c5, hp: 120, maxHp: 120, xpBase: 10, moveType: 0 }));
+  const items = [0x8d, 0x8e, 0x8f, 0x90].map((e, i) => { const it = s.item(50 + i, { gfx: 0x31 }); s.a.setW(OBJ(it) + 0xe, e); s.give(2, it, 0x16 + 12 * (i >> 1) + 2 * (i & 1) + 0); return it; });
+  s.a.setW(0x1a1e, 1);                                                                                    // the boss has been hurt once: stage 1
+  return { s, trap, plate, door, lock, glyph, pit, key, potion, boss, items };
+}
+export function plan2(w: ReturnType<typeof playthrough2>) {
+  let stage = 0, wait = 0;
+  return (sim: BcSim): Cmd[] => {
+    const px = sim.a.w(0x1742);
+    if (wait > 0) { wait--; return [{ kind: 'wait' }]; }
+    switch (stage) {
+      case 0: if (px < 12) return [{ kind: 'move', dir: 'forward' }]; stage = 1; return [{ kind: 'move', dir: 'forward' }];       // the trap square
+      case 1: stage = 2; return [{ kind: 'move', dir: 'forward' }];                                                            // the plate square (13, 11)
+      case 2: stage = 3; return [{ kind: 'trigger', x: 13, y: 11, type: 0x1d }];
+      case 3: stage = 4; wait = 3; return [{ kind: 'move', dir: 'forward' }];                                                  // the glyph (14, 11)
+      case 4: stage = 5; return [{ kind: 'move', dir: 'forward' }];                                                            // (15, 11)
+      case 5: stage = 6; return [{ kind: 'move', dir: 'forward' }];                                                            // bumps the locked door
+      case 6: stage = 7; return [{ kind: 'cursor', char: 1, item: w.key }];
+      case 7: stage = 8; return [{ kind: 'useKey', char: 1 }];
+      case 8: if (px < 17) return [{ kind: 'move', dir: 'forward' }]; stage = 9; return [{ kind: 'move', dir: 'forward' }];       // through the door, onto (17, 11)
+      case 9: stage = 10; return [{ kind: 'move', dir: 'forward' }];                                                           // the pit (18, 11)
+      case 10: stage = 11; return [{ kind: 'use', char: 3, item: w.potion }];                                                  // at (22, 11)
+      case 11: stage = 12; return [{ kind: 'use', char: 2, item: w.items[0] }];                                                // PROTECTOR
+      case 12: stage = 13; return [{ kind: 'use', char: 2, item: w.items[1] }];                                                // SOULFREEZER
+      case 13: stage = 14; return [{ kind: 'use', char: 2, item: w.items[2] }];                                                // VORTEX
+      case 14: stage = 15; return [{ kind: 'use', char: 2, item: w.items[3] }];                                                // FORCEHAMMER
+    }
+    return [{ kind: 'wait' }];
+  };
+}
+const compact2 = (s: BcSim) => s.log.map(l => `${l.tick}:${l.what}${l.id !== undefined ? '#' + l.id : ''}${l.op !== undefined ? '@' + (l.op as number).toString(16) : ''}${l.ch !== undefined ? '/' + l.ch : ''}${l.verdict !== undefined ? 'v' + l.verdict : ''}`);
+describe('reference playthrough 2 (pass 8): trap, plate, glyph, locked door and key, pit, item, boss stages', () => {
+  it('runs the whole sequence and asserts its facts', () => {
+    const w = playthrough2(SEED2), s = w.s; s.play(60, plan2(w));
+    const at = (what: string) => s.log.filter(l => l.what === what);
+    // the trap: fire damage to every character (the executor's op 0x1C) and the wall behind the party (op 0x10)
+    expect(at('trap')).toHaveLength(1);
+    expect(at('action').map(l => l.op)).toEqual([0x1c, 0x10, 0x0b]);                                   // 0x0b is the plate's delayed record, run through the effect slot
+    expect(at('action')[0]).toMatchObject({ x: 12, y: 11, v: 2 });
+    expect((at('action')[0] as any).lost.every((v: number) => v >= 5 && v <= 14)).toBe(true);
+    expect(s.a.w(CELL(11, 11) + 2) & 0x8000).toBe(0x8000);
+    // the plate fires once, its delayed record two ticks later, and the structure unlocks again afterwards
+    const trig = at('trigger'); expect(trig.map(l => l.type)).toEqual([0x1e, 0x1d]);
+    expect(at('action')[2].tick - trig[1].tick).toBe(2);
+    expect(s.a.w(OBJ(w.plate) + 0xa)).toBe(0);
+    // the glyph poisons everyone and is consumed
+    expect([0, 1, 2, 3].map(k => s.a.b(CH(k) + 0x9a))).toEqual([1, 1, 1, 1].map((_, k) => s.a.b(CH(k) + 0x9a)));
+    expect(at('glyph')).toHaveLength(1);
+    expect(lookupType(s.a, 14, 11, 0x10)).toBe(0);
+    // the locked door bumps the party, the key opens it and is consumed
+    expect(at('blocked').some(l => l.x === 16)).toBe(true);
+    expect(at('use-key')[0]).toMatchObject({ used: true });
+    expect(s.a.w(OBJ(w.door) + 0xe)).toBe(1);
+    expect(s.a.w(OBJ(w.lock) + 0xe)).toBe(0);
+    // the pit hurts and relocates; the potion heals; the boss items run in stage order and FORCEHAMMER removes the boss
+    expect(at('pit')).toHaveLength(1);
+    expect(at('step-party').some(l => l.x === 22 && l.verdict === 2)).toBe(true);
+    expect(at('use-item').map(l => l.result)).toEqual([1, 1, 1, 1, 1]);
+    expect(s.a.w(0x1a1e)).toBe(5);
+    expect(s.monsterAlive(w.boss)).toBe(false);
+    expect(s.a.b(OBJ(w.potion) + 7)).toBe(1);                                                           // one charge spent
+    expect(s.gameOver).toBe(false);
+  });
+  it('is deterministic per seed and the timeline changes with the seed', () => {
+    const run = (seed: string) => { const w = playthrough2(seed); w.s.play(60, plan2(w)); return JSON.stringify(compact2(w.s)); };
+    expect(run(SEED2)).toBe(run(SEED2));
+    expect(run('0123456789ab')).not.toBe(run(SEED2));
+  });
+  it('null controls: without the key the door stays locked; the wrong stage order leaves the boss alive', () => {
+    const w = playthrough2(SEED2); const p = plan2(w);
+    w.s.play(60, sim => p(sim).filter(c => c.kind !== 'useKey'));
+    expect(w.s.a.w(OBJ(w.door) + 0xe)).toBe(2);
+    expect(w.s.a.w(0x1a22)).toBe(w.key);
+    const v = playthrough2(SEED2); const q = plan2(v);
+    v.s.a.setW(0x1a1e, 0);                                                                              // the boss never went below 50 hp: stage 0, PROTECTOR refuses and the chain stalls
+    v.s.play(60, q);
+    expect(v.s.monsterAlive(v.boss)).toBe(true);
+    expect(v.s.a.w(0x1a1e)).toBe(0);
+  });
+  it('golden timeline (a regression guard of this implementation; every rule inside is oracle-diffed)', () => {
+    const w = playthrough2(SEED2); w.s.play(60, plan2(w));
+    expect(compact2(w.s)).toEqual(GOLDEN2);
+  });
+});
+const GOLDEN2: string[] = [
+  '0:step-partyv6', '0:trap', '0:action#1@1c', '0:action#2@10', '0:trigger', '1:step-partyv0', '2:step-partyv5', '2:glyph', '3:trigger', '4:step-partyv0',
+  '5:action#0@b', '8:blocked', '9:blocked', '10:cursor/1', '11:use-key', '12:step-partyv0', '13:step-partyv0', '14:step-partyv2', '14:pit', '15:monster-hit/0',
+  '15:damage/0', '15:blocked', '16:use-item/3', '17:boss-item', '17:use-item/2', '18:boss-item', '18:use-item/2', '19:boss-item', '19:use-item/2', '20:forcehammer',
+  '20:use-item/2',
+];

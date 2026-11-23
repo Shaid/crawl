@@ -355,7 +355,7 @@ export class BcSim extends ObjectWorld {
     const a = this.a, cells = new Map<number, number>(), objs: Record<number, RayObj> = {};
     for (const o of [...a.m.keys()]) {
       const rel = o + 0x37ca;
-      if (rel < 0 || rel >= 0x10000 || (rel & 3) !== 0) continue;
+      if (rel < 0 || rel >= 0x4000 || (rel & 3) !== 0) continue;   // the 64 x 64 cell array only (anything above is the action records and the globals)
       const x = (rel & 0xff) >> 2, y = rel >> 8;
       const v = getL(a, CELL(x, y)); if (v) cells.set(y * 256 + x, v);
     }

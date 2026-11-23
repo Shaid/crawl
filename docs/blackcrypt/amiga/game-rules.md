@@ -648,6 +648,49 @@ Tests: `bc-sim.test.ts` ports the legacy tests (determinism and null control, co
 * **Hyp:** PAL as the default region; negative corpse index; generator real-time rate; hand 0 = `+0x1C` (derived from the event handlers, not from an item-use trace).
 * **Open (smallest next steps):** (1) harness `+0xC4F6` per opcode with the same `G` method (about 30 small cases, each an action record plus the cell / party pokes) and wire the executor into `move`; (2) glyph `+0x4662` and pit `+0x1734A` (each a loop over living characters with DamageCharacter hooked and logged: same method as `spec`); (3) wire the three boss items, DISMISS / BINDING in `bc-sim.ts` (ports exist); (4) key / lock handler `+0x16AC0`.
 
+## 15. Pass 8 (2026-11-24): the action executor, glyph, pit, locks and keys, item use, the full world in `bc-sim.ts`
+
+Evidence labels as before. No protection data was read or recorded. New files: `rules-action.ts`, `rules-item.ts`, `rules-pass8.test.ts`, `bc-sim-world.test.ts`, `rules_oracle/make_vectors_pass8.py` -> `vectors_pass8.json.gz` (small committed subset, 120 cases; `gen_vectors.sh` writes the full 3,600-case set into the gitignored `generated/`).
+
+> **Correction (2026-11-24):** §14.3 / §14.7 said the party door was `+0x9056`. `+0x9056` is the **monster** VM's door open; the **party** click is `+0x1110A` (`doorClick`, harness). §14.7's "code only" items (executor, glyph, pit, locks and keys, item effects) are now **harness** (below).
+
+### 15.1 Status
+| System | Grade | Parity (full / committed) |
+|---|---|---|
+| Action executor `+0xC4F6` / switch `+0xCE9C`, all 35 opcodes (0x00-0x23) plus no-ops 0x1B / 0x24+, with `crushSquare` `+0xC41A`, `pitDrop` `+0xC2DA` | **harness** | 2280 / 70 |
+| Executor behind TriggerActionsAt (immediate records) | **harness** | 120 |
+| Executor behind the pop loop's event 0x28 (the "UI effect call" is `+0xC4F6`) | **harness** | 120 |
+| Glyph `+0x4662`, pit `+0x1734A` | **harness** | 180, 120 |
+| Party door click `+0x1110A`, key on lock `+0x16AA8` | **harness** | 120, 120 |
+| Item use `+0x12FEA`: shell, effect-to-routine map, inline potions (callee spell routines hooked: covered by their own earlier harnesses) | **harness** | 240 (N=40) |
+| Stairs / teleporter follow-up `+0x16C62` (ramp from S_2 +0x39E, then map load) | **code** (map load is I/O, not modelled; the ramp is logged) | |
+| Ray kill order | **code** + harnessed `+0x7ED0` (see 15.4) | |
+
+### 15.2 Executor (`executeAction`), record = op [0], x [2], y [3], value [6]
+0 / 1 / 2 cell bit 30 toggle / set / clear. 3 / 4 / 5 type-0x17 word `+0xA` toggle / 0 / 1 (becoming 0 crushes the square). 6 / 7 / 8 type-0x14 pit (0 crushes and drops). 9 / A / B type 0x12 toggle / 0 / 1. 0xC type VALUE word `+0xA ^= 2`; 0xD / 0x16 `-= 2` when `(+0xA & 2) == 2`; 0xE / 0x17 `+= 2` when byte `+0xB` bit 1 clear. 0xF / 0x10 / 0x11 cell bit `0x1000 << VALUE`. 0x12 spawnMonster(template VALUE, x, y) then the scan. 0x13 hold `+= v`. 0x14 drops both hands of living characters and the cursor item (weight adjust uses character 0: a game quirk). 0x15 party teleport, v > 0 runs `+0x16C62`. 0x18-0x1A door word `+0xE`. 0x1C / 0x1D party damage `5 + rand16(5 v)` kind 4. 0x1E ramp + teleport, 0x1F ramp. 0x20-0x22 type-0x10 glyph / field. 0x23 crush. The second pass after the handler is a UI sound only. crushSquare unlinks monsters, frees the carried chains and the primary / secondary; pitDrop moves items with type nibble 0x90 / 0x30 / 0x60 / 0xC0 to the pit destination (words `+0xC` / `+0xE`) and the party follows.
+
+### 15.3 Glyph, pit, doors, keys, item use
+* **Glyph** (type 0x10 on the party square, a = `+0xE`, kind = `+0x10`): kind 1 with a != 0 deals 0xFFFF to every living character (kills the party), kind 1 with a = 0 sets everyone to 1 hp; kinds 2 / 3 fire / ice `5 + rand16(5a)` kind 4; kind 4 poison `1 + rand16(10)` kind 5 and `+0x9A += 1`; kinds 0 and >= 5 loop with the caller's register garbage (**harness** reproduces it with fixed d6 / d7, **open** for what the game leaves there). The glyph is consumed and `0x1A1A` cleared.
+* **Pit**: each character with hp > 0 and byte `+0x8A == 0` takes `5 + rand16(dex > 15 ? dex - 10 : dex + 5)`, kind 4.
+* **Move verdicts** (`+0x16CC4`): 2 pit effect then land at the destination; 3 teleporter (byte `+7` != 0 runs `+0x16C62`); 5 glyph; 6 TriggerActionsAt(x, y, 0x1E).
+* **Party door click** (gated by word `0x1A18`): front square by the facing; closed -> AdjustVitals(-2, -1, -1), state 1, trigger when `+0xC != 0` and byte `+0xF` bit 0; open -> blocked while occupancy(x, y, 0) != 0, else same cost, state 0, trigger when bit 1; locked (2) -> text only.
+* **Key on lock**: cursor item type 6; lock type 0x22 in front with `+0xC` equal to the key's `+0xC` and `+0xE != 0`; then lock `+0xE -= 1`, key freed, cursor cleared; at zero the first door becomes state 0 and the click runs, otherwise the vitals cost.
+* **Item use** (args item, character): a cell with bit 30 returns 1 with no effect; effect = item word `+0xE` (0x95 -> `rand16(10) + 0x80`); table 0x80..0x9F; 0x80-0x90 call `+0x58C6`, `+0x4C46(6)`, ray `+0x6D9A` with constants, `+0x5070(1 / 2)`, `+0x5CFA`, `+0x78DA`, `+0x79C2`, `+0x7B2E`, `+0x7C40`; 0x8A feast and 0x96-0x9F potions inline (`rules-item.ts`, `rules-tables.json` `itemEffectsPass8`). Effects 0x96..0xA9 except 0x9E cost a charge (byte `+7` unless 0xFF) and AdjustVitals(-1, 0, 0).
+
+### 15.4 The two section-14 hypotheses
+* **XP versus loot on ray kills (resolved, code + harness on `+0x7ED0`).** `CastSpellRay` calls the death routine at `+0x702E` right after each damage subtraction, so a ray kill is: damage draw -> death (loot draws, then XP draws, then level-up). The old port awarded XP with its own draws and killed afterwards; the sim now passes a per-hit death callback (`castRay(..., death)`). The reference playthrough golden changed order accordingly. DISMISS runs the death routine too (`+0x6AD6` calls `+0x7ED0`). The composition itself has no dedicated harness.
+* **Vitals-tick DamageCharacter flag (resolved, harness).** In the committed tick vectors all 1,157 `+0x17686` calls from the tick handler carry flag 1; the sim passes 1.
+
+### 15.5 `bc-sim.ts` after this pass
+New commands: `openDoor` (party click), `trigger {x, y, type}` (plate / lever), `useKey`, `cursor`, `use {char, item, pick?}`. `move` runs pit / glyph / teleporter / trap verdicts; the effect slot (event 0x28) runs the real executor; DISMISS / BINDING (facing, with the real death), REFRESH, the boss items (PROTECTOR / SOULFREEZER / VORTEX via `ramBossItem`, FORCEHAMMER via `forceHammer`) are wired. `useItem` supplies the callee routines from the ports harnessed elsewhere; LIGHT (`+0x58C6`) is **hyp** (taken as +120 light like spell 1, not diffed alone). Tests: `bc-sim.test.ts` (17), `bc-sim-world.test.ts` (12: trap, delayed plate, lever, glyphs, pit, key, door, ray-kill order, item use, boss items, DISMISS / BINDING), `bc-playthrough.test.ts` (second playthrough: trap, plate, glyph, locked door and key, pit, potion, PROTECTOR, SOULFREEZER, VORTEX, FORCEHAMMER, with facts, null controls and a golden timeline). `combat-sim.ts` is **not retired**: its 26 tests still cover the legacy path; bc-sim is the superset and the module to build the remake on.
+
+### 15.6 What is NOT harness-verified (final list)
+* **Code only:** the stairs / teleporter map load `+0x16C62` (I/O); the ray-kill composition (damage -> death) as one routine; the callee spell routines inside item use as composed (each is harnessed alone); LIGHT `+0x58C6` effect (**hyp**).
+* **UI only:** text, redraw flags, sounds, the executor's second-pass sound, the `+0x8C54E` presentation.
+* **Hyp:** PAL as default region; negative corpse index; generator real-time rate; hand 0 = `+0x1C`; glyph kinds 0 and >= 5 register garbage.
+* **Open, small:** a composed harness for ray -> death; LIGHT in isolation; the held-party click whitelist; turn cost.
+Everything else in the combat and world rules (melee, monsters, spells, events, doors, traps, glyphs, pits, locks, items, death and loot, vitals, Ram boss) is harness-graded.
+
 ## Appendix A — Spells (from the spells analysis; all offsets S_1)
 
 Evidence grades: **code** = read directly from the disassembly (S_1 offset given; Ghidra fn address = same number, 0x-prefixed 8 digits); **hyp** = inference; **open** = not derived (smallest next step given).
