@@ -83,5 +83,90 @@ for c, r in zip(ml, res):
     after = int(r.split(':')[1])
     b6 = c[3] - 256 if c[3] > 127 else c[3]
     vec['melee'].append({'seed': c[0], 'level': c[1], 'str': c[2], 'b6c': b6, 'monHit': c[4], 'monHp': c[5], 'cls': c[6], 'gfx': c[7], 'extra': c[8], 'item': c[9], 'monHpAfter': after})
+
+# ---- monster-vs-party melee (real 9D28, melee-only monsters)
+def sb(v): return v & 0xff
+mm = []
+for _ in range(2500):
+    gfx = rnd.choice([0x80B3, 0x80B3, 0x80B7, 0x80B8, 0x80B9, 0x80C0])
+    b2 = rnd.randrange(256); b3 = (rnd.randrange(256) & ~0x2C) | (rnd.choice([2, 3, 3, 1, 0]) << 2)
+    b6 = rnd.choice([2, 2, 3, 10, 0])
+    maxhp = rnd.randrange(1, 400)
+    px, py = rnd.randrange(8, 13), rnd.randrange(8, 13)
+    if rnd.random() < 0.8:
+        dx, dy = rnd.choice([(0, 1), (0, -1), (1, 0), (-1, 0)])
+    else:
+        dx, dy = rnd.randrange(-5, 3), rnd.randrange(-5, 3)
+    form = list(range(4)); rnd.shuffle(form)
+    hps = [rnd.choice([-3, 0, 5, 30, 60]) for _ in range(4)]
+    acs = [sb(rnd.randrange(-6, 30)) for _ in range(4)]
+    mm.append((seed(), gfx, b2, b3, b6, maxhp, px, py, px - dx, py - dy, rnd.randrange(4), rnd.randrange(5),
+               rnd.choice([2, 3, 4, 4]), 1, *form, *hps, *acs, rnd.randrange(2)))
+res = run('mmelee', [' '.join(str(x) for x in c) for c in mm])
+vec['mmelee'] = []
+for c, r in zip(mm, res):
+    f = r.split(':')[1].split()
+    ret, outflag, s0f, s0a, nd = (int(x) for x in f[:5])
+    dm = [[int(f[5 + 2 * k]), int(f[6 + 2 * k])] for k in range(nd)]
+    ns = int(f[5 + 2 * nd]); seed_after = f[6 + 2 * nd]
+    vec['mmelee'].append({'in': list(c), 'ret': ret, 'outflag': outflag, 's0f': s0f, 's0a': s0a, 'dmg': dm, 'sched': ns, 'seedAfter': seed_after})
+
+# ---- monster death XP (real 7ED0)
+xl = []
+for _ in range(400):
+    xl.append((seed(), rnd.randrange(256), rnd.randrange(0, 2000), rnd.randrange(0, 400),
+               *[rnd.choice([-4, 0, 7, 25]) for _ in range(4)], *[rnd.randrange(0, 100000) for _ in range(4)]))
+res = run('xp', [' '.join(str(x) for x in c) for c in xl])
+vec['xp'] = []
+for c, r in zip(xl, res):
+    f = r.split(':')[1].split()
+    vec['xp'].append({'in': list(c), 'xp': [int(x) for x in f[:4]], 'seedAfter': f[4]})
+
+# ---- behaviour VM (real AAFC); scripts from S_2, pointer table fixed by +0x80
+FIRST, TABLE = 0xE92, 0x114A
+starts = [(struct.unpack('>I', s2[TABLE + 4 * i:TABLE + 4 * i + 4])[0] - 0xA8BF0 + 0x80 - FIRST) // 6 for i in range(12)]
+lens = {}
+uniq = sorted(set(starts))
+for i, st in enumerate(uniq):
+    lens[st] = (uniq[i + 1] if i + 1 < len(uniq) else (TABLE - FIRST) // 6) - st
+al = []
+for _ in range(1500):
+    t = rnd.randrange(12)
+    pc = rnd.randrange(1, lens[starts[t]])
+    sp = rnd.randrange(1, 13); mhp = rnd.randrange(1, 300); hp = rnd.randrange(-5, mhp + 1)
+    b3 = rnd.randrange(256); w0c = rnd.choice([0, 1, 2, 3, 0x8000, 0x4001, 0x2002]); b7 = rnd.randrange(0, 30)
+    gfx = rnd.choice([0x80B3, 0x80B7, 0x80B8, 0x80B9])
+    px, py = rnd.randrange(8, 13), rnd.randrange(8, 13)
+    x, y = px + rnd.randrange(-3, 4), py + rnd.randrange(-3, 4)
+    rc = rnd.choice([0, 1, 2])
+    vars_ = [rnd.choice([0, 1, 2, 3, 5, 8, 20, 254]) for _ in range(8)]
+    al.append((seed(), t, pc, sp, hp, mhp, b3, w0c, b7, gfx, px, py, x, rc, y, *vars_, rnd.randrange(0, 12), rnd.randrange(0, 6), 0))
+# oracle arg order: type pc sp hp mhp b3 w0c b7 gfx px py x rc y vars(8) s11 s12 f1E8E
+lines = []
+for c in al:
+    lines.append(' '.join(str(v) for v in c))
+out = subprocess.run([ORACLE, s1p, s2p, 'ai'], input='\n'.join(lines) + '\n', capture_output=True, text=True).stdout.split('\n')
+vec['ai'] = []
+i = 0
+for c in al:
+    l1, l2 = out[i], out[i + 1]; i += 2
+    f = l1.split(':')[1].split()
+    steps = int(f[f.index('steps') + 1])
+    if steps > 100000:  # runaway script position (no delay op reached)
+        continue
+    pc, php, smax, gfx, b7, t_, s0e, s11, s12 = (int(x) for x in f[:9])
+    vs = [int(x) for x in f[10:18]]
+    sc0, sc4 = int(f[19]), int(f[20])
+    ents = [e for e in l2.split(' | ') if e.startswith('|') or True]
+    log = []
+    for e in l2.split('|')[1:]:
+        e = e.strip()
+        if e.startswith('seed'): seed_after = e.split()[1]; continue
+        parts = e.split(',')
+        off = int(parts[0], 16); w = [int(x) for x in parts[1:9]]
+        log.append({'off': off, 'w': w})
+    vec['ai'].append({'in': list(c), 'pc': pc, 'pHp': php, 'sMax': smax, 'gfx': gfx, 'b7': b7, 'type': t_, 's0e': s0e, 's11': s11, 's12': s12, 'vars': vs, 'sc0': sc0, 'sc4': sc4, 'log': log, 'seedAfter': seed_after})
+vec['aiScripts'] = {'cells': [[s2[o], s2[o + 1], (s2[o + 2] << 8) | s2[o + 3], (s2[o + 4] << 8) | s2[o + 5]] for o in range(FIRST, TABLE, 6)], 'starts': starts}
+
 json.dump(vec, open(here / 'vectors.json', 'w'), separators=(',', ':'))
 print('wrote vectors.json', {k: (len(v) if hasattr(v, '__len__') else v) for k, v in vec.items()})

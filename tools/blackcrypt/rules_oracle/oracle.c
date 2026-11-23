@@ -46,6 +46,7 @@ static void w8(uint32_t a, int v){ m68k_write_memory_8(a, (unsigned)v & 0xff); }
 static void w32(uint32_t a, uint32_t v){ m68k_write_memory_32(a, v); }
 static int r16s(uint32_t a){ return (int16_t)m68k_read_memory_16(a); }
 static unsigned r16(uint32_t a){ return m68k_read_memory_16(a); }
+static unsigned r32x(uint32_t a){ return m68k_read_memory_32(a); }
 static unsigned r8(uint32_t a){ return m68k_read_memory_8(a); }
 
 /* S_1 offsets of routines we keep real (everything else called by absolute
@@ -56,6 +57,7 @@ static const uint32_t KEEP[] = {
   0x0B308,                       /* monsters-in-front lookup ($8B360)  */
   0x002B4,                       /* step position by facing */
   0x17D2A, 0x1451E,              /* level-up check, player melee (the routines under test) */
+  0x268A6, 0x7ED0, 0xAAFC, 0x9D28, 0x8B2, 0x17686, 0x17EEA,  /* raw byte rand; monster death/XP, behaviour VM, monster attack, tick, DamageCharacter, AdjustVitals */
   0
 };
 static int keep(uint32_t off){ for(int i=0;KEEP[i];i++) if(KEEP[i]==off) return 1; return 0; }
@@ -70,10 +72,32 @@ static void stub_externals(size_t s1len){
       uint32_t t=m68k_read_memory_32(a+2);
       if(t>=S1_BASE && t<S1_BASE+s1len){
         uint32_t off=t-S1_BASE;
-        if(!keep(off)) w16(t,0x4E75);
+        if(!keep(off) && off<0x28000) w16(t,0x4E75); /* >= 0x28000: C runtime helpers (mul/div) stay real */
       }
     }
   }
+}
+
+
+/* ---- call hooks: when PC reaches a hooked S_1 offset the routine is skipped
+ * (return value D0 = hook_ret) and its first stack words are logged. ---- */
+#define MAXHOOK 32
+#define MAXLOG 4096
+static uint32_t hook_off[MAXHOOK]; static int hook_ret[MAXHOOK]; static int nhook=0;
+typedef struct { uint32_t off; uint16_t w[8]; uint32_t l0; } LogEnt;
+static LogEnt logv[MAXLOG]; static int nlog=0;
+static void hooks_clear(void){ nhook=0; nlog=0; }
+static void hook_add(uint32_t off,int ret){ hook_off[nhook]=off; hook_ret[nhook]=ret; nhook++; }
+static int hook_hit(uint32_t pc){
+  for(int i=0;i<nhook;i++) if(pc==S1_BASE+hook_off[i]){
+    uint32_t sp=m68k_get_reg(NULL,M68K_REG_A7);
+    if(nlog<MAXLOG){ LogEnt*e=&logv[nlog++]; e->off=hook_off[i]; for(int k=0;k<8;k++) e->w[k]=m68k_read_memory_16(sp+4+2*k); e->l0=m68k_read_memory_32(sp+4); }
+    m68k_set_reg(M68K_REG_D0,(uint32_t)hook_ret[i]);
+    m68k_set_reg(M68K_REG_PC,m68k_read_memory_32(sp));
+    m68k_set_reg(M68K_REG_A7,sp+4);
+    return 1;
+  }
+  return 0;
 }
 
 /* call routine at S_1 offset `off` with args (each: size 2 = word, 4 = long,
@@ -91,11 +115,19 @@ static unsigned long run_call(uint32_t off, int n, const int *sz, const uint32_t
   m68k_set_reg(M68K_REG_PC,S1_BASE+off);
   unsigned long steps=0;
   while(m68k_get_reg(NULL,M68K_REG_PC)!=RET_SENTINEL){
+    if(nhook && hook_hit(m68k_get_reg(NULL,M68K_REG_PC))) { steps++; continue; }
+    if(getenv("TRACE")) fprintf(stderr,"%05x\n",m68k_get_reg(NULL,M68K_REG_PC)-S1_BASE);
     m68k_execute(1); if(++steps>2000000){ fprintf(stderr,"runaway at off %x\n",off); break; }
   }
   return steps;
 }
 
+static int parse_line(const char*line,char*sh,int*v,int max){
+  char buf[512]; strncpy(buf,line,511); buf[511]=0; char*sp; char*t=strtok_r(buf," \t\r\n",&sp); if(!t) return -1;
+  strncpy(sh,t,31); sh[31]=0; int n=0;
+  while((t=strtok_r(NULL," \t\r\n",&sp))&&n<max) v[n++]=(int)strtol(t,NULL,0);
+  return n;
+}
 static uint32_t CH(int i){ return A4V+0x1758+0xA8*i; }
 static uint32_t OB(int u){ return A4V-0x6E7A+0x14*u; }
 static void set_seed(const unsigned char s[6]){ for(int i=0;i<6;i++) w8(S1_BASE+0x26882+i,s[i]); }
@@ -185,6 +217,88 @@ int main(int argc,char**argv){
       (void)sz;
       run_call(0x1451E,5,sz2,v2);
       printf("melee %s %d %d %d %d %d %d %d %d %d : %d\n",sh,lvl,str,b6c,monHit,monHP,cls,gfx,extra,item,r16s(OB(mon)+8));
+    }
+
+  } else if(!strcmp(mode,"mmelee")){
+    /* Monster-vs-party melee through the real 9D28 (monster act), melee-only monsters.
+       in: seed gfx b2 b3 b6 maxhp px py mx my facing pos op flag f0 f1 f2 f3 hp0..hp3 ac0..ac3 s0b
+       out: ret outflag S.b0F S.b0A ndmg [char dmg]* nsched seedAfter */
+    while(fgets(line,sizeof line,stdin)){
+      char sh[32]; int v[40];
+      int n=parse_line(line,sh,v,40);
+      if(n!=26) continue;
+      int gfx=v[0],b2=v[1],b3=v[2],b6=v[3],maxhp=v[4],px=v[5],py=v[6],mx=v[7],my=v[8],facing=v[9],pos=v[10],op=v[11],flag=v[12];
+      unsigned char s[6]; for(int i=0;i<6;i++){ unsigned q; sscanf(sh+2*i,"%2x",&q); s[i]=q; }
+      memcpy(mem,snap,MEM_SIZE); set_seed(s);
+      hooks_clear(); hook_add(0x17686,0); hook_add(0x5EA,0); hook_add(0x8388,0); hook_add(0x825C,0);
+      w16(A4V+0x1740,py); w16(A4V+0x1742,px); w16(A4V+0x1744,facing);
+      for(int i=0;i<4;i++){ w16(A4V+0x1E74+2*i,v[13+i]); w16(CH(i)+0x4E,v[17+i]); w8(CH(i)+0x62,v[21+i]); }
+      int P=1,S=2;
+      w16(OB(P),gfx); w8(OB(P)+2,b2); w8(OB(P)+3,b3); w8(OB(P)+6,b6); w16(OB(P)+8,50); w16(OB(P)+0x10,S);
+      w16(OB(S)+8,maxhp); w8(OB(S)+0xB,pos); w8(OB(S)+0x13,0); w8(OB(S)+0xF,(gfx==0x80B9)?v[25]:1);
+      uint32_t X=0x2F0100,Y=0x2F0102,OUT=0x2F0104; w16(X,mx); w16(Y,my); w16(OUT,0xAAAA);
+      /* push (right to left): flag(word), &out(long), op(word), &y(long), &x(long), mon(word) */
+      int sz[6]={2,4,2,4,4,2}; uint32_t vv[6]={(uint32_t)flag,OUT,(uint32_t)op,Y,X,(uint32_t)P};
+      run_call(0x9D28,6,sz,vv);
+      unsigned char sa[6]; get_seed(sa);
+      printf("mmelee %s : %d %d %d %d",sh,(int)(int16_t)m68k_get_reg(NULL,M68K_REG_D0),r16(OUT),r8(OB(S)+0xF),r8(OB(S)+0xA));
+      int nd=0,ns=0; for(int i=0;i<nlog;i++){ if(logv[i].off==0x17686) nd++; if(logv[i].off==0x5EA) ns++; }
+      printf(" %d",nd); for(int i=0;i<nlog;i++) if(logv[i].off==0x17686) printf(" %u %u",logv[i].w[0],logv[i].w[1]);
+      printf(" %d %02x%02x%02x%02x%02x%02x\n",ns,sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
+    }
+  } else if(!strcmp(mode,"xp")){
+    /* Monster-death XP award: the real 7ED0 with a minimal world.
+       in: seed rec1b2 rec2w6 rec2w8 hp0..hp3 xp0..xp3 ; out: xp after for each char + seed */
+    while(fgets(line,sizeof line,stdin)){
+      char sh[32]; int b2,w6,mh,hp[4]; unsigned xp[4];
+      if(sscanf(line,"%31s %d %d %d %d %d %d %d %u %u %u %u",sh,&b2,&w6,&mh,&hp[0],&hp[1],&hp[2],&hp[3],&xp[0],&xp[1],&xp[2],&xp[3])!=12) continue;
+      unsigned char s[6]; for(int i=0;i<6;i++){ unsigned q; sscanf(sh+2*i,"%2x",&q); s[i]=q; }
+      memcpy(mem,snap,MEM_SIZE); set_seed(s);
+      hooks_clear(); hook_add(0x17D2A,0); hook_add(0xB25A,0); hook_add(0x2D46,0); hook_add(0xB614,0); hook_add(0x4AE,0); hook_add(0xFE,0); hook_add(0x8388,0);
+      for(int i=0;i<4;i++){ w16(CH(i)+0x4E,hp[i]); w32(CH(i)+0xA0,xp[i]); w8(CH(i)+0x5E,1); }
+      int P=3,S=4;
+      w16(OB(P),0x80B3); w8(OB(P)+2,b2); w16(OB(P)+8,0); w16(OB(P)+0x10,S);
+      w16(OB(S)+6,w6); w16(OB(S)+8,mh);
+      /* 7ED0(mon, x, y): push y, x, mon */
+      int sz[3]={2,2,2}; uint32_t vv[3]={5,5,(uint32_t)P};
+      run_call(0x7ED0,3,sz,vv);
+      unsigned char sa[6]; get_seed(sa);
+      printf("xp %s : %u %u %u %u %02x%02x%02x%02x%02x%02x\n",sh,r32x(CH(0)+0xA0),r32x(CH(1)+0xA0),r32x(CH(2)+0xA0),r32x(CH(3)+0xA0),sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
+    }
+  } else if(!strcmp(mode,"ai")){
+    /* Behaviour VM AAFC. in: seed type pc speedb5 hp maxhp b3 w0C b7 gfx px py x y rc vars(8) s11 s12 f1E8E
+       out: pc delay-event... see printf */
+    while(fgets(line,sizeof line,stdin)){
+      char sh[32]; int v[32];
+      int n=parse_line(line,sh,v,32);
+      if(n<25) continue;
+      unsigned char s[6]; for(int i=0;i<6;i++){ unsigned q; sscanf(sh+2*i,"%2x",&q); s[i]=q; }
+      memcpy(mem,snap,MEM_SIZE); set_seed(s);
+      /* NOTE: the S_2 script pointer table holds values 0x80 below the real addresses; fixed here */
+      for(int i=0;i<12;i++){ uint32_t a=A4V-0x6EB4+4*i; w32(a,m68k_read_memory_32(a)+0x80); }
+      hooks_clear();
+      uint32_t H[]={0xA664,0x9D28,0x940C,0x9626,0x8D7E,0x866C,0x937A,0x9116,0x825C,0x8388,0xA906,0x1F3A8,0x5EA,0};
+      for(int i=0;H[i];i++) hook_add(H[i],v[12]);
+      hook_add(0xA82C,-1000); /* sentinel: A82C stays real, remove below */
+      nhook--; /* keep A82C real */
+      int type=v[0],pc=v[1],sp=v[2],hp=v[3],mhp=v[4],b3=v[5],w0c=v[6],b7=v[7],gfx=v[8],px=v[9],py=v[10],x=v[11];
+      int y=v[13];
+      int P=1,S=2;
+      w16(A4V+0x1742,px); w16(A4V+0x1740,py); w32(A4V+0x1750,1000); w8(A4V+0x1E8E,v[24]); w8(A4V+0x1E8F,0);
+      w16(OB(P),gfx); w8(OB(P)+3,b3); w8(OB(P)+5,sp); w8(OB(P)+7,b7); w16(OB(P)+8,hp); w16(OB(P)+0xC,w0c); w16(OB(P)+0xE,type); w16(OB(P)+0x10,S);
+      w16(OB(S)+4,pc); w16(OB(S)+8,mhp); w8(OB(S)+0xB,4); w8(OB(S)+0x13,0);
+      for(int i=0;i<8;i++) w8(OB(S)+0xF+i,v[14+i]);
+      w8(OB(S)+0x11,v[22]); w8(OB(S)+0x12,v[23]);
+      uint32_t sc=m68k_read_memory_32(A4V-0x6EB4+4*type);
+      int sz[3]={2,2,2}; uint32_t vv[3]={(uint32_t)y,(uint32_t)x,(uint32_t)P};
+      unsigned long steps=run_call(0xAAFC,3,sz,vv);
+      unsigned char sa[6]; get_seed(sa);
+      printf("ai %s : %u %d %d %d %u",sh,r16(OB(S)+4),r16s(OB(P)+8),r16s(OB(S)+8),(int)r16(OB(P)),r8(OB(P)+7));
+      printf(" %u %u %u %u",r16(OB(P)+0xE),r8(OB(S)+0xE),r8(OB(S)+0x11),r8(OB(S)+0x12));
+      printf(" v"); for(int i=0;i<8;i++) printf(" %u",r8(OB(S)+0xF+i));
+      printf(" sc %u %u steps %lu\n",r8(sc),r16(sc+4),steps);
+      printf("log %d",nlog); for(int i=0;i<nlog;i++){ printf(" |%x",logv[i].off); for(int k=0;k<8;k++) printf(",%u",logv[i].w[k]); }
+      printf(" | seed %02x%02x%02x%02x%02x%02x\n",sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
     }
   } else { fprintf(stderr,"unknown mode\n"); return 2; }
   return 0;
