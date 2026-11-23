@@ -66,13 +66,20 @@ class Combat(W6):
         self.uc.hook_add(UC_HOOK_MEM_WRITE, self._wr, begin=RNG_ADDR, end=RNG_ADDR + 5)
 
     def _stub(self, off, name, log=False):
+        """Replace the routine at CODE+off by a recording no-op. Stubbing an offset again replaces its entry
+        (one hook per address, so two stubs can never both pop the return address)."""
+        if not hasattr(self, '_stubs'): self._stubs = {}
+        fresh = off not in self._stubs
+        self._stubs[off] = (name, log)
+        if not fresh: return
         addr = CODE_BASE + off
         def hook(uc, a, size, ud):
             if off in self.disabled: return
+            nm, lg = self._stubs[off]
             sp = uc.reg_read(UC_M68K_REG_A7)
-            if log and self.tracking:
-                self.effects.append([name, bytes(uc.mem_read(sp + 4, log)).hex()])
-            uc.reg_write(UC_M68K_REG_D0, 0)
+            if lg is not False and lg is not None and self.tracking:
+                self.effects.append([nm, bytes(uc.mem_read(sp + 4, lg)).hex()])
+            uc.reg_write(UC_M68K_REG_D0, getattr(self, 'retvals', {}).get(nm, 0))
             uc.reg_write(UC_M68K_REG_A7, sp + 4)
             uc.reg_write(UC_M68K_REG_PC, self.r32(sp))
         self.uc.hook_add(UC_HOOK_CODE, hook, begin=addr, end=addr)
