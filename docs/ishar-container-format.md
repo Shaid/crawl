@@ -1885,6 +1885,12 @@ approximates that by start order.
       steps: the game refused every direction from there, cause not
       traced (no monster slot holds the location; possibly the party
       status check at `+0xdc2`).
+      **2026-11-23 (later):** `+0xdc2` is the party check. It loops over
+      the five members and lets the step through only if one is present
+      (`0x19a2` != -1), has hp above 0 (`0x16e0`, word) and has status 0
+      (`0x17be`, word). The forest savestate holds one member (33) with hp
+      266 and status 0. A party knocked out or disabled on the way would
+      explain why every direction was refused; this is not confirmed.
     - Decoder fixes found on the way: `cblast` reads an expression (it is
       `ckill` with erase). The entity tests and searches that
       end in `crstent` (`cfindtyp`, `cfindcla`, `ctstmov`, `cftstmov`,
