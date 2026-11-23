@@ -550,3 +550,31 @@ export function setStatus(m: Mem, rng: W6Rng, a4: number, args: number[]): void 
     killCleanup(m, a4, tg, ti);
   }
 }
+
+
+/**
+ * LAB_0E4F (CODE+0x23366): the per-target spell damage engine used by the damage spells. Rolls
+ * `count2 x count1` dice of `sides`, then a save: if Random(100) <= resist[res] - mod the target takes 0,
+ * else the damage is scaled by {@link resistScale}. HP falls by the result; HP <= 0 calls SetStatus
+ * (state 3). Dead targets (state >= 3) and flagged members (+0x2b) are untouched. Returns the damage.
+ */
+export function spellDamage(
+  m: Mem, rng: W6Rng, a4: number, tg: number, ti: number, count1: number, sides: number, count2: number,
+  res: number, mod: number,
+): { dmg: number; fx: Effect[] } {
+  const fx: Effect[] = [];
+  m.w16(a4 - 10488, 4);
+  const D = ti * 0x2c + m.u32(a4 - 15266 + 4 * tg);
+  if (m.u8(D + 0x22) >= 3 || m.u8(D + 0x2b) !== 0) return { dmg: 0, fx };
+  let tot = 0;
+  for (let o = count2; o > 0; o--) for (let i = count1; i > 0; i--) tot = s16(tot + rng.random(sides) + 1);
+  const mr = (g: number) => m.u32(a4 - 15294 + 4 * g);
+  if (tg === 0) for (let i = 0; i < 14; i++) m.w8(mr(0) + 0x94 + i, m.u8(a4 - 17584 + ti * 0x1b0 + i));
+  if (rng.random(100) <= s16(m.u8(mr(tg) + 0x94 + res) - mod)) tot = 0;
+  else tot = resistScale(m, rng, a4, tg, tot, res, mod);
+  if (tot > 0) {
+    m.w16(D + 2, m.u16(D + 2) - tot);
+    if (m.s16(D + 2) <= 0) fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, 0)]);
+  }
+  return { dmg: tot, fx };
+}

@@ -121,6 +121,18 @@ class Combat(W6):
         diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}
         return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs)}
 
+    def run_call(self, off, args, seed):
+        """Run any routine in the same tracked, stubbed environment (arguments: ints = words, (v, 4) = long)."""
+        self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
+        self.seed(*seed)
+        self.tracking = True
+        try:
+            ret = self.call(off, args)
+        finally:
+            self.tracking = False
+        diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}
+        return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs), 'ret': ret & 0xffff}
+
     def run_attack(self, target, hand, kind, seed):
         self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
         self.seed(*seed)
@@ -345,6 +357,29 @@ def make_setstatus_vectors(n, seed):
     return out
 
 
+def make_spelldmg_vectors(n, seed):
+    """LAB_0E4F (CODE+0x23366): the per-target spell damage engine."""
+    rng = pyrandom.Random(seed)
+    c = Combat()
+    out = []
+    A4 = c.A4
+    for v in range(n):
+        tg = rng.choice([0, 1, 2, 3, 4, 5]); ti = rng.randrange(4 if tg == 0 else 9)
+        fx = Fixture(c, rng).build(0, 0, tg, ti, 0, 0)
+        c.apply(fx.writes)
+        args = [tg, ti, rng.randrange(1, 5), rng.randrange(1, 9), rng.randrange(1, 4), rng.randrange(0, 12), rng.randrange(-30, 60)]
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        try:
+            r = c.run_call(0x23366, args, seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-60:], file=sys.stderr); continue
+        out.append({'args': args, 'seed': seed3, 'a4': A4, 'ret': r['ret'],
+                    'foot': {str(a): b for a, b in r['foot'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
+                    'diff': {str(a): b for a, b in r['diff'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
+                    'effects': r['effects'], 'rng': r['rng']})
+    return out
+
+
 def pick_subset(V, n=110):
     """A small committed subset: every effect kind, stance resets, all attack kinds, both sides."""
     chosen, seen = [], set()
@@ -368,6 +403,9 @@ if __name__ == '__main__':
         sub = pick_subset(V, int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 110)
         json.dump(sub, open(sys.argv[3], 'w'), separators=(',', ':'))
         print(len(sub), 'vectors in subset')
+    if sys.argv[1] == 'spelldmg':
+        n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
+        json.dump(make_spelldmg_vectors(n, 5), open(sys.argv[2], 'w'), separators=(',', ':'))
     if sys.argv[1] == 'setstatus':
         n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
         json.dump(make_setstatus_vectors(n, 3), open(sys.argv[2], 'w'), separators=(',', ':'))

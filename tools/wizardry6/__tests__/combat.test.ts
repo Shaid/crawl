@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Mem, resolveAttack, setStatus, weaponProc } from '../combat.ts';
+import { Mem, resolveAttack, setStatus, spellDamage, weaponProc } from '../combat.ts';
 import { W6Rng } from '../rules.ts';
 
 const path = process.env.W6_COMBAT_VECTORS ?? resolve('tools/wizardry6/oracle/combat-vectors.json');
@@ -16,6 +16,8 @@ const V: any[] = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : [];
 const ppath = process.env.W6_PROC_VECTORS ?? resolve('tools/wizardry6/oracle/combat-proc-vectors.json');
 const spath = process.env.W6_SETSTATUS_VECTORS ?? resolve('tools/wizardry6/oracle/combat-setstatus-vectors.json');
 const SS: any[] = existsSync(spath) ? JSON.parse(readFileSync(spath, 'utf8')) : [];
+const dpath = process.env.W6_SPELLDMG_VECTORS ?? resolve('tools/wizardry6/oracle/combat-spelldmg-vectors.json');
+const SD: any[] = existsSync(dpath) ? JSON.parse(readFileSync(dpath, 'utf8')) : [];
 const P: any[] = existsSync(ppath) ? JSON.parse(readFileSync(ppath, 'utf8')) : [];
 
 /** Message-text scratch buffers (-10836..-10596 rel. A4): presentation, not rules. */
@@ -131,5 +133,31 @@ describe.skipIf(SS.length === 0)('SetStatus and kill cleanup (CODE+0x2300c, 0x22
   it('null control: a different seed disagrees where a save is rolled', () => {
     const bad = SS.filter((v) => { try { return !runSet(v, (r) => { r.rng.s[2] = (r.rng.s[2] + 5) % 30000 || 1; }); } catch { return true; } });
     expect(bad.length).toBeGreaterThan(0);
+  });
+});
+
+function runDmg(v: any, tweak?: (r: { rng: W6Rng; mem: Mem }) => void): boolean {
+  const mem = new Mem(v.foot);
+  const rng = new W6Rng(v.seed);
+  tweak?.({ rng, mem });
+  const r = spellDamage(mem, rng, v.a4, ...(v.args as [number, number, number, number, number, number, number]));
+  const wrote = Object.fromEntries([...mem.wrote].filter(([a]) => !isText(a, v.a4)).sort((a, b) => a[0] - b[0]));
+  const want = Object.fromEntries(Object.entries<number>(v.diff).filter(([a]) => !isText(+a, v.a4)).sort((a, b) => +a[0] - +b[0]));
+  return JSON.stringify(wrote) === JSON.stringify(want) && JSON.stringify(r.fx) === JSON.stringify(v.effects)
+    && (r.dmg & 0xffff) === v.ret && JSON.stringify([...rng.s]) === JSON.stringify(v.rng);
+}
+
+describe.skipIf(SD.length === 0)('spell damage engine (CODE+0x23366)', () => {
+  it('matches the game on every vector: damage, HP write, SetStatus call, RNG state', () => {
+    expect(SD.filter((v) => { try { return !runDmg(v); } catch { return true; } }).length).toBe(0);
+  });
+  it('covers damage, saves and kills', () => {
+    expect(SD.some((v) => v.ret > 0)).toBe(true);
+    expect(SD.some((v) => v.ret === 0)).toBe(true);
+    expect(SD.some((v) => v.effects.length > 0)).toBe(true);
+  });
+  it('null control: a changed dice count disagrees', () => {
+    const bad = SD.filter((v) => { try { return !runDmg({ ...v, args: [v.args[0], v.args[1], v.args[2] + 1, ...v.args.slice(3)] }); } catch { return true; } });
+    expect(bad.length).toBeGreaterThan(SD.length / 3);
   });
 });
