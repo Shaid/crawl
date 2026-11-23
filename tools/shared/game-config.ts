@@ -232,6 +232,12 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         const { exportDungeonSlots } = await import('../wizardry6/export-dungeon-slots.ts');
         exportDungeonSlots(dataDir);
         console.log('  wizardry6/amiga: levels + indexed atlas + dungeon slots exported');
+        // Game-rules tables + corrected message corpus (docs/wizardry6/amiga/game-rules.md).
+        try {
+          const { exportRulesTables } = await import('../wizardry6/rules-tables.ts');
+          exportRulesTables(dataDir);
+          console.log('  wizardry6/amiga: rules-tables.json + messages-full.json exported');
+        } catch (e) { console.log('  Skipped W6 rules tables:', e); }
       },
     }, {
       platform: 'dosega',

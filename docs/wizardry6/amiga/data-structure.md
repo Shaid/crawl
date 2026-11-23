@@ -3923,6 +3923,13 @@ table 3:  900, 1800, 3600, 7200, 14400, 28800, 57600, 115200, 230400,
 table 14: 1112690507, ... (not a round number — confirms the table ends at 14)
 ```
 
+> **Correction (2026-11-23):** the class-to-table mapping is solved: the XP table
+> index **is the class byte** (`pcfile` `+415`, 0 FIGHTER, 1 MAGE, 2 PRIEST, 3 THIEF,
+> 4 RANGER, 5 ALCHEMIST, 6 BARD, 7 PSIONIC, 8 VALKYRIE, 9 BISHOP, 10 LORD, 11 SAMURAI,
+> 12 MONK, 13 NINJA; names are msg 120-133). `ReadSection(0, class)` at
+> `CODE+0x3eb5e`; the level-up loop is harness-verified 300/300
+> (`docs/wizardry6/amiga/game-rules.md` §1.3, §1.5).
+
 Every value in tables 0–13 is a round decimal number in a strictly
 increasing sequence — the canonical shape of a per-level XP-to-advance
 table. 14 tables matches Wizardry 6's real 14-class roster (also
@@ -5528,6 +5535,17 @@ Verified extractor: `tools/wizardry6/decode-headers.ts` (writes
 Full trace: `docs/wizardry6/amiga/investigations/headers-and-databases.md`.
 
 ### 7.4 `msg.dbs` (81920 bytes) — confirmed, 724/724 messages decoded
+
+> **Correction (2026-11-23):** the framing described below is wrong for the strings'
+> *lengths*. In a page each string is `[n][L][n-1 Huffman bytes]`; `L` (not `n`) is the
+> decoded character count, and `msg.hdr`'s word `C` high byte is the number of
+> *additional consecutive ids* that follow the first string in the same run. The old
+> extractor treated `n` as the decoded length and `L` as a compressed length, so it
+> decoded only each record's first string and cut it short (`STRENGTH` -> `STRENG`);
+> the 724 records hold **5,164** strings. `messages-full.json`
+> (`tools/wizardry6/rules-tables.ts`) is the corrected export. Evidence: the game's
+> own `GetMessage` (`CODE+0x872`) and Huffman driver (`CODE+0x2a60`), see
+> `game-rules.md` §0.2.
 
 **Solved.** `msg.dbs` is exactly 80 pages of 1024 bytes
 (`81920 = 80×1024`). Each message lives at

@@ -13,6 +13,14 @@ This repo hosts two first-person dungeon-crawler RE projects:
   its extractors run standalone from the repo root, e.g.
   `npx tsx tools/wizardry6/export-dungeon-levels.ts data/wizardry6/amiga`.
   Historical session notes inside `docs/wizardry6/` still say "sorcery".
+  **Wizardry 6 game rules** (character state, level-up, creation, spells, victory/loot
+  flow) live in `docs/wizardry6/amiga/game-rules.md`, with the 68k-oracle method:
+  `tools/wizardry6/oracle/rules.py` (Unicorn single-routine harness) -> committed
+  `oracle/rules-vectors.json` -> `tools/wizardry6/rules.ts` + `__tests__/rules.test.ts`;
+  tables via `tools/wizardry6/rules-tables.ts` (wired into `buildAssets`) as
+  `public/assets/wizardry6/amiga/data/{rules-tables,messages-full}.json`. Use
+  `messages-full.json`, not `messages.json` (the old decoder is wrong, see game-rules §0.2).
+  Combat resolution is still open (TODO `w6-combat-resolution`).
 - **Might & Magic II** (`data/mm2/amiga/`, `docs/mm2/`, `tools/mm2/`,
   `public/assets/mm2/amiga/`) — integrated 2026-08-12 as a **port from a
   finished ground-truth RE** (Vairn/MM2, https://github.com/Vairn/MM2): crawl's
