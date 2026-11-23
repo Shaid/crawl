@@ -32,12 +32,18 @@ export type Effect = [name: string, argsHex: string];
 export class Mem {
   readonly b = new Map<number, number>();
   readonly wrote = new Map<number, number>();
-  constructor(seed: Record<string, number>) {
+  /** `open` memories read never-written bytes as 0 (used by the simulator); footprint memories throw. */
+  private readonly open: boolean;
+  constructor(seed: Record<string, number>, open = false) {
+    this.open = open;
     for (const [a, v] of Object.entries(seed)) this.b.set(Number(a), v);
   }
   u8(a: number): number {
     const v = this.b.get(a);
-    if (v === undefined) throw new Error(`read outside footprint: ${a.toString(16)}`);
+    if (v === undefined) {
+      if (this.open) return 0;
+      throw new Error(`read outside footprint: ${a.toString(16)}`);
+    }
     return v;
   }
   s8(a: number): number { return s8(this.u8(a)); }
