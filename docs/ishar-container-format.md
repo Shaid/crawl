@@ -2284,6 +2284,59 @@ the gate between two legs.
     again. Crawl does not model the party's state, so those frames are
     left out (the black sprite is GERDEP's, not scenery).
 
+22. **Crystals of Arborea's 3D view (2026-11-23, driven and measured).**
+    alis runs Crystals (engine 2.0, platform uid `0x6ddd00`). The oracle
+    (`crystals`, under the virtual clock) boots through ECRANS's dialogs
+    ("new game", "new team": coordinate tests on SOURIS's mouse globals
+    `0x2d3a`/`0x2d3c`, z = 199 - y, not forms), defines six warriors and
+    presses "3D" (`crystalsBoot`). Findings, all traced and then measured:
+    - **Scene group.** MAIN `+0xa33` starts, outdoors (layer `0x2b3c` = 0),
+      CIELSOL, ARBRE, NPLAINE, PLAGES (GHABITAT when `0x30a2` is set),
+      TOUR, PUIT, GEMEEXT, HABITAT (plus SAMB, the band scripts and
+      GUGUS); in a cave (layer 1) OBJETS, SOLCAVE, CAVINT, GEMECAV, ENDIV.
+      The boot's 3D press wakes the group once, and a layer change wakes
+      the new group on the arrival step (`wakeFreshGroup`).
+    - **Grid.** One grid, `INIT.FIC` at `0x7c` (`cdim` dims [2, 114]): row
+      = x 0..94, col = 2*y + layer (`gridDims`). §8.3's indexing formula
+      holds. A new game changes 30 cells (`CRYSTALS_NEW_GAME_CELLS`, the
+      same with the boot's clicks shifted). Tables read with more indices
+      than one follow their `cdim` too (`tableDims`; the place table
+      `0x2d44` is [2]: without it HABITAT drew no houses).
+    - **Party and moves (GUGUS).** x `0x2b38`, y `0x2b39`, raw facing
+      `0x2b3a` (1 = y-1, 2 = x+1, 3 = y+1, 4 = x-1: Ishar 1's convention
+      with row = x, col = y); start (30, 45) facing 2. The arrow pad: top
+      row sidestep left / forward / sidestep right, middle turn left /
+      turn right, bottom about-turn (two turns, each a wake). A click
+      must be held 3..5 frames (a longer one repeats). The step test
+      (`+0x654`): 48/85 pass and message MAIN 100/101, which switch the
+      layer at the same x, y (`+0xc96`/`+0xd07`, the cave mouths); below
+      -5 blocks; -5 blocks a forward step only; -1..-4 open only when
+      their quest flag (`0x2f78`) is 3.
+    - **Houses.** After each action GUGUS probes the three cells two ahead
+      (`+0x890`); 60..65 (a wizard's house) swaps PLAGES for GHABITAT
+      until the party is more than 2 cells away (`crystalsHouseZone`).
+      HABITAT messages MAIN 108 at the house's door, which opens the
+      house (INTMAIS) and its question (manual protection, not modelled).
+    - **Palette.** NAD's (`crystalsPaletteSlot`): slot hour-1 for the hour
+      `0x2e97` 1..13 (16..18 for hours 5..7 with `0x30a4`), 14 in a cave,
+      13 while `0x2f36` is set. ECRAN's palette is the HUD's.
+    - **Screen.** View 320x152, centre (159, 112), no perspective divide
+      (pixels match without one; `crystals-perspective-divide` closed).
+
+    | Walk | Actions | Moves | Placements | Masked pixels |
+    |---|---|---|---|---|
+    | New-game start pose | 1 | - | 148/148 (all the scenery) | 100% |
+    | Outdoors, seeded random, hours 1..12, a house swap | 138 | 138/138 | 17,326/17,326 | 99.990% |
+    | To the (32,9) cave mouth and 40 actions inside | 87 | 87/87 | 7,083/7,083 | 99.993% |
+
+    Before: the walker drew one script at a time on a synthetic position,
+    greyscale, with no movement rule; nothing was compared with the game.
+    The walks remove the enemy bands (EBRAIN, EMOVE, ORC_ELF, MORGOT,
+    SHAMNIR; `poke 2d3f 0`): EMOVE walks them and GUGUS `+0xb86` starts a
+    fight when one is within a cell. Residual: about 0.01% of the pixels,
+    small equal-depth overlaps. Not modelled: the bands, the house
+    interiors, the clock (the walker keeps the start hour; `T` steps it).
+
 **Not covered yet** (rewritten 2026-11-23; Ishar 3 items 2026-11-24):
 
 - ~~how a click reaches a door's form, and the levers~~ (Ishar 1 solved
@@ -2297,7 +2350,8 @@ the gate between two legs.
 - Ishar 3's townspeople table at a new game: its loader is not found, so
   the walker draws no townspeople;
 - floor objects (AFFOBJ/OBJET);
-- Crystals of Arborea.
+- Crystals of Arborea's enemy bands, house interiors and map screen
+  (item 22).
 
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
 

@@ -36,6 +36,15 @@ failures).
 
 ## 3. `CARTE.CO` — the overworld travel screen (STRUCTURAL + partial content)
 
+> **Correction (2026-11-23, oracle-traced):** CARTE is not how the party
+> reaches the 3D view, and nothing here was checked against the running
+> game. A new game goes ECRANS ("new game", "new team") -> the team screen
+> (six companions defined) -> "OK characters" -> "3D", and MAIN then
+> starts the outdoor scene group and GUGUS (§8's correction below). The
+> team screen also has a "map" button; what CARTE's rows and `clive` do in
+> play is still not traced (`crystals-carte-destination-mechanism`). The
+> rows' reading below is a static reading of the bytecode (STRUCTURAL).
+
 `CARTE.CO` ("map") is `classByte == 0x01` (**stored, uncompressed** —
 `decompressedSize == fileSize == 29,860` exactly), making it directly
 readable without needing the compression codec. This is the single most
@@ -340,6 +349,15 @@ recognizable island/coastline silhouette).
 
 ## 7. Walker `GameView` — `CrystalsOfArboreaView`
 
+> **Superseded (2026-11-23).** The view is now the 3D view, run with the
+> game's own scene model (`CRYSTALS_TITLE`, `tools/shared/ishar-scene.ts`)
+> from the new-game start (x 30, y 45, facing east), with GUGUS's moves
+> (forward, turns, about-turn, sidesteps, cave mouths) and NAD's palette
+> by the hour. Measured against the alis oracle: every move, 100% of
+> placements, 99.99% of pixels (`docs/ishar-container-format.md` §8.8
+> item 22). The roster screen below stays behind `M`. The text below is
+> the 2026-09 state.
+
 `tools/walker/games-crystalsofarborea.ts` implements the shared walker
 harness's `GameView` interface for this title. Per §3.5's findings, this is
 **not** a spatial walker (no grid, no first-person view, no automap) — it's
@@ -368,6 +386,34 @@ type-checked + hand-traced against the confirmed bytecode/UI-string
 evidence only).
 
 ## 8. Location scene scripts and `INIT.FIC` — SOLVED: `ARBRE.CO` renders a real forest first-person view
+
+> **Correction (2026-11-23, measured against the game with the alis
+> oracle).** The 2026-09 passes below rendered one script at a time at
+> synthetic positions; "CONFIRMED end-to-end" there meant "the output
+> looks like a forest", not "matches the game". What the game does:
+>
+> - MAIN runs a whole group per layer, not one script: outdoors CIELSOL,
+>   ARBRE, NPLAINE, PLAGES (or GHABITAT near a wizard's house), TOUR,
+>   PUIT, GEMEEXT, HABITAT; in a cave OBJETS, SOLCAVE, CAVINT, GEMECAV,
+>   ENDIV.
+> - `0x2b3c` is the layer, and its writer is found: MAIN `+0xc96` sets 1
+>   and `+0xd07` sets 0, on GUGUS's messages 100/101 when the party steps
+>   onto a cave mouth (cell 48) or a cave exit (85). The x, y stay.
+>   (The §8 text's "CAVINT sets it in its own launch path" was a guess.)
+> - The grid cell for (x, y, layer) is byte `114*x + 2*y + layer` of
+>   `INIT.FIC` as a new game changes it (30 cells,
+>   `CRYSTALS_NEW_GAME_CELLS`). The new-game start is x 30, y 45, raw
+>   facing 2 (east), layer 0; the "test position (23, 39)" below was not a
+>   game position.
+> - The palette is NAD's, by the hour, not the placeholder sky/ground.
+> - No perspective divide is needed: the screen-14 view (320x152, centre
+>   159, 112) matches pixel for pixel without one.
+>
+> Measured: the start pose 148/148 sprites, 100% of pixels; 225 walked
+> actions outdoors and in a cave, every move as the game, 100% of
+> placements, 99.99% of pixels. `docs/ishar-container-format.md` §8.8
+> item 22. `tools/shared/crystals-firstperson.ts` (the one-script test
+> bench) is no longer used by the walker.
 
 > **Correction (2026-09-02 follow-up pass): the indexing formula this
 > section originally left open is now CONFIRMED**, and `ARBRE.bin`

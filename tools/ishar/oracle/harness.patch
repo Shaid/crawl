@@ -1,5 +1,5 @@
 diff --git a/src/alis.c b/src/alis.c
-index b8719c7..40ae753 100644
+index b8719c7..aea1a4e 100644
 --- a/src/alis.c
 +++ b/src/alis.c
 @@ -1549,7 +1549,7 @@ void alis_main_V2(void)
@@ -20,7 +20,15 @@ index b8719c7..40ae753 100644
  
                  sys_delay_loop();
                  
-@@ -1592,7 +1592,7 @@ void alis_main_V2(void)
+@@ -1585,6 +1585,7 @@ void alis_main_V2(void)
+                 {
+                     set_0x0a_vacc_offset(alis.script->vram_org, alis.script->vacc_off);
+                     set_0x08_script_ret_offset(alis.script->vram_org, alis.script->pc);
++                    { static const char *pl = (const char *)-1; if (pl == (const char *)-1) pl = getenv("ALIS_HARNESS_PCLOG"); if (pl && alis.script->name && strstr(pl, alis.script->name)) { extern long h_frame_now(void); fprintf(stderr, "[pc] %ld %s %x\n", h_frame_now(), alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org)); } }
+                     
+                     s32 script_offset = swap32(alis.mem + get_0x14_script_org_offset(alis.script->vram_org) + 6);
+                     if (script_offset != 0)
+@@ -1592,7 +1593,7 @@ void alis_main_V2(void)
                          alis.fseq = 0;
                          alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
                          alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + 6 + script_offset;
@@ -29,7 +37,7 @@ index b8719c7..40ae753 100644
                      }
                      
                      if (alis.restart_loop == 0)
-@@ -1660,7 +1660,7 @@ void alis_main_V3(void)
+@@ -1660,7 +1661,7 @@ void alis_main_V3(void)
                  alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
                  savecoord(alis.script->vram_org);
                  alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + before_vec_off + script_offset;
@@ -38,7 +46,7 @@ index b8719c7..40ae753 100644
                  updtcoord(alis.script->vram_org);
              }
          }
-@@ -1685,7 +1685,7 @@ void alis_main_V3(void)
+@@ -1685,12 +1686,13 @@ void alis_main_V3(void)
                  alis.script->pc = get_0x08_script_ret_offset(alis.script->vram_org);
                  alis.script->vacc_off = get_0x0a_vacc_offset(alis.script->vram_org);
                  alis.fseq++;
@@ -47,7 +55,13 @@ index b8719c7..40ae753 100644
  
                  if (alis.restart_loop == 0)
                  {
-@@ -1698,7 +1698,7 @@ void alis_main_V3(void)
+                     set_0x0a_vacc_offset(alis.script->vram_org, alis.script->vacc_off);
+                     set_0x08_script_ret_offset(alis.script->vram_org, alis.script->pc);
++                    { static const char *pl = (const char *)-1; if (pl == (const char *)-1) pl = getenv("ALIS_HARNESS_PCLOG"); if (pl && alis.script->name && strstr(pl, alis.script->name)) { extern long h_frame_now(void); fprintf(stderr, "[pc] %ld %s %x\n", h_frame_now(), alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org)); } }
+                     
+                     s32 script_offset = xread32(get_0x14_script_org_offset(alis.script->vram_org) + after_vec_off);
+                     if (script_offset != 0)
+@@ -1698,7 +1700,7 @@ void alis_main_V3(void)
                          alis.fseq = 0;
                          alis.script->vacc_off = alis.saversp = get_0x0a_vacc_offset(alis.script->vram_org);
                          alis.script->pc = get_0x14_script_org_offset(alis.script->vram_org) + after_vec_off + script_offset;
@@ -56,6 +70,14 @@ index b8719c7..40ae753 100644
                      }
                      
                      if (alis.restart_loop == 0)
+@@ -1824,6 +1826,7 @@ void alis_main_V6(void)
+                 {
+                     set_0x0a_vacc_offset(alis.script->vram_org, alis.script->vacc_off);
+                     set_0x08_script_ret_offset(alis.script->vram_org, alis.script->pc);
++                    { static const char *pl = (const char *)-1; if (pl == (const char *)-1) pl = getenv("ALIS_HARNESS_PCLOG"); if (pl && alis.script->name && strstr(pl, alis.script->name)) { extern long h_frame_now(void); fprintf(stderr, "[pc] %ld %s %x\n", h_frame_now(), alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org)); } }
+ 
+                     s32 script_offset = xread32(script_org + 0x1c);
+                     if (script_offset != 0)
 diff --git a/src/image.c b/src/image.c
 index 26375e3..00547a1 100644
 --- a/src/image.c
@@ -155,10 +177,10 @@ index d3b0040..e68f4f2 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..a4139f4
+index 0000000..faf7b92
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,225 @@
+@@ -0,0 +1,226 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -229,7 +251,7 @@ index 0000000..a4139f4
 +  FILE *o = fopen(p, "w"); if (!o) return;
 +  for (int i = 0; i < MAX_SCRIPTS; i++) {
 +    sAlisScriptLive *l = alis.live_scripts[i];
-+    if (l && l->name) fprintf(o, "E %d %s run=%d sleep=%d org=%x\n", i, l->name, l->running, (s8)get_0x04_cstart_csleep(l->vram_org), l->data ? l->data->data_org : 0);
++    if (l && l->name) fprintf(o, "E %d %s run=%d sleep=%d org=%x pc=%x\n", i, l->name, l->running, (s8)get_0x04_cstart_csleep(l->vram_org), l->data ? l->data->data_org : 0, (unsigned)(get_0x08_script_ret_offset(l->vram_org) - l->pc_org));
 +  }
 +  for (u16 scn = screen.ptscreen; scn; scn = get_scr_to_next(scn)) {
 +    fprintf(o, "S %u state=%d x=%d y=%d w=%d h=%d\n", scn, get_scr_state(scn), get_scr_newx(scn), get_scr_newy(scn), get_scr_width(scn), get_scr_height(scn));
@@ -384,6 +406,7 @@ index 0000000..a4139f4
 +  if (!init) { init = 1; const char *w = getenv("ALIS_HARNESS_WATCH"); while (w && *w && n < 8) { offs[n++] = strtoul(w, (char **)&w, 16); if (*w == ',') w++; } for (int i = 0; i < n; i++) last[i] = alis.mem[alis.basemain + offs[i]]; }
 +  for (int i = 0; i < n; i++) { u8 v = alis.mem[alis.basemain + offs[i]]; if (v != last[i]) { fprintf(stderr, "[watch] %ld %x %d->%d by=%s pc=%x\n", h_frameno, offs[i], (s8)last[i], (s8)v, alis.script && alis.script->name ? alis.script->name : "?", alis.script ? alis.script->pc : 0); last[i] = v; } }
 +}
++long h_frame_now(void) { return h_frameno; }
 diff --git a/src/sys/sys.c b/src/sys/sys.c
 index 89651c2..81dc8f3 100644
 --- a/src/sys/sys.c
@@ -477,11 +500,3 @@ index 9783d8a..14b77dd 100644
  
      // Drain the event queue; quick clicks latch in mouse.lb_clicked / rb_clicked.
      while (SDL_PollEvent(&event))
-diff --git a/src/version.h b/src/version.h
-index 2aecc27..9a256c2 100644
---- a/src/version.h
-+++ b/src/version.h
-@@ -1,2 +1,2 @@
- // Generated by scripts/gen_version.sh, do not edit.
--#define kProgVersion "108ead4-dirty"
-+#define kProgVersion "31b1811-dirty"

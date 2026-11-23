@@ -19,7 +19,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { dirname, join, resolve } from 'node:path';
 import { ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharTitleSpec } from '../../shared/ishar-scene.ts';
 
-export type OracleGame = 'ishar' | 'ishar2' | 'ishar3';
+export type OracleGame = 'ishar' | 'ishar2' | 'ishar3' | 'crystals';
 
 export const ORACLE_ROOT = resolve(process.env.ISHAR_ORACLE_DIR ?? 'build/cache/ishar-oracle');
 export const ORACLE_BIN = join(ORACLE_ROOT, 'alis/build/alis');
@@ -42,6 +42,12 @@ export interface OracleTitle {
   /** Screen pixels of the "turn left" and "forward" arrows. */
   turnLeft: readonly [number, number];
   forward: readonly [number, number];
+  /**
+   * Frames a walk click holds the button (default 2). Crystals' GUGUS
+   * ignores a click shorter than 3 frames and repeats the move while the
+   * button stays down (a 6-frame hold steps twice).
+   */
+  clickHold?: number;
   /** Where a "use" action (`U`) clicks in the view with an empty hand: a lever in front (Ishar 1: SOURIS's lever test, form mask 64). */
   use?: readonly [number, number];
   /** View screen geometry as the oracle's `S` line prints it. */
@@ -93,6 +99,33 @@ function clickEvents(start: number, x: number, y: number, n: number, gap: number
   const out: Array<[number, string]> = [];
   for (let i = 0; i < n; i++) out.push([start + i * gap, `click ${x} ${y}`], [start + i * gap + 5, 'up']);
   return out;
+}
+
+/**
+ * Crystals of Arborea's boot to the first 3D frame (2026-11-23): clicks and
+ * spaces through logo, intro and title; ECRANS's dialogs ("new game",
+ * "new team": rectangles x 72..248, z 65..75 in SOURIS's coordinates,
+ * z = 199 - y; the first click after the dialog appears is eaten by the
+ * screen before it); then each of the six companions is defined as a
+ * warrior (click the portrait, "warrior" on the sheet, the sheet's exit
+ * box x 11..35, z 10..26); "OK characters" and then "3D" (both at
+ * (176, 78)) start the outdoor scene group (MAIN `+0xa33`).
+ */
+function crystalsBoot(): Array<[number, string]> {
+  const ev: Array<[number, string]> = [];
+  const click = (f: number, x: number, y: number) => ev.push([f - 10, `move ${x} ${y}`], [f, `click ${x} ${y}`], [f + 10, 'up']);
+  for (const f of [200, 400, 600, 800, 1000]) ev.push([f, 'click 160 100'], [f + 5, 'up'], [f + 100, 'key 32'], [f + 120, 'keyup']);
+  for (const f of [1400, 1700, 2000]) click(f, 160, 129);
+  let f = 2300;
+  for (let k = 0; k < 6; k++, f += 900) {
+    click(f, 40 + 50 * k, 138);
+    click(f + 300, 160, 144);
+    click(f + 600, 23, 181);
+  }
+  click(7710, 176, 78);
+  click(7900, 176, 78);
+  ev.push([8010, 'save']);
+  return ev;
 }
 
 export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
@@ -264,6 +297,41 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     ],
     start: { region: 1, row: 2, col: 50, facing: 0 },
   },
+  crystals: {
+    dataDir: 'data/crystalsofarborea/amiga',
+    // GUGUS moves the party: x 0x2b38 (raw facing 2 = x+1, 4 = x-1), y
+    // 0x2b39 (1 = y-1, 3 = y+1), facing 0x2b3a, the scene layer 0x2b3c
+    // (0 outdoors, 1 in a cave: MAIN +0xa7c picks the scene group on it).
+    row: 0x2b38,
+    col: 0x2b39,
+    facing: 0x2b3a,
+    region: 0x2b3c,
+    facingCycle: [1, 2, 3, 4],
+    facingRaw: [1, 2, 3, 4],
+    // the 3x3 arrow pad (ECRAN): top row strafe-left / forward / strafe-right,
+    // middle row turn left / - / turn right, bottom row map / about-turn / exit
+    turnRight: [299, 172],
+    turnLeft: [265, 172],
+    forward: [282, 159],
+    clickHold: 4,
+    viewScreen: { x: 0, y: 0, w: 319, h: 151 },
+    // EBRAIN moves the enemy bands and stops the game with "<companion> is
+    // near N enemies" (fight / flee); EMOVE walks the bands (0x2b42: x, y
+    // per band, 0x2d3f of them; GUGUS +0xb86 meets one within 1 cell);
+    // ORC_ELF/MORGOT draw them, SHAMNIR the
+    // sorcerer's band
+    npcScripts: ['ebrain', 'emove', 'orc_elf', 'morgot', 'shamnir'],
+    // NAD is the game-wide palette owner; the 3D view keeps it.
+    env: { ALIS_HARNESS_VCLOCK: '1' },
+    boot: crystalsBoot(),
+    // the main block the scene scripts read as tables (0x2d44 places, 0x2f78 ...)
+    // and the 3D grid (INIT.FIC as MAIN loaded it, with the new game's changes)
+    bootMemdumps: [{ name: 'grid', off: 0x7c, len: 10830 }, { name: 'tables', off: 0x2aca, len: 1846, memory: true }],
+    stepMemdumps: [{ name: 'tables', off: 0x2aca, len: 1846, memory: true }],
+    // NAD's palette inputs: the hour (MAIN advances it in play) and two flags
+    stateGlobals: [0x2e97, 0x30a4, 0x2f36],
+    start: { region: 0, row: 30, col: 45, facing: 1 },
+  },
 };
 
 export function oracleAvailable(): boolean {
@@ -387,7 +455,7 @@ export interface OracleFrame {
   entities: string[];
 }
 
-const stripExt = (n: string) => n.replace(/\.(do|ao)$/i, '').toLowerCase();
+const stripExt = (n: string) => n.replace(/\.(do|ao|co)$/i, '').toLowerCase();
 
 export function parseSpr(text: string): { screens: OracleScreen[]; entities: string[] } {
   const screens: OracleScreen[] = [];
@@ -461,7 +529,7 @@ export function capturePoses(game: OracleGame, poses: readonly OraclePose[], out
     const ci = t.facingCycle.indexOf(raw);
     const before = t.facingCycle[(ci + t.facingCycle.length - 1) % t.facingCycle.length]!;
     ev.push([f0, `poke ${t.row.toString(16)} ${p.row}`], [f0, `poke ${t.col.toString(16)} ${p.col}`], [f0, `poke ${t.facing.toString(16)} ${before}`]);
-    ev.push([f0 + 1, `click ${t.turnRight[0]} ${t.turnRight[1]}`], [f0 + 3, 'up']);
+    ev.push([f0 + 1, `click ${t.turnRight[0]} ${t.turnRight[1]}`], [f0 + 1 + (t.clickHold ?? 2), 'up']);
     ev.push([f0 + POSE_SETTLE, `dump p${i}`], ...partyDumps(t, f0 + POSE_SETTLE, `q${i}`));
   });
   ev.push([4 + poses.length * POSE_STRIDE + 2, 'quit']);
@@ -557,7 +625,7 @@ export function captureWalk(
   actions.forEach((a, i) => {
     const f0 = 4 + i * WALK_STRIDE;
     const [x, y] = actionClick(t, a);
-    ev.push([f0, `click ${x} ${y}`], [f0 + 2, 'up']);
+    ev.push([f0, `click ${x} ${y}`], [f0 + (t.clickHold ?? 2), 'up']);
     ev.push(...partyDumps(t, f0 + WALK_STRIDE - 8, `s${i}`));
     ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);
   });
@@ -632,7 +700,7 @@ export function captureLegWalk(
         const f0 = 4 + i * WALK_STRIDE;
         const [x, y] = actionClick(opts.use ? { ...t, use: opts.use } : t, a);
         if (a === 'U') for (const c of opts.useCommands ?? []) ev.push([f0 - 1, c]);
-        ev.push([f0, `click ${x} ${y}`], [f0 + 2, 'up']);
+        ev.push([f0, `click ${x} ${y}`], [f0 + (t.clickHold ?? 2), 'up']);
         ev.push(...partyDumps(t, f0 + WALK_STRIDE - 8, `s${i}`));
         ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);
         const e = expect?.[i];

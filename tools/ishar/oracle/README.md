@@ -101,6 +101,19 @@ These variables change how it runs:
 | `ALIS_HARNESS_WATCH=hexoff,...` | Reports which script changed a main-segment byte. |
 | `ALIS_HARNESS_FORMS=1` | Logs every form test (`ctstform`/`cftstset`...: the testing script and pc, the point, the mask, each candidate entity's form, hit or miss, and its material) and every `csend` (sender and pc). That is how the Ishar 1 door and lever clicks were traced. |
 
+## Crystals of Arborea (2026-11-23)
+
+`crystals` boots under the virtual clock to the first 3D frame
+(`crystalsBoot`: new game, new team of six warriors, "OK characters", "3D")
+in about a second. The arrow pad needs a click held 3..5 frames
+(`clickHold: 4`): GUGUS ignores shorter clicks and repeats longer ones. The
+boot state's scene has been woken once, so `crawlWalk(..., startWakes = 1)`.
+Scenery walks use `noNpcs` (EBRAIN, EMOVE, ORC_ELF, MORGOT, SHAMNIR) and
+`poke 2d3f 0` (no enemy bands), else a band meeting the party stops the
+walk with a fight, and keep one cell clear of the wizards' houses (grid
+60..65): HABITAT opens a house when the party reaches its door, and the
+house asks a question from the manual.
+
 ## Caveats
 
 - **Independence.** Crawl's ALIS interpreter (`tools/shared/alis-interp.ts`)
@@ -128,6 +141,13 @@ stopped following it. Use `startState`/`finalState` to chain walks and
 the scene the game's sub-zone (`crawlWalk(..., startZone)`; Ishar 1 dumps
 `0x3eac` as `zone` each step, and a walk whose first action is a turn
 takes it from there).
+
+`ALIS_HARNESS_PCLOG=name.CO,...` logs, for each named script, the resume
+pc after every activation (`[pc] frame script offset`; the offset is from
+the script's code start, `pc_org`, which can sit a header past the
+decompressed file's start: Crystals' ECRANS is 0x18 bytes in). The `E` lines
+of a display-list dump also carry each entity's resume pc. That is how
+Crystals' new-game dialogs and team screen were driven (2026-11-23).
 
 `ALIS_HARNESS_STRCMP=1` logs the engine's string compares and key reads,
 with the script and pc of each `ogetkey`. That is how the Ishar 1 CONT3

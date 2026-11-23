@@ -2,90 +2,45 @@
  * Crystals of Arborea (Silmarils, 1990, Amiga) walker view — `GameView` for
  * the shared walker harness (`tools/walker/walker.ts`).
  *
- * NOT a grid walker and NOT a first-person view. Unlike Ishar 1/2/3 (whose
- * outdoor+indoor world is one big `CONT*.FIC` region grid the party walks
- * step-by-step, see `docs/ishar-container-format.md` §9), Crystals of
- * Arborea has **no `CONT*.FIC` files at all** — confirmed absent from
- * `data/crystalsofarborea/amiga/` (only `INIT.FIC` exists). Its overworld
- * screen, `CARTE.CO` ("map"), is a real, traced ALIS bytecode program (this
- * session's finding, `docs/crystalsofarborea/amiga/data-structure.md` §3.5)
- * that turns out to be a **party-roster/travel checklist UI**, not a
- * destination-graph or tile grid:
+ * **The 3D view (2026-11-23, measured against the game).** The game's own
+ * scene model (`CRYSTALS_TITLE` in `tools/shared/ishar-scene.ts`), run the
+ * way the game runs it, traced and measured with the alis oracle
+ * (`tools/ishar/oracle/`, `tools/ishar/__tests__/crystals-oracle.test.ts`):
  *
- * - `CARTE.CO`'s own script vram declares two 8-element signed-byte scratch
- *   arrays (offsets 0x3c/0x46), initialized by a real `cscmov` + 15×`cstore`
- *   bytecode block that self-terminates exactly at its structural boundary
- *   (CONFIRMED — a boundary-agnostic forward walk of the actual opcode/
- *   opername/storename semantics from `github.com/maestun/alis`).
- * - The 8-index order matches, byte for byte, 8 confirmed UI strings found
- *   later in the same file: `JON ZACH IRVAN AKEER OLBAR THORM ALL NONE`
- *   (a player-character + 5 recruitable companions + select-all/select-none),
- *   immediately followed by `MOVE`/`EXIT` action-button strings (STRUCTURAL
- *   — this reframes the original "8-directional adjacency table" hypothesis
- *   into a party-composition checklist).
- * - A real consumer region later in the same script (STRUCTURAL, traced this
- *   session) implements click-to-toggle hit-testing (`cftstset` sets up a
- *   click-point + "forme" collision test, matching the sprite-format doc's
- *   §1 `adresform()`/"formes" mechanism) and highlight drawing (`cboxf`)
- *   over these 8 rows, with `clive` (load-and-run-another-script-by-id)
- *   firing on confirmation — consistent with `MOVE` launching the actual
- *   travel/exploration script (NOT decoded — no hotspot placement or
- *   per-location launch-id table was recovered).
+ * - The game reaches the 3D view from the team screen's "3D" button (a new
+ *   game: "new game", "new team", six companions defined, "OK
+ *   characters"). MAIN then starts the outdoor group (CIELSOL, ARBRE,
+ *   NPLAINE, PLAGES, TOUR, PUIT, GEMEEXT, HABITAT) and GUGUS, which moves
+ *   the party and wakes the group after every step and turn.
+ * - The world is one grid, `INIT.FIC` as MAIN loads it (95 x 57 cells, two
+ *   layers: outdoors and caves), with the 30 cells a new game changes.
+ *   The party starts at x 30, y 45 facing east (raw facing 2).
+ * - Moves are GUGUS's: forward / turn / about-turn / sidestep; cells below
+ *   0 block (-5 lets a sidestep through); 48 and 85 are cave mouths that
+ *   switch the layer at the same x, y; a wizard's house two cells ahead
+ *   swaps PLAGES for GHABITAT.
+ * - The palette is NAD's, by the hour (`crystalsPaletteSlot`). The walker's
+ *   clock stands still at the start hour; `T` steps the hour.
  *
- * This view renders `CARTE.CO`'s own confirmed map picture (the directory's
- * 7 tallest bitmap slots, shelf-packed side by side — an island/coastline
- * silhouette, greyscale, RENDERED not CONFIRMED colour — see
- * `docs/ishar-sprite-format.md` §5) with the 8 confirmed checklist rows
- * overlaid as keyboard/mouse-togglable checkboxes, seeded from each row's
- * real decoded initial value. It is deliberately NOT a destination-travel
- * graph — that mechanic exists (the `clive` call proves *something* gets
- * launched) but isn't decoded to a confirmable on-screen hotspot layout.
+ * Measured (oracle, scenery walks with the enemy bands removed): 225 actions
+ * outdoors and into a cave, every move as the game, 100% of placements,
+ * 99.99% of pixels. Not modelled: the enemy bands (ORC_ELF/MORGOT/SHAMNIR
+ * draw them, EBRAIN/EMOVE move them, a meeting starts a fight), a wizard's
+ * house interior (INTMAIS, opened at the house's door), and the clock.
  *
- * **First-person addition (2026-09-02)**: unlike the rest of this file
- * (which predates the discovery below), Crystals DOES have a real, working
- * first-person scene compositor — the same engine-wide mechanism as Ishar 1
- * (`docs/ishar-container-format.md` §8), just indexing a genuinely different
- * on-disk source: not a `CONT*.FIC` world grid (confirmed absent, see above)
- * but a single `INIT.FIC` file (10,830 B) read via a genuinely N-ary
- * `omaintc(0x7c)` array access (`tools/shared/crystals-firstperson.ts` has
- * the full derivation + verification evidence). `ARBRE.bin` ("tree") is
- * CONFIRMED end-to-end: 4 real party positions/facings all render an
- * unmistakable forest — multiple distinct tree silhouettes, responsive to
- * position and facing. `NPLAINE.bin` ("plain") is also RENDERED, showing a
- * semantically-distinct sparse low-vegetation ground band at the same test
- * position — no tall trees, as expected for a "plain" terrain script.
+ * `M` shows the older CARTE roster screen below (`CARTE.CO`'s party
+ * checklist, a static reading of its bytecode; the real map screen is
+ * reached from the team screen's "map" button and is not modelled).
  *
- * **Two more scripts added (2026-09-02 follow-up)**, by disassembling each
- * script's own `cswitch1` cell-value dispatch and scanning real `INIT.FIC`
- * bytes for matching cells (the same technique used for `RAMPART.bin`/
- * `PLAINE.bin` in the Ishar 1 walker): `PLAGES.bin` ("beaches") RENDERS a
- * rocky/dune coastal terrain (grey rock-texture horizon band + foreground
- * mounds), confirmed at 4 real positions along a dense coastal cell band
- * near the `x=94` map edge. `CAVINT.bin` ("cave interior") RENDERS a dense,
- * mostly-enclosed interior (little open sky, filled with wall/rock texture)
- * — but needs `sceneLayer=1`, not the default 0 every other script uses; see
- * `docs/crystalsofarborea/amiga/data-structure.md` §8's correction block for
- * why (the previous session's "guess sceneLayer=1" attempt produced a blank
- * frame at the WRONG position — the layer guess was actually right, the
- * position wasn't).
- *
- * Toggle with `KeyF` (from the checklist screen); `KeyC` cycles between all
- * four verified scripts; `WASD`/arrows move a synthetic test position across
- * the local scene array's real `95x57` coordinate space (there is no
- * confirmed link between this position and `CARTE.CO`'s own undecoded
- * travel-destination mechanism — this is a manual test-bench, exactly like
- * `games-ishar.ts`'s own `KeyC` location cycling). Note: the default start
- * position (`testX=23,testY=39`, chosen for `ARBRE`'s own dense terrain
- * cluster) is NOT a good starting point for `PLAGES`/`CAVINT` — cycle to
- * one of them and move with `WASD` to find their own real clusters (`PLAGES`
- * is dense along the `x=90-94` edge; `CAVINT`'s room-outline cluster is
- * broad, e.g. around `x=20-60,y=0-50`).
+ * Keys: W/Up forward, A/Left and D/Right turn, S/Down about-turn, Q/E
+ * sidestep, T next hour, M roster screen.
  */
+
 import type { KeyStateLike } from '@seer-project/dungeon';
 import type { PieceBankLookup, RGBAColor, Pose, DrawItem } from '@seer-project/dungeon';
 import type { SlotTableFile } from '@seer-project/dungeon/schema';
 import type { GameView } from './games.ts';
-import { renderCrystalsLocationFrame } from '../shared/crystals-firstperson.ts';
+import { compositeIsharView, CRYSTALS_TITLE, crystalsNewGameGrid, IsharGridBuffers, IsharScene, isharSceneScriptNames, type IsharPartyState } from '../shared/ishar-scene.ts';
 
 interface AtlasFrame {
   name: string;
@@ -131,57 +86,37 @@ const ARRAY_0X46: readonly number[] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
 const MAP_STRIP_NAMES = ['carte_005', 'carte_006', 'carte_007', 'carte_008', 'carte_009', 'carte_010', 'carte_011'];
 
-/** One first-person-renderable location script, verified end-to-end against real `INIT.FIC` data (see module doc). */
-interface CrystalsLocation {
-  key: string;
-  label: string;
-  data: Uint8Array;
-  /** Forwarded to `renderCrystalsLocationFrame()`'s `sceneLayer` param -- see `LOCATION_SCRIPTS`. */
-  sceneLayer?: number;
-}
+/** The new-game start (oracle: the first 3D frame of a new game). */
+const START: Pose = { level: 0, x: 30, y: 45, facing: 1 };
+/** Inside the cave mouth at (32, 9) (oracle: the step onto it switches the layer at the same x, y). */
+const CAVE_START: Pose = { level: 1, x: 32, y: 9, facing: 0 };
 
-/**
- * `sceneLayer` defaults to 0 (the outdoor/terrain `INIT.FIC` layer) for
- * every script except `CAVINT.bin`, which needs `sceneLayer=1` (the indoor
- * room-outline layer) -- CAVINT's own disassembled cell-value dispatch
- * (`docs/crystalsofarborea/amiga/data-structure.md` §8's correction block)
- * reads the identical default-0 `omainb(0x2b3c)` global as every other
- * script, but its own confirmed cell-value alphabet (`-94..-90`, `-79..-70`,
- * `80..85`) only exists in `INIT.FIC`'s Z=1 sub-array, not Z=0 -- meaning
- * the real game sets this global to 1 somewhere in `CAVINT`'s OWN launch
- * path (outside this one script's bytecode), not a hardcoded constant this
- * script itself carries. Superseded the prior "guess sceneLayer=1, got a
- * blank frame" attempt -- see the doc for the full account.
- */
-const LOCATION_SCRIPTS: Array<{ key: string; label: string; sceneLayer?: number }> = [
-  { key: 'arbre', label: 'Forest (ARBRE.bin)' },
-  { key: 'nplaine', label: 'Plain (NPLAINE.bin)' },
-  { key: 'plages', label: 'Beaches (PLAGES.bin)' },
-  { key: 'cavint', label: 'Cave interior (CAVINT.bin)', sceneLayer: 1 },
-];
+/** Scripts the scene can run, plus NAD (the palette owner). */
+const SCRIPT_NAMES = [...isharSceneScriptNames(CRYSTALS_TITLE), 'NAD'];
 
 interface CrystalsData {
-  atlas: HTMLImageElement;
+  /** CARTE's map picture (the roster screen); absent when the sprite export was not run. */
+  atlas?: HTMLImageElement;
   frames: Map<string, AtlasFrame>;
-  /** `undefined` if the export step (`tools/crystalsofarborea/amiga/scripts.ts`, not wired into `npm run`) hasn't been run, or fetch failed for any piece. */
-  firstPerson?: { initFic: Uint8Array; locations: CrystalsLocation[] };
+  /** The 3D view's assets (`tools/crystalsofarborea/amiga/scripts.ts`); absent when not exported. */
+  scene?: { grid: Uint8Array; scripts: Map<string, Uint8Array> };
 }
 
 let loadPromise: Promise<CrystalsData> | null = null;
 
-async function tryLoadFirstPersonAssets(base: string): Promise<{ initFic: Uint8Array; locations: CrystalsLocation[] } | undefined> {
+async function tryLoadSceneAssets(base: string): Promise<CrystalsData['scene']> {
   try {
     const initRes = await fetch(`${base}/data/init.bin`);
     if (!initRes.ok) return undefined;
-    const initFic = new Uint8Array(await initRes.arrayBuffer());
-    const locations: CrystalsLocation[] = [];
-    for (const { key, label, sceneLayer } of LOCATION_SCRIPTS) {
-      const res = await fetch(`${base}/scripts/${key}.bin`);
-      if (!res.ok) continue;
-      locations.push({ key, label, sceneLayer, data: new Uint8Array(await res.arrayBuffer()) });
-    }
-    if (locations.length === 0) return undefined;
-    return { initFic, locations };
+    const grid = crystalsNewGameGrid(new Uint8Array(await initRes.arrayBuffer()));
+    const scripts = new Map<string, Uint8Array>();
+    await Promise.all(
+      SCRIPT_NAMES.map(async (n) => {
+        const res = await fetch(`${base}/scripts/${n.toLowerCase()}.bin`);
+        if (res.ok) scripts.set(n.toUpperCase(), new Uint8Array(await res.arrayBuffer()));
+      }),
+    );
+    return scripts.size ? { grid, scripts } : undefined;
   } catch {
     return undefined;
   }
@@ -191,13 +126,16 @@ function loadCrystalsData(): Promise<CrystalsData> {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     const base = '/assets/crystalsofarborea/amiga';
-    const [atlas, sidecar] = await Promise.all([
-      loadImage(`${base}/sprites/carte.png`),
-      fetch(`${base}/sprites/carte.json`).then((r) => r.json() as Promise<AtlasSidecar>),
-    ]);
-    const frames = new Map(sidecar.frames.map((f) => [f.name, f]));
-    const firstPerson = await tryLoadFirstPersonAssets(base);
-    return { atlas, frames, firstPerson };
+    let atlas: HTMLImageElement | undefined;
+    let frames = new Map<string, AtlasFrame>();
+    try {
+      const [img, sidecar] = await Promise.all([loadImage(`${base}/sprites/carte.png`), fetch(`${base}/sprites/carte.json`).then((r) => r.json() as Promise<AtlasSidecar>)]);
+      atlas = img;
+      frames = new Map(sidecar.frames.map((f) => [f.name, f]));
+    } catch {
+      // the roster screen draws without its map picture
+    }
+    return { atlas, frames, scene: await tryLoadSceneAssets(base) };
   })();
   return loadPromise;
 }
@@ -206,6 +144,9 @@ const ROW_HEIGHT = 14;
 const ROWS_TOP = 6;
 const BUTTON_ROWS = ['MOVE', 'EXIT'];
 const NAV_COOLDOWN_MS = 160;
+const STEP_COOLDOWN_MS = 180;
+
+const s8 = (v: number) => (v >= 128 ? v - 256 : v);
 
 export class CrystalsOfArboreaView implements GameView {
   readonly id = 'crystalsofarborea';
@@ -215,46 +156,111 @@ export class CrystalsOfArboreaView implements GameView {
   readonly slots: SlotTableFile = { schemaVersion: 1, banks: [], slotRows: [] } as unknown as SlotTableFile;
 
   private readonly data: CrystalsData;
-  /** Per-row checkbox state, seeded from `ARRAY_0X3C` (>0 => checked). Mutable — this is the interactive part of the confirmed toggle mechanism. */
+  private pose_: Pose;
+  private tick = 0;
+  private noclip = false;
+  private stepCooldown = 0;
+  private hour = 1;
+  private message = '';
+  private readonly keysWereDown = new Set<string>();
+  private scene: IsharScene | null = null;
+  private buffers: IsharGridBuffers | null = null;
+  private frame: { rgba: Uint8Array; placements: number } | null = null;
+  private frameCanvas: HTMLCanvasElement | null = null;
+
+  // the CARTE roster screen (M)
+  private roster = false;
+  /** Per-row checkbox state, seeded from `ARRAY_0X3C` (>0 => checked). */
   private readonly checked: boolean[];
   private focus = 0; // 0..7 = rows, 8 = MOVE, 9 = EXIT
   private navCooldown = 0;
-  private tick = 0;
   private lastAction = '';
-  private readonly pose_: Pose = { level: 0, x: 0, y: 0, facing: 0 };
 
-  // First-person test-bench state (see module doc's 2026-09-02 addition).
-  private firstPerson = false;
-  private toggleKeyWasDown = false;
-  private cycleKeyWasDown = false;
-  private locationIndex = 0;
-  /** A confirmed dense terrain-feature cluster in `INIT.FIC`'s real bytes (found by scanning for cells in [1,20] at Z=0) — a good starting position for the test-bench, not a decoded "spawn point". */
-  private testX = 23;
-  private testY = 39;
-  private testFacing: 0 | 1 | 2 | 3 = 0;
-  private fpStepCooldown = 0;
-  private fpCache: { key: string; frame: ReturnType<typeof renderCrystalsLocationFrame> } | null = null;
-  private fpCanvas: HTMLCanvasElement | null = null;
-
-  constructor(data: CrystalsData) {
+  constructor(data: CrystalsData, startPose: Pose | null) {
     this.data = data;
     this.checked = ARRAY_0X3C.map((v) => (v ?? 0) > 0);
+    this.pose_ = startPose ? { ...startPose } : { ...START };
+    this.restartScene();
   }
 
-  get firstPersonAvailable(): boolean {
-    return !!this.data.firstPerson;
+  private state(pose: Pose = this.pose_): IsharPartyState {
+    return { region: pose.level, row: pose.x, col: pose.y, facing: (pose.facing & 3) as 0 | 1 | 2 | 3, globals: { 0x2e97: this.hour } };
   }
 
-  private get currentLocation(): CrystalsLocation | undefined {
-    const locations = this.data.firstPerson?.locations;
-    return locations?.[this.locationIndex % locations.length];
+  /** The grid cell (signed) at x, y on a layer. */
+  private cell(layer: number, x: number, y: number): number {
+    const g = this.data.scene?.grid;
+    if (!g || x < 0 || y < 0 || x > 94 || y > 56) return -128;
+    return s8(g[114 * x + 2 * y + layer] ?? 0);
+  }
+
+  /** A new game (or a teleport): MAIN starts the group and GUGUS wakes it once. */
+  private restartScene(): void {
+    const sc = this.data.scene;
+    if (!sc) return;
+    const st = this.state();
+    this.buffers = new IsharGridBuffers(CRYSTALS_TITLE, () => [sc.grid]);
+    this.scene = new IsharScene(CRYSTALS_TITLE, (n) => sc.scripts.get(n.toUpperCase()), this.buffers.update(st));
+    this.scene.enter(st);
+    this.scene.step(st);
+    this.redraw();
+  }
+
+  /** One GUGUS action: the scene wakes after every step and turn. */
+  private wake(): void {
+    if (!this.scene || !this.buffers) return;
+    const st = this.state();
+    this.scene.setGrids(this.buffers.update(st));
+    this.scene.step(st);
+    this.redraw();
+  }
+
+  private redraw(): void {
+    if (!this.scene) return;
+    const leaves = this.scene.leaves();
+    this.frame = { rgba: compositeIsharView(leaves, CRYSTALS_TITLE.screen, this.scene.palette), placements: leaves.length };
+  }
+
+  /**
+   * A step in walker direction `dir` (0..3 = raw facing 1..4), as GUGUS
+   * `+0x654` tests the target cell: 48/85 switch the layer, below -5 blocks,
+   * -5 blocks a forward step only, -1..-4 (crystal gates) block while shut.
+   */
+  private stepTo(dir: 0 | 1 | 2 | 3, forward: boolean): boolean {
+    const from = this.state();
+    const to = CRYSTALS_TITLE.stepFrom({ ...from, facing: dir }, dir);
+    if (!to) return false;
+    const c = this.cell(from.region, to.row, to.col);
+    let layer = from.region;
+    if (!this.noclip) {
+      if (c === 48) layer = 1;
+      else if (c === 85) layer = 0;
+      else if (c < -5 || (c < 0 && (forward || c !== -5))) {
+        this.message = `blocked (cell ${c})`;
+        return false;
+      }
+    }
+    this.pose_ = { ...this.pose_, level: layer, x: to.row, y: to.col };
+    this.message = layer !== from.region ? (layer === 1 ? 'into the cave' : 'out of the cave') : '';
+    return true;
+  }
+
+  private pressed(keys: KeyStateLike, ...codes: string[]): boolean {
+    let hit = false;
+    for (const c of codes) {
+      const down = keys.isDown(c);
+      if (down && !this.keysWereDown.has(c)) hit = true;
+      if (down) this.keysWereDown.add(c);
+      else this.keysWereDown.delete(c);
+    }
+    return hit;
   }
 
   get levelId(): number {
-    return 0;
+    return this.pose_.level;
   }
   get levelLabel(): string {
-    return 'CARTE — travel/party roster screen';
+    return this.roster ? 'CARTE — party roster screen' : this.pose_.level === 1 ? 'Arborea, caves (3D)' : 'Arborea, outdoors (3D)';
   }
   get pose(): Pose {
     return this.pose_;
@@ -303,42 +309,44 @@ export class CrystalsOfArboreaView implements GameView {
 
   update(dtMs: number, keys: KeyStateLike): Pose | null {
     this.tick += dtMs;
-
-    const toggleDown = keys.isDown('KeyF');
-    if (toggleDown && !this.toggleKeyWasDown && this.firstPersonAvailable) {
-      this.firstPerson = !this.firstPerson;
+    if (this.pressed(keys, 'KeyM')) this.roster = !this.roster;
+    if (this.roster) return this.updateRoster(dtMs, keys);
+    if (this.pressed(keys, 'KeyT')) {
+      this.hour = (this.hour % 13) + 1;
+      this.scene?.refresh(this.state());
+      this.redraw();
     }
-    this.toggleKeyWasDown = toggleDown;
-
-    if (this.firstPerson && this.firstPersonAvailable) {
-      const cycleDown = keys.isDown('KeyC');
-      if (cycleDown && !this.cycleKeyWasDown) {
-        const count = this.data.firstPerson?.locations.length ?? 1;
-        this.locationIndex = (this.locationIndex + 1) % count;
-      }
-      this.cycleKeyWasDown = cycleDown;
-
-      this.fpStepCooldown = Math.max(0, this.fpStepCooldown - dtMs);
-      if (this.fpStepCooldown <= 0) {
-        let dx = 0;
-        let dy = 0;
-        if (keys.isDown('KeyW') || keys.isDown('ArrowUp')) dy = -1;
-        else if (keys.isDown('KeyS') || keys.isDown('ArrowDown')) dy = 1;
-        else if (keys.isDown('KeyA') || keys.isDown('ArrowLeft')) dx = -1;
-        else if (keys.isDown('KeyD') || keys.isDown('ArrowRight')) dx = 1;
-        if (dx !== 0 || dy !== 0) {
-          this.testX = Math.min(94, Math.max(0, this.testX + dx));
-          this.testY = Math.min(56, Math.max(0, this.testY + dy));
-          this.testFacing = dx === 1 ? 1 : dx === -1 ? 3 : dy === 1 ? 2 : 0;
-          this.fpStepCooldown = NAV_COOLDOWN_MS;
-        }
-      }
-      return null;
+    this.stepCooldown = Math.max(0, this.stepCooldown - dtMs);
+    if (this.stepCooldown > 0) return null;
+    const f = this.pose_.facing & 3;
+    let acted = false;
+    if (keys.isDown('KeyW') || keys.isDown('ArrowUp')) acted = this.stepTo(f as 0 | 1 | 2 | 3, true);
+    else if (keys.isDown('KeyQ')) acted = this.stepTo(((f + 3) & 3) as 0 | 1 | 2 | 3, false);
+    else if (keys.isDown('KeyE')) acted = this.stepTo(((f + 1) & 3) as 0 | 1 | 2 | 3, false);
+    else if (keys.isDown('KeyA') || keys.isDown('ArrowLeft')) {
+      this.pose_ = { ...this.pose_, facing: ((f + 3) & 3) as Pose["facing"] };
+      acted = true;
+    } else if (keys.isDown('KeyD') || keys.isDown('ArrowRight')) {
+      this.pose_ = { ...this.pose_, facing: ((f + 1) & 3) as Pose["facing"] };
+      acted = true;
+    } else if (keys.isDown('KeyS') || keys.isDown('ArrowDown')) {
+      // the about-turn is two turns, each one a wake (oracle: raw facing 2 -> 3 -> 4)
+      this.pose_ = { ...this.pose_, facing: ((f + 1) & 3) as Pose["facing"] };
+      this.wake();
+      this.pose_ = { ...this.pose_, facing: ((f + 2) & 3) as Pose["facing"] };
+      acted = true;
+    } else return null;
+    this.stepCooldown = STEP_COOLDOWN_MS;
+    if (acted) {
+      this.wake();
+      return this.pose_;
     }
+    return null;
+  }
 
+  private updateRoster(dtMs: number, keys: KeyStateLike): Pose | null {
     this.navCooldown = Math.max(0, this.navCooldown - dtMs);
     if (this.navCooldown > 0) return null;
-
     const totalRows = ROW_NAMES.length + BUTTON_ROWS.length;
     let moved = false;
     if (keys.isDown('KeyS') || keys.isDown('ArrowDown')) {
@@ -355,11 +363,12 @@ export class CrystalsOfArboreaView implements GameView {
     return null;
   }
 
-  setPose(): void {
-    // No spatial pose on this screen — kept as a no-op for the GameView contract.
+  setPose(pose: Pose): void {
+    this.pose_ = { ...pose, level: pose.level === 1 ? 1 : 0, x: Math.max(0, Math.min(94, pose.x)), y: Math.max(0, Math.min(56, pose.y)), facing: (pose.facing & 3) as Pose["facing"] };
+    this.restartScene();
   }
-  setNoclip(): void {
-    // Not applicable.
+  setNoclip(on: boolean): void {
+    this.noclip = on;
   }
   interactCodes(): string[] {
     return [];
@@ -369,16 +378,12 @@ export class CrystalsOfArboreaView implements GameView {
   }
 
   pick(containerX: number, containerY: number): void {
-    if (this.firstPerson) return; // no hotspots in the first-person test-bench view
+    if (!this.roster) return;
     const idx = this.rowAt(containerX, containerY);
     if (idx === null) return;
-    if (idx < ROW_NAMES.length) {
-      this.focus = idx;
-      this.toggle(idx);
-    } else {
-      this.focus = idx;
-      this.activateFocus();
-    }
+    this.focus = idx;
+    if (idx < ROW_NAMES.length) this.toggle(idx);
+    else this.activateFocus();
   }
 
   /** Inverse of `drawRows` — which row (0..7 = names, 8/9 = MOVE/EXIT) contains (x,y), or `null`. */
@@ -396,6 +401,7 @@ export class CrystalsOfArboreaView implements GameView {
 
   private drawMap(ctx: CanvasRenderingContext2D): void {
     const { atlas, frames } = this.data;
+    if (!atlas) return;
     const stripFrames = MAP_STRIP_NAMES.map((n) => frames.get(n)).filter((f): f is AtlasFrame => f !== undefined);
     const totalW = stripFrames.reduce((sum, f) => sum + f.w, 0);
     // Fit into the space left of the checklist column (listX=210), never
@@ -445,67 +451,36 @@ export class CrystalsOfArboreaView implements GameView {
     });
   }
 
-  /**
-   * Render one first-person frame (see `tools/shared/crystals-firstperson.ts`)
-   * by actually executing the currently-selected location script's (`KeyC`
-   * cycles it) bytecode against the real `INIT.FIC` local-scene-array bytes
-   * for a synthetic test position (`WASD`/arrows, `testX`/`testY`/
-   * `testFacing`). Cached by position/facing/location so it's only
-   * recomputed when the test position actually moves.
-   */
-  private renderFirstPerson(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    const firstPerson = this.data.firstPerson!;
-    const location = this.currentLocation;
-    if (!location) return;
-    const key = `${this.testX},${this.testY},${this.testFacing}:${location.key}`;
-    if (!this.fpCache || this.fpCache.key !== key) {
-      const frame = renderCrystalsLocationFrame({
-        location: location.data,
-        initFic: firstPerson.initFic,
-        partyX: this.testX,
-        partyY: this.testY,
-        facing: this.testFacing,
-        sceneLayer: location.sceneLayer,
-      });
-      this.fpCache = { key, frame };
-    }
-
-    const frame = this.fpCache.frame;
-    if (!this.fpCanvas) this.fpCanvas = document.createElement('canvas');
-    this.fpCanvas.width = frame.width;
-    this.fpCanvas.height = frame.height;
-    const fctx = this.fpCanvas.getContext('2d')!;
-    fctx.putImageData(new ImageData(new Uint8ClampedArray(frame.rgba), frame.width, frame.height), 0, 0);
-
-    ctx.clearRect(0, 0, w, h);
-    ctx.imageSmoothingEnabled = false;
-    const scale = Math.min(w / frame.width, h / frame.height);
-    const dw = frame.width * scale;
-    const dh = frame.height * scale;
+  private renderView(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(this.fpCanvas, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    if (!this.frame) {
+      ctx.fillStyle = '#ffe080';
+      ctx.font = '10px monospace';
+      ctx.fillText('3D assets not exported: npx tsx tools/crystalsofarborea/amiga/scripts.ts', 4, 14);
+      return;
+    }
+    const { width: fw, height: fh } = CRYSTALS_TITLE.screen;
+    if (!this.frameCanvas) this.frameCanvas = document.createElement('canvas');
+    this.frameCanvas.width = fw;
+    this.frameCanvas.height = fh;
+    this.frameCanvas.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(this.frame.rgba), fw, fh), 0, 0);
+    const scale = Math.min(w / fw, (h - 30) / fh);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.frameCanvas, (w - fw * scale) / 2, 0, fw * scale, fh * scale);
     ctx.imageSmoothingEnabled = true;
-
+    const facing = ['north', 'east', 'south', 'west'][this.pose_.facing & 3];
     ctx.fillStyle = '#ffe080';
     ctx.font = '10px monospace';
-    ctx.fillText(
-      `first-person: ${location.label} @ (${this.testX},${this.testY}) — RENDERED (real ALIS bytecode execution, placeholder sky/ground colour, no real palette)`,
-      4,
-      12,
-    );
-    ctx.fillText('F: back to CARTE.CO.  C: cycle location script.  WASD/arrows: move test position (not a decoded spawn/travel mechanic).', 4, 24);
-    if (frame.placementCount === 0) {
-      ctx.fillStyle = '#ff8080';
-      ctx.fillText('0 sprites placed at this position/facing', 4, 36);
-    }
+    ctx.fillText(`x ${this.pose_.x} y ${this.pose_.y} facing ${facing}, hour ${this.hour}${this.pose_.level === 1 ? ', cave' : ''}${this.message ? ` — ${this.message}` : ''}`, 4, h - 18);
+    ctx.fillText('W fwd  A/D turn  S about  Q/E sidestep  T hour  M roster', 4, h - 6);
   }
 
   renderCanvas(ctx: CanvasRenderingContext2D): void {
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
-    if (this.firstPerson && this.firstPersonAvailable) {
-      this.renderFirstPerson(ctx, w, h);
+    if (!this.roster) {
+      this.renderView(ctx, w, h);
       return;
     }
     ctx.fillStyle = '#000';
@@ -514,42 +489,25 @@ export class CrystalsOfArboreaView implements GameView {
     this.drawRows(ctx);
     ctx.fillStyle = '#ffe080';
     ctx.font = '10px monospace';
-    ctx.fillText('CARTE.CO — party roster/travel screen (RENDERED map, CONFIRMED checklist structure)', 4, h - 24);
-    const fpNote = this.firstPersonAvailable
-      ? 'press F for first-person (ARBRE/NPLAINE/PLAGES/CAVINT scripts, RENDERED — test-bench, not a decoded travel mechanic)'
-      : 'first-person assets not exported (see tools/crystalsofarborea/amiga/scripts.ts)';
-    ctx.fillText(`W/S or click: navigate. Space/Enter or click: toggle/activate. ${fpNote}`, 4, h - 12);
+    ctx.fillText('CARTE.CO — party roster screen (static reading of its bytecode). M: back to 3D', 4, h - 12);
     if (this.lastAction) {
       ctx.fillStyle = '#a0ffa0';
-      ctx.fillText(this.lastAction, 4, h - 36);
+      ctx.fillText(this.lastAction, 4, h - 24);
     }
   }
 }
 
-/**
- * TypeScript allows a function with fewer parameters to satisfy the shared
- * harness's `(assetBase, levelId, startPose) => Promise<GameView>` loader
- * shape (see `games-ishar.ts`'s `loadIshar1View` etc.) — this screen has no
- * spatial levels or pose, so none of the three are needed here.
- */
-export async function loadCrystalsOfArboreaView(): Promise<CrystalsOfArboreaView> {
-  const data = await loadCrystalsData();
-  return new CrystalsOfArboreaView(data);
+export async function loadCrystalsOfArboreaView(_assetBase: string, levelId: number, startPose: Pose | null): Promise<CrystalsOfArboreaView> {
+  // the caves "level" starts just inside the (32, 9) cave mouth
+  return new CrystalsOfArboreaView(await loadCrystalsData(), startPose ?? (levelId === 1 ? CAVE_START : null));
 }
 
 export async function crystalsOfArboreaLevelList(): Promise<Array<{ id: number; label: string }>> {
-  return [{ id: 0, label: 'CARTE — party roster/travel screen' }];
+  return [
+    { id: 0, label: 'Arborea, outdoors (3D)' },
+    { id: 1, label: 'Arborea, caves (3D)' },
+  ];
 }
 
-/**
- * Pre-shaped to the harness's `GAMES[].loader` field type
- * (`(assetBase, levelId, startPose) => Promise<GameView>`) so the paste-in
- * snippet doesn't need an inline wrapper arrow function; also serves as a
- * static self-check that `loadCrystalsOfArboreaView`'s narrower (zero-arg)
- * signature is really assignable there.
- */
-export const crystalsOfArboreaLoader: (
-  assetBase: string,
-  levelId: number,
-  startPose: Pose | null,
-) => Promise<GameView> = loadCrystalsOfArboreaView;
+/** The harness's `GAMES[].loader` shape. */
+export const crystalsOfArboreaLoader: (assetBase: string, levelId: number, startPose: Pose | null) => Promise<GameView> = loadCrystalsOfArboreaView;

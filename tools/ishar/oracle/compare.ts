@@ -15,6 +15,8 @@ import {
   ISHAR1_TITLE,
   ISHAR2_TITLE,
   ISHAR3_TITLE,
+  CRYSTALS_TITLE,
+  crystalsNewGameGrid,
   type GridReader,
   type IsharPartyState,
   type IsharSceneLeaf,
@@ -29,7 +31,13 @@ import {
 import type { OracleFrame, OracleGame, OraclePose, OracleScreen } from './alis-oracle.ts';
 import { ORACLE_TITLES } from './alis-oracle.ts';
 
-export const TITLE_SPECS: Partial<Record<OracleGame, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE, ishar3: ISHAR3_TITLE };
+export const TITLE_SPECS: Partial<Record<OracleGame, IsharTitleSpec>> = { ishar: ISHAR1_TITLE, ishar2: ISHAR2_TITLE, ishar3: ISHAR3_TITLE, crystals: CRYSTALS_TITLE };
+
+/** A title's grid file for CONT number `n` (Crystals has one, `INIT.FIC`). */
+export function contFileName(game: OracleGame, n: number): string {
+  if (game === 'crystals') return 'INIT.FIC';
+  return game === 'ishar3' ? `CONT${n}-3.FIC` : `CONT${n}.FIC`;
+}
 
 export interface TitleData {
   spec: IsharTitleSpec;
@@ -50,7 +58,7 @@ export function loadTitleData(game: OracleGame, repoRoot = resolve('.')): TitleD
   const load = (name: string) => {
     const key = name.toUpperCase();
     if (!cache.has(key)) {
-      const p = join(dir, `${key}.DO`);
+      const p = join(dir, `${key}.${game === 'crystals' ? 'CO' : 'DO'}`);
       cache.set(key, existsSync(p) ? unpackIsharScript(new Uint8Array(readFileSync(p))) : undefined);
     }
     return cache.get(key);
@@ -58,8 +66,9 @@ export function loadTitleData(game: OracleGame, repoRoot = resolve('.')): TitleD
   const cont = new Map<number, Uint8Array | null>();
   const contFile = (n: number) => {
     if (!cont.has(n)) {
-      const p = join(dir, game === 'ishar3' ? `CONT${n}-3.FIC` : `CONT${n}.FIC`);
-      cont.set(n, existsSync(p) ? new Uint8Array(readFileSync(p)) : null);
+      const p = join(dir, contFileName(game, n));
+      const f = existsSync(p) ? new Uint8Array(readFileSync(p)) : null;
+      cont.set(n, f && game === 'crystals' ? crystalsNewGameGrid(f) : f);
     }
     return cont.get(n)!;
   };
@@ -456,8 +465,9 @@ export function contLayers(game: OracleGame, data: TitleData, repoRoot = resolve
   const cache = new Map<number, Uint8Array[] | undefined>();
   return (n) => {
     if (!cache.has(n)) {
-      const p = join(dir, game === 'ishar3' ? `CONT${n}-3.FIC` : `CONT${n}.FIC`);
-      const f = existsSync(p) ? new Uint8Array(readFileSync(p)) : undefined;
+      const p = join(dir, contFileName(game, n));
+      const raw = existsSync(p) ? new Uint8Array(readFileSync(p)) : undefined;
+      const f = raw && game === 'crystals' ? crystalsNewGameGrid(raw) : raw;
       cache.set(n, f ? (data.spec.gridBuffers === 'layers' ? [f.subarray(0, cells), f.subarray(cells, 2 * cells)] : [f]) : undefined);
     }
     return cache.get(n);

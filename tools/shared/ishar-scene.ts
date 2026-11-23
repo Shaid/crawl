@@ -33,7 +33,7 @@ import { AlisScriptRunner, type SceneEnv } from './alis-interp.ts';
 import { decodeIsharBitmap, findIsharDirectory, isharBitmapToNormalizedGreyscaleRGBA, resolveIsharSlot, type IsharBitmap } from './ishar-sprites.ts';
 import { isharBitmapToPaletteRGBA, resolveIsharOwnPalette, resolveIsharPaletteSlot, type IsharPalette } from './ishar-palette.ts';
 
-export type IsharGame = 'ishar' | 'ishar2' | 'ishar3';
+export type IsharGame = 'ishar' | 'ishar2' | 'ishar3' | 'crystals';
 
 /** A sign-extended cell reader over one storage grid (`row*stride + col`). */
 export type GridReader = (row: number, col: number) => number;
@@ -72,7 +72,12 @@ export interface IsharSceneGroup {
    * its `cpalette` installs. A list names candidates: the first one alive
    * wins (Ishar 2's dungeons, whose backdrop is a zone add-on).
    */
-  paletteFrom?: { script: string | readonly string[]; slot: number | ((readMain: (addr: number) => number) => number) | Readonly<Record<string, number>> };
+  paletteFrom?: {
+    script: string | readonly string[];
+    slot: number | ((readMain: (addr: number) => number) => number) | Readonly<Record<string, number>>;
+    /** The palette's script is a game-wide entity outside the group (Crystals' NAD): read its palette even though the scene does not run it. */
+    global?: boolean;
+  };
 }
 
 export interface IsharTitleSpec {
@@ -83,6 +88,20 @@ export interface IsharTitleSpec {
   facingRaw: readonly [number, number, number, number];
   gridA: number;
   gridB: number;
+  /**
+   * A grid declared with two `cdim` dimensions (Crystals: `0x7c`, dims
+   * [2, 114]): `omaintc` pops twice, `index = direct + dims[0]*pop() +
+   * dims[1]*pop()` (`tabchar`, LIFO), so the cell is row = second pop,
+   * col = direct + dims[0]*first pop (stride = dims[1]). Default: one
+   * dimension, row = pop(), col = direct.
+   */
+  gridDims?: readonly [number, number];
+  /**
+   * Main tables (`tables`, `memory`) MAIN declares with `cdim` dimensions
+   * (Crystals `0x2d44`: dims [2], the (x, y) pairs of the places): the
+   * scripts push one index per dimension, `index = direct + dims[i]*pop()`.
+   */
+  tableDims?: Readonly<Record<number, readonly number[]>>;
   screen: IsharViewScreen;
   /** Every main global the scene scripts read, for a party state. */
   mainGlobals(state: IsharPartyState): Record<number, number>;
@@ -107,6 +126,18 @@ export interface IsharTitleSpec {
     /** The game runs the routine only after a step, not a turn. */
     onMoveOnly?: boolean;
   };
+  /**
+   * A sub-zone rule written out instead of run from a script (Crystals'
+   * GUGUS house probe): the new zone after every step or turn.
+   */
+  zoneRule?(state: IsharPartyState, grids: { A: GridReader; B: GridReader }, zone: number): number;
+  /**
+   * `'keep'` add-ons only: put fresh add-ons right after this group script
+   * (the entity slot the game reuses) instead of ahead of the group.
+   */
+  addOnsAfterScript?: string;
+  /** A region change wakes the new group on the arrival step (Crystals); default: not until the next step (Ishar). */
+  wakeFreshGroup?: boolean;
   /** Sub-zone value at the start of a new game (default 0). */
   initialZone?: number;
   /** Zones whose add-ons MAIN restarts (kill + start) every time the zone is entered. */
@@ -1314,6 +1345,172 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   },
 };
 
+/**
+ * Crystals of Arborea (2026-11-23, traced with the oracle). The 3D view is
+ * entered from the team screen's "3D" button; MAIN `+0xa33` then starts the
+ * scene group on the layer global `0x2b3c`: outdoors (0) CIELSOL (sky and
+ * ground), ARBRE, NPLAINE, PLAGES (GHABITAT instead when `0x30a2` is set),
+ * TOUR, PUIT, GEMEEXT, HABITAT, plus SAMB (sound, never drawn), the monster
+ * script ORC_ELF (MORGOT when `0x30e1` is clear) and GUGUS, the movement
+ * handler; indoors (1) OBJETS, SOLCAVE, CAVINT, GEMECAV, ENDIV. The scenes
+ * read one grid, `INIT.FIC` as MAIN loads it at `0x7c` (`cdim` dims
+ * [2, 114]: row = x 0..94, col = 2*y + layer), and the party globals x
+ * `0x2b38`, y `0x2b39`, raw facing `0x2b3a` (1 = y-1, 2 = x+1, 3 = y+1,
+ * 4 = x-1, the same as Ishar 1's raw facing with row = x, col = y). The
+ * view palette is NAD's (NAD, started with the game, owns it; ECRAN's is
+ * the HUD's). Oracle start pose: x 30, y 45, raw facing 2, 148/148
+ * placements and 100% of the pixels outside the monsters' boxes.
+ */
+/**
+ * NAD's view palette (NAD `+0x303..+0x3e0`): slot 13 while `0x2f36` is set,
+ * slot 14 in a cave (layer `0x2b3c` != 0), else by the hour `0x2e97`
+ * (1..13 -> slot hour-1; hours 5..7 take slots 16..18 instead when
+ * `0x30a4` is set). The hour starts at 1 and MAIN advances it in play.
+ */
+export function crystalsPaletteSlot(readMain: (addr: number) => number): number {
+  if (readMain(0x2f36)) return 13;
+  if (readMain(0x2b3c) !== 0) return 14;
+  const h = readMain(0x2e97) || 1;
+  if (h >= 5 && h <= 7 && readMain(0x30a4)) return 11 + h;
+  return h >= 1 && h <= 13 ? h - 1 : 0;
+}
+
+/**
+ * The 30 cells MAIN changes in `INIT.FIC` when a new game starts (read back
+ * from the oracle at the first 3D frame: `[index, byte]`, index = 114*x +
+ * 2*y + layer; identical when the boot's clicks are shifted in time): the
+ * wizards' houses 60..63, two cave mouths 48 and their exits 85, and other
+ * marker cells.
+ */
+export const CRYSTALS_NEW_GAME_CELLS: ReadonlyArray<readonly [number, number]> = [
+  [0, 250], [591, 249], [1636, 252], [2010, 251], [2038, 253], [2124, 61], [2331, 181], [2558, 226], [2592, 63], [4709, 181],
+  [4712, 226], [5162, 62], [5947, 249], [6891, 249], [7655, 85], [7801, 181], [7882, 48], [7918, 48], [7923, 85], [8524, 255],
+  [8644, 250], [8688, 60], [8848, 254], [8899, 249], [9648, 226], [9796, 250], [9860, 250], [9877, 181], [10070, 226], [10299, 181],
+];
+
+/** `INIT.FIC` as the 3D view reads it at the start of a new game (`CRYSTALS_NEW_GAME_CELLS` applied). */
+export function crystalsNewGameGrid(initFic: Uint8Array): Uint8Array {
+  const g = Uint8Array.from(initFic);
+  for (const [i, v] of CRYSTALS_NEW_GAME_CELLS) g[i] = v;
+  return g;
+}
+
+/**
+ * The place table `0x2d44` (cdim [2]: x, y of 100 places; ECRANS fills it
+ * at a new game, read back from the oracle). Entries 30..36, 40..43,
+ * 60..63, 71..77 and 79..83 are set; 79..83 are the five cave mouths (the
+ * grid's 48 cells), and HABITAT draws its houses from entries 40..45.
+ */
+const CRYSTALS_PLACES: readonly number[] = [
+  ...new Array(60).fill(0), 17, 36, 43, 3, 44, 34, 44, 44, 37, 21, 42, 25, 40, 23, 0, 0, 0, 0, 0, 0, 76, 12, 18, 36, 45, 16, 22, 42,
+  ...new Array(32).fill(0), 74, 44, 77, 35, 17, 50, 14, 20, ...new Array(14).fill(0), 85, 53, 75, 47, 86, 28, 5, 10, 52, 9, 78, 3, 60, 25,
+  0, 0, 0, 0, 18, 8, 32, 9, 69, 8, 64, 39, 69, 26, ...new Array(30).fill(0),
+];
+
+// PLAGES (or GHABITAT) is an add-on: GUGUS swaps the two (`crystalsHouseZone`)
+const CRYSTALS_OUTDOOR = ['CIELSOL', 'ARBRE', 'NPLAINE', 'TOUR', 'PUIT', 'GEMEEXT', 'HABITAT'];
+
+/**
+ * GUGUS's house probe (`+0x890..+0xa28`, after every step and turn,
+ * outdoors only): the three layer-0 cells two ahead (`+0x8b0` raw facing 1:
+ * y-2, `+0x95a` 2: x+2, `+0x905` 3: y+2, `+0x9af` 4: x-2; lateral -1..1).
+ * One holding 60..65 (a wizard's house) makes `+0xee0` kill PLAGES and start
+ * GHABITAT, which draws the house, and save the position (`0x30ad`/`0x30ae`);
+ * once the party is more than 2 cells from it (x or y) `+0xf8e` swaps back.
+ * Zone = 0 (PLAGES) or 1 + 128*x + y of the saved position (GHABITAT).
+ */
+export function crystalsHouseZone(st: IsharPartyState, grids: { A: GridReader }, zone: number): number {
+  if (st.region !== 0) return zone;
+  const raw = CRYSTALS_TITLE.facingRaw[st.facing];
+  const { row: x, col: y } = st;
+  if (zone === 0) {
+    for (const l of [-1, 0, 1]) {
+      const [cx, cy] = raw === 1 ? [x + l, y - 2] : raw === 3 ? [x + l, y + 2] : raw === 2 ? [x + 2, y + l] : [x - 2, y + l];
+      if (cx < 0 || cy < 0 || cx >= 95 || 2 * cy >= 114) continue;
+      const c = grids.A(cx, 2 * cy);
+      if (c >= 60 && c <= 65) {
+        zone = 1 + 128 * x + y;
+        break;
+      }
+    }
+  }
+  if (zone > 0) {
+    const sx = Math.floor((zone - 1) / 128);
+    const sy = (zone - 1) % 128;
+    if (Math.abs(x - sx) > 2 || Math.abs(y - sy) > 2) zone = 0;
+  }
+  return zone;
+}
+const CRYSTALS_INDOOR = ['OBJETS', 'SOLCAVE', 'CAVINT', 'GEMECAV', 'ENDIV'];
+export const CRYSTALS_TITLE: IsharTitleSpec = {
+  game: 'crystals',
+  // row = x (0..94), col = 2*y + layer (0..113)
+  stride: 114,
+  rows: 95,
+  globals: { row: 0x2b38, col: 0x2b39, facing: 0x2b3a },
+  facingRaw: [1, 2, 3, 4],
+  gridA: 0x7c,
+  gridB: -1,
+  gridDims: [2, 114],
+  // MAIN +0x60..+0x11d: the cdim declarations of the tables the scene scripts read with more than one index
+  tableDims: { 0x2ace: [15], 0x2b42: [15], 0x2d44: [2], 0x2f94: [15], 0x30b6: [6], 0x30fc: [9], 0x3142: [2] },
+  // new-game values the scene scripts read: the places, and the crystal
+  // quest flags GEMEEXT/GEMECAV test (`0x2f78`, read back from the oracle)
+  tables: { 0x2d44: CRYSTALS_PLACES, 0x2f78: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 110, 110, 110, 110] },
+  // oracle `S 14 x=0 y=0 w=319 h=151`; CIELSOL's sky (384x135 at x 32, z 58) lands at (0, -13)
+  screen: { xCenter: 159, horizonY: 112, width: 320, height: 152 },
+  mainGlobals(s) {
+    return { 0x2b38: s.row, 0x2b39: s.col, 0x2b3a: this.facingRaw[s.facing], 0x2b3c: s.region };
+  },
+  sceneGroup(region) {
+    const paletteFrom = { script: 'NAD', slot: crystalsPaletteSlot, global: true };
+    if (region === 0) return { scripts: CRYSTALS_OUTDOOR, paletteFrom };
+    if (region === 1) return { scripts: CRYSTALS_INDOOR, paletteFrom };
+    return null;
+  },
+  sceneScripts: [...CRYSTALS_OUTDOOR, 'PLAGES', 'GHABITAT', ...CRYSTALS_INDOOR],
+  zoneRule: (st, grids, zone) => crystalsHouseZone(st, grids, zone),
+  addOns(region, zone) {
+    if (region !== 0) return [];
+    return zone > 0 ? ['GHABITAT'] : ['PLAGES'];
+  },
+  // MAIN starts PLAGES after NPLAINE; GHABITAT takes the slot PLAGES frees
+  addOnsAfterScript: 'NPLAINE',
+  gridBuffers: 'layers',
+  // one grid for both layers: the layer is the `direct` term of the index
+  contOf: () => 1,
+  stepFrom(st, dir) {
+    let { row, col } = st;
+    const raw = this.facingRaw[dir];
+    if (raw === 1) col--;
+    else if (raw === 3) col++;
+    else if (raw === 2) row++;
+    else row--;
+    if (row < 0 || col < 0 || row >= this.rows || 2 * col + 1 >= this.stride) return null;
+    return { ...st, row, col };
+  },
+  // GUGUS +0x19a..+0x2be (one arm per raw facing) reads the target cell
+  // and runs +0x654: 48 and 85 pass and message MAIN (100/101); below -5
+  // is refused; -5 is refused for a forward step (it lets a sidestep
+  // through); -1..-4 are refused unless their entry of 0x2f78 is 3 (then
+  // MAIN gets message 107 and the party goes one cell further); 0 and up
+  // pass. A forward step is also refused when one of the three cells two
+  // ahead holds 60..65 (locals 28..30), but only the sidesteps (+0x338,
+  // +0x51e) fill those locals, so a walk without sidesteps never meets it.
+  // 48 / 85 are the cave mouths: MAIN +0xc96 (message 100) sets the layer
+  // to 1 and +0xd07 (101) back to 0, at the same x and y, and restarts the
+  // scene group (MAIN +0xa04).
+  enter(_from, to, cell) {
+    const c = cell(to.region, to.row, 2 * to.col + to.region);
+    if (c === 48) return { ...to, region: 1 };
+    if (c === 85) return { ...to, region: 0 };
+    return c < 0 ? null : to;
+  },
+  // the new group's scripts are woken on the arrival step (GUGUS wakes
+  // them after MAIN started them), unlike Ishar's
+  wakeFreshGroup: true,
+};
+
 /** The CONT file number `region` reads (`IsharTitleSpec.contOf`). */
 export function isharContOf(spec: IsharTitleSpec, region: number): number {
   return spec.contOf ? spec.contOf(region) : region % 10;
@@ -1475,14 +1672,19 @@ export class IsharScene {
         t.set(index, v);
       },
       readGrid: (addr, pop, direct, size = 1) => {
+        // a main table declared with `cdim` dimensions: `tabchar` pops one index per dimension (LIFO)
+        const td = this.spec.tableDims?.[addr];
+        if (td) for (const d of td) direct += d * pop();
         const w = this.written.get(addr)?.get(direct);
         if (w !== undefined) return w;
         const table = st.tables?.[addr] ?? this.spec.tables?.[addr];
         if (table) return table[direct] ?? 0;
         const mem = readMemory(st.memory, addr, direct, size) ?? readMemory(this.memory, addr, direct, size);
         if (mem !== undefined) return mem;
-        const row = pop();
-        const col = direct;
+        const dims = (addr === gridA || addr === gridB) ? this.spec.gridDims : undefined;
+        const first = pop();
+        const row = dims ? pop() : first;
+        const col = dims ? direct + dims[0] * first : direct;
         if (row < 0 || col < 0 || col >= stride || row >= rows) return 0;
         if (addr === gridA) return this.grids.A(row, col);
         if (addr === gridB) return this.grids.B(row, col);
@@ -1602,7 +1804,9 @@ export class IsharScene {
     if (!group?.paletteFrom) return;
     const { script, slot } = group.paletteFrom;
     const names = typeof script === 'string' ? [script] : script;
-    const pal = names.map((n) => this.scripts.find((s) => s.name === n)).find((s) => s);
+    const pal = group.paletteFrom.global
+      ? names.map((n) => { const data = this.load(n); return data && { name: n, data }; }).find((s) => s)
+      : names.map((n) => this.scripts.find((s) => s.name === n)).find((s) => s);
     if (!pal) return;
     const env = this.env();
     const n = typeof slot === 'function' ? slot(env.readMain) : typeof slot === 'number' ? slot : (slot[pal.name] ?? -1);
@@ -1620,6 +1824,10 @@ export class IsharScene {
 
   /** Run the title's sub-zone routine for the current state (GERDEP, after every step/turn). */
   private updateZone(): void {
+    if (this.spec.zoneRule) {
+      this.zone = this.spec.zoneRule(this.state!, this.grids, this.zone);
+      return;
+    }
     const z = this.spec.zone;
     if (!z) return;
     if (!this.zoneRunner) {
@@ -1670,7 +1878,11 @@ export class IsharScene {
       // An add-on wins equal-depth ties against the region group (oracle,
       // CONT5 7..12,24: INCAVE's wall covers FORET's tree root at depth 99;
       // INCAVE got entity slot 13, FORET 12). Unchanged on the CONT1-4 walks.
-      if (this.spec.addOnSwap !== 'restart') keep.unshift(s);
+      if (this.spec.addOnSwap !== 'restart') {
+        const after = this.spec.addOnsAfterScript ? keep.findIndex((k) => k.name === this.spec.addOnsAfterScript) : -1;
+        if (after >= 0) keep.splice(after + 1, 0, s);
+        else keep.unshift(s);
+      }
     }
     if (this.spec.addOnSwap === 'restart') {
       // In clive order, ahead of the region group or after it (`addOnsAfter`).
@@ -1704,7 +1916,7 @@ export class IsharScene {
       // entities (ENCONT) are, every step
       const persistent = this.spec.entities?.persistent ?? [];
       for (const s of this.scripts) {
-        if (fresh && !persistent.includes(s.name) && s.handle === undefined) continue;
+        if (fresh && !this.spec.wakeFreshGroup && !persistent.includes(s.name) && s.handle === undefined) continue;
         s.runner.wake();
         s.runner.settle(env);
       }
