@@ -8,11 +8,13 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Mem, resolveAttack } from '../combat.ts';
+import { Mem, resolveAttack, weaponProc } from '../combat.ts';
 import { W6Rng } from '../rules.ts';
 
 const path = process.env.W6_COMBAT_VECTORS ?? resolve('tools/wizardry6/oracle/combat-vectors.json');
 const V: any[] = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : [];
+const ppath = process.env.W6_PROC_VECTORS ?? resolve('tools/wizardry6/oracle/combat-proc-vectors.json');
+const P: any[] = existsSync(ppath) ? JSON.parse(readFileSync(ppath, 'utf8')) : [];
 
 /** Message-text scratch buffers (-10836..-10596 rel. A4): presentation, not rules. */
 const isText = (a: number, a4: number) => a - a4 >= -10836 && a - a4 < -10596;
@@ -76,5 +78,31 @@ describe.skipIf(V.length === 0)('attack resolver (CODE+0x1f33e)', () => {
     const m = new Mem({ '1': 5 });
     expect(m.u8(1)).toBe(5);
     expect(() => m.u8(2)).toThrow();
+  });
+});
+
+function runProc(v: any, tweak?: (r: { rng: W6Rng; mem: Mem }) => void) {
+  const mem = new Mem(v.foot);
+  const rng = new W6Rng(v.seed);
+  tweak?.({ rng, mem });
+  const fx = weaponProc(mem, rng, v.a4, v.T, v.blk, v.tg, v.ti);
+  const wrote = Object.fromEntries([...mem.wrote].sort((a, b) => a[0] - b[0]).map(([a, b]) => [a, b]));
+  const want = Object.fromEntries(Object.entries<number>(v.diff).sort((a, b) => +a[0] - +b[0]));
+  return JSON.stringify(wrote) === JSON.stringify(want) && JSON.stringify(fx) === JSON.stringify(v.effects)
+    && JSON.stringify([...rng.s]) === JSON.stringify(v.rng);
+}
+
+describe.skipIf(P.length === 0)('weapon on-hit effects (CODE+0x1ede0 with ApplyStatus CODE+0x23154)', () => {
+  it('matches the game on every vector: bytes written, SetStatus calls, RNG state', () => {
+    expect(P.filter((v) => { try { return !runProc(v); } catch { return true; } }).length).toBe(0);
+  });
+  it('covers all three sides', () => {
+    expect([...new Set(P.map((v) => v.fam))].sort()).toEqual(['mm', 'mp', 'pm']);
+    expect(P.some((v) => v.effects.length > 0)).toBe(true);
+    expect(P.some((v) => Object.keys(v.diff).some((a) => (+a - v.a4) < -30000 && (+a - v.a4) > -30400))).toBe(true);
+  });
+  it('null control: a different seed disagrees', () => {
+    const bad = P.filter((v) => { try { return !runProc(v, (r) => { r.rng.s[1] = (r.rng.s[1] + 7) % 30000 || 1; }); } catch { return true; } });
+    expect(bad.length).toBeGreaterThan(P.length / 4);
   });
 });

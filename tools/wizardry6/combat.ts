@@ -11,7 +11,7 @@
  *
  * Calls the game makes into presentation or into other systems are not executed here; they are
  * recorded as {@link Effect}s with the exact stack arguments the game pushed:
- *   set_status   CODE+0x2300c  (kill / status set on the defender; args grp, idx, msg, 0, 3, 0, 6)
+ *   set_status   CODE+0x2300c  (kill / status set on the defender; ten words, see {@link setStatusArgs})
  *   weapon_proc  CODE+0x1ede0  (on-hit status effects of the weapon block; separate port below)
  *   spell_effect CODE+0x24ea0  (spell effect dispatcher, when the weapon / monster attack casts)
  *   use_ammo     CODE+0x22278  (consume one thrown / shot item)
@@ -111,6 +111,14 @@ export function dice(rng: W6Rng, base: number, n: number, sides: number): number
   let t = s16(base);
   for (; n > 0; n--) t = s16(t + rng.random(sides) + 1);
   return t;
+}
+
+/** LAB_0D69 (CODE+0x20bd0) packs (n, sides, base) into -30356(A4) before LAB_0D66 rolls them. */
+export function dice69(m: Mem, rng: W6Rng, a4: number, a: number, b: number, c: number): number {
+  m.w16(a4 - 30356, c);
+  m.w8(a4 - 30354, a);
+  m.w8(a4 - 30353, b);
+  return dice(rng, c, a & 0xff, b & 0xff);
 }
 
 /** LAB_0DDB (CODE+0x21fc4): body-part roll: Random(100) walked down eight weights, default part 4. */
@@ -362,7 +370,7 @@ export function resolveAttack(m: Mem, rng: W6Rng, x: AttackIn): Effect[] {
         if (c > 0xff) c = 0xff;
         m.w8(D + 0x11, c);
         if (m.s16(D + 2) < 1) {
-          fx.push(['set_status', [tg, ti, 0x0d9e, 0, 3, 0, 6].map(hex16).join('')]);
+          fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, 0)]);
           if (m.u8(A + 0x2b) === 0xff) m.w8(A + 0x2b, 1);
         } else if (m.u8(MR(tg) + 0xd0) !== 0x16) {
           fx.push(['weapon_proc', hex32(A) + hex32(blk) + hex16(tg) + hex16(ti)]);
@@ -374,5 +382,106 @@ export function resolveAttack(m: Mem, rng: W6Rng, x: AttackIn): Effect[] {
     }
   }
   if (m.u8(A + 0x2b) === 0xff) m.w8(A + 0x2b, 0);
+  return fx;
+}
+
+
+/** The ten words pushed for LAB_0E3D (CODE+0x2300c SetStatus): grp, idx, msg, resist slot (0 = no save), new state, resist modifier, then constants. */
+export function setStatusArgs(tg: number, ti: number, msg: number, res: number, state: number, mod: number, w7 = 6): string {
+  return [tg, ti, msg, res, state, mod, w7, 6, 0x0d50, 0].map(hex16).join('');
+}
+
+/**
+ * LAB_0E3A (CODE+0x22f9e) resist scale: v = clamp(mag * (resist - mod) / 100, 0, mag) with resist =
+ * record byte +0x94+res; the magnitude that survives is mag - Random(v + 1).
+ */
+export function resistScale(m: Mem, rng: W6Rng, a4: number, grp: number, mag: number, res: number, mod: number): number {
+  const rec = m.u32(a4 - 15294 + 4 * grp);
+  let v = tdiv(s16(mag) * s16(m.u8(rec + 0x94 + res) - mod), 100);
+  if (v < 0) v = 0;
+  if (v > s16(mag)) v = s16(mag);
+  return s16(mag - rng.random(v + 1));
+}
+
+/**
+ * LAB_0E45 (CODE+0x23154) ApplyStatus: add a duration to one of the defender's status counters
+ * (member bytes +0xe+slot, capped at 250; 0xff = permanent) if the magnitude survives the resistance
+ * scale and Random(100) beats resist-mod. Slot 5 also records the low byte of `c` at +0x23.
+ */
+export function applyStatus(
+  m: Mem, rng: W6Rng, a4: number, tg: number, ti: number, res: number, slot: number, mod: number,
+  a: number, b: number, c: number,
+): void {
+  const D = ti * 0x2c + m.u32(a4 - 15266 + 4 * tg);
+  if (m.u8(D + 0x22) >= 2 || m.u8(D + 0x2b) !== 0) return;
+  const mr = (g: number) => m.u32(a4 - 15294 + 4 * g);
+  if (tg === 0) for (let i = 0; i < 14; i++) m.w8(mr(0) + 0x94 + i, m.u8(a4 - 17584 + ti * 0x1b0 + i));
+  let mag = dice69(m, rng, a4, a, b, c);
+  mag = resistScale(m, rng, a4, tg, mag, res, mod);
+  if (mag <= 0) return;
+  if (rng.random(100) > s16(m.u8(mr(tg) + 0x94 + res) - mod)) {
+    if ((c & 0xffff) === 0xff) m.w8(D + 0x0e + slot, 0xff);
+    else if (m.u8(D + 0x0e + slot) + mag > 0xfa) m.w8(D + 0x0e + slot, 0xfa);
+    else m.w8(D + 0x0e + slot, m.u8(D + 0x0e + slot) + mag);
+    if (slot === 5) m.w8(D + 0x23, c);
+  }
+}
+
+/**
+ * LAB_0CBB (CODE+0x1ede0): the on-hit effects of a weapon block. For each of eight effects, if
+ * Random(100) < block byte +4+k the effect fires with power = attacker word0 / 3 + 1 and a resist
+ * modifier of (attacker word0 - defender word0) * 3:
+ *   0 status slot 2 (res 9)   1 slot 3 (res 4)   2 slot 5 (res 6, c = block byte +12)   3 set state 2 (res 11)
+ *   4 none   5 monster-only stamina drain (record byte +217 = 3) or life drain (= 11, record +161)
+ *   6 save vs res 11 (party) / 13 (monster) or die   7 status slot 2 (res 9, different dice)
+ */
+export function weaponProc(m: Mem, rng: W6Rng, a4: number, A: number, blk: number, tg: number, ti: number): Effect[] {
+  const fx: Effect[] = [];
+  m.w16(a4 - 10488, 4);
+  const D = ti * 0x2c + m.u32(a4 - 15266 + 4 * tg);
+  const mr = (g: number) => m.u32(a4 - 15294 + 4 * g);
+  const mod = s16((s16(m.u16(A)) - s16(m.u16(D))) * 3);
+  for (let k = 0; k < 8; k++) {
+    if (!(rng.random(100) < m.u8(blk + 4 + k))) continue;
+    const pow = s16(tdiv(m.s16(A), 3) + 1);
+    switch (k) {
+      case 0: applyStatus(m, rng, a4, tg, ti, 9, 2, mod, pow, 2, pow); break;
+      case 1: applyStatus(m, rng, a4, tg, ti, 4, 3, mod, s16(pow * pow * 2), 5, pow); break;
+      case 2: applyStatus(m, rng, a4, tg, ti, 6, 5, mod, s16(pow * 10), 2, m.u8(blk + 12)); break;
+      case 3: fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9d, 11, 2, mod, 0x0e)]); break;
+      case 5: {
+        if (m.u16(a4 - 15138) === 0) break;
+        const ag = m.u16(a4 - 15138);
+        let dmg = 0;
+        const t = m.u8(mr(ag) + 217);
+        if (t === 3) {
+          dmg = dice69(m, rng, a4, pow * 2, 5, pow * 3);
+          let v = s16(m.s16(D + 6) - dmg);
+          if (v < 0) v = 0;
+          m.w16(D + 6, v);
+        } else if (t === 11) {
+          if (rng.random(100) > m.u8(mr(ag) + 161)) {
+            dmg = dice69(m, rng, a4, 1, 4, 0);
+            m.w16(D + 4, m.u16(D + 4) - dmg);
+            m.w16(D + 2, m.u16(D + 2) - dmg);
+            if (m.s16(D + 4) < 1) m.w16(D + 4, 1);
+            if (tg === 0) {
+              m.w16(a4 - 17898 + ti * 0x1b0, m.u16(D + 2));
+              m.w16(a4 - 17896 + ti * 0x1b0, m.u16(D + 4));
+            }
+          }
+        }
+        if (dmg > 0 && m.s16(D + 2) <= 0) fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, mod)]);
+        break;
+      }
+      case 6: {
+        const res = tg === 0 ? 11 : 13;
+        if (rng.random(100) > s16(m.u8(mr(tg) + 0x94 + res) - mod)) fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, mod)]);
+        break;
+      }
+      case 7: applyStatus(m, rng, a4, tg, ti, 9, 2, mod, s16(pow * 2), 3, pow); break;
+      default: break;
+    }
+  }
   return fx;
 }

@@ -28,7 +28,7 @@ UI_FUNCS = {0x21bf0: 'name', 0x21c50: 'win50', 0x21d44: 'win44', 0x21d90: 'win90
             0x225f8: 'portrait', 0x229e4: 'tick', 0x22ae0: 'ae0', 0x22afa: 'delay', 0x22b52: 'b52',
             0x24862: 'anim', 0x22ea6: 'status_msg'}
 # Logic callees that are recorded (their effect is a separate harness): name -> offset
-LOGGED = {0x22278: ('use_ammo', 2), 0x2300c: ('set_status', 14), 0x1ede0: ('weapon_proc', 12), 0x24ea0: ('spell_effect', 8)}
+LOGGED = {0x22278: ('use_ammo', 2), 0x2300c: ('set_status', 20), 0x1ede0: ('weapon_proc', 12), 0x24ea0: ('spell_effect', 8)}
 KEEP_JT = {-32652, -32664, -32490, -32496}      # Random, ReadSection, TestBit, SetBit
 G = {'ag': -15138, 'ai': -15136}
 MEM_ARR, MREC_ARR = -15266, -15294
@@ -44,6 +44,7 @@ class Combat(W6):
         super().__init__(trace_unknown_lvo=False)
         self.boot()
         self.effects = []
+        self.disabled = set()
         jt = load_jt(self)
         self.jt = jt
         for d, off in jt.items():
@@ -53,6 +54,10 @@ class Combat(W6):
         for off, (nm, n) in LOGGED.items(): self._stub(off, nm, log=n)
         self.written = {}; self.foot = {}
         self.tracking = False
+        self.rargs = []
+        def rh(uc, a, size, ud):
+            if self.tracking: self.rargs.append(self.r16(uc.reg_read(UC_M68K_REG_A7) + 4))
+        self.uc.hook_add(UC_HOOK_CODE, rh, begin=CODE_BASE + 0xb9c, end=CODE_BASE + 0xb9c)
         # data hunk, BSS and heap; the stack (0x1E0000-0x1F0000) is excluded
         for lo, hi in ((DATA_BASE, 0x1E0000 - 1), (HEAP_BASE, HEAP_END)):
             self.uc.hook_add(UC_HOOK_MEM_READ, self._rd, begin=lo, end=hi)
@@ -63,6 +68,7 @@ class Combat(W6):
     def _stub(self, off, name, log=False):
         addr = CODE_BASE + off
         def hook(uc, a, size, ud):
+            if off in self.disabled: return
             sp = uc.reg_read(UC_M68K_REG_A7)
             if log and self.tracking:
                 self.effects.append([name, bytes(uc.mem_read(sp + 4, log)).hex()])
@@ -86,8 +92,23 @@ class Combat(W6):
     def apply(self, writes):
         for a, b in writes: self.uc.mem_write(a, bytes(b))
 
+    def run_proc(self, attacker, blk, tg, ti, seed):
+        """LAB_0CBB (CODE+0x1ede0): weapon on-hit effects. Args: attacker long, block long, tg, ti."""
+        self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
+        self.seed(*seed)
+        self.tracking = True
+        self.a5 = STACK_TOP - 16
+        self.disabled = {0x1ede0}
+        try:
+            self.call(0x1ede0, [(attacker, 4), (blk, 4), tg, ti])
+        finally:
+            self.tracking = False
+            self.disabled = set()
+        diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}
+        return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs)}
+
     def run_attack(self, target, hand, kind, seed):
-        self.effects = []; self.written = {}; self.foot = {}
+        self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
         self.seed(*seed)
         self.tracking = True
         self.a5 = STACK_TOP - 16
@@ -97,7 +118,7 @@ class Combat(W6):
             self.tracking = False
         diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}   # every byte written, final value
         self.ibuf = bytes(self.uc.mem_read(self.a5 - 74, 32)).hex()
-        return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state())}
+        return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs)}
 
 
 # ---------------------------------------------------------------------------
@@ -246,11 +267,43 @@ def make_vectors(n, seed):
     return out
 
 
+def make_proc_vectors(n, seed):
+    rng = pyrandom.Random(seed)
+    c = Combat()
+    out = []
+    A4 = c.A4
+    for v in range(n):
+        fam = rng.choices(['pm', 'mp', 'mm'], [5, 4, 1])[0]
+        if fam == 'pm':   ag, ai, tg, ti = 0, rng.randrange(4), rng.randrange(1, 6), rng.randrange(0, 9)
+        elif fam == 'mp': ag, ai, tg, ti = rng.randrange(1, 6), rng.randrange(0, 9), 0, rng.randrange(4)
+        else:             ag, ai, tg, ti = rng.randrange(1, 6), rng.randrange(0, 9), rng.randrange(1, 6), rng.randrange(0, 9)
+        fx = Fixture(c, rng).build(ag, ai, tg, ti, 0, 0)
+        T = MEM_BASE + ag * MEM_STRIDE + ai * 44
+        fx.writes.append((T + 0x1f, bytes([tg, ti])))
+        # make the weapon blocks proc often, and randomise the attacker / defender strength words
+        hand = rng.randrange(2)
+        blk = (REC_MON_BASE + ag * REC_MON_STRIDE + hand * 16 + 0x44) if ag else (A4 - 17682 + hand * 16 + ai * 0x1b0)
+        fx.writes.append((blk + 4, bytes(rng.choice([0, 30, 100, 100]) for _ in range(8))))
+        fx.writes.append((T, struct.pack('>H', rng.randrange(1, 90))))
+        fx.writes.append((blk + 12, bytes([rng.randrange(0, 12)])))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        try:
+            res = c.run_proc(T, blk, tg, ti, seed3)
+        except RuntimeError as e:
+            print('skip', fam, ag, ai, tg, ti, str(e)[-80:], file=sys.stderr); continue
+        out.append({'fam': fam, 'ag': ag, 'ai': ai, 'tg': tg, 'ti': ti, 'T': T, 'blk': blk, 'seed': seed3, 'a4': A4,
+                    'foot': {str(a): b for a, b in res['foot'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
+                    'diff': {str(a): b for a, b in res['diff'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
+                    'effects': res['effects'], 'rng': res['rng'], 'rargs': res['rargs']})
+    return out
+
+
 def pick_subset(V, n=110):
     """A small committed subset: every effect kind, stance resets, all attack kinds, both sides."""
     chosen, seen = [], set()
     def feat(v):
-        f = {'fam:' + v['fam'], 'kind%d' % v['kind']} | {'fx:' + e[0] for e in v['effects']}
+        f = {'fam:' + v['fam']} | ({'kind%d' % v['kind']} if 'kind' in v else set()) | {'fx:' + e[0] for e in v['effects']}
         if any((int(a) - 0x400000) % 0x400 % 44 == 0x1e for a in v['diff'] if int(a) >= 0x400000): f.add('stance')
         return f
     for v in V:                      # greedy: first vector that brings a new feature
@@ -259,16 +312,20 @@ def pick_subset(V, n=110):
     for v in V:
         if len(chosen) >= n: break
         if v not in chosen: chosen.append(v)
-    for v in chosen: v.pop('ibuf', None)
+    for v in chosen: v.pop('ibuf', None); v.pop('rargs', None)
     return chosen
 
 
 if __name__ == '__main__':
     if sys.argv[1] == 'subset':
         V = json.load(open(sys.argv[2]))
-        sub = pick_subset(V)
+        sub = pick_subset(V, int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 110)
         json.dump(sub, open(sys.argv[3], 'w'), separators=(',', ':'))
         print(len(sub), 'vectors in subset')
+    if sys.argv[1] == 'proc':
+        n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
+        seed = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 1
+        json.dump(make_proc_vectors(n, seed), open(sys.argv[2], 'w'), separators=(',', ':'))
     if sys.argv[1] == 'vectors':
         n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
         seed = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 1
