@@ -406,6 +406,15 @@ dictionary at all).
 
 ### 2.5 The compression algorithms — CONFIRMED, ported, corpus-verified
 
+> **Correction (2026-11-23): the `0xA1` port dropped the last byte.** Its
+> main loop stopped at `unpackedSize - 1`, so the final output byte stayed
+> 0 in 242 of the 369 `0xA1` files. The running engine holds it: the
+> oracle's `absdump` of Ishar 3's FJUNGLE as loaded differs from crawl's
+> unpack in that one byte only (`e6`, the low byte of a composite record's
+> z, -26 read as -256). The loop now runs to `unpackedSize`, as the
+> reference's current `unpack_new` does. This was the cause of the FFORET
+> slot-5 height residual (§8.8 item 16) and of a wrong jungle backdrop.
+
 Cracked via a genuine open-source reference implementation found by
 `WebSearch`, not derived from scratch: **`github.com/maestun/silm-depack`**
 (MIT-licensed, dedicated depacker for this exact Silmarils "ALIS" engine
@@ -1891,6 +1900,13 @@ approximates that by start order.
       (`0x17be`, word). The forest savestate holds one member (33) with hp
       266 and status 0. A party knocked out or disabled on the way would
       explain why every direction was refused; this is not confirmed.
+      **Resolved 2026-11-23 (later still):** not the party check (peeked
+      every step: hp stays above 0, status 0). A roaming forest monster
+      (EN1 slot 91, location 50, the party's location) follows the party
+      and stands on the cell it steps toward; GERDEP `+0xe93` refuses a
+      target holding such a monster in regions 5/6. The FFORET slot-5
+      height was the unpacker's dropped last byte (§2.5 correction). See
+      item 20.
     - Decoder fixes found on the way: `cblast` reads an expression (it is
       `ckill` with erase). The entity tests and searches that
       end in `crstent` (`cfindtyp`, `cfindcla`, `ctstmov`, `cftstmov`,
@@ -2004,6 +2020,39 @@ the gate between two legs.
     - **Walker.** The E key opens a clickable door the party faces, which
       is the effect of `+0x1c4`.
 
+20. **Ishar 3 beyond Maz (2026-11-23, driven and measured).**
+    - **Trips without a gate cell.** The oracle sends MAIN message 38 (what
+      GERDEP `+0xe04` sends on a gate) from the new-game state with the
+      location poked (`captureTrip('ishar3', [38], ..., { commands: ['poke
+      3b33 8'] })`). Location 8 leads to the jungle (region 3, (5,4)),
+      location 6 to the mountains (region 9, (21,36)), 13 to the forest.
+    - **Region 2** (Maz's second state, CONT2-3) is where the jungle's gate
+      leads back once EN1 slot 71's word `0x20c8` is at most 0 or the flag
+      `0x3ee1` is 1 (MAIN `+0x420c`): destination 23, which `+0x3ef7` splits
+      into region 2 and sub-code 3, at (38,41), location 8. Otherwise it
+      leads back to region 1 (destination 13). Driven: jungle state,
+      `poke 3ee1 1`, message 38 -> region 2 (38,41), location 8, inside a
+      building with a dialogue. Not measured (location 8's add-ons are not
+      modelled).
+    - **Step test, monsters.** GERDEP `+0xf13` is not a target test: it
+      checks EN1 slots 60.. standing in the party's own cell (location
+      `0x2f0a`, row `0x1e22`, col `0x1f04`, kind `0x2e22` < 0 or 99 or
+      `0x3b98` < 0) and refuses the move toward the side named by the type
+      `0x1fe6` (1, 2, -1, -2 = raw directions), like Ishar 2's `+0xc8b`.
+      In regions 5/6 `+0xe93` also refuses a target holding such a monster.
+      Ported (`ishar3Occupancy`).
+    - **Groups.** The jungle runs FJUNGLE + JUNGLE, the mountains FMONT +
+      MONTAGNE (MAIN `+0x16b1`); each backdrop has one palette.
+
+    | Walk | Actions | Moves | Placements | Masked pixels |
+    |---|---|---|---|---|
+    | Forest, from the gate (3,5) | 25 | 25/25 (was 12/25) | 1234/1234 (was 97.97%) | 100.000% |
+    | Jungle, from (5,4) | 40 | 40/40 | 1901/1901 (was 97.90% before the unpacker fix) | 100.000% (was 81.5%) |
+    | Mountains, from (21,36) | 40 | 40/40 | 2241/2241 | 100.000% |
+
+    A mountain walk that steps back onto the gate returns to Maz location
+    6, whose district add-ons crawl does not model yet (5 of 17 sprites).
+
 19. **Ishar 2's islands (2026-11-23, driven and measured).**
     - **Who sends the selector.** MAP (the travel map) sends MAIN message
       14 with `0x4f10` = the clicked form - 20 (`+0xcf`, selectors 1..8;
@@ -2071,8 +2120,8 @@ the gate between two legs.
 
 - how a click reaches a door's form, and the levers (item 18; the walks poke them open);
 - Ishar 2's island NPCs, the jail and the cliff (item 19);
-- Ishar 3 beyond Maz and the forest (item 16: the jungle, dungeon and
-  mountain groups are decoded but not measured);
+- Ishar 3's dungeons (regions 7/8) and Maz's district add-ons beyond the
+  start (item 20);
 - monster movement and combat. The walker draws the NPCs at their EN1
   places; GEREN moves them and spawns the roaming ones;
 - Ishar 3's townspeople table at a new game: its loader is not found, so

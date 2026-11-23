@@ -206,6 +206,42 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.data
 });
 
 /**
+ * Ishar 3's jungle and mountains. The trip is GERDEP's gate message (MAIN
+ * message 38) sent from the new-game state with the location poked: Maz
+ * location 8 leads to the jungle (region 3, CONT3-3), location 6 to the
+ * mountains (region 9, CONT6-3). One leg each (every savestate load moves
+ * Ishar 3's clock on by hours). The walks avoid the gate cells.
+ */
+const ISHAR3_TRIPS: ReadonlyArray<{ location: number; walk: string; group: string[] }> = [
+  { location: 8, walk: 'FFLFLFLLLLLFFLFLLFFFFLLL', group: ['FJUNGLE', 'JUNGLE'] },
+  { location: 6, walk: 'FLFLFFLLLLLLLLLLLLLLFLLL', group: ['FMONT', 'MONTAGNE'] },
+];
+
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 jungle and mountains vs the game (alis oracle)', () => {
+  it.each(ISHAR3_TRIPS)('location $location: moves like the game and matches the view', ({ location, walk, group }) => {
+    const out = tempDir('ishar3-trip-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const state = join(out, 'trip.state');
+      const at = captureTrip('ishar3', [38], state, 600, { commands: [`poke 3b33 ${location}`] });
+      const actions = [...walk] as Array<'F' | 'L' | 'R'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: state, start: at, maxLegs: 1 });
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 0, steps[0]?.mem?.zone?.[0], false);
+      expect(cw.some((w) => group.every((g) => w.scripts.includes(g)))).toBe(true);
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, matched: r.matched, crawl: r.crawl, masked: r.pixelsMasked - r.pixelsMaskedEqual }).toEqual({ i, move: true, matched: r.oracle, crawl: r.oracle, masked: 0 });
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
+
+/**
  * Ishar 3: Maz from the start, south through the streets while the day
  * turns to dusk and night. MAIN derives the phase from the game clock's
  * hour (`0x3c08`; MAIN `+0x4dac`: 8..19 is day) and passes the phase's

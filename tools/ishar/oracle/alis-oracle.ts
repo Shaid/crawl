@@ -645,20 +645,30 @@ export function captureLegWalk(
  * reaches in `statePath`. Ishar 2: `[14, selector]` is what MAP (the travel
  * map), GERDEP (region 4's cell 126) and GESORT (recall) send; MAIN
  * `+0x374` stores the selector and runs the arrival table (`ISHAR2_TRAVEL`).
+ * Ishar 3: `[38]` is GERDEP's gate message; MAIN `+0x41ed` picks the
+ * destination from the region and the location `0x3b33`, so poke the
+ * location first (`commands`, e.g. `poke 3b33 8` for the jungle gate).
+ * `startState` defaults to the boot savestate.
  * Returns the party state the game holds at the end.
  */
-export function captureTrip(game: OracleGame, message: readonly number[], statePath: string, frames = 400): { region: number; row: number; col: number; facingRaw: number } {
+export function captureTrip(
+  game: OracleGame,
+  message: readonly number[],
+  statePath: string,
+  frames = 400,
+  opts: { commands?: readonly string[]; startState?: string } = {},
+): { region: number; row: number; col: number; facingRaw: number } {
   const t = ORACLE_TITLES[game];
   const own = join(tempDir(`${game}-trip-`), 'game');
   mkdirSync(own, { recursive: true });
   for (const f of readdirSync(gameDir(game))) {
     const d = join(own, f);
-    if (f === 'alis.state') copyFileSync(join(gameDir(game), f), d);
+    if (f === 'alis.state') copyFileSync(opts.startState ?? join(gameDir(game), f), d);
     else linkSync(join(gameDir(game), f), d);
   }
   try {
     const out = join(dirname(own), 'out');
-    const ev: Array<[number, string]> = [[2, `send 0 ${message.join(' ')}`], ...partyDumps(t, frames, 'trip'), [frames + 2, 'save'], [frames + 6, 'quit']];
+    const ev: Array<[number, string]> = [...(opts.commands ?? []).map((c) => [2, c] as [number, string]), [3, `send 0 ${message.join(' ')}`], ...partyDumps(t, frames, 'trip'), [frames + 2, 'save'], [frames + 6, 'quit']];
     const r = runOracle(game, ev, out, { loadState: true, gameDir: own, timeoutMs: 120_000 });
     if (!existsSync(join(out, 'trip.row.bin'))) throw new Error(`oracle did not finish the trip\n${r.stderr.slice(-2000)}`);
     copyFileSync(join(own, 'alis.state'), statePath);

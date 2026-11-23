@@ -192,7 +192,12 @@ class NewUnpacker {
 
   /** Port of `unpack_new()`'s main loop. Returns bytes written. */
   run(unpackedSize: number): number {
-    const end = unpackedSize - 1;
+    // Every byte, the last one included. (Correction 2026-11-23: this was
+    // `unpackedSize - 1`, which left the final byte 0. The engine's memory
+    // holds it: Ishar 3 FJUNGLE's last composite record ends `ff e6`
+    // (z -26), and the port read `ff 00` (z -256), as dumped from the
+    // running oracle with the harness's `absdump`.)
+    const end = unpackedSize;
     this.d7 = 0;
     while (this.unpackedPos < end) {
       this.decode(1);

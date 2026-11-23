@@ -139,10 +139,10 @@ index d3b0040..e68f4f2 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..38fb1cf
+index 0000000..89cbb8f
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,223 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -156,6 +156,7 @@ index 0000000..38fb1cf
 +//   memdump OFF N NAME                  (raw bytes at basemain+OFF -> NAME.bin)
 +//   derefdump OFF N NAME                (N bytes of an indirect v3 array: the handle at basemain+OFF)
 +//   derefpoke OFF IDX VAL               (byte IDX of that array := VAL, IDX decimal)
++//   absdump ADDR N NAME                 (N bytes of engine memory at absolute ADDR, e.g. a script's org)
 +//   send ENTRY V1 [V2 ...]              (queue a message for the entity at atent offset ENTRY, 0 = MAIN, as csend does)
 +//   dump NAME                           (NAME.ppm frame + NAME.spr live sprite list)
 +//   save | quit | mark TEXT
@@ -280,6 +281,7 @@ index 0000000..38fb1cf
 +        fprintf(stderr, "[send] %ld entity %d: %d values\n", h_frameno, ent, n);
 +      } else fprintf(stderr, "[send] %ld entity %d: not queued\n", h_frameno, ent);
 +    }
++    else if (!strcmp(cmd, "absdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + off, 1, n, o); fclose(o); } }
 +    else if (!strcmp(cmd, "derefpoke")) { unsigned off; int idx, v; sscanf(h_line, "%*ld %*s %x %d %d", &off, &idx, &v); u32 a = xread32(xread32(alis.basemain + off)); *(u8 *)(alis.mem + a + idx) = (u8)v; }
 +    else if (!strcmp(cmd, "dump")) { sscanf(h_line, "%*ld %*s %159s", name); h_dump_ppm(name); h_dump_sprites(name); fprintf(stderr, "[dump] %ld %s\n", h_frameno, name); }
 +    else if (!strcmp(cmd, "save")) { alis.state = eAlisStateSave; }

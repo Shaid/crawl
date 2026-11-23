@@ -782,6 +782,33 @@ export function ishar2Occupancy(read: (addr: number, len: number) => Uint8Array 
   return (_region, row, col, dir) => (dir === undefined ? target.has(`${row},${col}`) : !!side.get(`${row},${col}`)?.has(dir));
 }
 
+/**
+ * Ishar 3's GERDEP `+0xf13`: EN1 slots 60..109 whose location `0x2f0a` is
+ * the party's (`0x3b33`), standing in the party's own cell (row `0x1e22`,
+ * col `0x1f04`, words) with kind `0x2e22` < 0 or 99, or `0x3b98` < 0, refuse
+ * the move toward the side their type `0x1fe6` names (a raw facing:
+ * 1, 2, -1, -2; `cswitch2` base 2). No hp test. Without `dir`: GERDEP
+ * `+0xe93`, the forest's target test (same slots, location and kind, no
+ * `0x3b98` alternative), standing on the cell.
+ */
+export function ishar3Occupancy(read: (addr: number, len: number) => Uint8Array | undefined, location: number): IsharOccupancy | undefined {
+  const w = (a: Uint8Array, i: number) => (((a[2 * i]! << 8) | a[2 * i + 1]!) << 16) >> 16;
+  const b = (a: Uint8Array, i: number) => (a[i]! << 24) >> 24;
+  const loc = read(0x2f0a, 110), rows = read(0x1e22, 220), cols = read(0x1f04, 220), kind = read(0x2e22, 110), flag = read(0x3b98, 110), type = read(0x1fe6, 220);
+  if (!loc || !rows || !cols || !kind || !flag || !type) return undefined;
+  const side = new Map<string, Set<number>>();
+  const target = new Set<string>();
+  for (let i = 60; i < 110; i++) {
+    if (b(loc, i) !== location) continue;
+    const k = b(kind, i);
+    const key = `${w(rows, i)},${w(cols, i)}`;
+    if (k < 0 || k === 99) target.add(key);
+    if (!(k < 0 || k === 99 || b(flag, i) < 0)) continue;
+    (side.get(key) ?? side.set(key, new Set()).get(key)!).add(w(type, i));
+  }
+  return (_region, row, col, dir) => (dir === undefined ? target.has(`${row},${col}`) : !!side.get(`${row},${col}`)?.has(dir));
+}
+
 /** Ishar 2's region groups other than the start island (MAIN `+0x16f8`); see `ISHAR2_TITLE.sceneGroup`. */
 // Palettes: each outdoor backdrop picks its slot from the day phase 0x519f
 // like FOND1 (FARBO +0x122, FMONT +0x144, FVILLE +0x142: phase 1/2/3 ->
@@ -917,7 +944,7 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     return { factors: [m(0x3f82), m(0x3f84), m(0x3f86)], first: 1, count: m(0x3da4) === 0 ? 15 : 175 };
   },
   tables: { 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2', 'FORET', 'FFORET'],
+  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2', 'FORET', 'FFORET', 'FJUNGLE', 'JUNGLE', 'FMONT', 'MONTAGNE'],
   // EAFF (Ishar 1's ENCONT, engine 3.0) and AFFPV, the Maz townspeople:
   // 150 people with row `0x4012`, col `0x40ae`, facing `0x414a` and kind
   // `0x41e6`; AFFPV `+0x75` scans them up to 6 cells ahead and `clive`s
@@ -947,17 +974,26 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     if (region === 1) return { scripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
     // oracle start order after a gate trip (MAIN +0x3e0f): foret, fforet
     if (region === 5 || region === 6) return { scripts: ['FORET', 'FFORET'], paletteFrom: { script: 'FFORET', slot: -1 } };
+    // the jungle and the mountains, in MAIN +0x16b1's load order
+    if (region === 3 || region === 4) return { scripts: ['FJUNGLE', 'JUNGLE'], paletteFrom: { script: 'FJUNGLE', slot: -1 } };
+    if (region === 9 || region === 10) return { scripts: ['FMONT', 'MONTAGNE'], paletteFrom: { script: 'FMONT', slot: -1 } };
     return null;
   },
   gridBuffers: 'layers',
   // GERDEP's step test (+0xdb8 .. +0x13b7): a negative layer-0 cell refuses
   // the step except -2 (while 0x3b34 = 0, as in every oracle run); -5 in Maz
   // is a door (MAIN message 17 opens the building instead); grid-B 100 is a
-  // gate (message 38, a trip: `+0xe04`); a monster in EN1 slots 60.. on the
-  // cell (`+0xf13`) also refuses it (not modelled: walks remove monsters).
-  enter(_from, to, cell) {
+  // gate (message 38, a trip: `+0xe04`). A monster standing in the party's
+  // own cell (`+0xf13`, `ishar3Occupancy`) holds one side of it, like
+  // Ishar 2's `+0xc8b`; the party check (`+0xdc2`) is not modelled.
+  enter(from, to, cell, occupied) {
     const v = cell(to.region, to.row, to.col);
-    return v < 0 && v !== -2 ? null : to;
+    if (v < 0 && v !== -2) return null;
+    // GERDEP +0xe93: in the forest (regions 5/6) a monster on the target refuses it
+    if ((from.region === 5 || from.region === 6) && occupied?.(to.region, to.row, to.col)) return null;
+    // GERDEP +0xf13: a monster in the party's own cell holds the side its type names
+    const dir = to.col === from.col - 1 ? 1 : to.row === from.row + 1 ? 2 : to.col === from.col + 1 ? -1 : -2;
+    return occupied?.(from.region, from.row, from.col, dir) ? null : to;
   },
   stepFrom(st, dir) {
     let { row, col } = st;

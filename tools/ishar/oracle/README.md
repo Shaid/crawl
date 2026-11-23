@@ -77,6 +77,9 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
   at `0x14ae`);
 - `derefpoke OFF IDX VAL` — writes byte IDX (decimal) of such an array
   (for example, a gate value 100 into Ishar 3's buffer B to drive a trip);
+- `absdump ADDR N NAME` — N bytes of engine memory at an absolute address
+  (a script's `org` from the display list), e.g. to compare a loaded
+  script with crawl's unpack;
 - `send ENTRY V1 [V2 ...]` — queues a message for the entity at `atent`
   offset ENTRY (0 = MAIN), the same queue write the engine's `csend` makes.
   `captureTrip(game, [14, selector], statePath)` uses it to drive an
@@ -157,3 +160,8 @@ Walk from the saved state in short legs with `legCommands: ['pokew 2d5c
 Jon's Island (cold, `+0x229`/`+0x32e`) and the dungeon monsters attack, so
 an unpoked party dies within a dozen steps (LOSTGAME, then the game reloads
 at CONT1 (27,47)).
+
+Ishar 3 trips: `captureTrip('ishar3', [38], state, 600, { commands:
+['poke 3b33 8'] })` sends GERDEP's gate message with the location poked
+(8 = the jungle, 6 = the mountains, 13 = the forest; MAIN `+0x41ed` picks
+the destination from region and location). Walk from the result in one leg.

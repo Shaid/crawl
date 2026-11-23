@@ -23,6 +23,7 @@ import {
   ishar1MonsterTableFromDumps,
   ishar1Occupancy,
   ishar2Occupancy,
+  ishar3Occupancy,
   isharContOf,
 } from '../../shared/ishar-scene.ts';
 import type { OracleFrame, OracleGame, OraclePose, OracleScreen } from './alis-oracle.ts';
@@ -401,13 +402,18 @@ export function stepGlobals(game: OracleGame, mem: Readonly<Record<string, Uint8
   return out;
 }
 
-/** GERDEP's monster occupancy from a walk step's `stepMemdumps` (Ishar 1 and 2). */
+/** GERDEP's monster occupancy from a walk step's `stepMemdumps` (all three titles). */
 export function stepOccupancy(game: OracleGame, mem: Readonly<Record<string, Uint8Array>> | undefined): IsharOccupancy | undefined {
   if (!mem) return undefined;
   if (game === 'ishar2') {
     // EN1 arrays as dumped (`ent<addr>`), and the party's zone
     const zone = mem.zone?.[0];
     return zone === undefined ? undefined : ishar2Occupancy((addr) => mem[`ent${addr.toString(16)}`], s8(zone));
+  }
+  if (game === 'ishar3') {
+    // the location 0x3b33 is dumped as `zone`
+    const loc = mem.zone?.[0];
+    return loc === undefined ? undefined : ishar3Occupancy((addr) => mem[`ent${addr.toString(16)}`], s8(loc));
   }
   if (game !== 'ishar') return undefined;
   const t = ishar1MonsterTableFromDumps(mem);
