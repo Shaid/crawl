@@ -8764,7 +8764,7 @@ Offset  Size  Description
 0x00    2     gfxNumber (also determines hardcoded weapon stats)
 0x02    2     name reference — see below (0 = unnamed)
 0x04    1     position on square (N=1, E=2, S=4, W=8; NE=3, SE=6, NW=9, SW=0xC)
-              AND class usage (+1 Fighter, +2 Cleric, +4 Druid, +8 Magic User)
+              AND class usage (+1 Fighter, +2 Cleric, +4 Magic User, +8 Druid; **Correction (2026-11-23):** the order of the last two was reversed here, the game tests `item.b4 & (1 << classIndex)` (class mask = low nibble of byte 4, placement position = high nibble) with Fighter 0, Cleric 1, Magic User 2, Druid 3, and Robes of the Elders / Wizard Blade carry 4, Robe of the Forest 8; see game-rules.md §8.9)
 0x05    1     itemType (defines the remaining bytes' layout)
 0x06    1     position in container (0–7 upper row, 8–15 lower row)
 ```

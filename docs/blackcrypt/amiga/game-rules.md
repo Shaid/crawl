@@ -6,14 +6,15 @@ Evidence grades: **harness** = diffed against the game's real 68k routine run in
 
 Companion data: `game-rules-spells.json` (60-spell table, machine readable), `game-rules-world.json` (field maps, vitals constants, item-effect tables). Exported by `buildAssets`: `public/assets/blackcrypt/amiga/data/rules-tables.json` (see §6).
 
-## 2026-11-23 status summary
+## 2026-11-23 status summary (pass 2 updates in §8 and §9)
 
 | Area | Done | Open |
 |---|---|---|
-| 1 Character state | record field map (§1.1), new-game init, class templates, level-up + XP thresholds (harness), stat tables | chargen point-allocation caps, stat-slot names, class numbering vs item class mask |
-| 2 Combat | player melee to-hit/damage (harness), weapon table + monster immunities (harness, 256x256), monster death XP, party damage, monster-vs-party melee hit/damage, monster AI = bytecode VM (dispatcher traced), tick/event model | AI script decode (table located, byte layout unresolved), monster speed -> delay, ranged attacks, tick wall-clock length |
-| 3 Spells | model (memorised charges, no mana), all 60 spells, memorising/recharge, monster casts (appendix A) | see appendix A.6 |
-| 4 World | vitals, resting, traps, locks, no random encounters, no shops, weight/AC/light (appendix B) | see appendix B.open |
+| 1 Character state | record field map (§1.1), new-game init, class templates, level-up + XP thresholds (harness), stat tables; **stat names STR/INT/WIS/DEX/CON and record slots, creation caps (stat <= 20, pool 25), class numbering and item class mask bits (§8.9)** | none blocking |
+| 2 Combat | player melee (harness), weapon table + monster immunities (harness); **monster melee, target selection, XP award, disease/poison attacks, tick vitals (all harness, §8)**; **behaviour VM decoded: layout, 26 opcodes, all 12 scripts, pointer-table relocation fix (§8.3, harness)**; AC semantics (§8.8) | monster pathfinder `+0x866C` and stacking, ranged branch formulas as harness, possession / stone, wall-clock tick length (h) |
+| 3 Spells | model, all 60 spells, memorising / recharge, monster casts (appendix A) | A.6 items 3-6: ray range/path, event 0x25 users |
+| 4 World | vitals, resting, traps, locks, no random encounters, no shops, weight / AC / light (appendix B); **vitals cadences corrected (§8.6)** | counter `+0x89`, item effects 0x8D-0x90 names, party-click whitelist |
+| 5 Remake spec | §9: clock, characters, player and monster attacks, damage, death, XP, vitals, spells, loot, with grades | §9.9 |
 
 ## 1. Character state
 
@@ -46,7 +47,7 @@ The WHDLoad-trainer layout in `data-structure.md` is partly wrong (+0x52 is not 
 | +0xA0 | l | experience points | code+harness |
 | +0xA4 | l | carried weight (sum of item weights, init: sum of the 5 start items' +8) | code bcdfp +0x934..+0x97C |
 
-Stat slot roles (code): +0x64 melee damage bonus table T1; +0x65/+0x66 spell stat (clerics/druids use +0x65, others +0x66 per spells agent); +0x67 level-up HP bonus (T1) and disease resistance; +0x68 base armour and melee attack delay (T3) and pit-fall damage. **Names (STR/INT/WIS/CON/DEX) are inferred only**: +0x64=STR, +0x67=CON, +0x68=DEX fit the role; +0x65/+0x66 WIS/INT unconfirmed.
+Stat slot roles (code): +0x64 melee damage bonus table T1; +0x65/+0x66 spell stat (clerics/druids use +0x65, others +0x66 per spells agent); +0x67 level-up HP bonus (T1) and disease resistance; +0x68 base armour and melee attack delay (T3) and pit-fall damage. **Names confirmed (2026-11-23, chargen panel labels, §8.9): +0x64 STR, +0x65 WIS, +0x66 INT, +0x67 CON, +0x68 DEX.**
 
 ### 1.2 Tables (S_2, 31 words, index = stat value 0..30; harness-checked values in vectors.json, exported in rules-tables.json)
 * **T1** `S_2+0x2E4` stat bonus: -7,-6,-5,-4,-3,-3,-2,-2,-1,-1,0,0,0,0,0,0,1,1,2,3,4,4,5,5,6,7,7,7,7,7,7.
@@ -63,7 +64,7 @@ Stat slot roles (code): +0x64 melee damage bonus table T1; +0x65/+0x66 spell sta
 | MAGIC USER | 8, 14, 6, 12, 10 | 18 |
 | DRUID | 6, 8, 12, 10, 14 | 27 |
 
-The party is the fixed four classes; creation edits stats (25 spare points), names and portraits. **Open:** point-allocation upper cap and the per-click rule (bcdfp LAB_0080 region, +0x4F0..). Starting kit: 20 items = 5 per class (`bcdfp` DATA 0x585C, see data-structure.md).
+The party is the fixed four classes; creation edits stats (25 spare points), names and portraits. Point allocation: each stat in [class minimum, 20], pool 25 (§8.9). Starting kit: 20 items = 5 per class (`bcdfp` DATA 0x585C, see data-structure.md).
 
 New-game init (code, bcdfp +0x22A..+0x9DA): level 1, HP/max 20, XP 0, food=water 5000, energy 10000, armour +0x62=+0x63 = table[+0x68]+6+2, weight = sum of starting items.
 
@@ -77,7 +78,7 @@ New-game init (code, bcdfp +0x22A..+0x9DA): level 1, HP/max 20, XP 0, food=water
 ## 2. Combat
 
 ### 2.1 Time model (code)
-Real-time, not turn-based. Tick counter long at A4+0x1750, incremented once per call of the tick handler `S_1 +0x8B2`. Timed things are a sorted list of 12-byte slots at A4+0x1036 (150 slots, free list head A4+0x173E, next A4+0x103F+12*i), created by **ScheduleEvent +0x5EA** `(type, dueTick, a1, a2, a3, a4)`; the handler dispatches due events by type: 0x01 / 0x05 monster act (a1,a2 = x,y), 0x0A/0x0B misc, 0x14/0x15 weapon cooldown ready (hand), 0x16 pain/flash, 0x1E AC buff expiry (900 or 1800 ticks), 0x1F strength buff expiry (1800), 0x20 compass (3600), 0x21 wizard sight (3600), 0x22 create-wall expiry, 0x23 detect-trap (D4*360), 0x24 haste (D4*120), 0x25, 0x28/0x29. **Open:** wall-clock length of one tick (find the caller cadence of +0x8B2; all durations scale with it).
+Real-time, not turn-based. Tick counter long at A4+0x1750, incremented once per call of the tick handler `S_1 +0x8B2`. Timed things are a sorted list of 12-byte slots at A4+0x1036 (150 slots, free list head A4+0x173E, next A4+0x103F+12*i), created by **ScheduleEvent +0x5EA** `(type, dueTick, a1, a2, a3, a4)`; the handler dispatches due events by type: 0x01 / 0x05 monster act (a1,a2 = x,y), 0x0A/0x0B misc, 0x14/0x15 weapon cooldown ready (hand), 0x16 pain/flash, 0x1E AC buff expiry (900 or 1800 ticks), 0x1F strength buff expiry (1800), 0x20 compass (3600), 0x21 wizard sight (3600), 0x22 create-wall expiry, 0x23 detect-trap (D4*360), 0x24 haste (D4*120), 0x25, 0x28/0x29. **Open:** wall-clock length of one tick: see §8.7 (hyp 0.1 s). > **Correction (2026-11-23):** the per-tick list that follows is superseded by §8.6.
 
 Per-tick periodic effects in +0x8B2 (code): every 16 ticks: if flag +0x6D (regen) is set and HP<max: +1 HP. Resting (A4+0x1746 != 0, sleeping chars only): every 8 ticks HP += level*2 (level if the square has flag 0x80 and +0x86 is set), clamped to max. Every 64 ticks: if food (+0x52) or water (+0x54) < 2000 the char takes `2 - value/2000` = 2 damage via DamageCharacter (kind 1). Every 512 ticks: poison (+0x9A) deals its value as damage; every 256: disease (+0x97) deals rand16(5)+1... (**code**; exact byte mapping of the two status bytes from the spells/world agents: +0x9A poison, +0x97 disease; the tick code reads +0x97/+0x9A at these cadences and I did not re-verify which pairs with which cadence: **hyp** on the pairing). Food/energy loss per action is in appendix B (code).
 
@@ -100,7 +101,8 @@ Inputs: attacker level L, stat s64, to-hit bonus b6c, weapon (gfx, item +0xC "ex
 * DamageCharacter (**code**, +0x17686): if `dmg < HP`: HP -= dmg, records last damage, schedules events; otherwise "DIED": HP=0, items on the char (pack and equipment) drop to the square, party formation updated, party gone if none left. No armour is applied inside this routine (armour acts earlier through +0x69 rolls). Energy -3/food -2/water -3 per damage event.
 * Special attacks `+0x98A8`: type 0xC possession (only monster 0x80B1-0x80C...), 0xD stone, 0xE disease, 0xF poison; each gated by a protection byte and `rand8(100)`; poison/disease add to +0x9A/+0x97.
 * Monster spells: appendix A.4.
-* **Monster behaviour is a bytecode VM** (`S_1 +0xAAFC`, called by events 1/5): 6-byte instructions `op,a,w1,w2` per behaviour type; behaviour = record word +0x0E (movement type), script pointers table at `S_2+0x114A` (4 B each, 12 entries; entries 0,4,7,8 share a script). Opcodes seen in the dispatcher: 2,3,4 step/attack, 5 wait w1 ticks, 6 wait speed&0x7F, 9 sidestep, 0xA, 0xB attack (+0x940C), 0xD regenerate (HP += rand + w/2, capped), 0x10 set / 0x12 add / 0x13 sub per-monster variable, 0x16/0x19 (adjacent)/0x1C/0x1D conditions, 0x1E (+0x9626), 0x21, 0x22 transform (set word0, counter 0x14), 0x24 set HP, 0x27 message, 0x28/0x29 state slot write, 0x2B wait 2*speed, 0xFF counter/flee-turn. **Open:** the script byte layout does not decode cleanly from the S_2 image (the pointer table resolves, scripts show the opcode at byte +2 of each 6-byte cell, entries 0-3 do not match); smallest next step: dump the script region from a post-init memory state, or trace the initialiser that builds it.
+* > **Correction (2026-11-23):** the monster melee rule in the next bullet (`rand8(100) >= char[+0x69]`) is the spell rule; melee is the armour threshold in §8.4 (harness).
+* **Monster behaviour is a bytecode VM** (decoded in full: §8.3) (`S_1 +0xAAFC`, called by events 1/5): 6-byte instructions `op,a,w1,w2` per behaviour type; behaviour = record word +0x0E (movement type), script pointers table at `S_2+0x114A` (4 B each, 12 entries; entries 0,4,7,8 share a script). Opcodes seen in the dispatcher: 2,3,4 step/attack, 5 wait w1 ticks, 6 wait speed&0x7F, 9 sidestep, 0xA, 0xB attack (+0x940C), 0xD regenerate (HP += rand + w/2, capped), 0x10 set / 0x12 add / 0x13 sub per-monster variable, 0x16/0x19 (adjacent)/0x1C/0x1D conditions, 0x1E (+0x9626), 0x21, 0x22 transform (set word0, counter 0x14), 0x24 set HP, 0x27 message, 0x28/0x29 state slot write, 0x2B wait 2*speed, 0xFF counter/flee-turn. **Solved in §8.3:** the script pointers in the extracted image are 0x80 low; cells are `op, a, w1, w2`.
 
 ### 2.4 Monster death (code, S_1 +0x7ED0)
 When `HP < 1`: the monster's carried item chain drops to the square, effects/events are cancelled (+0xB25A), the square is redrawn, and **XP is awarded to each living character** (§1.4). Special-type monsters have custom handling (types 0x80B1.. keep HP at 49 / 1 until a flag; 0xC5-type is a story boss: sets A4+0x1A1E).
@@ -113,18 +115,186 @@ When `HP < 1`: the monster's carried item chain drops to the square, effects/eve
 S_1 holds a manual-question table (~+0x1B1E6..+0x1B4F9). It was neither read for answers nor recorded.
 
 ## 6. Tooling and tables
-* `tools/blackcrypt/rules_oracle/oracle.c` (musashi; `build.sh`; builds on `tools/bcdft_decompress/musashi`): loads S_1 at 0x80058 and S_2 at 0xA8BF0, A4 = S_2+0x7FFE, patches every external `jsr abs.l` target to `RTS` (UI/blitter/text) except the real helpers, and runs single routines to a sentinel return. Modes: `rng`, `levelup`, `weapon`, `melee`. `make_vectors.py <s1> <s2>` regenerates `vectors.json` (116 KB, no game data beyond small rule constants).
-* Parity: RNG 72 sequences x 24 draws exact; level-up 240/240; weapon lookup 65,536/65,536 type x gfx (fixture stores the base table and the 6 deviating monster types plus the matrix sha1); bare-hand 16/16; melee 500/500. Null control (perturbed base) disagrees on >20 cases.
+* `tools/blackcrypt/rules_oracle/oracle.c` (musashi; `build.sh`; builds on `tools/bcdft_decompress/musashi`): loads S_1 at 0x80058 and S_2 at 0xA8BF0, A4 = S_2+0x7FFE, patches every external `jsr abs.l` target to `RTS` (UI/blitter/text) except the real helpers, and runs single routines to a sentinel return. Modes: `rng`, `levelup`, `weapon`, `melee`, and (pass 2) `mmelee`, `xp`, `ai`, `tick`, `spec`; `TRACE=1` prints every executed S_1 offset. `make_vectors.py <s1> <s2>` regenerates `vectors.json` (116 KB, no game data beyond small rule constants).
+* Parity: RNG 72 sequences x 24 draws exact; level-up 240/240; weapon lookup 65,536/65,536 type x gfx (fixture stores the base table and the 6 deviating monster types plus the matrix sha1); bare-hand 16/16; melee 500/500. Null control (perturbed base) disagrees on >20 cases. Pass 2 parity: see the table in §8.
 * `tools/blackcrypt/rules-tables.ts` (wired into `tools/shared/game-config.ts` `buildAssets`) writes `rules-tables.json`: T1/T2/T3, XP thresholds, new-character defaults, class templates, 60-spell table (name, recharge, level, nextInPage), weapon base table decoded statically from the dispatch chain (test confirms it equals the harness table). Needs `build/cache/blackcrypt/bcdft_*.bin` (run `tools/bcdft_decompress/build.sh run`).
 * The older `classes.json` export (stat labels str/dex/con/int/wis/cha) is wrong; `rules-tables.json` supersedes it.
 
-## 7. Smallest next steps (ranked)
-1. Decode the monster AI scripts (§2.3 open) and monster attack/speed fields; harness the monster-vs-party melee (+0x9D28).
-2. Wall-clock tick length (all durations/regen).
-3. XP award args in +0x7ED0; verify with a harness case.
-4. Chargen allocation rule; class numbering (item class mask bit order conflicts: data-structure says +1 Fighter,+2 Cleric,+4 Druid,+8 MU; code `1<<classIdx` with MU=2 would make bit 4 = MU).
-5. Resolve AC (+0x62) semantics vs +0x69.
-6. Tick pairing of poison/disease cadences; RNG seed.
+## 7. Smallest next steps (ranked, after pass 2)
+1. Wall-clock tick length: find the reload of the countdown byte `+0x150(a5)` (an interrupt server in the `BlackCrypt` executable) or time a captured session (§8.7).
+2. Harness the monster pathfinder `+0x866C` / step `+0x9116` on a synthetic map, then the spell-branch of `+0x9D28` and `+0x940C` / `+0x9626`.
+3. Harness the player-side spell routines (heals, cures, buffs: `+0x5070`, `+0x52D6`, `+0x54E2`, `+0x5710`) and `CastSpellRay +0x6D9A` ranges (`+0x435C`).
+4. Name item effects 0x8D-0x90 from the dispatch table at `+0x12FEA`; counter `+0x89`; who switches a monster to movement type 10.
+5. Possession / stone (`+0x98A8` bits 12 / 13) as harness cases.
+
+
+## 8. Pass 2 (2026-11-23): monster AI, harnessed combat, ticks, armour, creation
+
+Everything here was derived from the game's own 68k code. New harness modes in `tools/blackcrypt/rules_oracle/oracle.c` run the **real** routines (`mmelee` = S_1 +0x9D28, `xp` = +0x7ED0, `ai` = +0xAAFC, `tick` = +0x8B2, `spec` = +0x98A8) with a call-hook facility (a routine reached by PC is skipped, D0 is forced, its stack arguments are logged), and TS ports live in `tools/blackcrypt/rules-monster.ts` (tests `rules-monster.test.ts`, vectors in `vectors.json`, each with a null control). C-runtime helpers above S_1 +0x28000 (32-bit mul/div) stay real; every other absolute `jsr` target inside S_1 is still stubbed to `RTS`.
+
+| Rule | Routine | Parity (cases) | Null control |
+|---|---|---|---|
+| Monster melee on the party (target pick, gates, to-hit, damage) | +0x9D28 melee path, +0x96E8, +0x97F0 | **2,500 / 2,500** (return, damage list, flags, RNG state) | AC +4 disagrees on >20 |
+| Monster-death XP award | +0x7ED0 loop at +0x819C | **400 / 400** (1,600 character slots) | +1 base disagrees on >300 |
+| Behaviour VM (state, call sequence, scheduled event, RNG state) | +0xAAFC | **1,500 / 1,500**; every one of the 26 opcodes executed | +1 speed disagrees on >100 |
+| Tick handler vitals (hp, light/hold counters, call sequence) | +0x8B2 | **1,500 / 1,500** | tick shifted by 64 disagrees on >200 |
+| Monster disease / poison attacks | +0x98A8 bits 14, 15 | **1,500 / 1,500** | zeroed CON table disagrees on >10 |
+
+### 8.1 Monster record, as loaded (object record 0x14 bytes at A4-0x6E7A + 0x14*id; **code**, fields confirmed by the harness where the VM or melee reads them)
+Primary record P (id) and secondary record S (index = P word +0x10):
+
+| Rec | Off | Meaning |
+|---|---|---|
+| P | w+0 | gfx (0x80B3.. monster, 0x80B7 / 0x80B8 / 0x80B9 / 0x80BE / 0x80C5 special) |
+| P | b+1 | monster type byte (weapon immunity rules, §2.2) |
+| P | b+2 | hit byte (XP random term; also the player to-hit adjustment) |
+| P | b+3 | bits 0-1 = **morale index** (flee threshold 0 / 10 / 20 / 30 % of max HP), bits 2-3 = **speed index** (0..3: act-gate and pathfinder depth), bit 4 = can pass doors, bit 5 = do not turn to face the party, bit 7 = flying |
+| P | b+5 | move speed: wait = `b5 & 0x7F` ticks (Rock Eye 0x84 = 4 ticks, Two Head 0x85 = 5) |
+| P | b+6 | attack methods: bit 0 = can open doors, bit 1 = melee, bit 2 = ranged / spells |
+| P | b+7 | magic charges (decremented by heals, spells) |
+| P | w+8 / w+0xA / w+0xC / w+0xE / w+0x10 | current HP / carried item chain head / spell-set bit mask / movement type = script index (0..11) / secondary index |
+| S | w+0, w+2 | last-seen party position |
+| S | w+4 | VM program counter (cell index, 0 = header) |
+| S | w+6 / w+8 | XP base / **maximum HP** (used for XP, damage scaling and morale) |
+| S | b+0xA / 0xB / 0xC / 0xD / 0xE | attack-animation frame / position on square (0-3 corner, 4 centre) / facing / turn state (4 = none) / manhattan distance to the party |
+| S | b+0xF.. | VM variables var[0..7]; **b+0x11 = var[2] (saved movement type) and b+0x12 = var[3] (flee counter) and b+0x13 = var[4] ("event pending")** alias them |
+
+### 8.2 Monster activation
+* A monster act is a scheduled event: **type 1** `(due, x, y, id)` calls the behaviour VM `+0xAAFC(id, x, y)` (called from the tick handler dispatch at +0x1314). **Type 5** is only the attack-animation frame stepper (`+0xB486`, every 2 ticks, cosmetic).
+* The VM runs cells from `pc` until an op sets the delay `d5` (ops 5, 6, 9 without a free square, 0x2B, 0xFF). Then `pc` is stored and, unless the last act result was 2 (monster removed / blocked: `var[4] := 0`, no reschedule; for gfx 0x80B7/0x80B8 a result of 2 becomes 0 and `S.b0E := 10`), event 1 is re-scheduled at `tick + d5`. A result of 1 (interrupted) halves the delay: `d5 := d5/2 + 1`. (**harness**)
+
+### 8.3 The behaviour VM (**harness**: `runBehaviour`, 1,500 cases)
+Cells are 6 bytes: `op:1, a:1, w1:2, w2:2` at S_2 +0xE92..+0x1149 (116 cells; the block ends exactly at the pointer table S_2 +0x114A). Each script is a contiguous run of cells; `pc` indexes from the script's first (header) cell; jump targets (`w2`) are script-relative. **Pass 1's failure to decode this was a relocation artefact: the 12 script pointers in the extracted S_2 image are 0x80 bytes low** (with +0x80 each lands on a header cell and the last script ends on the table). Header cells (`0x14` / `0x15`) are rewritten at run time by MARK ops; cell 0 is never executed (pc starts at 1).
+
+| Op | Name | Semantics |
+|---|---|---|
+| 02 / 03 / 04 | ACT_MELEE / ACT_RANGED / ACT_ANY | `w1 == 1`: pursue one step (`+0xA664`); otherwise act in place (`+0x9D28`, op = permitted modes: 2 melee, 3 ranged, 4 either). result = return value; pc++ |
+| 05 / 06 / 2B | WAIT / WAIT_SPEED / WAIT_DOUBLE | delay = `w1` / `b5 & 0x7F` / `2*(b5 & 0x7F)` ticks |
+| 09 | STEP_RANDOM | one step to a random free neighbour (`+0x8D7E` list); with no free square the delay is `b5 & 0x7F` and **pc stays** |
+| 0A | TELEPORT | move to square (x = `a`, y = `w1`); `S.b0E := |partyX - y| + |partyY - y|` (the code subtracts y from both axes) |
+| 0B | ACT_SPELL | `+0x940C` ranged spell cast (result code) |
+| 0D | HEAL | if charges (`P.b7`) and `P.wC & 3` and `S.maxHp - 5 > P.hp`: `n = (wC & 2) ? 20 : 10`, `hp += rand16(n) + n/2` (cap max), `b7--`; pc++ either way |
+| 0E | GOTO | pc = w2 |
+| 10 / 12 / 13 | VAR_SET / VAR_ADD / VAR_SUB | `var[a] = / += / -= w1` (byte wrap) |
+| 16 | IF_HP_OK | goto `w2` when `hp*100/maxHp >= (b3 & 3)*10` (signed truncating divide), else fall through (= the flee / heal branch) |
+| 19 | IF_NOT_ADJACENT | goto `w2` unless `|partyX-x| + |partyY-y| == 1` |
+| 1C / 1D | IF_DIST / IF_VAR | compare `S.b0E` (distance) / `var[a]` with `thr = w1 & 0x1FFF`: bit 15 `>`, bit 14 `==`, bit 13 `<` (any set bit that holds); goto `w2` if true |
+| 1E | ACT_SPECIAL | `+0x9626(a)` special act (result code); pc++ |
+| 21 | STEAL | `+0xA906`: the monster takes the item in the target's hand slot +0x1A (else +0x1C), unless type 6 / 0x2B / 0x26, and holds it (carried chain) |
+| 22 | TRANSFORM | `P.gfx = w1; P.b7 = 20` |
+| 24 | SET_HP | `S.maxHp = P.hp = w1` |
+| 27 | MESSAGE | print string table entry `w1` |
+| 28 / 29 | MARK_A / MARK_B | write the header cell: op byte = 0x14 / 0x15 (and `w2` for 29); the monster-death code copies a 0x15 header's word to the dying object (state hand-over) |
+| FF | FLEE_TICK | `var[3]--`; if nonzero call `+0x866C`, and (when `A4+0x1E8F != 3`) `pc = 1`, `P.movementType = var[2]`, `var[2] = var[3] = 0`, delay 1; at zero `var[2] = 0`, result 2 |
+
+**Scripts by movement type** (decoded; JSON `monsterAi.scripts` in `rules-tables.json`):
+
+| Type | Script (pc: op) | Reading |
+|---|---|---|
+| 0, 4, 7, 8 | 1: ACT_ANY(pursue) 2: WAIT_SPEED 3: GOTO 1 | relentless chaser; attacks when adjacent |
+| 1 | 1: VAR0=0 2: ACT_MELEE(in place) 3: WAIT_SPEED 4: GOTO 2 | stationary guard, swings at the adjacent square |
+| 2 | 1: STEP_RANDOM 2: WAIT 3: ACT_ANY(pursue) 4: WAIT 5: GOTO 1 | wanderer that pursues |
+| 3 (thief) | wander until adjacent; STEAL; chase 5 times; TELEPORT to (60, 7); come back when the party is far; ... | steals a hand item then teleports to a hideout |
+| 5 (possessor) | chase / random-step loops on distance; on var1 > 0xFE or var0 > 0 transforms 0x80B7 -> 0x80B8 (200 / 150 HP); ACT_SPECIAL | the possession boss behaviour (§8.6) |
+| 6 (caster) | 1: pursue 2: wait 3: IF_HP_OK -> 1; 4: ACT_SPELL 5: wait 6: IF_NOT_ADJACENT -> 4; 7: HEAL 8: wait 9: GOTO 1 | pursues while healthy; below its morale threshold casts and heals |
+| 9 | melee x3 then ranged, each pursuing, with waits | multi-attacker |
+| 10 | ACT_SPECIAL, WAIT_DOUBLE, FLEE_TICK, loop | timed special / fleeing state (who switches a monster to type 10 is **open**) |
+| 11 ("thank you") | init vars; ACT_SPECIAL; message 1 when the party is adjacent; pursue loop | friendly NPC behaviour |
+
+### 8.4 Monster act, pursuit and melee (`+0xA664`, `+0x9D28`; melee path **harness**, rest **code**)
+* **Gates** (every act attempt, `+0x9D28`; melee-only monsters shown, spell branch in A.4): direction `d2` from monster to party (dx, dy as party minus monster; dominant axis wins, ties = none; none returns 0; `dx >= 4` or `dy >= 4` returns 2). `melee = (b6 bit1) && manhattan == 1 && op in {2,4}`; `magic = (b6 bit2) && aligned && op in {3,4,0xC}`. Unless gfx 0x80B9 on its first act: **gate 1** `rand byte < 255/(speedIdx+1)` (minus 30 for gfx 0x80B7/0x80B8) returns 0 (no act); **gate 2** with `n = melee + magic`: `n == 0` returns 0, else `rand byte < 255/(n+1)` (minus 30 for 0x80B8) returns 0. With both modes available a further `rand byte <= 127` keeps the spell, otherwise melee.
+* **Melee** (**harness**): `m = max(1, S.maxHp / 10)`; target from `+0x97F0`; event 5 is scheduled; `thr = clamp(AC + 8 - ((m-1) >> 1) - speedIdx, 2, 20)` with AC = target byte +0x62; **hit iff `rand8(20) + 1 >= thr`**; `dmg = rand16(4*m) + m`; DamageCharacter(target, dmg, kind 4, flag 1). Draw order: gate 1, gate 2, (centre-square target pick `rand16(2)`), `rand8(20)`, `rand16(4m)`.
+* **Target selection** (**harness**): `+0x96E8` takes the party formation `A4+0x1E74[slot] = char`, facing `A4+0x1744`: slot `(dir+4-facing+3)&3` (fallback `+1`) and slot `(dir+4-facing+2)&3` (fallback `+3`), only living chars (hp > 0). `+0x97F0`: a corner monster (S.b0B 0..3) uses the first target when `dir == pos`, the second when `(pos+3)&3 == dir`, else none; a centre monster (pos 4) uses whichever exists, or `rand16(2)` between both.
+* **Special attacks** (**harness** for bits 14 / 15): for spell-set bits 12..15 the target is picked, then `rand8(100) < char.b69` resists (`b69` is the resistance percentage, higher = safer), and with the magic-shield counter `+0x83` set a second `rand8(100) > 50` resists. **Bit 15 poison**: unless `+0x8B`, `+0x9A += 1`, damage `rand16(10)+1` kind 5. **Bit 14 disease**: unless `+0x88`, infects iff `rand16(20) + 20 - T1[CON] > 30`, then `+0x97 += 1`, damage `rand16(10)+1` kind 6. **Bit 12 possession** (gfx 0x80B7 only, target needs `+0x8F == 0`, the two candidate targets are swapped when `rand16(100) > 50`) and **bit 13 flesh-to-stone** (needs `+0x87 == 0`) both kill the target (DamageCharacter with its full HP, flag 0); possession turns the monster into 0x80B8 with 150 HP, stone creates a statue object (type 0x2F) remembering the character. (**code**)
+* **Pursuit** (**code**): `+0xA664` turns the monster toward the party (turn state `S.b0D`), calls the pathfinder `+0x866C` (search depth `3 * (speedIdx + 1)` squares; result `A4+0x1E8F` 1 = open, 2 = blocked, 3 = no path; `A4+0x1E91` = distance), then either attacks (adjacent) or steps (`+0x9116` moves the monster object, redraws). **Door passing** (`+0x8532`, the square-enter test; returns 0 free, 1 blocked, 2 open-it): objects on the square are walked by structure type: door frame (0x11) blocks unless `b3 bit 4`, a locked door (state 2) always blocks, a closed door needs `b6 bit 0` (can open doors, result 2 = open it); pillar (0x17) and illusion wall (0x10) block while solid; pits (0x14): a floor pit blocks all, a ceiling pit blocks flyers; fountains / panels (0x1F) and statues (0x2F) always block. Items and other monsters do not block here.
+* **Morale / flee**: only through script ops 0x16 (`IF_HP_OK`) and FLEE_TICK; the morale index (b3 bits 0-1) gives the 0 / 10 / 20 / 30 % threshold. No generic "flee" movement exists beyond the scripts.
+* **Ranged** (**code**, A.4): spell-set bits 2..6 fire bolts and 7..10 ice bolts, `dmg = rand16(d4) + d5 + m` against up to two targets, skipped by `+0x83` (51 % pass) / `+0x82+idx` (resisting) / `rand8(100) < b69`; bit 11 holds the party (`A4+0x1756 += 18`); the monster cast gate is gate 1/2 above plus a uniform choice among set bits (max bit 11 beyond distance 1).
+
+### 8.5 Monster death and XP (**harness**, `awardXp`)
+When `P.hp < 1` the carried chain drops, effects are cancelled and **every living character (hp > 0) independently gets `xp += rand16(S.maxHp) + rand16(P.b2) + S.w6`**, in slot order (two draws each, first `rand16(S.maxHp)`), followed by the level-up check (§1.4, harness). gfx 0x80C5 with hp < 50 is held at 49 and sets `A4+0x1A1E` (the story-boss stage machine, `+0x79C2` / `+0x7B2E` / `+0x7C40`).
+
+### 8.6 Vitals tick (**harness**, `vitalsTick`; the periodic part of `+0x8B2`)
+The tick counter `t` (A4+0x1750) is incremented first; the light timer `A4+0x1754` and the hold timer `A4+0x1756` each lose 1 while above 0. **Everything below runs only when `t & 15 == 0`, or when resting and `t & 7 == 0`** (so the resting food/water cadence `t & 7 == 5` in the code is unreachable):
+
+| Cadence | Effect |
+|---|---|
+| `t & 15 == 0` | monster-generator scan `+0xB614` (§Appendix B e) |
+| every pass, per living character | `AdjustVitals(char, energy, food -1, water -1)` where energy = +125 for a resting character in the resting state (`A4+0x1A07[slot] == 1`), else 0 |
+| resting, per living character in state 1 | HP += `level*2` (halved when the square flag bit 31 is set and `+0x86 == 0`), clamped to max |
+| per living character, flag `+0x6D` set, `t & 0x200 == 0`, hp < max | HP += 1 |
+| square flag bit 31 and `+0x86 == 0` | `rand16(5)+1` damage, kind 4 |
+| `t & 0x1FF == 0x100` (resting: `t & 0x1F == 0x10`) | each character with `+0x97 != 0`: damage = `+0x97`, kind 6 |
+| `t & 0xFF == 0x80` (resting: `t & 15 == 8`) | each character with `+0x9A != 0`: damage `rand16(+0x9A * 10) + 1`, kind 5 |
+| `t & 0x7F == 0x40` | food < 2000: damage 2, water < 2000: damage 2 (kind 4) |
+| `t & 63 == 32`, not resting | stat-enchanted pack items (effect word < 0x80, charges not 0 / 0xFF) lose a charge; at the last charge the enchantment is removed (**code**, not in the TS port) |
+
+Damage kinds (4 = physical / hunger, 5 = poison, 6 = disease) are passed to DamageCharacter unchanged. Spell recharge (`+0x10D2`) is outside the gate (every tick not on the gate path). **Corrections to pass 1:** hunger / thirst damage is every 128 ticks (not 64), poison every 256, disease every 512, and the pairing is +0x9A poison / +0x97 disease as pass 1 guessed.
+
+### 8.7 Time (**open**, evidence)
+One game tick = one call of the tick handler, which the main loop runs when the input library's idle event (code 1, `+0x1FDB6`) is returned. The library's timer unit is a decisecond (`VBlankFrequency / 10` frames, `+0x1EFB4`; reload byte 10 at `+0x151(a5)`), but no code in `bcdft`, `bcdfp`, `bcdfq` or `BlackCrypt` loads the countdown byte `+0x150(a5)` with a positive value, so the cadence is set by something outside the overlays (an interrupt server). **Working assumption for the remake: 1 tick = 0.1 s (`TICK_MS = 100`, hyp)**; 0.2 s (10 vblanks at 50 Hz) is the alternative. Every duration below is in ticks so the constant is the only thing to change. Smallest next step: read the `BlackCrypt` executable's `AddIntServer` / `CIA` setup for the 0x150 reload, or time a captured session.
+
+### 8.8 Armour and the two defence bytes (**harness / code**)
+* **`+0x62` AC: higher is better.** The monster melee threshold is `AC + 8 - ...` (§8.4): each AC point lowers the monster's hit chance by 5 percentage points; base AC = `T1[DEX] + 6 (+2 at new game)`; worn armour adds its word +0xC low byte, SHIELD / PROTECTION add `n` for 1800 ticks. Minimum hit chance 5 % (threshold clamps at 20), maximum 95 % (clamps at 2).
+* **`+0x69` resistance percentage** is used only by spells and special attacks (`rand8(100) < b69` resists), never by melee. Event 0x25 (item routine `+0x78DA`) adds 75 (0x4B) to every living character for 200 ticks.
+
+### 8.9 Character creation (**code**; labels read from the chargen stat-panel bitmap)
+* Stat slots, creation order = template word order: **STR, INT, WIS, DEX, CON** stored to record bytes **+0x64, +0x66, +0x65, +0x68, +0x67**. The panel's sixth field is "POOL" (spare points, 25).
+* Allocation (bcdfp `+0x1996` raise, `+0x1A46` lower): a stat can be raised while it is below **20** and the pool is above 0 (pool -= 1); lowered while above its class minimum (pool += 1). Class minimums and starts are in §1.3.
+* **Class numbering is Fighter 0, Cleric 1, Magic User 2, Druid 3** (template order, record word +0). Item class mask = **low nibble of the loaded item record byte 4** (the high nibble is the placement position on the square: the four Fire Wands all have low nibble 0xF and high nibbles 1, 2, 4, 6), bits `1 << class`: **+1 Fighter, +2 Cleric, +4 Magic User, +8 Druid** (e.g. Robes of the Elders / Wizard Blade carry 4, Robe of the Forest 8, Plate Armor 3, Ogre Blade 1). *This reverses the `+4 Druid, +8 MU` in data-structure.md's item table.*
+* Names are limited to 12 characters (bcdfp `+0x1DB6`). Starting food / water / energy 5000 / 5000 / 10000 (§1.3).
+* **RNG**: the six-byte state starts as the constant `2D 14 CA 66 59 AF` (S_1 +0x26882) and is advanced by (the sum of the four bytes of `seconds + microseconds` from Intuition `CurrentTime`, mod 256) + 1 steps (S_1 +0xD390 -> +0x26888), once at program start. Remake: seed from any entropy source.
+
+### 8.10 Items and the small open items
+* Item use effects 0x80-0x90 (code, `+0x12FEA`): 0x80 light, 0x81 dispel, 0x82 pestilence ray, 0x83 fireball ray, 0x84 healing I, 0x85 stone fire ray, 0x86 healing II, 0x87 chant of orlin ray, 0x88 freeze ray, 0x89 quake ray, 0x8A sustenance (food / water to 5000), 0x8B raise dead, 0x8C boss-killer ray (magnitude 200, only gfx 0x80BE / 0x80C5-class targets, §A.5); **0x8D-0x90** call `+0x78DA` (+75 resistance to every living character for 200 ticks, event 0x25) and `+0x79C2` / `+0x7B2E` / `+0x7C40` (the Ram-boss stage machine on `A4+0x1A1E`, 1 -> 2 -> 3, spawns the stage-2 monster); which index calls which routine, and the item names, are **open** (smallest step: read the dispatch table at `+0x12FEA`).
+* **Ogre Blade "life force will slowly drain"**: gfx 140 (0x8C) appears in code only in the weapon-rule table (`+0xBF92`: triple damage against the 0xB2 / 0xBE bosses); the periodic block above has no per-weapon HP loss and the clue text (S_1 +0x1BA6F) is flavour (**negative evidence, code**).
+* **Mask of True Sight** (gfx 0xC0, the item at character offset +0x36): without it the weapon bonus against monster type 0xB1 is -10 (`+0xBFFE`, part of the **harness-verified** weapon matrix).
+* Counters `+0x89`, `+0x8D`, `+0x8E`: `+0x8D` / `+0x8E` are the ice / fire bolt resist flags (A.4); `+0x89` still **open** (no reader found in the tick, melee or special-attack paths).
+
+> **Correction (2026-11-23):** the class restriction line in Appendix B(g) ("class word 0 Fighter, 1 Cleric, 2 Druid, 3 MU") is wrong; see §8.9 (2 = Magic User, 3 = Druid). The "+0x65 = WIS, +0x66 = INT" hypothesis in A.1 is confirmed by the chargen labels (§8.9).
+
+> **Correction (2026-11-23):** monster poison / disease damage is `rand16(10)+1` (not `rand(5)+1` / `rand(6)+1` as written in Appendix B(c)), and disease infection needs `rand16(20)+20-T1[CON] > 30` (Appendix B(c) was right about the roll, wrong about the damage).
+
+> **Correction (2026-11-23):** §2.1's per-tick list is superseded by §8.6 (hunger every 128 ticks, the resting cadences, the whole block gated by `t & 15 == 0` or resting `t & 7 == 0`). Event types 1 and 5 are not the same handler: 1 is the behaviour VM, 5 the attack-animation stepper (§8.2).
+
+> **Correction (2026-11-23):** §2.3 said the monster melee hits iff `rand8(100) >= char[+0x69]`. That is the **spell / special-attack** rule. Melee uses the armour threshold (§8.4). §1.4's XP formula was missing the order of draws: two draws per living character (§8.5).
+
+## 9. Remake-ready combat spec (2026-11-23)
+
+Grades: **H** = harness-verified against the real routine, **C** = read from code, **h** = hypothesis, **O** = open. All times in ticks (§9.1); all random draws use the generator of §1.4 (`rand8(n)` = byte % n, `rand16(n)` = word % n, n = 0 gives 0). Per-spell numbers: `game-rules-spells.json` and Appendix A.3; tables: `rules-tables.json`.
+
+### 9.1 Clock
+`TICK_MS = 100` (h; §8.7). `tick` is a counter incremented at the start of every tick. Per tick, in order (C): increment; light and hold timers decrement; the periodic block of §9.6; spell recharge; then the due events of the event list (types 1 monster act, 5 animation, 0x14 / 0x15 weapon cooldown, 0x1E / 0x1F / 0x20-0x25 buff expiries). The party is real-time; nothing waits for the player.
+
+### 9.2 Characters (H for the formulas, C for the layout)
+* Four fixed characters, slot = class: Fighter, Cleric, Magic User, Druid. Stats STR / INT / WIS / DEX / CON (§8.9), each 1..30 (creation 20 max, items add), `T1[v]` = bonus table (`rules-tables.json`), `T3[v]` speed table.
+* HP: start 20 / 20, level-up `hp += rand16(9) + T1[CON] + 7` (cur and max) per level gained; **xp > 2^(level+7)** gains a level, repeated (**H**). Level cap none.
+* AC = `T1[DEX] + 6 + 2 + worn armour + buffs`; higher is better (**H**, §8.8). Resistance `+0x69` percent (spells only).
+* Food 5000 / water 5000 (max 5000), energy 10000; HUNGRY / THIRSTY below 2000, TIRED below 1000 (STR and DEX -1 while tired, C).
+
+### 9.3 Player attack (H, §2.2)
+`strB = T1[STR]` (arithmetic half when bare handed); `thr = clamp(7 - ((L-1)>>1) - strB - 2*toHitBonus + monster.b2, 2, 20)`; `roll = rand8(20) + weaponBonus + 1`; hit iff `roll >= thr` and the weapon is not immune; `dmg = max(1, rand16(sides) + base + strB + weaponBonus)`. Weapon table and the per-monster-type immunity / multiplier rules: §2.2 and `weaponBase` (H, 256 x 256). Cooldown event 0x14 / 0x15 after `max(5, T3[DEX] + weight/23)` ticks (halved + 1 under Haste, C). Cost per swing: energy -4, food -2, water -1 (C).
+
+### 9.4 Monster act (H)
+Event 1 `(x, y, id)`: run the VM (§8.3) from `S.pc` with the type's script (`monsterAi` in `rules-tables.json`); reschedule at `tick + delay` (delay from the wait ops, halved + 1 on result 1, none on result 2). Act gates, melee, target selection and damage exactly as §8.4 (H): in particular `m = max(1, S.maxHp/10)`, `hit iff rand8(20)+1 >= clamp(AC + 8 - ((m-1)>>1) - speedIdx, 2, 20)`, `dmg = rand16(4m) + m`. Specials (poison, disease): §8.4 (H for bits 14 / 15; C for possession, stone). Ranged bolts: A.4 (C). Movement / pathfinding / door rules: §8.4 (C; the pathfinder `+0x866C` itself and monster stacking on a square are O). Monsters do not pursue beyond `3*(speedIdx+1)` squares of path.
+
+### 9.5 Damage and death (C, `DamageCharacter +0x17686`)
+`DamageCharacter(char, dmg, kind, flag)`: if `dmg < hp` then `hp -= dmg`, last-damage display, per-hit vitals cost energy -3 / food -2 / water -3; else the character dies (`hp = 0`, pack and equipment drop to the square, formation updated, the game is over when none is left). No armour or resistance is applied inside. Kinds: 4 physical / hunger, 5 poison, 6 disease. Monster death: HP < 1 -> carried chain drops, effects cancelled, XP award (H, §8.5), story-boss rules for gfx 0x80C5 (C).
+
+### 9.6 Periodic block (H, §8.6)
+Implemented as `vitalsTick` in `rules-monster.ts`: food / water -1 each per 16 ticks (energy +125 resting), regen, resting heal, hazard squares, poison (256), disease (512), hunger (128). AdjustVitals clamps to [0, max] (C, §B.a).
+
+### 9.7 Spells (C; A.1-A.4)
+Five memorised slots per character, no mana, no failure roll (anti-magic squares fizzle and still spend the charge); casting rays: `total = magnitude + rand16(damage + 1)` per monster on the target square (up to 2), range as in the table; effects durations in ticks: Shield / Protection 1800, Strength 1800, Compass 3600, Wizard Sight 3600, Detect Traps `D4*360`, Haste `D4*120`, Light +120 per cast, magic resistance item 200. Recharge after memorising `R = (L-1)*540 + 1260`, reduced by 180 per level above the spell level (`L < level + b6B`), minimum 360, scaled by `T2[stat]` percent, clamp [60, 32767] ticks (C). Healing: `2<<n + rand16(16*n)` per A.3.
+
+### 9.8 Loot and the world (C)
+Monsters carry one item chain (record word +0xA) dropped on death; no gold, shops or random encounters; the only spawners are generator structures (type 0x2E: spawn when count > 0, cooldown 30 + rand(30) ticks, live monsters in range <= limit, Appendix B e). Items, weights and enchantments: Appendix B(g).
+
+### 9.9 What the spec still lacks
+1. The wall-clock tick length (hyp, §8.7).
+2. Monster pathfinder (`+0x866C`) and square-stacking rules, the ranged-spell branch of `+0x9D28` and `+0x940C` / `+0x9626` formulas as harness (only the gating is read, A.4).
+3. Possession / stone (`+0x98A8` bits 12 / 13) and the player-side spell routines are code-read, not harnessed.
+4. Item decay at `t & 63 == 32`, spell recharge ticking, and the due-event ordering inside the handler are code-read.
+5. Ray range / path rule (`+0x435C`), event 0x25 users beyond the item, and the counter `+0x89`.
 
 ## Appendix A — Spells (from the spells analysis; all offsets S_1)
 
@@ -225,13 +395,13 @@ Columns: idx | name | spellLevel (S_2 table) | book+page | effect | ray formula 
 ### A. 5. Scroll/wand/potion item effects  (code, partial)
 Item effect id = obj rec word +0xE (0x80+n, n<0x20) via dispatcher +0x12FEA ("HEAL"/"SPELL FAILED"); item uses the same routines with constant power: n=0 LIGHT(+0x58C6 via abs 0x8591E), 1 DISPEL(D4=6), 2 PESTILENCE-style ray(mag 10, dmg 8, eff 28, pre 0x67, rng 1), 3 FIREBALL ray (16,6,15,0x67,3), 4 HEALING n=1, 5 STONE FIRE ray(16,6,24,0x67,3), 6 HEALING n=2, 7 CHANT OF ORLIN ray(16,6,21,1,3), 8 FREEZE ray(4,8,18,1,3), 9 QUAKE ray(10,100,38,0x66,1), 10 SUSTENANCE (5000), 11 RAISE DEAD, 12 ray(200,1,37,pre 0x64,1) (boss-killer filter), 13-16 routines +0x7932..+0x7C98 (open), 0x16 heal rand(n)+2, 0x17 flag char+0x8C..., 0x96..0xA9 potion/effect group. Item-only routines not in the 60-spell table: +0x061B0 (MAGIC SHIELD marker event 0x1E a2=0x0D, +1800), +0x062D0 (revive/animate object, uses +0x5C06), +0x58FA (hold party).
 
-### A. 6. Open items (smallest next step)
-1. Real-time length of a tick (recharge/buff durations): trace caller cadence of +0x8B2 (copper/vblank divisor).
-2. Class word <-> class name and which stat (+0x65/+0x66) it is; where char+0x45/+0x46 are initialised: read bcdfp char-creation code (writes to $45/$46(A.) with class).
-3. AC sign convention (+0x62 += n is good or bad): read monster-hit routine +0x08532 region.
-4. +0x098A8 (monster bits 12-15), +0x07904/+0x079B0 (event 0x25), item effects 13-16.
-5. Xp formula inside +0x07ED0 (random args lost by decompiler).
-6. FUN_435c ray range/pathing and b308 target selection (walls/doors block?).
+### A. 6. Open items (smallest next step; status 2026-11-23)
+1. ~~Real-time length of a tick~~ narrowed in §8.7 (hyp 0.1 s; evidence and next step there).
+2. ~~Class word <-> class name, +0x65 / +0x66~~ **solved** (§8.9): Fighter 0, Cleric 1, Magic User 2, Druid 3; +0x65 WIS, +0x66 INT.
+3. ~~AC sign convention~~ **solved** (§8.8, harness): higher AC is better.
+4. `+0x098A8` bits 12-15: **read** (§8.4; bits 14 / 15 harness); event 0x25 and item effects 13-16: `+0x78DA` read (§8.10), the three boss-stage routines named but not decoded.
+5. ~~XP formula inside +0x07ED0~~ **solved** (§8.5, harness).
+6. `+0x435C` ray range / pathing and `+0xB308` target selection: **open** (smallest step: harness `+0x435C` on a synthetic map with doors).
 
 ## Appendix B — World rules (from the world-rules analysis; static analysis, not harness-verified)
 
@@ -290,12 +460,12 @@ None: no BUY/SELL/PRICE/COIN strings (GOLD occurs only in key names), no currenc
 - **Charges**: item byte +7; 0xFF infinite, decrement per use; 0 on type 0x00-0x03/0x0D/0x29 with effect >= 0x80 gives ITEM IS OUT OF CHARGES (`+0x12BE0`). Use-kind: types 0,1 melee; 2,3 melee/zap; 4 scroll; 0x0D(+0xC==2,+0xE>=0x80) and 0x29 zap; 0x24 bow; 0x25,0x28 throw. [code]
 - **AC**: +0x62/+0x63 (printed in LV/AC panel). Base = T1[stat+0x68]+6 (T1 = S_2+0x2E4 table: -7..7, 0 for stat 10-15). Equipping adds the low byte of word+0x0C for types 0x07-0x0B,0x15,0x19,0x1A,0x1B,0x1C,0x2A,0x2D; removing subtracts. [code; label AC hyp-strong]
 - **Slots** (S_2+0, rows x cols): row0 Boots(0x0B) Leggings(0x0A) hand hand(shield ok) Helm(0x07) Armor(0x09); row1 pack Pants(0x1C) Bracers(0x2A,2-wide) pack Shirt(0x1B); row2 pack Belt(0x19) Ring(0x15) Ring(0x15) Crown/Mask(0x2D) Amulet(0x1A). `+0x18088`,`+0xE56A`. [code]
-- **Class restriction**: usable iff (item byte+4 & (1<<class)) != 0, class word at char+0: 0 Fighter, 1 Cleric, 2 Druid, 3 MU (`+0x12B8C`). Skipped only for the two hand slots in the equip click; otherwise CANNOT WEAR ITEM. Failing use: "<name> CANNOT USE THIS ITEM". Idols (type 0x2C) and gfx 0xAA/0x1A cannot enter inventory (CANNOT PLACE ITEM IN INVENTORY). [code]
+- **Class restriction**: usable iff (item byte+4 & (1<<class)) != 0, class word at char+0: 0 Fighter, 1 Cleric, **2 Druid, 3 MU as originally written; wrong, see the correction below: 2 = Magic User, 3 = Druid** (`+0x12B8C`). > **Correction (2026-11-23):** class order is Fighter, Cleric, Magic User, Druid; item mask bits +1 / +2 / +4 / +8 in that order (§8.9). Skipped only for the two hand slots in the equip click; otherwise CANNOT WEAR ITEM. Failing use: "<name> CANNOT USE THIS ITEM". Idols (type 0x2C) and gfx 0xAA/0x1A cannot enter inventory (CANNOT PLACE ITEM IN INVENTORY). [code]
 - **Enchantments (effect word +0x0E)**: 0-9 stat idx +value, 0x14-0x22 protection counters, 0x80-0x9F use-effects. Table in world.json. Effects only active while charges != 0. Weapons (types 0-3, 0x24) give +1 (not +value). Type 0x0D = slot-bound charm (word+0xC = row*10+col). Tablets (type 0x30) `+0x16502`. [code]
 - **Use-effect map** 0x80-0x9F: decoded potions (0x96-0x9F), LIGHT (0x80), feast (0x8A); the remaining 0x81-0x90 call spell routines (+0x6D9A projectile with 5 params, +0x5070, +0x4C46, +0x5D52, +0x78DA..+0x7C40) - **open**: name them by matching params to spell list at S_1 +0x1A7FA.
 - Magic items are blocked on squares with flag bit 6 (SPELL FAILED / anti-magic) before any effect. [code]
-- Mask of True Sight: inventory row2 col4 slot gfx 0xC0 is consulted by combat code (+0xBFFE, +0x14710); -10 modifier when absent. [hyp, lead's area]
+- Mask of True Sight: inventory row2 col4 slot gfx 0xC0 is consulted by combat code (+0xBFFE, +0x14710); -10 modifier when absent. [now harness for the weapon rule: §8.10]
 - OGREBLADE "slowly drain" text: no equipped-item drain found in tick or elsewhere. [open: smallest step = search tick handler for per-tick HP loss tied to weapon gfx]
 
-### B. Open list
-1. Use-effects 0x81-0x90 names/params.  2. Stat index to name map (only idx3 = disease/CON-like, idx4 = DEX-like AC stat are role-confirmed).  3. Ogreblade curse.  4. Counters +0x89,+0x8D,+0x8E.  5. Starting food/water/energy values (bcdfp).  6. Exact held-party click whitelist.
+### B. Open list (status 2026-11-23)
+1. Use-effects 0x8D-0x90 names (0x81-0x8C named in A.5 / §8.10).  2. ~~Stat index to name map~~ solved (§8.9).  3. ~~Ogreblade curse~~ no mechanical drain found (§8.10).  4. Counters `+0x89` open, `+0x8D` / `+0x8E` = ice / fire resist flags.  5. ~~Starting food/water/energy~~ solved (§1.3).  6. Exact held-party click whitelist: open (`+0xD6D8`).

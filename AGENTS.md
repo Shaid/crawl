@@ -818,7 +818,7 @@ a aa bb bb cc cc d e ff gg ...
 - `bbbb`: gfx number (determines weapon properties)
 - `cccc`: **name offset into bcdft** (decompressed data); 0 = first name at byte 115978
 - `d`: position on square (nibble)
-- `e`: who can use (bitmask: +1 Fighter, +2 Cleric, +4 Druid, +8 MU)
+- `e`: who can use (bitmask: +1 Fighter, +2 Cleric, +4 Magic User, +8 Druid; corrected 2026-11-23, see docs/blackcrypt/amiga/game-rules.md §8.9)
 - `ff`: item type (defines trailing bytes)
 - `gg`: position in container
 
