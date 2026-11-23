@@ -104,6 +104,12 @@ export function extractRulesTables(s1: Uint8Array, s2: Uint8Array, bcdfp: Uint8A
       0x90: { routine: 0x7c40, name: 'FORCEHAMMER', what: 'Ram-boss stage machine (code, not decoded)' },
     },
     classes, spells,
+    // the spell book as the memorise / recharge / refresh routines read it (S_2 +0x1F2: 15 page records of 6 bytes = owned word?, head word, next-page word; spell records +0x12 + 8*i)
+    spellBook: {
+      pageHead: Array.from({ length: 15 }, (_, p) => u16(s2, 0x1f2 + 6 * p + 2)),
+      pageNext: Array.from({ length: 15 }, (_, p) => u16(s2, 0x1f2 + 6 * p + 4)),
+      next: spells.map(sp => sp.nextInPage), level: spells.map(sp => sp.spellLevel), rechargeBase: spells.map(sp => sp.recharge),
+    },
     weaponBase: decodeWeaponSwitch(s1),
   };
 }

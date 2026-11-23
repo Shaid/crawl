@@ -88,7 +88,8 @@ export function aiCompare(value: number, thr: number, w: number): boolean {
 /** Run the behaviour VM for one monster activation (S_1 +0xAAFC). `scripts` is not mutated. */
 export type VmCall = { off: number; w0?: number; w5?: number };
 /** Optional live callback (used by combat-sim): performs the action and returns its result code (0 none, 1 interrupted, 2 removed/blocked) and, for a pursuit step, the monster's new position. */
-export type VmOnCall = (c: VmCall) => number | { res: number; x?: number; y?: number };
+/** the callback also receives the VM's live monster state (so a live world can mirror it into its records first) and may return fields the routine changed (the VM reads S.b0E / S.vars directly in the original) */
+export type VmOnCall = (c: VmCall, m: VmMonster) => number | { res: number; x?: number; y?: number; s0e?: number; vars?: number[]; hp?: number; b7?: number };
 export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRng, hpOk: (m: VmMonster) => boolean, id = 1, onCall?: VmOnCall): VmResult {
   const m: VmMonster = { ...m0, vars: [...m0.vars] };
   const cells = sc.cells.map(c => [...c] as Cell);
@@ -101,10 +102,14 @@ export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRn
   const act = (c: VmCall): number => {
     calls.push(c);
     if (!onCall) return w.hookRet;
-    const r = onCall(c);
+    const r = onCall(c, m);
     if (typeof r === 'number') return r;
     if (r.x !== undefined) x = r.x;
     if (r.y !== undefined) y = r.y;
+    if (r.s0e !== undefined) m.s0e = r.s0e;
+    if (r.vars) r.vars.forEach((v, i) => { m.vars[i] = v; });
+    if (r.hp !== undefined) m.hp = r.hp;
+    if (r.b7 !== undefined) m.b7 = r.b7;
     return r.res;
   };
   while (d5 === 0) {

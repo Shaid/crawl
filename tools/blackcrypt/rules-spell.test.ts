@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BcRng, type RuleTables } from './rules';
+import { loadVectors, scaled } from './rules-vectors';
 import { awardXp } from './rules-monster';
 import {
   castSimple, castSpell, castRay, castFacing, castRefresh, memoriseClick, rechargeTick, monsterPossessStone,
@@ -11,7 +11,7 @@ import {
 } from './rules-spell';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const V = JSON.parse(gunzipSync(readFileSync(resolve(here, 'rules_oracle/vectors_spell.json.gz'))).toString());
+const { data: V } = loadVectors<any>('spell'); // full generated set if gen_vectors.sh was run, else the small committed subset
 const T: RuleTables = JSON.parse(readFileSync(resolve(here, 'rules_oracle/vectors.json'), 'utf8')).tables;
 const hex = (r: BcRng) => (r as any).s.map((b: number) => b.toString(16).padStart(2, '0')).join('');
 const clone = <X>(x: X): X => JSON.parse(JSON.stringify(x));
@@ -51,7 +51,7 @@ describe('non-ray spells through the real CastSpell dispatcher (+0x7044) vs TS',
       castSimple(w, c.spell, c.pick, T, rng);
       if (cmp(c, w, rng).length) bad++;
     }
-    expect(bad).toBeGreaterThan(30);
+    expect(bad).toBeGreaterThan(scaled(30, V.cast.length, 1000));
   });
 });
 
@@ -72,16 +72,16 @@ describe('ray caster (real +0x6D9A, ray march +0x435C, target pick +0xB308) vs T
     for (const c of V.ray) expect(run(c)).toEqual([]);
   });
   it('covers hits, kills and blocked rays', () => {
-    expect(V.ray.filter((c: any) => c.out.total !== 0).length).toBeGreaterThan(150);
-    expect(V.ray.filter((c: any) => c.out.deaths > 0).length).toBeGreaterThan(50);
+    expect(V.ray.filter((c: any) => c.out.total !== 0).length).toBeGreaterThan(scaled(150, V.ray.length, 1200));
+    expect(V.ray.filter((c: any) => c.out.deaths > 0).length).toBeGreaterThan(scaled(50, V.ray.length, 1200));
     // wall-blocked and door-blocked rays are among them: the TS march agrees on every case, so the blocking rules are covered
     const blocked = V.ray.filter((c: any) => {
       const w = rayWorld(c.world); const ms = c.args.range; return ms > 0 && (w.cells.get(c.world.py * 256 + c.world.px)! >>> (12 + c.world.facing) & 1) === 1;
     });
-    expect(blocked.length).toBeGreaterThan(10);
+    expect(blocked.length).toBeGreaterThan(scaled(10, V.ray.length, 1200));
   });
   it('null control: a longer range disagrees', () => {
-    expect(V.ray.filter((c: any) => run(c, true).length > 0).length).toBeGreaterThan(3);
+    expect(V.ray.filter((c: any) => run(c, true).length > 0).length).toBeGreaterThan(scaled(3, V.ray.length, 1200));
   });
 });
 
@@ -107,10 +107,10 @@ describe('ray spells through the dispatcher (damage formulas, antimagic, lifeste
     expect(new Set(V.rayspell.map((c: any) => c.spell)).size).toBe(26);
   });
   it('covers damaging casts and antimagic squares', () => {
-    expect(V.rayspell.filter((c: any) => Object.entries<any>(c.out.mon).some(([id, m]) => m[0] !== c.world.objs[id].hp)).length).toBeGreaterThan(150);
+    expect(V.rayspell.filter((c: any) => Object.entries<any>(c.out.mon).some(([id, m]) => m[0] !== c.world.objs[id].hp)).length).toBeGreaterThan(scaled(150, V.rayspell.length, 1040));
   });
   it('null control: zeroing the stat-bonus table changes the damage', () => {
-    expect(V.rayspell.filter((c: any) => run(c, true).length > 0).length).toBeGreaterThan(100);
+    expect(V.rayspell.filter((c: any) => run(c, true).length > 0).length).toBeGreaterThan(scaled(100, V.rayspell.length, 1040));
   });
 });
 
@@ -124,8 +124,8 @@ describe('memorise click and recharge tick (real +0xF548, +0x8B2) vs TS', () => 
   };
   it('memorise: slot and recharge timer match on all cases', () => { for (const c of V.memorise) expect(mem(c)).toBe(true); });
   it('memorise: covers successful and refused clicks; null control (T2 = 0) disagrees', () => {
-    expect(V.memorise.filter((c: any) => JSON.stringify(c.out.slots) !== JSON.stringify(c.slots)).length).toBeGreaterThan(100);
-    expect(V.memorise.filter((c: any) => !mem(c, true)).length).toBeGreaterThan(20);
+    expect(V.memorise.filter((c: any) => JSON.stringify(c.out.slots) !== JSON.stringify(c.slots)).length).toBeGreaterThan(scaled(100, V.memorise.length, 600));
+    expect(V.memorise.filter((c: any) => !mem(c, true)).length).toBeGreaterThan(scaled(20, V.memorise.length, 600));
   });
   const rc = (c: any, tweak = false) => {
     const b = book(c.timers, []);
@@ -134,7 +134,7 @@ describe('memorise click and recharge tick (real +0xF548, +0x8B2) vs TS', () => 
   };
   it('recharge: all 60 timers and the redraw flag match on all cases', () => { for (const c of V.recharge) expect(rc(c)).toBe(true); });
   it('recharge: null control (no double speed while resting) disagrees', () => {
-    expect(V.recharge.filter((c: any) => !rc(c, true)).length).toBeGreaterThan(20);
+    expect(V.recharge.filter((c: any) => !rc(c, true)).length).toBeGreaterThan(scaled(20, V.recharge.length, 200));
   });
 });
 
@@ -156,11 +156,11 @@ describe('monster possession (bit 12) and flesh-to-stone (bit 13) of +0x98A8 vs 
     for (const c of V.special2) expect(run(c)).toEqual([]);
   });
   it('covers possession, stone, resistance and protection', () => {
-    expect(V.special2.filter((c: any) => c.bit === 12 && c.out.gfx === 0x80b8).length).toBeGreaterThan(80);
-    expect(V.special2.filter((c: any) => c.bit === 13 && c.out.statue.length).length).toBeGreaterThan(80);
+    expect(V.special2.filter((c: any) => c.bit === 12 && c.out.gfx === 0x80b8).length).toBeGreaterThan(scaled(80, V.special2.length, 1600));
+    expect(V.special2.filter((c: any) => c.bit === 13 && c.out.statue.length).length).toBeGreaterThan(scaled(80, V.special2.length, 1600));
   });
   it('null control: ignoring the possession protection byte disagrees', () => {
-    expect(V.special2.filter((c: any) => c.bit === 12 && run(c, true).length > 0).length).toBeGreaterThan(3);
+    expect(V.special2.filter((c: any) => c.bit === 12 && run(c, true).length > 0).length).toBeGreaterThan(scaled(3, V.special2.length, 1600));
   });
 });
 
@@ -187,8 +187,8 @@ describe('facing-square spells DISMISS / BINDING / REFRESH vs TS', () => {
     for (const c of V.facing) expect(run(c)).toEqual([]);
   });
   it('covers kills and bindings; null control (caster level + 1) disagrees', () => {
-    expect(V.facing.filter((c: any) => c.spell === 34 && c.out.b25a.length).length).toBeGreaterThan(20);
-    expect(V.facing.filter((c: any) => c.spell === 43 && c.out.sched.length).length).toBeGreaterThan(50);
-    expect(V.facing.filter((c: any) => c.spell !== 46 && run(c, true).length > 0).length).toBeGreaterThan(3);
+    expect(V.facing.filter((c: any) => c.spell === 34 && c.out.b25a.length).length).toBeGreaterThan(scaled(20, V.facing.length, 900));
+    expect(V.facing.filter((c: any) => c.spell === 43 && c.out.sched.length).length).toBeGreaterThan(scaled(50, V.facing.length, 900));
+    expect(V.facing.filter((c: any) => c.spell !== 46 && run(c, true).length > 0).length).toBeGreaterThan(scaled(3, V.facing.length, 900));
   });
 });
