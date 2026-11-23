@@ -352,3 +352,28 @@ export function monsterSpecial(i: SpecIn, t1: number[], rng: BcRng) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- stat-enchantment decay
+
+/** Item structure types (object byte +5) that can carry a decaying stat enchantment (S_1 +0x0D66 jump chain; set measured with the real routine over types 0..63). */
+export const DECAY_TYPES = new Set([0, 1, 2, 3, 7, 8, 9, 10, 11, 13, 21, 25, 26, 27, 28, 36, 42, 45]);
+export interface DecayItem { char: number; slot: number; type: number; charges: number; effect: number }
+/**
+ * The decay block of the tick handler (S_1 +0x0C50..+0x0E5A): only when `t & 63 == 32` and the party is not resting. Every
+ * character (alive or not, no HP test) is scanned: 3 groups x 6 item words from record +0x16 (slot = group * 6 + slot). An item whose
+ * type is in DECAY_TYPES, with charges in 1..254 and an effect word below 0x80, loses one charge; at charges == 1 the enchantment is
+ * removed first (call +0x180E0 with char, group, slot). Returns the charges after and the removal calls in scan order.
+ */
+export function itemDecay(items: DecayItem[], t: number, resting: boolean): { after: number[]; removed: [number, number, number][] } {
+  const after = items.map(i => i.charges);
+  const removed: [number, number, number][] = [];
+  if ((t & 63) !== 32 || resting) return { after, removed };
+  const order = items.map((_, k) => k).sort((a, b) => items[a].char - items[b].char || items[a].slot - items[b].slot);
+  for (const k of order) {
+    const i = items[k];
+    if (!DECAY_TYPES.has(i.type) || i.charges === 0 || i.charges >= 0xff || i.effect >= 0x80) continue;
+    if (i.charges === 1) removed.push([i.char, Math.floor(i.slot / 6), i.slot % 6]);
+    after[k] = i.charges - 1;
+  }
+  return { after, removed };
+}

@@ -344,6 +344,27 @@ int main(int argc,char**argv){
       printf("log %d",nlog); for(int i=0;i<nlog;i++){ printf(" |%x",logv[i].off); for(int k=0;k<8;k++) printf(",%u",logv[i].w[k]); }
       printf(" | seed %02x%02x%02x%02x%02x%02x\n",sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
     }
+  } else if(!strcmp(mode,"decay")){
+    /* Enchantment decay in the tick handler 8B2 (t & 63 == 32, not resting): real routine, party items only.
+       in: seed t n  then n x (char slot type charges effect) ; out: per item charges after, then hook log (removals) */
+    while(fgets(line,sizeof line,stdin)){
+      char sh[32]; int v[400]; int n=parse_line(line,sh,v,400);
+      if(n<2) continue; int t=v[0], ni=v[1]; if(n!=2+5*ni) continue;
+      unsigned char sd[6]; for(int i=0;i<6;i++){ unsigned q; sscanf(sh+2*i,"%2x",&q); sd[i]=q; }
+      memcpy(mem,snap,MEM_SIZE); set_seed(sd);
+      hooks_clear(); hook_add(0x17686,0); hook_add(0x17EEA,0); hook_add(0x5EA,0); hook_add(0xB614,0); hook_add(0x18088,0);
+      w16(A4V+0x174E,1); w32(A4V+0x1750,(uint32_t)t-1u); w16(A4V+0x1746,0);
+      w16(A4V+0x1754,0); w16(A4V+0x1756,0); w16(A4V+0x1740,5); w16(A4V+0x1742,5);
+      for(int i=0;i<4;i++){ w16(CH(i)+0x4E,50); w16(CH(i)+0x50,50); w8(CH(i)+0x5E,1); w16(CH(i)+0x52,5000); w16(CH(i)+0x54,5000); w16(A4V+0x19F8+2*i,i); w8(A4V+0x1A07+i,0); }
+      for(int k=0;k<ni;k++){ int ch=v[2+5*k],slot=v[3+5*k],type=v[4+5*k],chg=v[5+5*k],eff=v[6+5*k]; int id=20+k;
+        w16(CH(ch)+0x16+2*slot,id); w8(OB(id)+5,type); w8(OB(id)+7,chg); w16(OB(id)+0xE,eff); }
+      run_call(0x8B2,0,NULL,NULL);
+      printf("decay %s :",sh);
+      for(int k=0;k<ni;k++) printf(" %u",r8(OB(20+k)+7));
+      int nr=0; for(int i=0;i<nlog;i++) if(logv[i].off==0x18088) nr++;
+      printf(" | %d",nr); for(int i=0;i<nlog;i++) if(logv[i].off==0x18088) printf(" %u %u %u",logv[i].w[0],logv[i].w[1],logv[i].w[2]);
+      printf("\n");
+    }
   } else if(!strcmp(mode,"period")){
     /* Input-library idle period: SetIdlePeriod (S_1 +0x1FF7A, d0 = units of 1/60 s) then Reload (+0x1FF90).
        in: vblankHz d0 ; out: reload byte (+0x151), countdown after reload (+0x150)  */

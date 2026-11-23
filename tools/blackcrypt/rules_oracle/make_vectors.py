@@ -212,6 +212,26 @@ for c, r in zip(sp, res):
     rest = t[1 + 3 * nd:]
     vec['special'].append({'in': list(c), 'dmg': dm, 'poison': [int(x) for x in rest[1:5]], 'disease': [int(x) for x in rest[6:10]], 'sched': int(rest[11]), 'seedAfter': rest[12]})
 
+# ---- stat-enchantment decay in the tick handler (real 8B2, t & 63 == 32, not resting)
+dl = []
+for _ in range(600):
+    ni = rnd.randrange(1, 9); items = []; used = set()
+    while len(items) < ni:
+        ch, sl = rnd.randrange(4), rnd.randrange(18)
+        if (ch, sl) in used: continue
+        used.add((ch, sl))
+        items.append((ch, sl, rnd.choice([0, 1, 2, 3, 7, 8, 9, 10, 11, 12, 13, 20, 24, 25, 26, 27, 35, 41, 44, 45, 5, 14]),
+                      rnd.choice([0, 1, 1, 2, 5, 255]), rnd.choice([0, 3, 0x10, 0x7f, 0x80, 0x95])))
+    t = rnd.choice([32, 32, 96, 33, 64, 160, 2080, 16])
+    dl.append((seed(), t, items))
+res = run('decay', ['%s %d %d %s' % (c[0], c[1], len(c[2]), ' '.join(str(x) for it in c[2] for x in it)) for c in dl])
+vec['decay'] = []
+for c, r in zip(dl, res):
+    a, b = r.split(' : ')[1].split(' | ')
+    ch = [int(x) for x in a.split()]; bb = [int(x) for x in b.split()]
+    rem = [bb[1 + 3 * k:4 + 3 * k] for k in range(bb[0])]
+    vec['decay'].append({'t': c[1], 'items': [list(i) for i in c[2]], 'after': ch, 'removed': rem})
+
 # ---- input-library idle period (SetIdlePeriod S_1 +0x1FF7A / reload +0x1FF90): the real tick length in vblanks
 pl = [(hz, d0) for hz in (50, 60) for d0 in (0, 1, 3, 6, 10, 12, 30, 60)]
 res = run('period', ['%d %d' % c for c in pl])

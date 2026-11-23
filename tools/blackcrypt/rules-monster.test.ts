@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BcRng } from './rules';
-import { monsterMelee, awardXp, runBehaviour, hpAtLeastMorale, vitalsTick, monsterSpecial, VM_CALLS, type AiScripts, type VmResult, type TickCall } from './rules-monster';
+import { itemDecay, monsterMelee, awardXp, runBehaviour, hpAtLeastMorale, vitalsTick, monsterSpecial, VM_CALLS, type AiScripts, type VmResult, type TickCall } from './rules-monster';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const V = JSON.parse(readFileSync(resolve(here, 'rules_oracle/vectors.json'), 'utf8'));
@@ -149,5 +149,19 @@ describe('monster special attacks, disease and poison (real 98A8) vs TS', () => 
   });
   it('null control: zeroing the constitution table changes disease outcomes', () => {
     expect(V.special.filter((c: any) => c.in[1] === 14 && JSON.stringify(run(c, true).r.dmg) !== JSON.stringify(c.dmg)).length).toBeGreaterThan(10);
+  });
+});
+
+describe('stat-enchantment decay (real 8B2, t & 63 == 32) vs TS', () => {
+  const run = (c: any, tweak = false) => itemDecay(c.items.map((a: number[]) => ({ char: a[0], slot: a[1], type: a[2], charges: a[3], effect: a[4] })), tweak ? c.t + 1 : c.t, false);
+  it('matches the oracle on 600 cases (charges after, removal calls)', () => {
+    for (const c of V.decay) {
+      const o = run(c);
+      expect({ after: o.after, removed: o.removed }).toEqual({ after: c.after, removed: c.removed });
+    }
+  });
+  it('null control: a shifted tick disagrees, and the cases include removals', () => {
+    expect(V.decay.filter((c: any) => JSON.stringify(run(c, true).after) !== JSON.stringify(c.after)).length).toBeGreaterThan(100);
+    expect(V.decay.filter((c: any) => c.removed.length).length).toBeGreaterThan(30);
   });
 });
