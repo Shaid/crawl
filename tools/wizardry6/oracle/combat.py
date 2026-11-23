@@ -166,11 +166,11 @@ class Fixture:
     def put(self, addr, data): self.writes.append((addr, bytes(data)))
     def rb(self, n, hi): return bytes(self.rng.randrange(hi + 1) for _ in range(n))
 
-    def build(self, ag, ai, tg, ti, hand, kind):
+    def build(self, ag, ai, tg, ti, hand, kind, ng=6):
         c, rng, A4 = self.c, self.rng, self.c.A4
         w16 = lambda a, v: self.put(a, struct.pack('>H', v & 0xffff))
         w32 = lambda a, v: self.put(a, struct.pack('>I', v & 0xffffffff))
-        for g in range(6):
+        for g in range(ng):
             w32(A4 + MEM_ARR + 4 * g, MEM_BASE + g * MEM_STRIDE)
             w32(A4 + MREC_ARR + 4 * g, REC_MON_BASE + g * REC_MON_STRIDE)
         w16(A4 - 15138, ag); w16(A4 - 15136, ai)
@@ -213,7 +213,7 @@ class Fixture:
             # slot item spell words for ReadSection (computed by the oracle)
             for s in range(30): self.items[struct.unpack('>H', bytes(rec[64 + 8 * s:66 + 8 * s]))[0]] = None
         # member arrays: 9 members x 44 + group trailer
-        for g in range(6):
+        for g in range(ng):
             m = bytearray(self.rb(0x1c0, 3))
             for j in range(9):
                 o = j * 44
