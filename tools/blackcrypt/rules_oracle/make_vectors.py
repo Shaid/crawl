@@ -212,5 +212,13 @@ for c, r in zip(sp, res):
     rest = t[1 + 3 * nd:]
     vec['special'].append({'in': list(c), 'dmg': dm, 'poison': [int(x) for x in rest[1:5]], 'disease': [int(x) for x in rest[6:10]], 'sched': int(rest[11]), 'seedAfter': rest[12]})
 
+# ---- input-library idle period (SetIdlePeriod S_1 +0x1FF7A / reload +0x1FF90): the real tick length in vblanks
+pl = [(hz, d0) for hz in (50, 60) for d0 in (0, 1, 3, 6, 10, 12, 30, 60)]
+res = run('period', ['%d %d' % c for c in pl])
+vec['period'] = []
+for c, r in zip(pl, res):
+    t = r.split(':')[1].split()
+    vec['period'].append({'hz': c[0], 'd0': c[1], 'reload': int(t[0]), 'countdown': int(t[1])})
+
 json.dump(vec, open(here / 'vectors.json', 'w'), separators=(',', ':'))
 print('wrote vectors.json', {k: (len(v) if hasattr(v, '__len__') else v) for k, v in vec.items()})

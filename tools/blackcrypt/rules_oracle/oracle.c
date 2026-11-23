@@ -57,7 +57,7 @@ static const uint32_t KEEP[] = {
   0x0B308,                       /* monsters-in-front lookup ($8B360)  */
   0x002B4,                       /* step position by facing */
   0x17D2A, 0x1451E,              /* level-up check, player melee (the routines under test) */
-  0x268A6, 0x98A8, 0x96E8, 0x97F0, 0x7ED0, 0xAAFC, 0x9D28, 0x8B2, 0x17686, 0x17EEA,  /* raw byte rand; monster death/XP, behaviour VM, monster attack, tick, DamageCharacter, AdjustVitals */
+  0x1FF7A, 0x1FF90, 0x268A6, 0x98A8, 0x96E8, 0x97F0, 0x7ED0, 0xAAFC, 0x9D28, 0x8B2, 0x17686, 0x17EEA,  /* raw byte rand; monster death/XP, behaviour VM, monster attack, tick, DamageCharacter, AdjustVitals */
   0
 };
 static int keep(uint32_t off){ for(int i=0;KEEP[i];i++) if(KEEP[i]==off) return 1; return 0; }
@@ -116,8 +116,8 @@ static unsigned long run_call(uint32_t off, int n, const int *sz, const uint32_t
   unsigned long steps=0;
   while(m68k_get_reg(NULL,M68K_REG_PC)!=RET_SENTINEL){
     if(nhook && hook_hit(m68k_get_reg(NULL,M68K_REG_PC))) { steps++; continue; }
-    if(getenv("TRACE")) fprintf(stderr,"%05x\n",m68k_get_reg(NULL,M68K_REG_PC)-S1_BASE);
-    m68k_execute(1); if(++steps>2000000){ fprintf(stderr,"runaway at off %x\n",off); break; }
+    if(getenv("TRACE")) fprintf(stderr,"%05x a0=%x d0=%x\n",m68k_get_reg(NULL,M68K_REG_PC)-S1_BASE,m68k_get_reg(NULL,M68K_REG_A0),m68k_get_reg(NULL,M68K_REG_D0));
+    m68k_execute(1); if(getenv("TRACE")) fprintf(stderr,"  -> pc=%x a0=%x\n",m68k_get_reg(NULL,M68K_REG_PC),m68k_get_reg(NULL,M68K_REG_A0)); if(++steps>2000000){ fprintf(stderr,"runaway at off %x\n",off); break; }
   }
   return steps;
 }
@@ -343,6 +343,20 @@ int main(int argc,char**argv){
       printf(" sc %u %u steps %lu\n",r8(sc),r16(sc+4),steps);
       printf("log %d",nlog); for(int i=0;i<nlog;i++){ printf(" |%x",logv[i].off); for(int k=0;k<8;k++) printf(",%u",logv[i].w[k]); }
       printf(" | seed %02x%02x%02x%02x%02x%02x\n",sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
+    }
+  } else if(!strcmp(mode,"period")){
+    /* Input-library idle period: SetIdlePeriod (S_1 +0x1FF7A, d0 = units of 1/60 s) then Reload (+0x1FF90).
+       in: vblankHz d0 ; out: reload byte (+0x151), countdown after reload (+0x150)  */
+    while(fgets(line,sizeof line,stdin)){
+      int hz,d0; if(sscanf(line,"%d %d",&hz,&d0)!=2) continue;
+      memcpy(mem,snap,MEM_SIZE);
+      uint32_t lib=0x2F1000; w32(S1_BASE+0x2099E,lib);   /* library base pointer cell (a0 = (pc-rel)) */
+      w16(lib+0x154,hz);
+      m68k_set_reg(M68K_REG_D0,(uint32_t)d0);
+      run_call(0x1FF7A,0,NULL,NULL);
+      unsigned reload=r8(lib+0x151);
+      run_call(0x1FF90,0,NULL,NULL);
+      printf("period %d %d : %u %u (cell %x hz %u)\n",hz,d0,reload,r8(lib+0x150),r32x(S1_BASE+0x2099E),r16(lib+0x154));
     }
   } else { fprintf(stderr,"unknown mode\n"); return 2; }
   return 0;

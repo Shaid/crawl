@@ -86,7 +86,10 @@ export function aiCompare(value: number, thr: number, w: number): boolean {
 }
 
 /** Run the behaviour VM for one monster activation (S_1 +0xAAFC). `scripts` is not mutated. */
-export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRng, hpOk: (m: VmMonster) => boolean, id = 1): VmResult {
+export type VmCall = { off: number; w0?: number; w5?: number };
+/** Optional live callback (used by combat-sim): performs the action and returns its result code (0 none, 1 interrupted, 2 removed/blocked) and, for a pursuit step, the monster's new position. */
+export type VmOnCall = (c: VmCall) => number | { res: number; x?: number; y?: number };
+export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRng, hpOk: (m: VmMonster) => boolean, id = 1, onCall?: VmOnCall): VmResult {
   const m: VmMonster = { ...m0, vars: [...m0.vars] };
   const cells = sc.cells.map(c => [...c] as Cell);
   const base = sc.starts[m.type];
@@ -95,14 +98,22 @@ export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRn
   const calls: VmResult['calls'] = [];
   const ops = new Set<number>();
   let guard = 0;
+  const act = (c: VmCall): number => {
+    calls.push(c);
+    if (!onCall) return w.hookRet;
+    const r = onCall(c);
+    if (typeof r === 'number') return r;
+    if (r.x !== undefined) x = r.x;
+    if (r.y !== undefined) y = r.y;
+    return r.res;
+  };
   while (d5 === 0) {
     if (++guard > 5000) throw new Error('runaway');
     const [op, a, w1, w2] = cells[base + pc];
     ops.add(op);
     switch (op) {
       case 2: case 3: case 4:
-        calls.push({ off: w1 === 1 ? VM_CALLS.move : VM_CALLS.attack, w0: id, w5: op });
-        res = w.hookRet; pc++; break;
+        res = act({ off: w1 === 1 ? VM_CALLS.move : VM_CALLS.attack, w0: id, w5: op }); pc++; break;
       case 5: d5 = w1; pc++; break;
       case 6: d5 = m.b5 & 0x7f; pc++; break;
       case 9:
@@ -114,7 +125,7 @@ export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRn
         m.s0e = s8(Math.abs(w.px - y) + Math.abs(w.py - y)); // sic: the code subtracts y from both coordinates
         pc++; break;
       }
-      case 0x0b: calls.push({ off: VM_CALLS.spell, w0: id, w5: 0x0b }); res = w.hookRet; pc++; break;
+      case 0x0b: res = act({ off: VM_CALLS.spell, w0: id, w5: 0x0b }); pc++; break;
       case 0x0d:
         if (m.b7 !== 0 && (m.w0c & 3) !== 0 && m.maxHp - 5 > m.hp) {
           const n = m.w0c & 2 ? 20 : 10;
@@ -131,7 +142,7 @@ export function runBehaviour(m0: VmMonster, w: VmWorld, sc: AiScripts, rng: BcRn
       case 0x19: pc = Math.abs(Math.abs(w.px - x) + Math.abs(w.py - y)) === 1 ? pc + 1 : w2; break;
       case 0x1c: pc = aiCompare(m.s0e, w1 & 0x1fff, w1) ? w2 : pc + 1; break;
       case 0x1d: pc = aiCompare(m.vars[a], w1 & 0x1fff, w1) ? w2 : pc + 1; break;
-      case 0x1e: calls.push({ off: VM_CALLS.special, w0: id, w5: a << 8 }); res = w.hookRet; pc++; break;
+      case 0x1e: res = act({ off: VM_CALLS.special, w0: id, w5: a << 8 }); pc++; break;
       case 0x21: calls.push({ off: VM_CALLS.steal, w0: id }); pc++; break;
       case 0x22: m.gfx = w1; m.b7 = 0x14; pc++; break;
       case 0x24: m.maxHp = w1; m.hp = w1; pc++; break;

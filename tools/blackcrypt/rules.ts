@@ -99,3 +99,15 @@ export function meleeAttack(
   if (dmg < 1) dmg = 1;
   return { hit: true, damage: dmg, monHp: ((a.monHp - dmg) << 16) >> 16 };
 }
+
+/**
+ * Real-time length of one game tick, in vblanks (input library, S_1 +0x1FF7A / +0x1FF90; harness on the arithmetic).
+ * The game calls SetIdlePeriod(10) once at start-up (S_1 +0x1A836, `moveq #10,d0`); the unit is 1/60 s and the stored
+ * reload is `max(1, d0 * VBlankFrequency / 60)` (mulu.w, divu.w #60). The vblank server decrements the countdown once per
+ * vblank (+0x9F16A path, code) and the tick handler reloads it at its end (+0x1FF90 via +0x2036, code), so one tick is
+ * 8 vblanks = 160 ms on PAL (50 Hz) and 10 vblanks = 166.7 ms on NTSC (60 Hz), plus the handler's own run time.
+ */
+export function idlePeriodVblanks(d0: number, vblankHz: number): number {
+  const q = Math.floor(((d0 & 0xffff) * (vblankHz & 0xffff)) / 60) & 0xffff;
+  return q === 0 ? 1 : q & 0xff;
+}

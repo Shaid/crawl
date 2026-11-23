@@ -69,3 +69,22 @@ describe.skipIf(!have)('rules-tables extractor vs oracle', () => {
     expect(t.classes.map(c => c.name)).toEqual(['FIGHTER', 'CLERIC', 'MAGIC USER', 'DRUID']);
   });
 });
+
+import { idlePeriodVblanks } from './rules';
+describe('tick length (input library idle period, real SetIdlePeriod / reload routines)', () => {
+  it('matches the oracle for 50 / 60 Hz', () => {
+    for (const p of V.period) {
+      expect(idlePeriodVblanks(p.d0, p.hz)).toBe(p.reload);
+      expect(p.countdown).toBe(p.reload);
+    }
+    expect(V.period.length).toBe(16);
+  });
+  it('the game asks for 10: 8 vblanks on PAL, 10 on NTSC', () => {
+    expect(idlePeriodVblanks(10, 50)).toBe(8);
+    expect(idlePeriodVblanks(10, 60)).toBe(10);
+  });
+  it('null control: a wrong divisor disagrees', () => {
+    const bad = V.period.filter((p: any) => Math.max(1, Math.floor((p.d0 * p.hz) / 50)) !== p.reload).length;
+    expect(bad).toBeGreaterThan(4);
+  });
+});
