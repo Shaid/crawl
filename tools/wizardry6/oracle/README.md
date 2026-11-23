@@ -74,3 +74,7 @@ routines (random generator, level-up, CheckLevelUp through the game's own
 OUT.json` writes the committed `rules-vectors.json` that
 `tools/wizardry6/__tests__/rules.test.ts` diffs `tools/wizardry6/rules.ts`
 against (null controls included). See `docs/wizardry6/amiga/game-rules.md`.
+
+## Combat oracle (`combat.py`)
+
+`combat.py` runs the attack resolver (`CODE+0x1f33e`), weapon effects, SetStatus, the spell damage engine and the composed chain against synthetic party/monster state, recording the input footprint, every byte written, the stubbed-call log and the generator state per vector. Subcommands: `vectors OUT.json [--n N] [--seed S] [--full]`, `proc`, `setstatus`, `spelldmg`, and `subset IN.json OUT.json [--n N]` (a small committed subset). The TypeScript ports (`../combat.ts`) are tested against the committed subsets in `combat-*-vectors.json`; see `docs/wizardry6/amiga/game-rules.md` section 7.8 for the full-sweep recipe and parity numbers.
