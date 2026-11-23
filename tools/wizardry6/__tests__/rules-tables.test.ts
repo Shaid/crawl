@@ -29,6 +29,18 @@ describe.skipIf(!have)('W6 rules-tables extractor (retail data)', () => {
       else expect(s.level).toBe(0);
     }
   });
+  it('combat tables: attack kinds from the game messages, the weapon skill map and the spell engine map', () => {
+    expect(tables.combat.attackKinds.map((k: { message: string }) => k.message)).toEqual(
+      ['SWINGS', 'THRUSTS', 'BASHES', 'MELEES', 'THROWS', 'PUNCHES', 'KICKS', 'LASHES', 'SHOOTS']);
+    expect(tables.combat.weaponSkillBySubtype.length).toBe(256);
+    expect(tables.combat.weaponSkillBySubtype[0x18]).toBe(8);
+    const ids = tables.combat.spellEngines.map((e: { id: number }) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // the damage spells named by the game
+    const byId = (i: number) => tables.spells[i].name;
+    expect(byId(0)).toBe('ENERGY BLAST');
+    expect(tables.combat.spellEngines.find((e: { id: number }) => e.id === 2).engine).toBe('damage@0x23758');
+  });
   it('class minimums: every class needs its namesake attribute', () => {
     expect(tables.classes[0].minAttrs[0]).toBe(12); // FIGHTER STR
     expect(tables.classes[1].minAttrs[1]).toBe(12); // MAGE INT

@@ -13,6 +13,7 @@ import { mkdirSync } from 'node:fs';
 import { readBinary, writeJson } from '@seer-project/pipeline';
 import { parseHunkFile } from '@seer-project/amiga';
 import { HP_DICE, SPELL_TIER_LEVELS } from './rules.ts';
+import { ATTACK_KINDS, weaponSkill } from './combat.ts';
 
 const u16 = (b: Uint8Array, o: number) => (b[o] << 8) | b[o + 1];
 const s16 = (b: Uint8Array, o: number) => (u16(b, o) << 16) >> 16;
@@ -96,6 +97,35 @@ export interface SpellRow {
   casterMask: number;
 }
 
+/**
+ * Combat tables. Attack kinds, the weapon-subtype to skill map and the thresholds are the ones the harness
+ * verified (combat.ts, combat.test.ts); `spellEngines` is read from the dispatcher CODE+0x24ea0 (grade: code,
+ * not yet run) and maps spell id to the generic effect engine and its fixed arguments.
+ */
+function combatTables(m: (id: number) => string) {
+  const spellEngines: { id: number; engine: string; target: string; args: number[] }[] = [];
+  const add = (engine: string, rows: [number, string, ...number[]][]) =>
+    rows.forEach(([id, target, ...args]) => spellEngines.push({ id, engine, target, args }));
+  // damage: engine args = [resist index]
+  add('damage@0x23758', [[0, 'single', 7], [2, 'area P+3', 5], [4, 'area P+4', 3], [5, 'area P+3', 10], [7, 'area 10', 4], [9, 'single', 6],
+    [17, 'area P+4', 4], [19, 'single', 10], [27, 'area P+3', 7], [35, 'single', 7], [40, 'area P+3', 4], [43, 'area 10', 6],
+    [65, 'single', 8], [66, 'area P+1', 7]]);
+  add('damage@0x23366', [[74, 'single', 4]]);
+  // status / kill with one save: engine args = [arg2]
+  add('status@0x238ac', [[1, 'area P+1', 2], [11, 'area 10', 10], [18, 'single', 4], [24, 'area P+3', 12], [36, 'area 3', 8], [42, 'single', 4],
+    [48, 'area P+3', 9], [50, 'single', 9], [55, 'area P+3', 9], [61, 'single', 11], [67, 'area P', 11], [75, 'area P', 11]]);
+  // status with three dice arguments: engine args = [arg2, a, b, c, d]
+  add('status@0x23aa0', [[20, 'single', 6, 5, 0, 2], [22, 'area 3', 5, 6, 0, 4], [25, 'area 10', 6, 4, 0, 2], [29, 'single', 6, 5, 0, 4],
+    [31, 'area 10', 5, 3, 0, 4], [32, 'area P+3', 5, 6, 0, 4], [47, 'single', 10, 7, 0, 1], [58, 'area P+3', 10, 7, 0, 2]]);
+  return {
+    attackKinds: ATTACK_KINDS.map((name, k) => ({ kind: k, name, message: m(3350 + k) })),
+    weaponSkillBySubtype: Array.from({ length: 256 }, (_, st) => weaponSkill(st)),
+    fatigueThresholds: { stamina: [50, 66, 75, 90], toHitPenalty: [0, 5, 10, 20, 40], acPenalty: [0, 0, 1, 2, 4] },
+    encumbrance: { thresholdsPct: [50, 66, 75, 90], armourPenalty: [0, 0, 1, 2, 4], hand0ToHit: [0, 5, 10, 20, 40], hand1ToHit: [0, 10, 20, 40, 80] },
+    spellEngines,
+  };
+}
+
 export function extractRulesTables(dataDir: string) {
   const bane = readBinary(resolve(dataDir, 'Bane'));
   const hunks = parseHunkFile(bane);
@@ -163,6 +193,7 @@ export function extractRulesTables(dataDir: string) {
     realms: realmNames,
     spells,
     spellTierLevels: [...SPELL_TIER_LEVELS],
+    combat: combatTables(m),
     creation: {
       bonusPool: { base: 5, randomDie: 6, extraEightChance: '2 independent rolls of Random(20)==0, +8 each', cheatValue: 21 },
       femalePenalty: { str: -2, per: +1, kar: +1, note: 'applied by CODE+0x2d732 when the gender arg == 1 (hypothesis: female)' },
