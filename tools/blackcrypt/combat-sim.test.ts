@@ -101,4 +101,24 @@ describe('combat-sim: executable form of game-rules.md section 9', () => {
     const sim = new CombatSim(cfg({ blocked: ['4,1', '4,0', '4,2'], monsters: [monster({ x: 6, y: 1 })] })).run(60);
     expect(sim.monsters[0].x).toBe(5);
   });
+
+  it('ray spell: damages the first monster in line, a wall in between blocks it (spell 0 = pre 1 ray, range 3)', () => {
+    const run = (blocked: string[]) => {
+      const sim = new CombatSim(cfg({ blocked, monsters: [monster({ x: 3, y: 1, hp: 500, maxHp: 500 })] }));
+      sim.step1([{ kind: 'ray', char: 1, spell: 0 }]);
+      return sim;
+    };
+    const open = run([]);
+    const ray = open.log.find(l => l.ev === 'ray');
+    expect(ray && ray.ev === 'ray' && ray.hits.length).toBe(1);
+    expect(open.monsters[0].hp).toBeLessThan(500);
+    const walled = run(['2,1']);
+    expect(walled.monsters[0].hp).toBe(500);
+  });
+  it('ray kill awards XP and removes the monster', () => {
+    const sim = new CombatSim(cfg({ monsters: [monster({ x: 2, y: 1, hp: 1, maxHp: 1, xpBase: 400 })] }));
+    sim.step1([{ kind: 'ray', char: 1, spell: 0 }]);
+    expect(sim.monsters[0].alive).toBe(false);
+    expect(sim.chars.every(c => c.xp >= 400)).toBe(true);
+  });
 });

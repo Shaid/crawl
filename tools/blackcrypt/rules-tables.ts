@@ -85,14 +85,23 @@ export function extractRulesTables(s1: Uint8Array, s2: Uint8Array, bcdfp: Uint8A
       hungerThirst: { every: 128, offset: 0x40, below: 2000, damage: 2, damageType: 4 },
       regen: 'flag +0x6D: +1 HP when (t&0x200)==0 at the 16-tick cadence', restHeal: 'level*2 per 8 ticks (halved on hazard squares without +0x86)',
       hazardSquare: 'map flag bit 31 without +0x86: rand16(5)+1 damage type 4 per 16 ticks',
-      itemDecay: 't&63==32: stat-enchanted pack items lose one charge; effect off at zero',
-      wallClockSecondsPerTick: null,
+      itemDecay: 't&63==32 and not resting: for every character (alive or not), 18 item words from record +0x16: types {0,1,2,3,7,8,9,10,11,13,21,25,26,27,28,36,42,45} with charges 1..254 and effect word < 0x80 lose one charge; at charges == 1 the enchantment is removed (+0x180E0) (harness, rules-monster.ts itemDecay)',
+      // harness on the arithmetic (S_1 +0x1FF7A / +0x1FF90), code on the wiring: SetIdlePeriod(10) at S_1 +0x1A836; reload = max(1, 10*VBlankFrequency/60) vblanks
+      timing: { setIdlePeriodArg: 10, unitsPerSecond: 60, reloadVblanks: { 50: 8, 60: 10 }, tickMs: { pal: 160, ntsc: 1000 / 6 }, note: 'plus the handler run time; the countdown restarts at the end of each tick handler' },
+      wallClockSecondsPerTick: { pal: 0.16, ntsc: 1 / 6 },
     },
     monsterAi: {
       note: 'behaviour VM at S_1 +0xAAFC; 6-byte cells op,a,w1,w2; script chosen by monster record word +0xE (movement type 0..11); pc = secondary record word +4; pointer table (S_2 +0x114A) is 0x80 low in the extracted image',
       ...extractAiScripts(s2),
       ops: Object.fromEntries([...new Set(extractAiScripts(s2).cells.map(c => c[0]))].sort((a, b) => a - b).map(o => [o, aiOpName(o)])),
       scripts: listScripts(extractAiScripts(s2)),
+    },
+    // item use effects (object word +0xE, dispatch table S_1 +0x12FEA): 0x8D-0x90 resolved this pass (code for the routine, bcdfs item data for the names)
+    itemEffects890: {
+      0x8d: { routine: 0x78da, name: 'PROTECTOR', what: 'event 0x25: +75 magic resistance (+0x69) to every living character for 200 ticks' },
+      0x8e: { routine: 0x79c2, name: 'SOULFREEZER', what: 'Ram-boss stage machine on A4+0x1A1E (code, not decoded)' },
+      0x8f: { routine: 0x7b2e, name: 'VORTEX', what: 'Ram-boss stage machine (code, not decoded)' },
+      0x90: { routine: 0x7c40, name: 'FORCEHAMMER', what: 'Ram-boss stage machine (code, not decoded)' },
     },
     classes, spells,
     weaponBase: decodeWeaponSwitch(s1),

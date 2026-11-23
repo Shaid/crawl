@@ -12,6 +12,7 @@
  * (slot = class), any number of monsters (one per square), real-time ticks, scripted party commands.
  */
 import { BcRng, levelUp, meleeAttack, weaponInfo, type RuleTables, type WeaponBase } from './rules';
+import { RAY_SPELLS, casterValues, castRay, type RayWorld, type RayObj } from './rules-spell';
 import {
   awardXp, hpAtLeastMorale, monsterMelee, runBehaviour, vitalsTick, VM_CALLS,
   type AiScripts, type VmMonster, type VmCall,
@@ -27,6 +28,8 @@ export interface SimChar {
   cls: number; level: number; xp: number;
   hp: number; maxHp: number;
   str: number; dex: number; con: number;
+  /** INT (+0x66) and WIS (+0x65): spell stat; class 1 / 3 use WIS, others INT */
+  int: number; wis: number;
   /** record +0x62 armour class (higher is better) */
   ac: number;
   /** record +0x69 percent resistance (spells / specials only) */
@@ -80,6 +83,7 @@ export type SimCmd =
   | { kind: 'attack'; char: number }
   | { kind: 'move'; dir: 'forward' | 'back' }
   | { kind: 'turn'; by: 1 | -1 }
+  | { kind: 'ray'; char: number; spell: number }
   | { kind: 'rest'; on: boolean }
   | { kind: 'wait' };
 
@@ -90,6 +94,7 @@ export type LogEntry =
   | { t: number; ev: 'death'; char: number }
   | { t: number; ev: 'monster-dead'; monster: number; xp: number[] }
   | { t: number; ev: 'levelup'; char: number; level: number }
+  | { t: number; ev: 'ray'; char: number; spell: number; total: number; hits: { monster: number; dmg: number; killed: boolean }[] }
   | { t: number; ev: 'step'; monster: number; x: number; y: number }
   | { t: number; ev: 'game-over' };
 
@@ -176,6 +181,42 @@ export class CombatSim {
     c.readyAt = this.tick + Math.max(5, this.cfg.tables.speedT3[Math.max(0, Math.min(30, c.dex))]);
     this.log.push({ t: this.tick, ev: 'swing', char: k, hit: r.hit, dmg: r.damage, monster: m.id, monHp: m.hp });
     if (m.hp < 1) this.monsterDies(m);
+  }
+
+  /**
+   * Player ray spell [H castRay / marchRay / RAY_SPELLS from rules-spell.ts]: walls (here: blocked squares, modelled as solid pillars) stop the ray,
+   * any monster on the path stops it. Memorised slots, recharge timers and the antimagic square are not modelled here [h]
+   * (rechargeTick / memoriseClick in rules-spell.ts are harness-verified and can be wired in). Only ray spells (RAY_SPELLS) are supported.
+   */
+  private ray(k: number, spell: number) {
+    const c = this.chars[k], fn = RAY_SPELLS[spell];
+    if (!fn || c.hp <= 0) return;
+    const p = fn(casterValues({ cls: c.cls, level: c.level, b6a: 0, w65: c.wis, w66: c.int } as never, this.cfg.tables));
+    const cells = new Map<number, number>(); const objs: Record<number, RayObj> = {};
+    this.monsters.forEach((m, i) => {
+      if (!m.alive) return;
+      const P = 1 + 2 * i, S = 2 + 2 * i;
+      cells.set(m.y * 256 + m.x, P);
+      objs[P] = { kind: 'mon', gfx: m.gfx, b2: m.b2, hp: m.hp, S };
+      objs[S] = { kind: 'sec', maxHp: m.maxHp, w6: m.xpBase, pos: m.pos, alert: 0 };
+    });
+    let sid = 500;
+    for (const b of this.blocked) { const [x, y] = b.split(',').map(Number); objs[sid] = { kind: 'str', b5: 0x17, wA: 0 }; cells.set(y * 256 + x, sid++); }
+    const w: RayWorld = { cells, objs, px: this.px, py: this.py, facing: this.facing, item36: false, b1E5C: 0, chars: this.chars.map(ch => ({ hp: ch.hp, xp: ch.xp })) };
+    const r = castRay(w, { mag: p.mag, dmg: p.dmg, base: 0, pre: p.pre, range: p.range }, this.rng, awardXp);
+    this.chars.forEach((ch, i) => { ch.xp = w.chars[i].xp; });
+    const hits = r.hits.map(h => ({ monster: (h.id - 1) >> 1, dmg: h.dmg, killed: h.killed }));
+    for (const h of hits) { const m = this.monsters[h.monster]; m.hp = objs[1 + 2 * h.monster].hp!; }
+    this.log.push({ t: this.tick, ev: 'ray', char: k, spell, total: r.total, hits });
+    for (const h of hits) if (h.killed) this.finishKill(this.monsters[h.monster]);
+  }
+
+  /** after a ray kill: XP was already awarded by castRay; this removes the monster and runs the level-up checks [H] */
+  private finishKill(m: SimMonster) {
+    m.alive = false;
+    this.events = this.events.filter(e => e.monster !== m.id);
+    this.chars.forEach((c, k) => { if (c.hp > 0) { const lv = c.level; levelUp(c, this.cfg.tables, this.rng); if (c.level !== lv) this.log.push({ t: this.tick, ev: 'levelup', char: k, level: c.level }); } });
+    this.log.push({ t: this.tick, ev: 'monster-dead', monster: m.id, xp: [] });
   }
 
   /** Monster death (S_1 +0x7ED0) [H awardXp + levelUp]; carried chain drops on the square [C]. */
@@ -282,6 +323,7 @@ export class CombatSim {
         }
         break;
       }
+      case 'ray': this.ray(cmd.char, cmd.spell); break;
       case 'rest': this.resting = cmd.on; this.chars.forEach(c => { c.resting = cmd.on; }); break;
       case 'wait': break;
     }
@@ -297,9 +339,9 @@ export class CombatSim {
 export function startingParty(t: RuleTables): SimChar[] {
   const stats = [[14, 8, 6, 12, 10], [12, 8, 14, 6, 10], [8, 14, 6, 12, 10], [6, 8, 12, 10, 14]]; // STR INT WIS DEX CON
   return ['FIGHTER', 'CLERIC', 'MAGIC USER', 'DRUID'].map((name, cls) => {
-    const [str, , , dex, con] = stats[cls];
+    const [str, int, wis, dex, con] = stats[cls];
     return {
-      name, cls, level: 1, xp: 0, hp: 20, maxHp: 20, str, dex, con,
+      name, cls, level: 1, xp: 0, hp: 20, maxHp: 20, str, dex, con, int, wis,
       ac: t.statBonusT1[dex] + 6 + 2, resist: 0,
       food: 5000, water: 5000, energy: 10000, poison: 0, disease: 0,
       regen: 0, prot86: 0, sustain: 0, weapon: { gfx: 0, extra: 0 }, b6c: 0, resting: false, readyAt: 0, tired: false,
