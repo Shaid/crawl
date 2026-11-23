@@ -406,6 +406,8 @@ A separate blitter for rendering text characters:
 
 #### Character Record Layout (from WHDLoad trainer)
 
+> **Correction (2026-11-23):** the trainer layout below is partly wrong (+0x52 is food, +0x54 water, +0x56 energy, XP is the long at +0xA0, there is no gold). The code-derived field map is in `game-rules.md` §1.1.
+
 0xA8 (168) bytes per character, 4 characters:
 - +$00: name
 - +$4E: current HP (w)

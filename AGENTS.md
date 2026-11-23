@@ -174,6 +174,9 @@ index plus a log of dead ends worth not repeating; where the two disagree,
   `screens/ending-*.png`, `sprites/ending-panels.*`, `sprites/ending-font.*`,
   `data/ending-script.json`.
 
+### Game rules
+`docs/blackcrypt/amiga/game-rules.md` holds the code-derived rules (character record, XP/level-up, melee, spells, world) with a musashi oracle in `tools/blackcrypt/rules_oracle/`; open rules work is in `docs/blackcrypt/TODO.md` (`bc-rules-*`).
+
 ### Extraction history (mostly solved — current open work is in `docs/blackcrypt/TODO.md`)
 - ~~**Item sprites (dungeon floor)**~~: **SOLVED.** All 180 item icons are
   24x24 @ 6 sequential bitplanes with **no mask plane** (the only Black Crypt
