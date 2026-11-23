@@ -3,8 +3,8 @@
  * view runs (`CRYSTALS_TITLE`'s scene scripts plus NAD, the palette owner)
  * and the raw `INIT.FIC` grid as binary web assets for the walker
  * (`tools/walker/games-crystalsofarborea.ts`, which applies the new game's
- * cell changes itself). NOT wired into package.json (like
- * `tools/ishar/amigaaga/scripts.ts`) -- run directly:
+ * cell changes itself). Run by `npm run build-assets -- --game
+ * crystalsofarborea` (tools/shared/game-config.ts, 2026-11-23), or directly:
  * `npx tsx tools/crystalsofarborea/amiga/scripts.ts [dataDir]`.
  * Output: public/assets/crystalsofarborea/amiga/scripts/<name>.bin,
  * public/assets/crystalsofarborea/amiga/data/init.bin

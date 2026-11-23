@@ -751,7 +751,106 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
       },
     }],
   },
+  {
+    id: 'ishar',
+    displayName: 'Ishar: Legend of the Fortress',
+    platforms: [{
+      platform: 'amigaaga',
+      dataDirs: ['ishar/amigaaga'],
+      executable: undefined,
+      expectedFiles: ['CONT1.FIC'],
+      supported: true,
+      assetDir: 'ishar',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // Sprite atlases + region grids + the decompressed scene scripts the first-person walker runs (tools/walker/games-ishar.ts).
+        await runIsharFamilyExporters('ishar/amigaaga', dataDir, [
+          'tools/ishar/amigaaga/sprites.ts',
+          'tools/ishar/amigaaga/regions.ts',
+          'tools/ishar/amigaaga/scripts.ts',
+        ]);
+      },
+    }],
+  },
+  {
+    id: 'ishar2',
+    displayName: 'Ishar 2: Messengers of Doom',
+    platforms: [{
+      platform: 'amigaaga',
+      dataDirs: ['ishar2/amigaaga'],
+      executable: undefined,
+      expectedFiles: ['CONT1.FIC'],
+      supported: true,
+      assetDir: 'ishar2',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // Sprite atlases + region grids + the walker's scene scripts.
+        await runIsharFamilyExporters('ishar2/amigaaga', dataDir, [
+          'tools/ishar2/amigaaga/sprites.ts',
+          'tools/ishar2/amigaaga/regions.ts',
+          'tools/ishar2/amigaaga/scripts.ts',
+        ]);
+      },
+    }],
+  },
+  {
+    id: 'ishar3',
+    displayName: 'Ishar 3: The Seven Gates of Infinity',
+    platforms: [{
+      platform: 'amigaaga',
+      dataDirs: ['ishar3/amigaaga'],
+      executable: undefined,
+      expectedFiles: ['CONT1-3.FIC'],
+      supported: true,
+      assetDir: 'ishar3',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // Sprite atlases + region grids + the walker's scene scripts.
+        await runIsharFamilyExporters('ishar3/amigaaga', dataDir, [
+          'tools/ishar3/amigaaga/sprites.ts',
+          'tools/ishar3/amigaaga/regions.ts',
+          'tools/ishar3/amigaaga/scripts.ts',
+        ]);
+      },
+    }],
+  },
+  {
+    id: 'crystalsofarborea',
+    displayName: 'Crystals of Arborea',
+    platforms: [{
+      platform: 'amiga',
+      dataDirs: ['crystalsofarborea/amiga'],
+      executable: undefined,
+      expectedFiles: ['INIT.FIC', 'NAD.CO'],
+      supported: true,
+      assetDir: 'crystalsofarborea',
+      features: {},
+
+      async buildAssets(_cfg, dataDir) {
+        // Sprite atlases (incl. CARTE) + the 3D view's scene scripts, NAD and INIT.FIC (tools/walker/games-crystalsofarborea.ts).
+        await runIsharFamilyExporters('crystalsofarborea/amiga', dataDir, [
+          'tools/crystalsofarborea/amiga/sprites.ts',
+          'tools/crystalsofarborea/amiga/scripts.ts',
+        ]);
+      },
+    }],
+  },
 ]);
+
+/**
+ * The Ishar-family exporters are standalone CLIs (`npx tsx tools/<game>/<platform>/<step>.ts [dataDir]`);
+ * run each in its own process so a fresh checkout's `npm run build-assets` produces every walker asset.
+ */
+async function runIsharFamilyExporters(label: string, dataDir: string, scripts: string[]): Promise<void> {
+  const { execFileSync } = await import('node:child_process');
+  for (const script of scripts) {
+    execFileSync('npx', ['tsx', script, dataDir], { stdio: 'inherit', cwd: process.cwd() });
+  }
+  console.log(`  ${label}: ${scripts.length} exporters run`);
+}
 
 export const GAME_PLATFORMS = flattenConfigs(GAME_CONFIGS);
 

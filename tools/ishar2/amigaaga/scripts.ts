@@ -1,8 +1,8 @@
 /**
  * Ishar 2: Messengers of Doom (Amiga AGA) — export decompressed location
  * scripts needed by tools/walker's first-person renderer as binary web
- * assets. NOT wired into package.json (per this task's constraints) — run
- * directly: `npx tsx tools/ishar2/amigaaga/scripts.ts [dataDir]`.
+ * assets. Run by `npm run build-assets -- --game ishar2` (tools/shared/game-config.ts,
+ * 2026-11-23), or directly: `npx tsx tools/ishar2/amigaaga/scripts.ts [dataDir]`.
  * Output: public/assets/ishar2/amigaaga/scripts/<name>.bin -- the old
  * test-bench set plus `ISHAR2_TITLE.sceneScripts` (2026-11-22).
  *

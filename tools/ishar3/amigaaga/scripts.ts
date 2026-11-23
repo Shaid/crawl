@@ -1,8 +1,8 @@
 /**
  * Ishar 3: The Seven Gates of Infinity (Amiga AGA) — export decompressed
  * location scripts needed by tools/walker's first-person renderer as binary
- * web assets. NOT wired into package.json (matches Ishar 1/2's own
- * `scripts.ts` convention) — run directly:
+ * web assets. Run by `npm run build-assets -- --game ishar3`
+ * (tools/shared/game-config.ts, 2026-11-23), or directly:
  * `npx tsx tools/ishar3/amigaaga/scripts.ts [dataDir]`.
  * Output: public/assets/ishar3/amigaaga/scripts/{foret,fforet,jungle,fjungle}.bin
  *

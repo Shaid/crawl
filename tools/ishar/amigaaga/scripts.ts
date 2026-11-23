@@ -1,8 +1,8 @@
 /**
  * Ishar: Legend of the Fortress (Amiga AGA) — export decompressed location
  * scripts needed by tools/walker's first-person renderer as binary web
- * assets. NOT wired into package.json (per this task's constraints) — run
- * directly: `npx tsx tools/ishar/amigaaga/scripts.ts [dataDir]`.
+ * assets. Run by `npm run build-assets -- --game ishar` (tools/shared/game-config.ts,
+ * 2026-11-23), or directly: `npx tsx tools/ishar/amigaaga/scripts.ts [dataDir]`.
  * Output: public/assets/ishar/amigaaga/scripts/<name>.bin -- the old
  * test-bench set plus every scene script and the zone script the walker's
  * `IsharScene` needs (`ISHAR1_TITLE`, 2026-11-22).

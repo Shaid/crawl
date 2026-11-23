@@ -72,6 +72,13 @@ The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONST
 
 ## Session log
 
+- **2026-11-23 (asset build wiring):** the four titles had no
+  `tools/shared/game-config.ts` entry, so `npm run build-assets` skipped
+  them and a fresh checkout lacked the walker's gitignored scripts, region
+  grids and atlases. Each now has one that runs its standalone exporters
+  (`sprites`, `regions`, `scripts`; Crystals: `sprites`, `scripts`). Checked
+  with `npm run build-assets -- --game <id>` on all four (0 export errors).
+
 - **2026-11-23 (Crystals of Arborea's 3D view):** the oracle boots
   Crystals to its first 3D frame (new game, six warriors, "3D") and
   walks it with the game's arrow pad. The scene model now runs Crystals:
