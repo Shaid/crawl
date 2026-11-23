@@ -539,8 +539,12 @@ export function decodeAlisInstr(data: Uint8Array, pc: number, version = 20): Ali
     case 0x9a: return fin('cxinvon', {});
     case 0x9b: return fin('cxinvoff', {});
     case 0x9c: return fin('clistent', { dest: store(c) });
-    case 0x9d: return fin('csound', {});
-    case 0x9e: return fin('cmsound', {});
+    // csound / cmsound (engine 2.x/3.x): five expressions -- sample index,
+    // priority, volume, loop, speed (measured: MINOTOR `+0xe0` desynchronised without them)
+    case 0x9d: case 0x9e: {
+      const args = [expr(c), expr(c), expr(c), expr(c), expr(c)];
+      return fin(op === 0x9d ? 'csound' : 'cmsound', { args });
+    }
     case 0x9f: return fin('credon', {});
     case 0xa0: return fin('credoff', {});
     case 0xa1: return fin('cdelsound', {});

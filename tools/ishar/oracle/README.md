@@ -52,10 +52,16 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
     mirrored);
   - pixels of the view window.
 
-  Sprites from non-scenery entities (wandering NPCs and monsters) are left
-  out of the placement count. The "masked" pixel rate also leaves out their
-  boxes. `sweep.ts` also prints a null control, which compares crawl's pose
-  i against the game's pose i+1.
+  NPCs and monsters count too (2026-11-23): crawl runs the title's entity
+  scripts (`spec.entities`, e.g. Ishar 1's ENCONT) on the EN1 memory the
+  oracle dumps each step (`stepMemdumps`/`bootMemdumps` flagged `memory`).
+  Only entities crawl cannot draw are left out of the placement count, and
+  the "masked" pixel rate leaves out their boxes. Pass `npcs = false` to
+  `crawlWalk`/`crawlSequence`/`comparePose` for a `noNpcs` walk.
+  `matchedNearX` also accepts placements that differ only in x by up to
+  12 px, which is the jitter Ishar 2/3 add with the engine's shared random
+  generator. `sweep.ts` also prints a null control, which compares crawl's
+  pose i against the game's pose i+1.
 
 ## Harness commands
 

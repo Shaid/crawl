@@ -1906,14 +1906,90 @@ at 500.** All values are placements / pixels outside NPC boxes:
 The town-14 miss is the walk's own poke: it killed the guards spawned at
 the gate between two legs.
 
-**Not covered yet** (rewritten 2026-11-23 later; the earlier list named
-regions 3-6, the town/cave codes and Ishar 3's boot, all measured since):
+17. **NPCs and monsters (2026-11-23).** They are drawn by the game's own
+    entity scripts, which `IsharScene` now runs (`spec.entities`):
+    - **Ishar 1: ENCONT.** MAIN starts it once; GERDEP wakes it every step
+      with the scene. On each wake it kills the monster entities it started
+      (type byte 35), then walks EN1 slots 28..69 (`0x3697` = 70). A slot is
+      drawn when its region code (`0x3910`) is the party's (`0x1508`), its hp
+      (`0x1b22`) is above 0, and it stands up to 6 cells ahead and no
+      farther to the side than ahead (rows `0x1978`, cols `0x1a06`; one arm
+      per facing, `+0x76`). For each one ENCONT `clive`s the monster's
+      script: by slot for 28..32 (BORMIN, MORGU, KIRIELA, FRAGORN, EN1), else
+      by species `0x1ebe` (`+0x584`, 50 arms: ORC, LOUP, PABO the town guard,
+      MINOTOR ...). It passes x, depth and height through `shimw`:
+      depth = 99 per cell (-5 outdoors), x and height from a per-depth
+      table (`+0x334`). The monster script puts its own sprite by depth
+      (BORMIN `+0x78`: slot 6 + depth/100) and sleeps; ENCONT kills it on
+      the next wake.
+    - A monster right in front takes one of three front-row places
+      (`0x3d54`; x -65 / 0 / 57). Any other is spread across the cell by
+      `oprnd` seeded with 100 x its slot: x offset -100 + 20 x
+      prnd(slot x 100, 9). `oprnd` is a pure hash of the seed (rotate left
+      10, x 0x7ab7 - 0x77f, high word of range x hash). Some species reset
+      the offset to 0.
+    - **Ishar 2: EAFF** (same shape): slots 50..109 (`0x4a81` = 110) in the
+      party's zone (`0x449a` = `0x4ef2`), hp `0x36ac`, rows `0x34f0`, cols
+      `0x3412`, species `0x3d2e` (`+0x664`, 57 arms: POURS1 the bear, PEOPLE1/2,
+      the GUARD3/4 ...), front-row places `0x4b80`. Two of its front places
+      add `ornd`, the engine's shared generator.
+    - **Ishar 3: AFFPV and EAFF.** AFFPV belongs to the Maz group (MAIN's
+      load order fville, affpv, vdec1, vdec2). It walks a 150-person table:
+      row `0x4012`, col `0x40ae`, facing `0x414a`, kind `0x41e6`, arrays 156
+      bytes apart. It `clive`s VPERSO1..5 by kind and location (`0x3b33`),
+      with x/depth/height in vram 0/8/16. Every person's x adds
+      65 + `ornd`(20) (`+0x2e3`/`+0x2f6`). EAFF is Ishar 3's ENCONT.
+    - **EN1.FIC** is MAIN's `cfreadb` run in file order for all three titles
+      (`ISHAR*_EN1_READS`, §9.3), so `isharEntityMemory` builds the new-game
+      memory straight from the file.
+    - **`ornd` cannot be reproduced.** It is the engine's shared generator,
+      which every script advances. Crawl uses the middle of the range.
+      `comparePose` reports `matchedNearX`, which also accepts placements
+      that differ only in x by up to 12 px.
+
+    Decoder fixes found on the way:
+    - `csound`/`cmsound` read five expressions. MINOTOR's close-up animation
+      desynchronised without them.
+    - The interpreter decoded every script as engine 2.0. Ishar 3's AFFPV
+      (`cdim` at `+0x18`) fell off its own code. `spec.engineVersion` = 30
+      fixes it.
+    - Table stores (`smaintc`/`smainti`) now write to the scene (`writeTable`).
+
+    **Measured (no NPC masking: the NPC scripts count as modelled).**
+
+    | Walk | Steps | Placements | Pixels | Moves |
+    |---|---|---|---|---|
+    | Ishar 1, the 129-action test walk (Bormin, Kiriela, roaming wolves) | 129 | 12,328/12,328 | 100.000% | 128/129 |
+    | Ishar 1, new game to the CONT2 south edge, all NPCs alive (Bormin, Kiriela, Naim) | 119 | 12,590/12,590 | 99.99% | 118/119 |
+    | Ishar 1, CONT3 bridge to the town gate (Fragorn; guard 46 and roaming monsters removed) | 82 | 6,659/6,659 | 100% | 82/82 |
+    | Ishar 1, town 13 with its gate guards alive (111 PABO sprites) | 98 | 8,883/8,883 | 100% | 98/98 |
+    | Ishar 3, the 58-action Maz walk with its townspeople | 58 | 1,427/1,497 exact; 131/133 people within 12 px | 94.8% | 57/58 |
+
+    The pixel residual on the Ishar 1 route is the known equal-depth tie
+    order after a region change (`ishar-scene-tie-slots`).
+
+    Measured gaps:
+    - **Close-up animation.** A monster in the cell right in front plays a
+      per-frame animation (MINOTOR `+0xb6`: `cstop` loop over slots 38..45,
+      plus GEREN's attack messages). Crawl draws its idle frame there.
+      Seen at the CONT3 causeway guard: 2 frames of 26.
+    - **Ishar 2.** On the 128-action start walk with NPCs alive, 91 of 93
+      bear sprites match exactly. The two misses are on fight frames, and
+      the walk itself goes out of step with the game in fights.
+    - **Ishar 3.** ALSTAR (EAFF) is one cell farther in the game, on 2
+      frames.
+
+**Not covered yet** (rewritten 2026-11-23):
 
 - how doors and levers are worked in play (the walks poke them open);
 - Ishar 2 outside its start group (`ishar2-scene-groups`);
 - Ishar 3 beyond Maz and the forest (item 16: the jungle, dungeon and
   mountain groups are decoded but not measured);
-- NPCs and monsters in the view;
+- monster movement and combat. The walker draws the NPCs at their EN1
+  places; GEREN moves them and spawns the roaming ones;
+- Ishar 3's townspeople table at a new game: its loader is not found, so
+  the walker draws no townspeople;
+- floor objects (AFFOBJ/OBJET);
 - Crystals of Arborea.
 
 ## 9. The world/region grid system — SOLVED (`CONT*.FIC` + MAIN bytecode loader), CONFIRMED
@@ -2041,6 +2117,13 @@ items. See `docs/ishar/TODO.md`.
   its cell (GERDEP `+0x1584`) when hp > 0, kind < 0 and z = 0. Kind >= 0
   is an NPC the party can walk onto, for example Bormin (slot 28, CONT1
   15,29).
+  **All three titles (2026-11-23):** each MAIN reads EN1.FIC with one
+  run of `cfreadb addr len` in file order. Ishar 1 `+0x4a9e` has 28 reads
+  (3,640 B), Ishar 2 `+0x3e22` has 29 (6,050 B), and Ishar 3 `+0x4bcd` has
+  29 (6,050 B; `+0x4aec` is its write twin). The lists are
+  `ISHAR1/2/3_EN1_READS`, checked by `ishar-entities.test.ts`. They place
+  the species array Ishar 1's ENCONT switches on, `0x1ebe`, at file
+  offset 770 (§8.8 item 17).
 - **`TAB1.FIC`** (Ishar 1, 361 B) — loaded whole by
   `MAIN.bin+0x4b2c`: `cfopen("TAB1.FIC", 2); cfreadb(vram+0x379c, 0x169);
   cfclose` (0x169 = 361 exactly), and declared by `cdim` at `MAIN.bin+0x1bc`

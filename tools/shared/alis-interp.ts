@@ -77,9 +77,11 @@ export interface SceneEnv {
    * scene-content array (`basemain+0x7c`, `count=2, dims=[2,114]`) needs
    * `pop()` called TWICE — see `tools/shared/crystals-firstperson.ts`.
    */
-  readGrid(addr: number, pop: () => number, direct: number): number;
+  readGrid(addr: number, pop: () => number, direct: number, size?: 1 | 2): number;
   /** Optional `smain*` writes; when absent they are dropped (and warned about). */
   writeMain?(addr: number, value: number): void;
+  /** Optional `smaintc`/`smainti` writes into a one-dimensional main table (element `index`); when absent they are dropped (and warned about). */
+  writeTable?(addr: number, index: number, value: number, size: 1 | 2): void;
   /** `clive id`: start another entity from script `id`; returns its handle (stored to the instruction's destination), or -1. */
   live?(id: number): number;
   /** `shim*`/`ohim*`: another entity's variable at vram `offset` (the handle comes from a `clive`). */
@@ -174,6 +176,9 @@ export class AlisScriptRunner {
       this.warnings.push(msg);
     }
   }
+
+  /** Engine version the bytecode is decoded for (`decodeAlisInstr`): 20 for Ishar 1/2, 30 for Ishar 3 (its `cdim`/`cfreadb`/... operand shapes differ). */
+  version = 20;
 
   /** Where the entity coordinates live (`ALIS_SCR_WCX/WCY/WCZ`): vram words 0/2/4, or 0/8/16 for engine version 3.0 (Ishar 3). */
   coordOffsets: readonly [number, number, number] = [0, 2, 4];
@@ -282,7 +287,7 @@ export class AlisScriptRunner {
             continue;
           }
           if (step.op === 'omaintc' || step.op === 'omainti') {
-            acc = env.readGrid(step.value, () => pile.pop() ?? 0, acc);
+            acc = env.readGrid(step.value, () => pile.pop() ?? 0, acc, step.op === 'omainti' ? 2 : 1);
           } else if (step.op === 'odirtc' || step.op === 'oloctc' || step.op === 'odirti' || step.op === 'olocti') {
             acc = locals.get(localArrayIndex(localKey(step.op, step.value), acc)) ?? 0;
           } else {
@@ -296,6 +301,12 @@ export class AlisScriptRunner {
           else if (step.op === 'osgn') acc = Math.sign(acc);
           else if (step.op === 'opile') acc = pile.pop() ?? 0;
           else if (step.op === 'ofree') acc = 0x7fff;
+          else if (step.op === 'oprnd') acc = seededRandom(pile.pop() ?? 0, acc);
+          // `ornd`: the engine's shared generator, advanced by every script
+          // that calls it, so crawl cannot reproduce its value; take the
+          // middle of the range (Ishar 2/3 jitter a monster's or a
+          // townsperson's x with it).
+          else if (step.op === 'ornd') acc = (acc & 0xffff) >> 1;
           else warn(`unmodeled EVAL step opname ${step.op}`);
         } else if (step.t === 'unary') {
           acc = applyUnaryStep(step.op, step.arg);
@@ -322,6 +333,12 @@ export class AlisScriptRunner {
           const key = localArrayIndex(localKey(dest.op, dest.value), acc);
           const nv = mode === 'add' ? (locals.get(key) ?? 0) + v : v;
           locals.set(key, dest.op.endsWith('c') ? s8(nv) : s16(nv));
+        } else if (dest.t === 'imm' && typeof dest.value === 'number' && /^[sa]maint[ci]$/.test(dest.op) && env.writeTable) {
+          // e.g. Ishar 1 ENCONT `+0x4a9`: `smaintc(0x3d54)[1]` = the monster in the front-centre slot
+          const size = dest.op.endsWith('c') ? 1 : 2;
+          const cur = mode === 'add' ? env.readGrid(dest.value, () => 0, acc, size) : 0;
+          const nv = cur + v;
+          env.writeTable(dest.value, acc, size === 1 ? s8(nv) : s16(nv), size);
         } else {
           warn(`unmodeled indexed destination ${dest.t === 'imm' ? dest.op : dest.t}`);
         }
@@ -422,7 +439,7 @@ export class AlisScriptRunner {
       }
       let instr: AlisInstr;
       try {
-        instr = decodeAlisInstr(this.data, pc);
+        instr = decodeAlisInstr(this.data, pc, this.version);
       } catch (e) {
         warn(`decode error at 0x${pc.toString(16)}: ${e instanceof Error ? e.message : String(e)}`);
         result = 'error';
@@ -656,6 +673,22 @@ export function runIsharScene(data: Uint8Array, entry: number, env: SceneEnv): R
   const r = new AlisScriptRunner(data, '', entry);
   const { placements, steps } = r.activate(env);
   return { placements, warnings: r.warnings, steps };
+}
+
+/**
+ * `oprnd`: a pseudo-random number below `range`, a pure function of
+ * `seed` (the value popped from the eval stack), unlike `ornd`, which
+ * advances the engine's shared generator. Behaviour measured against the
+ * reference VM: the seed is rotated left by 10 bits (16-bit), mapped
+ * through h = (h * 0x7ab7 - 0x77f) mod 2^16, and the result is the high
+ * word of range * h. Ishar 1 ENCONT `+0x500` spreads a monster across the
+ * view with it, seeded by the monster's slot number.
+ */
+export function seededRandom(seed: number, range: number): number {
+  let h = seed & 0xffff;
+  h = ((h << 10) | (h >>> 6)) & 0xffff;
+  h = (Math.imul(h, 0x7ab7) - 0x77f) & 0xffff;
+  return Math.floor(((range & 0xffff) * h) / 0x10000);
 }
 
 function applyBinary(op: string, lhs: number, rhs: number, warn: (m: string) => void): number {

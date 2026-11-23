@@ -18,11 +18,12 @@
  * range is `[10,16]`, not `[-10,-4]`); see `docs/ishar-container-format.md`
  * §8.7.
  */
-import { exportIsharScripts } from '../../shared/ishar-script-export.js';
+import { exportIsharEntityMemory, exportIsharScripts, isharSceneScriptNames } from '../../shared/ishar-script-export.js';
 import { ISHAR1_TITLE } from '../../shared/ishar-scene.ts';
 
 const dataDir = process.argv[2] ?? 'data/ishar/amigaaga';
-const report = exportIsharScripts(dataDir, 'ishar', 'amigaaga', [...new Set(['FORET', 'FOND', 'VILLAGE', 'PLAINE', 'RAMPART', 'TEMPLE', 'FTEMPLE', ...ISHAR1_TITLE.sceneScripts, ISHAR1_TITLE.zone!.script])]);
+const report = exportIsharScripts(dataDir, 'ishar', 'amigaaga', [...new Set(['FORET', 'FOND', 'VILLAGE', 'PLAINE', 'RAMPART', 'TEMPLE', 'FTEMPLE', ...isharSceneScriptNames(ISHAR1_TITLE)])]);
 const ok = report.filter((r) => r.ok).length;
 console.log(`ishar/amigaaga: exported ${ok}/${report.length} first-person scripts`);
 for (const r of report) console.log(`  ${r.ok ? 'OK ' : 'ERR'} ${r.name} ${r.ok ? r.decodedLength + ' bytes' : r.error}`);
+console.log(`  entity memory: ${exportIsharEntityMemory(dataDir, 'ishar', 'amigaaga', ISHAR1_TITLE)} blocks`);

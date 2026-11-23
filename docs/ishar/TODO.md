@@ -66,9 +66,30 @@ Still open:
 Doors, partly traced: PCAVE gives a door a click form (`cforme`) only when it is adjacent and its index is below 24 or above 40; index 40 also needs item -24 in a party inventory (`0x1568`); PCAVE `+0x1c4` then sets the door's PARAM flag. Negative indices are levers (state `0x3b98`; lever drawn up at 0, down at 1/2). Clicking the door, or ACTION then the door, in the oracle did not open CONT5 door 11 (16,24): the click has to hit the form in the mouse entity's coordinates, not yet worked out. The ACTION menu offers PICK LOCK.
 
 The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONSTRE's and TELEP's tables and answers a prompt by trying the words (verified at the cave mouth, about 60 s per try). | `docs/ishar-container-format.md` §8.8 | 2026-11-23 |
+| ishar-npcs | open (narrowed) | **2026-11-23:** NPCs and monsters are drawn by the game's own entity scripts, now run by `IsharScene` (`spec.entities`). Ishar 1 uses ENCONT, which `clive`s a monster script per EN1 slot in view and passes it x/depth/height through `shimw`. Ishar 2 uses EAFF, the same mechanism. Ishar 3 uses AFFPV (the Maz townspeople, VPERSO1..5) plus EAFF. EN1.FIC is MAIN's `cfreadb` run in all three titles (`ISHAR*_EN1_READS`). Measured with no NPC masking: Ishar 1 walks 100% of placements (Bormin, Kiriela, Naim, Fragorn, roaming wolves, 111 town-guard sprites in town 13) and 99.99-100% of pixels. Ishar 2: 91 of 93 bear sprites exact. Ishar 3: 131 of 133 townspeople within 12 px (their x adds `ornd`, the engine's shared random generator, which crawl cannot reproduce; 63 exact). Open: (1) a monster in the cell in front plays a per-frame close-up animation (MINOTOR `+0xb6`) that crawl draws as idle; (2) GEREN's monster movement and roaming spawns (the walker shows the new-game EN1 places); (3) Ishar 3's townspeople table (`0x4012..`) has no loader found yet, so the walker draws none; (4) floor objects (AFFOBJ/OBJET) | `docs/ishar-container-format.md` §8.8 item 17, §9.3; `tools/ishar/__tests__/ishar-entities.test.ts`, `oracle-parity.test.ts` (townspeople) | 2026-11-23 |
 | ishar-scene-tie-slots | open (low) | After a region change the game's equal-depth tie order follows each new script's entity slot (slots freed by the killed group are reused); `IsharScene` uses start order. Costs 10 pixels over a 129-frame walk. Model slot allocation (`script_live` slot reuse) if it ever matters | `tools/ishar/__tests__/oracle-parity.test.ts` (walk test comment) | 2026-11-22 |
 
 ## Session log
+
+- **2026-11-23 (NPCs and monsters):** the walker draws NPCs and monsters
+  the way the game does: it runs each title's entity scripts (Ishar 1
+  ENCONT, Ishar 2 EAFF, Ishar 3 AFFPV + EAFF) on the EN1 memory. The
+  oracle dumps that memory every step, and the walker reads it from
+  EN1.FIC. Fixed on the way:
+  - `oprnd`, a seeded hash;
+  - `csound`'s five operands;
+  - table stores;
+  - Ishar 3 scripts decoded as engine 2.0.
+
+  Results:
+  - Ishar 1: 100% of placements on every live-NPC walk. That includes
+    town 13 with its gate guards, reached with the protection answered at
+    run time.
+  - Ishar 3: Maz townspeople 131/133 within 12 px.
+  - Ishar 2: bears 91/93.
+
+  The remaining gap is the engine's shared random generator (`ornd`).
+  See §8.8 item 17.
 
 - **2026-11-22 (alis oracle pass):** built `tools/ishar/oracle/`, which
   runs `maestun/alis` (MIT, pinned 31b1811) plus a harness patch. It is

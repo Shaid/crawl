@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, isharSceneScriptNames, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -178,7 +178,8 @@ interface IsharData {
    * The game's own scene model (`tools/shared/ishar-scene.ts`), for titles
    * that have one traced: every scene + zone script it can run, by name.
    */
-  scene?: { spec: IsharTitleSpec; scripts: Map<string, Uint8Array> };
+  /** `memory`: the entity scripts' new-game main memory (`data/entity-memory.json`, from EN1.FIC), when exported. */
+  scene?: { spec: IsharTitleSpec; scripts: Map<string, Uint8Array>; memory?: Record<number, Uint8Array> };
   /**
    * Every location script fetched successfully for this game (empty/absent
    * if the export step hasn't been run: `tools/ishar/amigaaga/scripts.ts` /
@@ -259,7 +260,7 @@ const START_POSES: Record<IsharGameId, Pose> = {
 };
 
 async function tryLoadSceneScripts(base: string, spec: IsharTitleSpec): Promise<Map<string, Uint8Array> | undefined> {
-  const names = [...spec.sceneScripts, ...(spec.zone ? [spec.zone.script] : [])];
+  const names = isharSceneScriptNames(spec);
   try {
     const out = new Map<string, Uint8Array>();
     await Promise.all(
@@ -271,6 +272,20 @@ async function tryLoadSceneScripts(base: string, spec: IsharTitleSpec): Promise<
     return out.size ? out : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** The NPC/monster entities' new-game memory blocks (`exportIsharEntityMemory`); empty when not exported (the scene then draws no NPCs). */
+async function tryLoadEntityMemory(base: string): Promise<Record<number, Uint8Array>> {
+  try {
+    const res = await fetch(`${base}/data/entity-memory.json`);
+    if (!res.ok) return {};
+    const json = (await res.json()) as { blocks: Record<string, number[]> };
+    const out: Record<number, Uint8Array> = {};
+    for (const [k, v] of Object.entries(json.blocks)) out[Number(k)] = Uint8Array.from(v);
+    return out;
+  } catch {
+    return {};
   }
 }
 
@@ -348,7 +363,8 @@ function loadIsharData(game: IsharGameId): Promise<IsharData> {
     const firstPerson = await tryLoadFirstPersonAssets(base, game);
     const spec = SCENE_SPECS[game];
     const sceneScripts = spec ? await tryLoadSceneScripts(base, spec) : undefined;
-    return { game, layout, regions, storage, firstPerson, scene: spec && sceneScripts ? { spec, scripts: sceneScripts } : undefined };
+    const memory = spec && sceneScripts ? await tryLoadEntityMemory(base) : {};
+    return { game, layout, regions, storage, firstPerson, scene: spec && sceneScripts ? { spec, scripts: sceneScripts, memory } : undefined };
   })();
   loadPromises.set(game, promise);
   return promise;
@@ -459,6 +475,8 @@ export class IsharView implements GameView {
     if (!this.scene) {
       // A new game (or a load): the scripts start, nothing is woken yet.
       this.scene = new IsharScene(sc.spec, (n) => sc.scripts.get(n.toUpperCase()), grids);
+      // NPCs and monsters at their new-game EN1 places (the walker does not move them)
+      this.scene.memory = sc.memory ?? {};
       this.scene.enter(st);
     } else {
       this.scene.setGrids(grids);
@@ -609,7 +627,9 @@ export class IsharView implements GameView {
         return v >= 128 ? v - 256 : v;
       };
       const from = this.partyState();
-      const to = sc.spec.enter(from, { ...from, region: target.level, row: target.x, col: target.y }, cellAt);
+      // Ishar 1: monsters hold their cells (GERDEP +0x1584), at their new-game EN1 places
+      const table = this.id === 'ishar' ? ishar1MonsterTableFromMemory(sc.memory ?? {}) : null;
+      const to = sc.spec.enter(from, { ...from, region: target.level, row: target.x, col: target.y }, cellAt, table ? ishar1Occupancy(table) : undefined);
       return to ? { level: to.region, x: to.row, y: to.col, facing: this.pose_.facing } : null;
     }
     if (!this.noclip && isBlocked(cell)) return null;

@@ -60,6 +60,8 @@ export interface IsharPartyState {
   globals?: Readonly<Record<number, number>>;
   /** One-dimensional main tables as the game holds them now (e.g. Ishar 1's door flags `0x3b64`); override the spec's new-game `tables`. */
   tables?: Readonly<Record<number, readonly number[]>>;
+  /** Main-segment memory blocks as the game holds them now, keyed by start address (e.g. the EN1 monster arrays); override `IsharScene.memory`. */
+  memory?: Readonly<Record<number, Uint8Array>>;
 }
 
 export interface IsharSceneGroup {
@@ -105,6 +107,8 @@ export interface IsharTitleSpec {
   initialZone?: number;
   /** Zones whose add-ons MAIN restarts (kill + start) every time the zone is entered. */
   addOnRestartZones?: readonly number[];
+  /** ALIS engine version of the title's bytecode (default 20; Ishar 3 is 30). */
+  engineVersion?: number;
   /** Entity coordinate offsets in script vram (`ALIS_SCR_WCX/WCY/WCZ`); default 0/2/4, engine 3.0 uses 0/8/16. */
   coordOffsets?: readonly [number, number, number];
   /**
@@ -147,6 +151,22 @@ export interface IsharTitleSpec {
   darken?(readMain: (addr: number) => number): { factors: readonly [number, number, number]; first: number; count: number } | null;
   /** The CONT file a region code reads (default: `region % 10`, Ishar 1/2's town/cave codes +10 share their region's file). */
   contOf?(region: number): number;
+  /**
+   * NPCs and monsters. `persistent` scripts are started once for the whole
+   * game and stay alive across region changes; GERDEP wakes them with the
+   * scene (Ishar 1: ENCONT, which on every wake kills the monster entities
+   * it started and `clive`s one per EN1 slot in view, passing the view
+   * position through `shimw`). `scripts` are the scripts those may start
+   * (looked up by header id, like the scene scripts' own children).
+   */
+  entities?: {
+    persistent: readonly string[];
+    scripts: readonly string[];
+    /** `EN1.FIC` as MAIN reads it: `[addr, len]` in file order (`isharEntityMemory`). */
+    en1?: ReadonlyArray<readonly [number, number]>;
+    /** Other main blocks the entity scripts read and write, zero at a new game (Ishar 1's front-row slots `0x3d54`). */
+    scratch?: ReadonlyArray<readonly [number, number]>;
+  };
   /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
   addOns?(region: number, zone: number, state: IsharPartyState): readonly string[] | null;
 }
@@ -227,6 +247,47 @@ export function ishar1MonsterTableFromDumps(mem: Readonly<Record<string, Uint8Ar
   const name = (k: string) => 'mon' + k[0]!.toUpperCase() + k.slice(1);
   if (!Object.keys(ISHAR1_MONSTER_ARRAYS).every((k) => mem[name(k)])) return null;
   return readMonsterArrays((k) => mem[name(k)]!, 'dump');
+}
+
+/** Every script a title's walker scene can run: the scene scripts, the zone script and the NPC/monster entities. */
+export function isharSceneScriptNames(spec: IsharTitleSpec): string[] {
+  return [...new Set([...spec.sceneScripts, ...(spec.zone ? [spec.zone.script] : []), ...(spec.entities?.persistent ?? []), ...(spec.entities?.scripts ?? [])])];
+}
+
+/**
+ * The main-segment memory the monster/NPC entity scripts read, at a new
+ * game: `EN1.FIC` cut into the title's read list (`entities.en1`, MAIN's
+ * `cfreadb` run, file order) plus the zeroed scratch blocks. Keyed by start
+ * address, for `IsharScene.memory`.
+ */
+export function isharEntityMemory(spec: IsharTitleSpec, en1: Uint8Array): Record<number, Uint8Array> {
+  const out: Record<number, Uint8Array> = {};
+  const e = spec.entities;
+  if (!e) return out;
+  let o = 0;
+  for (const [addr, len] of e.en1 ?? []) {
+    out[addr] = en1.slice(o, o + len);
+    o += len;
+  }
+  for (const [addr, len] of e.scratch ?? []) out[addr] = new Uint8Array(len);
+  return out;
+}
+
+/**
+ * `EN1.FIC` as each title's MAIN reads it (one `cfopen`, then a run of
+ * `cfreadb addr len` in file order): Ishar 1 MAIN `+0x4a9e` (28 reads,
+ * 3,640 B), Ishar 2 `+0x3e22` (29 reads, 6,050 B), Ishar 3 `+0x4bcd`
+ * (29 reads, 6,050 B; its write twin is `+0x4aec`). Checked against the
+ * decoded MAIN by `ishar-entities.test.ts`.
+ */
+export const ISHAR1_EN1_READS: ReadonlyArray<readonly [number, number]> = [[6520, 140], [6662, 140], [6804, 140], [6946, 140], [7088, 140], [7798, 70], [7870, 70], [7942, 70], [8014, 70], [8086, 70], [8158, 70], [8230, 70], [8660, 70], [8302, 70], [8376, 210], [8588, 70], [7230, 140], [7514, 140], [7656, 140], [7372, 140], [8734, 210], [13978, 140], [8946, 70], [5958, 560], [14608, 70], [14778, 140], [14920, 140], [15062, 140]];
+export const ISHAR2_EN1_READS: ReadonlyArray<readonly [number, number]> = [[13330, 220], [13552, 220], [13774, 220], [13996, 220], [14218, 220], [15550, 110], [15662, 110], [15774, 110], [15886, 110], [15998, 110], [16110, 110], [16222, 110], [16892, 110], [16334, 110], [16448, 330], [16780, 110], [14662, 220], [15106, 220], [15328, 220], [14884, 220], [17006, 330], [14440, 220], [17338, 110], [12228, 1100], [17562, 110], [17674, 220], [17896, 220], [18118, 220], [20300, 110]];
+export const ISHAR3_EN1_READS: ReadonlyArray<readonly [number, number]> = [[7714, 220], [7940, 220], [8166, 220], [8392, 220], [8618, 220], [9974, 110], [10090, 110], [10206, 110], [10322, 110], [10438, 110], [10554, 110], [10670, 110], [11356, 110], [10786, 110], [10904, 330], [11240, 110], [9070, 220], [9522, 220], [9748, 220], [9296, 220], [11474, 330], [8844, 220], [11810, 110], [6608, 1100], [12042, 110], [12158, 220], [12384, 220], [12610, 220], [15256, 110]];
+
+/** The monster table from entity memory blocks (`isharEntityMemory`, keyed by main address); null if a block is missing. */
+export function ishar1MonsterTableFromMemory(mem: Readonly<Record<number, Uint8Array>>): Ishar1MonsterTable | null {
+  if (!Object.values(ISHAR1_MONSTER_ARRAYS).every((a) => mem[a.addr])) return null;
+  return readMonsterArrays((k) => mem[ISHAR1_MONSTER_ARRAYS[k].addr]!, 'dump');
 }
 
 /** GERDEP `+0x1584`'s per-slot test, as an occupancy predicate. */
@@ -384,6 +445,9 @@ export function ishar1DoorShut(
 export const ISHAR1_DOOR_ROWS: readonly number[] = [49, 27, 29, 30, 25, 20, 40, 42, 0, 31, 20, 16, 33, 22, 23, 19, 29, 37, 51, 38, 44, 33, 27, 25, 34, 34, 36, 36, 38, 38, 40, 40, 35, 37, 39, 41, 40, 40, 45, 45, 50];
 export const ISHAR1_DOOR_COLS: readonly number[] = [58, 14, 24, 33, 38, 42, 28, 34, 0, 51, 53, 24, 20, 35, 25, 28, 58, 50, 27, 23, 13, 31, 32, 31, 11, 13, 11, 13, 11, 13, 11, 13, 12, 12, 12, 12, 29, 27, 40, 42, 54];
 
+/** The monster and NPC scripts ENCONT `clive`s (by header id; the `+0x52a`/`+0x584` switches). */
+export const ISHAR1_ENTITY_SCRIPTS: readonly string[] = ['ORC', 'LOUP', 'KNIGHT', 'AZAL', 'NAIM', 'BARBARE', 'KIRIELA', 'BORMIN', 'DEALER', 'WIZ1', 'MORGU', 'WARDOG', 'DRAGON', 'DWARRIOR', 'GEANT', 'GOUL', 'KROG', 'MEDUS', 'MINOTOR', 'MOMO', 'MONSTRE', 'PREDATOR', 'SAUB', 'SKELET', 'SPECTRE', 'SPIDER', 'ZOMBI', 'DARKM', 'DARKWIZ', 'SORCIER', 'FRAGORN', 'EN1', 'PABO', 'GAZ'];
+
 /** FOND.DO `+0x68`: `cpalette 8` on its first resume. */
 const FOND_PALETTE = { script: 'FOND', slot: 8 } as const;
 
@@ -417,6 +481,8 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
       0x1508: s.region,
       0x3646: 54 * ((s.region % 10) - 1) + s.row,
       0x3696: 1,
+      // the EN1 slot count ENCONT and GERDEP scan up to
+      0x3697: ISHAR1_MONSTER_SLOTS,
     };
   },
   sceneGroup(region) {
@@ -444,6 +510,22 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
   // (e.g. region 1: col >= 46 in zone 0 -> zone 1; col < 46 in zone 1 -> 0;
   // (25,60) in zone 1 -> 3 ...), all ending at +0x1d34 / +0x2278.
   sceneScripts: ['FOND', 'RPLAINE', 'PLAINE', 'ARBRE', 'FORET', 'FBUIS', 'LACUSTRE', 'VILLAGE', 'RAMPART', 'INVILLE', 'FTEMPLE', 'TEMPLE', 'FVILLE', 'VILLE', 'FONTAINE', 'MCAVE', 'PCAVE', 'FCAVE2', 'SCAVE', 'COLCAVE', 'INCAVE'],
+  // ENCONT (started once by MAIN, woken by GERDEP every step): kills its
+  // monster entities, then for each EN1 slot 28..69 in the party's region
+  // (`0x3910`) with hp > 0 (`0x1b22`) up to 6 cells ahead and no farther to
+  // the side than ahead (rows `0x1978`, cols `0x1a06`), `clive`s the
+  // slot's script (by slot 28..32, else by species `0x1ebe`) and passes it
+  // x, depth (99 per cell, -5 outdoors) and height through `shimw`. The
+  // monster script puts its own sprite by depth (BORMIN `+0x78`: slot 6 +
+  // depth/100). A monster right in front takes one of three front-row
+  // places (`0x3d54`: x -65 / 0 / 57); the others spread by a hash of the
+  // slot number (`oprnd`, `+0x500`).
+  entities: {
+    persistent: ['ENCONT'],
+    scripts: ISHAR1_ENTITY_SCRIPTS,
+    en1: ISHAR1_EN1_READS,
+    scratch: [[0x3d54, 3]],
+  },
   gridBuffers: 'ishar1-pairs',
   stepFrom(st, dir) {
     let { region, row, col } = st;
@@ -549,9 +631,23 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
   // oracle `S 14 x=0 y=13 w=255 h=112`; sprites project to frame y 78
   screen: { xCenter: 127, horizonY: 65, width: 256, height: 113 },
   mainGlobals(s) {
-    return { 0x2ab4: s.row, 0x2ab5: s.col, 0x2ab6: this.facingRaw[s.facing], 0x2d18: s.region, 0x519f: 1, 0x4a80: 1 };
+    // 0x4a81: the EN1 slot count EAFF scans up to (110 in every oracle run)
+    return { 0x2ab4: s.row, 0x2ab5: s.col, 0x2ab6: this.facingRaw[s.facing], 0x2d18: s.region, 0x519f: 1, 0x4a80: 1, 0x4a81: 110 };
   },
   sceneScripts: ['FOND1', 'PLAINE1', 'VILLAGE1', 'BOAT', 'FORET1'],
+  // EAFF, Ishar 2's ENCONT (same shape; oracle trace: GERDEP wakes it every
+  // step, it kills and re-`clive`s POURS1 the bear): EN1 slots 50..109 in
+  // the party's zone (`0x449a` = `0x4ef2`) with hp > 0 (`0x36ac`), rows
+  // `0x34f0`, cols `0x3412`, up to 6 cells ahead; species `0x3d2e` picks
+  // the script (`+0x664`), the front-row places are `0x4b80`. Two of the
+  // three front places add the engine's shared random number (`ornd`,
+  // `+0x51e`/`+0x550`), which crawl cannot reproduce.
+  entities: {
+    persistent: ['EAFF'],
+    scripts: ['BOB4', 'HORNY4', 'VOLEUR3', 'DJFONT', 'ENT2', 'DRUIDE2', 'EWOK2', 'HOMOIS2', 'DWOMAN2', 'RHINO4', 'MOMY5', 'ELMTAIR5', 'SKELETT5', 'SORTMOR5', 'SORCIER5', 'CHAOSGU5', 'LIONMAN5', 'MONSTER5', 'ELMTFEU5', 'DRAGON5', 'ORK5', 'WIZARD5', 'MEDUSA5', 'WITCH5', 'DWIZARD5', 'AVEUGLE5', 'ODWOMAN5', 'DRUIDE4', 'LUTIN3', 'TROUBA3', 'KROG', 'PEOPLE2', 'PEOPLE1', 'PUIT', 'FLY1', 'GOLEM1', 'MARIN', 'POURS1', 'LEZARD1', 'WIZARD1', 'GEANT', 'RELICMAN', 'GUARD3', 'GUARD3HI', 'NAIN4', 'PIAF4', 'GUARD4'],
+    en1: ISHAR2_EN1_READS,
+    scratch: [[0x4b80, 3]],
+  },
   gridBuffers: 'layers',
   stepFrom(st, dir) {
     // Same raw-facing directions as Ishar 1 (the scripts' own facing
@@ -623,11 +719,13 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   gridA: 0x260,
   gridB: 0x14ae,
   coordOffsets: [0, 8, 16],
+  engineVersion: 30,
   // oracle `S 82 x=0 y=13 w=255 h=112`
   screen: { xCenter: 127, horizonY: 65, width: 256, height: 113 },
   mainGlobals(s) {
     // 0x3f82/0x3f84/0x3f86: the day/night factors (256 = daylight, a new game)
-    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x3518: 1, 0x3da4: 1, 0x3f82: 256, 0x3f84: 256, 0x3f86: 256 };
+    // 0x3519: the EN1 slot count EAFF scans up to; 0x3b33: the location (2 at the start, `stepMemdumps` zone)
+    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x3518: 1, 0x3519: 110, 0x3b33: 2, 0x3da4: 1, 0x3f82: 256, 0x3f84: 256, 0x3f86: 256 };
   },
   // MAIN +0x135b / +0x136d: `cdarkpal` with the factors in 0x3f82/0x3f84/
   // 0x3f86 on entries 1.., 15 of them when 0x3da4 = 0, else 175. MAIN steps
@@ -637,7 +735,20 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     return { factors: [m(0x3f82), m(0x3f84), m(0x3f86)], first: 1, count: m(0x3da4) === 0 ? 15 : 175 };
   },
   tables: { 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2', 'FORET', 'FFORET'],
+  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2', 'FORET', 'FFORET'],
+  // EAFF (Ishar 1's ENCONT, engine 3.0) and AFFPV, the Maz townspeople:
+  // 150 people with row `0x4012`, col `0x40ae`, facing `0x414a` and kind
+  // `0x41e6`; AFFPV `+0x75` scans them up to 6 cells ahead and `clive`s
+  // VPERSO1..5 by kind and location (`0x3b33`), passing x, depth and height
+  // through `shimw` (vram 0/8/16). Their x adds the engine's shared random
+  // number (`ornd`, `+0x2e3`/`+0x2f6`), which crawl cannot reproduce.
+  entities: {
+    persistent: ['EAFF'],
+    scripts: ['VPERSO1', 'VPERSO2', 'VPERSO3', 'VPERSO4', 'VPERSO5', 'MESSAGEU', 'GUARD2', 'ZOLTAR', 'PRINCESS', 'OURS9', 'LOUP9', 'CHAOS5', 'BEE5', 'FLY5', 'OURS5', 'LEO3', 'ZOUAV3', 'REDFI7', 'WIZARD7', 'WITCH7', 'DRAGON7', 'FEE5', 'SPIDER7', 'SNAKE3', 'SLIME7', 'CHAOS7', 'SORCIER7', 'MAGE5', 'VOLEUR1', 'PLASMA7', 'GREEM5', 'SKELET7', 'GEANT9', 'LEZARD1', 'GENERAT9', 'ALSTAR', 'GUARD1', 'MOLTUS'],
+    en1: ISHAR3_EN1_READS,
+    // the townspeople and AFFPV's thief flags `0x3b60`; EAFF's 0x32a0/0x330c/0x36a8 (not loaded from EN1)
+    scratch: [[0x4012, 618], [0x3b60, 50], [0x32a0, 110], [0x330c, 110], [0x36a8, 3]],
+  },
   // MAIN +0x4a3c: CONT1-3 / CONT2-3 for the two Maz codes, then one file per
   // region pair (3/4 jungle, 5/6 forest, 7/8 dungeons, 9/10 mountains).
   contOf(region) {
@@ -650,7 +761,8 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     // montagne. The location loader (+0x18d4) adds the Maz houses (start
     // location 2: vwall, vhouse2, vhouse1) and the dungeons' walls.
     // FVILLE `+0xfc`: `cpalette 5`.
-    if (region === 1) return { scripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
+    // AFFPV (the townspeople, after FVILLE in MAIN's load order) draws them through its children.
+    if (region === 1) return { scripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
     // oracle start order after a gate trip (MAIN +0x3e0f): foret, fforet
     if (region === 5 || region === 6) return { scripts: ['FORET', 'FFORET'], paletteFrom: { script: 'FFORET', slot: -1 } };
     return null;
@@ -756,6 +868,20 @@ interface LoadedScript {
   handle?: number;
 }
 
+/** Element `index` (byte or big-endian signed word) of the table at `addr`, if a block of `blocks` holds it. */
+function readMemory(blocks: Readonly<Record<number, Uint8Array>> | undefined, addr: number, index: number, size: 1 | 2): number | undefined {
+  if (!blocks) return undefined;
+  for (const k in blocks) {
+    const start = Number(k);
+    const b = blocks[k]!;
+    if (addr < start || addr >= start + b.length) continue;
+    const o = addr - start + index * size;
+    if (o < 0 || o + size > b.length) return 0;
+    return size === 1 ? (b[o]! << 24) >> 24 : (((b[o]! << 8) | b[o + 1]!) << 16) >> 16;
+  }
+  return undefined;
+}
+
 /** Display-list order of the reference engine (see module doc). */
 export function sortLeavesForDisplay<T extends { y: number; numelem: number; seq: number }>(leaves: T[]): T[] {
   return [...leaves].sort((a, b) => b.y - a.y || b.numelem - a.numelem || a.seq - b.seq);
@@ -813,9 +939,18 @@ export class IsharScene {
         globals[addr] = v;
         if (this.spec.zone && addr === this.spec.zone.addr) this.zone = v;
       },
-      readGrid: (addr, pop, direct) => {
+      writeTable: (addr, index, v) => {
+        let t = this.written.get(addr);
+        if (!t) this.written.set(addr, (t = new Map()));
+        t.set(index, v);
+      },
+      readGrid: (addr, pop, direct, size = 1) => {
+        const w = this.written.get(addr)?.get(direct);
+        if (w !== undefined) return w;
         const table = st.tables?.[addr] ?? this.spec.tables?.[addr];
         if (table) return table[direct] ?? 0;
+        const mem = readMemory(st.memory, addr, direct, size) ?? readMemory(this.memory, addr, direct, size);
+        if (mem !== undefined) return mem;
         const row = pop();
         const col = direct;
         if (row < 0 || col < 0 || col >= stride || row >= rows) return 0;
@@ -828,6 +963,17 @@ export class IsharScene {
 
   private nextHandle = 0x100;
   private idNames: Map<number, string> | null = null;
+  /** `smaintc` writes since the last step (ENCONT's front-row slots `0x3d54`); a step's own state tables replace them. */
+  private written = new Map<number, Map<number, number>>();
+  /**
+   * Main-segment memory that is game state rather than scenery, as blocks
+   * keyed by start address (the EN1 monster arrays, `isharEntityMemory`);
+   * a party state's own `memory` overrides it. The scripts read it with
+   * one-index `omaintc` (bytes) and `omainti` (big-endian words).
+   */
+  memory: Readonly<Record<number, Uint8Array>> = {};
+  /** Run the NPC/monster entities (`spec.entities`); false = scenery only (an oracle walk that removed them). */
+  npcs = true;
 
   /**
    * `clive id` from a scene script: start that script as a child entity
@@ -841,12 +987,13 @@ export class IsharScene {
   private live(id: number): number {
     if (!this.idNames) {
       this.idNames = new Map();
-      for (const n of this.spec.sceneScripts) {
+      for (const n of [...this.spec.sceneScripts, ...(this.spec.entities?.scripts ?? [])]) {
         const d = this.load(n);
         if (d && d.length > 1) this.idNames.set((d[0]! << 8) | d[1]!, n);
       }
     }
     const name = this.idNames.get(id);
+    if (!this.npcs && name && this.spec.entities?.scripts.includes(name)) return -1;
     const s = name ? this.create(name) : null;
     if (!s) {
       this.warnings.push(`clive of unknown script id ${id}`);
@@ -865,6 +1012,7 @@ export class IsharScene {
     }
     const runner = new AlisScriptRunner(data, name);
     if (this.spec.coordOffsets) runner.coordOffsets = this.spec.coordOffsets;
+    if (this.spec.engineVersion) runner.version = this.spec.engineVersion;
     return { name, data, runner };
   }
 
@@ -882,15 +1030,33 @@ export class IsharScene {
     if (key !== this.groupKey) {
       this.groupKey = key;
       this.addOnKey = '';
+      // the game-wide entities (ENCONT) outlive the region group
+      const persistent = this.npcs ? (this.spec.entities?.persistent ?? []) : [];
+      const kept = this.scripts.filter((s) => s.handle === undefined && persistent.includes(s.name));
       this.scripts = [];
       this.palette = null;
       if (group) {
+        const fresh: LoadedScript[] = [];
+        for (const name of persistent) {
+          const k = kept.find((s) => s.name === name);
+          if (k) this.scripts.push(k);
+          else {
+            const s = this.create(name);
+            if (s) {
+              this.scripts.push(s);
+              fresh.push(s);
+            }
+          }
+        }
         for (const name of group.scripts) {
           const s = this.create(name);
-          if (s) this.scripts.push(s);
+          if (s) {
+            this.scripts.push(s);
+            fresh.push(s);
+          }
         }
         const env = this.env();
-        for (const s of this.scripts) s.runner.settle(env);
+        for (const s of fresh) s.runner.settle(env);
         this.applyAddOns();
         this.tagNewSprites();
       }
@@ -923,6 +1089,7 @@ export class IsharScene {
         return;
       }
       this.zoneRunner = new AlisScriptRunner(data, z.script, z.entry);
+      if (this.spec.engineVersion) this.zoneRunner.version = this.spec.engineVersion;
     }
     const r = this.zoneRunner;
     r.pc = z.entry;
@@ -941,7 +1108,7 @@ export class IsharScene {
     this.addOnZone = this.zone;
     const key = want.join(',');
     if (key === this.addOnKey && !restart) return;
-    const base = this.spec.sceneGroup(st.region)?.scripts ?? [];
+    const base = [...(this.spec.sceneGroup(st.region)?.scripts ?? []), ...(this.spec.entities?.persistent ?? [])];
     const keep = this.scripts.filter((s) => s.handle !== undefined || base.includes(s.name) || (want.includes(s.name) && !restart));
     const have = new Set(keep.map((s) => s.name));
     const env = this.env();
@@ -970,10 +1137,16 @@ export class IsharScene {
     // and starts the new one, which is not woken until the next step (oracle
     // trace: fond woken at frame n, killed n+1, re-created n+2).
     const fresh = this.groupKeyFor(state) !== this.groupKey;
-    if (this.enter(state) && !fresh) {
+    for (const addr of Object.keys(state.tables ?? {})) this.written.delete(Number(addr));
+    if (state.memory) for (const addr of [...this.written.keys()]) if (readMemory(state.memory, addr, 0, 1) !== undefined) this.written.delete(addr);
+    if (this.enter(state)) {
       const env = this.env();
       this.scripts = this.scripts.filter((s) => s.handle === undefined);
+      // a fresh group is not woken until the next step; the game-wide
+      // entities (ENCONT) are, every step
+      const persistent = this.spec.entities?.persistent ?? [];
       for (const s of this.scripts) {
+        if (fresh && !persistent.includes(s.name) && s.handle === undefined) continue;
         s.runner.wake();
         s.runner.settle(env);
       }

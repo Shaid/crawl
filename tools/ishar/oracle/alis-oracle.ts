@@ -17,6 +17,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, linkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharTitleSpec } from '../../shared/ishar-scene.ts';
 
 export type OracleGame = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -62,13 +63,21 @@ export interface OracleTitle {
     len: number;
     /** a one-dimensional table the scene scripts read (`IsharPartyState.tables`), signed bytes */
     table?: boolean;
+    /** main memory the entity scripts read (`IsharPartyState.memory`) */
+    memory?: boolean;
     /** main globals the scene reads (`IsharPartyState.globals`), one per byte or big-endian word */
     globals?: 'byte' | 'word';
   }>;
   /** Memory captured at the start of every pose run (`<name>.bin` in the run directory). */
-  bootMemdumps?: ReadonlyArray<{ name: string; off: number; len: number }>;
+  bootMemdumps?: ReadonlyArray<{ name: string; off: number; len: number; memory?: boolean }>;
   /** Party state in the boot savestate (scene created, no wake-up yet). */
   start: { region: number; row: number; col: number; facing: 0 | 1 | 2 | 3 };
+}
+
+/** Per-step dumps of every main block a title's entity scripts read (`IsharTitleSpec.entities`). */
+function entityDumps(spec: IsharTitleSpec): Array<{ name: string; off: number; len: number; memory: true }> {
+  const e = spec.entities;
+  return [...(e?.en1 ?? []), ...(e?.scratch ?? [])].map(([off, len]) => ({ name: `ent${off.toString(16)}`, off, len, memory: true as const }));
 }
 
 function keyEvents(start: number, key: number, n: number, gap: number): Array<[number, string]> {
@@ -105,7 +114,7 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     start: { region: 1, row: 11, col: 29, facing: 1 },
     // Poking the position never makes MAIN preload a neighbour region, so
     // buffer B keeps whatever it held at boot; the comparison reads it back.
-    bootMemdumps: [{ name: 'gridB', off: 0x234a, len: 4860 }],
+    bootMemdumps: [{ name: 'gridB', off: 0x234a, len: 4860 }, ...entityDumps(ISHAR1_TITLE)],
     // The EN1.FIC monster table GERDEP's step test reads (`ISHAR1_MONSTER_TABLE`).
     stepMemdumps: [
       { name: 'monRow', off: 0x1978, len: 140 },
@@ -114,6 +123,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
       { name: 'monKind', off: 0x22f2, len: 70 },
       { name: 'monRegion', off: 0x3910, len: 70 },
       { name: 'monZ', off: 0x3a48, len: 140 },
+      // everything ENCONT reads to place the monsters (the EN1 arrays and its front-row slots)
+      ...entityDumps(ISHAR1_TITLE),
       // PARAM's door flags (the cave scripts draw each door open or shut)
       { name: 'doorOpen', off: 0x3b64, len: 41, table: true },
       // and the lever states MCAVE reads next to the lever list 0x3c68/0x3c9c
@@ -129,6 +140,9 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     facing: 0x2ab6,
     region: 0x2d18,
     npcScripts: ['pours1', 'lezard1', 'fly1', 'people1', 'people2', 'golem1', 'wizard1', 'aigle'],
+    // everything EAFF reads to place the monsters (the EN1 arrays and its front-row slots)
+    stepMemdumps: entityDumps(ISHAR2_TITLE),
+    bootMemdumps: entityDumps(ISHAR2_TITLE),
     // the day phase: MAIN advances it on a timer (frames 12965, 14965 ... of play)
     stateGlobals: [0x519f],
     facingCycle: [1, 2, 3, 4],
@@ -157,8 +171,11 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     // MAIN's region code (`0x14b9`, 1 in Maz: the switches at MAIN `+0x137c`/`+0x26e9`)
     region: 0x14b9,
     // MAIN's location code `0x3b33` (2 at the start): MAIN `+0x18d4` loads each location's scene add-ons on it
+    bootMemdumps: entityDumps(ISHAR3_TITLE),
     stepMemdumps: [
-      { name: 'zone', off: 0x3b33, len: 1 },
+      { name: 'zone', off: 0x3b33, len: 1, globals: 'byte' },
+      // everything EAFF and AFFPV read to place the monsters and townspeople
+      ...entityDumps(ISHAR3_TITLE),
       // the day/night palette factors MAIN `+0x135b` passes to `cdarkpal` (r, g, b words, 256 = unchanged) and its count switch
       { name: 'dark', off: 0x3f82, len: 6, globals: 'word' },
       { name: 'darkWide', off: 0x3da4, len: 2, globals: 'word' },

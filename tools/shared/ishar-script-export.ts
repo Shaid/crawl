@@ -14,7 +14,8 @@
  * matching the project's "browser only ever consumes preprocessed output"
  * convention (architecture-overview.md).
  */
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { isharEntityMemory, isharSceneScriptNames, type IsharTitleSpec } from './ishar-scene.ts';
 import { extname, join } from 'node:path';
 import { assetRoot } from './asset-paths.js';
 import { unpackSilmarilsScript } from './silmarils-unpack.js';
@@ -72,4 +73,24 @@ export function exportIsharScripts(
     }
   }
   return report;
+}
+
+export { isharSceneScriptNames };
+
+/**
+ * Write the entity scripts' new-game memory (`isharEntityMemory`: `EN1.FIC`
+ * cut into MAIN's read list, plus the zeroed scratch blocks) as
+ * `data/entity-memory.json` (`{ blocks: { [addr]: bytes } }`) for the walker.
+ * Returns the number of blocks, or 0 when the title has no entities or no `EN1.FIC`.
+ */
+export function exportIsharEntityMemory(dataDir: string, game: string, platform: string, spec: IsharTitleSpec): number {
+  const p = join(dataDir, 'EN1.FIC');
+  if (!spec.entities || !existsSync(p)) return 0;
+  const mem = isharEntityMemory(spec, new Uint8Array(readFileSync(p)));
+  const blocks: Record<string, number[]> = {};
+  for (const [k, v] of Object.entries(mem)) blocks[k] = [...v];
+  const outDir = join(assetRoot(game, platform), 'data');
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'entity-memory.json'), JSON.stringify({ blocks }));
+  return Object.keys(blocks).length;
 }

@@ -11,6 +11,7 @@ import {
   compositeIsharView,
   IsharGridBuffers,
   IsharScene,
+  isharEntityMemory,
   ISHAR1_TITLE,
   ISHAR2_TITLE,
   ISHAR3_TITLE,
@@ -32,6 +33,8 @@ export interface TitleData {
   spec: IsharTitleSpec;
   load(name: string): Uint8Array | undefined;
   grids(region: number, row: number): { A: GridReader; B: GridReader };
+  /** New-game memory of the entity scripts (`isharEntityMemory`, from `EN1.FIC`). */
+  entityMemory: Record<number, Uint8Array>;
 }
 
 const s8 = (v: number) => (v >= 128 ? v - 256 : v);
@@ -64,9 +67,11 @@ export function loadTitleData(game: OracleGame, repoRoot = resolve('.')): TitleD
     const cells = spec.stride * spec.rows;
     return spec.gridBuffers === 'layers' ? [f.subarray(0, cells), f.subarray(cells, 2 * cells)] : [f];
   };
+  const en1 = join(dir, 'EN1.FIC');
   return {
     spec,
     load,
+    entityMemory: existsSync(en1) ? isharEntityMemory(spec, new Uint8Array(readFileSync(en1))) : {},
     grids(region, row) {
       return new IsharGridBuffers(spec, layers).update({ region, row, col: 0, facing: 0 });
     },
@@ -122,6 +127,8 @@ export interface PoseComparison {
   pixelsMaskedEqual: number;
   missing: string[];
   extra: string[];
+  /** `matched` plus the missing/extra pairs that differ only in x, by at most 12 px (the `ornd` jitter of Ishar 2/3's NPCs). */
+  matchedNearX: number;
 }
 
 export function multisetMatch(a: PlacementKey[], b: PlacementKey[]): { matched: number; missing: string[]; extra: string[] } {
@@ -143,12 +150,23 @@ export function multisetMatch(a: PlacementKey[], b: PlacementKey[]): { matched: 
 }
 
 /** Compare one crawl view (leaves + canvas) against one oracle frame. */
-export function comparePose(game: OracleGame, frame: OracleFrame, data: TitleData, scripts: readonly string[], canvas: Uint8Array, leaves: IsharSceneLeaf[]): PoseComparison {
+export function comparePose(
+  game: OracleGame,
+  frame: OracleFrame,
+  data: TitleData,
+  scripts: readonly string[],
+  canvas: Uint8Array,
+  leaves: IsharSceneLeaf[],
+  /** Count the NPC/monster entities crawl models (default); false leaves them out like any unmodelled entity. */
+  npcs = true,
+): PoseComparison {
   const spec = data.spec;
   const screen = viewScreen(frame, game);
-  // Scenery the title can draw counts even when crawl did not run it here;
-  // only non-scenery entities (NPCs, monsters) are left out.
-  const modelled = new Set([...scripts, ...spec.sceneScripts].map((n) => n.toLowerCase()));
+  // Scenery the title can draw counts even when crawl did not run it here,
+  // and so do the NPCs and monsters when the title models them
+  // (`spec.entities`); only entities crawl cannot draw are left out.
+  const ents = spec.entities?.scripts ?? [];
+  const modelled = new Set([...scripts.filter((n) => npcs || !ents.includes(n)), ...spec.sceneScripts, ...(npcs ? ents : [])].map((n) => n.toLowerCase()));
   const { keys, excluded } = screen ? oracleKeys(screen, spec, data, modelled) : { keys: [], excluded: [] };
   const mine = crawlKeys(leaves);
   const m = multisetMatch(keys, mine);
@@ -190,7 +208,27 @@ export function comparePose(game: OracleGame, frame: OracleFrame, data: TitleDat
     pixelsMaskedEqual: pme,
     missing: m.missing,
     extra: m.extra,
+    matchedNearX: m.matched + nearXPairs(m.missing, m.extra, 12),
   };
+}
+
+/** How many `missing` keys have an `extra` twin that differs only in x, by at most `tol`. */
+function nearXPairs(missing: readonly string[], extra: readonly string[], tol: number): number {
+  const split = (k: string) => {
+    const m = k.match(/^(.*)@(-?\d+),(.*)$/)!;
+    return { head: m[1]!, x: Number(m[2]), tail: m[3]! };
+  };
+  const pool = extra.map(split);
+  let n = 0;
+  for (const k of missing) {
+    const a = split(k);
+    const j = pool.findIndex((b) => b.head === a.head && b.tail === a.tail && Math.abs(b.x - a.x) <= tol);
+    if (j >= 0) {
+      pool.splice(j, 1);
+      n++;
+    }
+  }
+  return n;
 }
 
 /**
@@ -204,9 +242,13 @@ export function crawlSequence(
   gridsFor: (region: number, row: number) => { A: GridReader; B: GridReader } = data.grids,
   /** Per pose: did the game take it (a swallowed input wakes nothing)? Default all. */
   taken: readonly boolean[] = [],
+  /** Run the NPC/monster entities, with this memory (default: the new-game `entityMemory`); false = scenery only. */
+  npcs: boolean | Record<number, Uint8Array> = true,
 ): Array<{ scene: IsharScene; scripts: string[]; leaves: IsharSceneLeaf[]; canvas: Uint8Array }> {
   const spec = data.spec;
   const scene = new IsharScene(spec, data.load, gridsFor(start.region, start.row));
+  scene.memory = typeof npcs === 'object' ? { ...data.entityMemory, ...npcs } : data.entityMemory;
+  scene.npcs = npcs !== false;
   scene.enter(start);
   const out: Array<{ scene: IsharScene; scripts: string[]; leaves: IsharSceneLeaf[]; canvas: Uint8Array }> = [];
   for (const [i, p] of poses.entries()) {
@@ -238,6 +280,16 @@ export function oracleRunGrids(game: OracleGame, data: TitleData, runDir: string
   };
 }
 
+/** The entity memory a pose run dumped at its start (`bootMemdumps` flagged `memory`), for `crawlSequence`. */
+export function oracleRunMemory(game: OracleGame, runDir: string): Record<number, Uint8Array> {
+  const out: Record<number, Uint8Array> = {};
+  for (const m of ORACLE_TITLES[game].bootMemdumps ?? []) {
+    const p = join(runDir, `${m.name}.bin`);
+    if (m.memory && existsSync(p)) out[m.off] = new Uint8Array(readFileSync(p));
+  }
+  return out;
+}
+
 /** One real-walk step, crawl side: what crawl's walker rules predicted and what the scene drew at the game's state. */
 export interface WalkComparison {
   predicted: IsharPartyState | null;
@@ -266,10 +318,14 @@ export function crawlWalk(
   startWakes = 0,
   /** The sub-zone global at the start pose (a mid-game savestate). Default: the first step's `zone` dump when that step is a turn (a turn keeps the zone), else 0. */
   startZone?: number,
+  /** Run the NPC/monster entities (default); false for a walk that removed them (`noNpcs`). */
+  npcs = true,
 ): WalkComparison[] {
   const spec = data.spec;
   const buffers = new IsharGridBuffers(spec, layers, initial);
   const scene = new IsharScene(spec, data.load, buffers.update(start));
+  scene.memory = data.entityMemory;
+  scene.npcs = npcs;
   const z0 = startZone ?? (steps[0] && steps[0].action !== 'F' ? steps[0].mem?.zone?.[0] : undefined);
   if (z0 !== undefined) scene.zone = z0;
   scene.enter(start);
@@ -283,7 +339,7 @@ export function crawlWalk(
     const facing = spec.facingRaw.indexOf(s.facingRaw);
     const memGlobals = stepGlobals(game(data), s.mem);
     const globals = memGlobals ? { ...s.globals, ...memGlobals } : s.globals;
-    const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals, tables: stepTables(game(data), s.mem) };
+    const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals, tables: stepTables(game(data), s.mem), memory: stepMemory(game(data), s.mem) };
     let predicted: IsharPartyState | null;
     if (s.action !== 'F') predicted = { ...cur, facing: ((cur.facing + (s.action === 'R' ? 1 : 3)) & 3) as 0 | 1 | 2 | 3 };
     else {
@@ -315,6 +371,17 @@ export function stepTables(game: OracleGame, mem: Readonly<Record<string, Uint8A
     const b = mem[m.name];
     if (!m.table || !b) continue;
     (out ??= {})[m.off] = [...b].map(s8);
+  }
+  return out;
+}
+
+/** Main memory a walk step dumped for the entity scripts (`stepMemdumps` entries flagged `memory`). */
+export function stepMemory(game: OracleGame, mem: Readonly<Record<string, Uint8Array>> | undefined): Record<number, Uint8Array> | undefined {
+  if (!mem) return undefined;
+  let out: Record<number, Uint8Array> | undefined;
+  for (const m of ORACLE_TITLES[game].stepMemdumps ?? []) {
+    const b = mem[m.name];
+    if (m.memory && b) (out ??= {})[m.off] = b;
   }
   return out;
 }

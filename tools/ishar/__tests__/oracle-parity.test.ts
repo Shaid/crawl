@@ -15,7 +15,15 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { bootToSavestate, captureWalk, capturePoses, ORACLE_TITLES, oracleAvailable, prepareGameDir, savestatePath, tempDir, type OracleGame, type OraclePose } from '../oracle/alis-oracle.ts';
-import { bootGridB, comparePose, contLayers, crawlSequence, crawlWalk, loadTitleData, oracleRunGrids } from '../oracle/compare.ts';
+import { bootGridB, comparePose, contLayers, crawlSequence, crawlWalk, loadTitleData, oracleRunGrids, oracleRunMemory } from '../oracle/compare.ts';
+
+/**
+ * Titles whose pose sample counts the NPCs and monsters (crawl runs the
+ * game's entity scripts on the run's own EN1 memory). Ishar 2 and 3 jitter
+ * some of them with the engine's shared random generator (`ornd`), which
+ * crawl cannot reproduce, so their samples leave the entities out.
+ */
+const NPC_POSES: Record<'ishar' | 'ishar2' | 'ishar3', boolean> = { ishar: true, ishar2: false, ishar3: false };
 
 const SAMPLES: Record<'ishar' | 'ishar2' | 'ishar3', OraclePose[]> = {
   // CONT1: the start pose, both zone add-ons (lacustre west of col 46,
@@ -61,9 +69,9 @@ for (const game of Object.keys(SAMPLES) as Array<'ishar' | 'ishar2' | 'ishar3'>)
         const frames = capturePoses(game, poses, out);
         expect(frames.map((f) => f.taken)).toEqual(poses.map(() => true));
         const data = loadTitleData(game);
-        const seq = crawlSequence(data, ORACLE_TITLES[game].start, poses, oracleRunGrids(game, data, out));
+        const seq = crawlSequence(data, ORACLE_TITLES[game].start, poses, oracleRunGrids(game, data, out), [], NPC_POSES[game] ? oracleRunMemory(game, out) : false);
         const rows = seq.map((c, i) => {
-          const r = comparePose(game, frames[i]!, data, c.scripts, c.canvas, c.leaves);
+          const r = comparePose(game, frames[i]!, data, c.scripts, c.canvas, c.leaves, NPC_POSES[game]);
           return { i, oracle: r.oracle, matched: r.matched, crawl: r.crawl, masked: r.pixelsMasked - r.pixelsMaskedEqual, missing: r.missing.slice(0, 3), extra: r.extra.slice(0, 3) };
         });
         for (const r of rows) {
@@ -133,11 +141,11 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.data
       if (!existsSync(savestatePath('ishar2'))) bootToSavestate('ishar2', join(out, 'boot'));
       const steps = captureWalk('ishar2', [...ISHAR2_WALK] as Array<'F' | 'L' | 'R'>, out, { noNpcs: true });
       const data = loadTitleData('ishar2');
-      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar2.start }, steps, contLayers('ishar2', data));
+      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar2.start }, steps, contLayers('ishar2', data), {}, 0, undefined, false);
       const seen = new Set(walk.flatMap((w) => w.scripts));
       expect(seen.has('VILLAGE1') && seen.has('BOAT')).toBe(true);
       walk.forEach((w, i) => {
-        const r = comparePose('ishar2', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves);
+        const r = comparePose('ishar2', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
         expect({ i, matched: r.matched, crawl: r.crawl, masked: r.pixelsMasked - r.pixelsMaskedEqual }).toEqual({ i, matched: r.oracle, crawl: r.oracle, masked: 0 });
       });
     } finally {
@@ -165,16 +173,48 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
       if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
       const steps = captureWalk('ishar3', [...ISHAR3_WALK] as Array<'F' | 'L' | 'R'>, out, { noNpcs: true, commands: [[20, 'pokew 3c08 20'], [40, 'pokew 3c08 23']] });
       const data = loadTitleData('ishar3');
-      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar3.start }, steps, contLayers('ishar3', data));
+      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar3.start }, steps, contLayers('ishar3', data), {}, 0, undefined, false);
       // the walk reaches dusk and night (blue factor 256 -> 152 -> 192)
       const factors = new Set(walk.map((w) => w.actual.globals?.[0x3f86] ?? 256));
       expect([...factors].sort()).toEqual([152, 192, 256]);
       expect(walk.every((w) => w.moveAgrees)).toBe(true);
       walk.forEach((w, i) => {
-        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves);
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
         expect({ i, matched: r.matched, crawl: r.crawl }).toEqual({ i, matched: r.oracle, crawl: r.oracle });
         expect(r.pixelsMaskedEqual / r.pixelsMasked, `step ${i} pixels`).toBeGreaterThan(0.995);
       });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 180_000);
+});
+
+/**
+ * Ishar 3: Maz with its townspeople, the first 30 actions of the walk above
+ * with nothing removed or poked. AFFPV places them from the 150-person table
+ * (`0x4012..`, dumped each step) through VPERSO1..5. Their x adds the
+ * engine's shared random number (`ornd`), so they are matched up to 12 px
+ * in x (`matchedNearX`); scenery and depth, height, slot and mirror must agree.
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 townspeople vs the game (alis oracle)', () => {
+  it('draws the townspeople where the game does', () => {
+    const out = tempDir('ishar3-npc-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const steps = captureWalk('ishar3', [...ISHAR3_WALK.slice(0, 30)] as Array<'F' | 'L' | 'R'>, out);
+      const data = loadTitleData('ishar3');
+      const walk = crawlWalk(data, { ...ORACLE_TITLES.ishar3.start }, steps, contLayers('ishar3', data));
+      let oracle = 0, near = 0, people = 0;
+      walk.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves);
+        expect({ i, crawl: r.crawl }).toEqual({ i, crawl: r.oracle });
+        oracle += r.oracle;
+        near += r.matchedNearX;
+        people += w.leaves.filter((l) => l.script.startsWith('VPERSO')).length;
+      });
+      expect(people).toBeGreaterThan(40);
+      expect(near / oracle).toBeGreaterThan(0.995);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
