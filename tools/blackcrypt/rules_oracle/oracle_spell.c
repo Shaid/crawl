@@ -102,6 +102,8 @@ static int hook_hit(uint32_t pc){
 
 /* call routine at S_1 offset `off` with args (each: size 2 = word, 4 = long,
  * 1 = byte) pushed so arg[0] is the FIRST pushed (C order, i.e. rightmost). */
+static uint32_t stop_pc=RET_SENTINEL;      /* `G start stop`: run from a mid-function PC until PC reaches `stop` (an S_1 address) */
+static uint32_t regv[16]; static unsigned regm=0; /* `D n v` / `A n v`: data / address registers preset before the run */
 static unsigned long run_call(uint32_t off, int n, const int *sz, const uint32_t *v){
   uint32_t sp=STACK_TOP;
   for(int i=0;i<n;i++){
@@ -113,8 +115,9 @@ static unsigned long run_call(uint32_t off, int n, const int *sz, const uint32_t
   m68k_set_reg(M68K_REG_A7,sp);
   m68k_set_reg(M68K_REG_A4,A4V);
   m68k_set_reg(M68K_REG_PC,S1_BASE+off);
+  for(int i=0;i<16;i++) if(regm&(1u<<i)) m68k_set_reg((m68k_register_t)((i<8?M68K_REG_D0+i:M68K_REG_A0+(i-8))),regv[i]);
   unsigned long steps=0;
-  while(m68k_get_reg(NULL,M68K_REG_PC)!=RET_SENTINEL){
+  while(m68k_get_reg(NULL,M68K_REG_PC)!=stop_pc){
     if(nhook && hook_hit(m68k_get_reg(NULL,M68K_REG_PC))) { steps++; continue; }
     if(getenv("TRACE")) fprintf(stderr,"%05x a0=%x d0=%x\n",m68k_get_reg(NULL,M68K_REG_PC)-S1_BASE,m68k_get_reg(NULL,M68K_REG_A0),m68k_get_reg(NULL,M68K_REG_D0));
     m68k_execute(1); if(getenv("TRACE")) fprintf(stderr,"  -> pc=%x a0=%x\n",m68k_get_reg(NULL,M68K_REG_PC),m68k_get_reg(NULL,M68K_REG_A0)); if(++steps>2000000){ fprintf(stderr,"runaway at off %x\n",off); break; }
@@ -365,7 +368,7 @@ int main(int argc,char**argv){
     static char big[1<<16];
     while(fgets(big,sizeof big,stdin)){
       char*sp; char*t=strtok_r(big," \t\r\n",&sp); if(!t) continue;
-      memcpy(mem,snap,MEM_SIZE); hooks_clear();
+      memcpy(mem,snap,MEM_SIZE); hooks_clear(); stop_pc=RET_SENTINEL; regm=0;
       unsigned char sd[6]={0}; 
       uint32_t coff=0; int cn=0; int csz[16]; uint32_t cval[16]; int called=0;
       char peekk[256][8]; uint32_t peeka[256]; int np=0;
@@ -377,6 +380,8 @@ int main(int argc,char**argv){
           if(t[0]=='b') w8(a,v); else if(t[0]=='w') w16(a,v); else w32(a,(uint32_t)v); }
         else if(!strcmp(t,"C")){ coff=strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); cn=atoi(strtok_r(NULL," \t\r\n",&sp));
           for(int i=0;i<cn;i++){ csz[i]=atoi(strtok_r(NULL," \t\r\n",&sp)); cval[i]=(uint32_t)strtol(strtok_r(NULL," \t\r\n",&sp),0,0);} called=1; }
+        else if(!strcmp(t,"G")){ coff=strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); stop_pc=S1_BASE+strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); cn=0; called=1; }
+        else if(!strcmp(t,"D")||!strcmp(t,"A")){ int n=atoi(strtok_r(NULL," \t\r\n",&sp)); uint32_t vv=(uint32_t)strtol(strtok_r(NULL," \t\r\n",&sp),0,0); int ix=(t[0]=='D'?0:8)+n; regv[ix]=vv; regm|=1u<<ix; }
         else if(t[0]=='r'){ strncpy(peekk[np],t,7); peekk[np][7]=0; peeka[np]=strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); np++; }
       } while((t=strtok_r(NULL," \t\r\n",&sp)));
       static unsigned char before[0x10000]; uint32_t dlo=A4V-0x8000u, dn=0xA000u;

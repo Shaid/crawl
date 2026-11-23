@@ -459,3 +459,75 @@ export function castRefresh(b: SpellBook, firstPage: number, pageNext: number[])
     for (let id = b.pageHead[p]; id !== 0xff; id = b.next[id]) if (b.level[id] < 5) b.timers[id] = 0;
   }
 }
+
+// ================================================================ due-event handlers 0x1E..0x25 (buff expiry), tick handler +0x8B2 dispatch chain at S_1 +0x1F34
+
+/** A4-relative byte memory the event handlers read and write (sparse: unread bytes are 0). */
+export class A4Mem {
+  m = new Map<number, number>();
+  b(o: number): number { return this.m.get(o) ?? 0; }
+  sb(o: number): number { return (this.b(o) << 24) >> 24; }
+  w(o: number): number { return (this.b(o) << 8) | this.b(o + 1); }
+  sw(o: number): number { return (this.w(o) << 16) >> 16; }
+  setB(o: number, v: number) { this.m.set(o, v & 0xff); }
+  setW(o: number, v: number) { this.setB(o, v >> 8); this.setB(o + 1, v); }
+}
+const CHAR = (k: number) => 0x1758 + 0xa8 * k;
+
+/**
+ * The expiry handlers of the due-event list (S_1 +0x1968 type 0x1E, +0x1AF8 0x1F, +0x1C04 0x20, +0x1C3E 0x21, +0x1D9A 0x23, +0x1E86 0x24,
+ * +0x1E90 0x25), run from the dispatch chain at +0x1F34 up to the common exit +0x1F9C. HARNESS (see rules_oracle/make_vectors_events.py).
+ * Event fields: a1 (node +5), a2 (+6), a3 (+7).
+ *  0x1E  AC buff:      char a1: byte +0x82+a2 -= 1 (wraps, no floor); when a2 == 0 also AC (+0x62) -= a3.
+ *  0x1F  stat buff:    char a1: byte +0x64+a2 -= a3, counter byte +0x78+a2 -= 1.
+ *  0x20  compass:      word A4+0x1E28 -= 1.
+ *  0x21  wizard sight: every living char (hp > 0) with byte +0x85 != 0: -= 1 and word A4+0x1E2A -= 1.
+ *  0x23  detect trap:  same with +0x84 and word A4+0x1E2C.
+ *  0x24  haste:        word A4+0x1E2E -= 1.
+ *  0x25  PROTECTOR:    every char with signed +0x69 >= 75: -= 75; afterwards A4+0x1A1E = 1 (the Ram-boss stage variable) and redraw flag +0x1748 = 1.
+ * UI redraw flags (A4+0x174C / 0x174D / 0x1748) follow the screen mode word A4+0x174A as in the original.
+ */
+export function applyExpiry(a: A4Mem, ev: { type: number; a1: number; a2: number; a3: number }): void {
+  const mode = a.w(0x174a), alive = (k: number) => a.sw(CHAR(k) + 0x4e) > 0;
+  const allFlags = () => { if (mode === 1 || mode === 10) a.setB(0x174c, 1); else if (mode === 3) a.setB(0x174d, 1); };
+  switch (ev.type) {
+    case 0x1e: {
+      const c = CHAR(ev.a1);
+      a.setB(c + 0x82 + ev.a2, a.b(c + 0x82 + ev.a2) - 1);
+      if (ev.a2 === 0) a.setB(c + 0x62, a.sb(c + 0x62) - ev.a3);
+      if (!alive(ev.a1)) break;
+      if (mode === 1 || mode === 10) a.setB(0x174c, 1);
+      else if (mode === 3 && a.w(0x1a14) === ev.a1) a.setB(0x174d, 1);
+      break;
+    }
+    case 0x1f: {
+      const c = CHAR(ev.a1);
+      a.setB(c + 0x64 + ev.a2, a.sb(c + 0x64 + ev.a2) - ev.a3);
+      a.setB(c + 0x78 + ev.a2, a.b(c + 0x78 + ev.a2) - 1);
+      if (mode === 4 && a.w(0x1a16) === ev.a1) a.setB(0x174d, 1);
+      break;
+    }
+    case 0x20:
+      a.setW(0x1e28, a.w(0x1e28) - 1);
+      if (a.w(0x1e28) === 0 && mode === 1 && a.b(0x1a26) === 0) a.setB(0x174d, 1);
+      break;
+    case 0x21:
+      for (let k = 0; k < 4; k++) if (alive(k) && a.b(CHAR(k) + 0x85) !== 0) { a.setB(CHAR(k) + 0x85, a.b(CHAR(k) + 0x85) - 1); a.setW(0x1e2a, a.w(0x1e2a) - 1); }
+      allFlags();
+      break;
+    case 0x23:
+      for (let k = 0; k < 4; k++) if (alive(k) && a.b(CHAR(k) + 0x84) !== 0) { a.setB(CHAR(k) + 0x84, a.b(CHAR(k) + 0x84) - 1); a.setW(0x1e2c, a.w(0x1e2c) - 1); }
+      if (a.w(0x1e2c) === 0) { a.setB(0x1748, 1); allFlags(); }
+      break;
+    case 0x24: a.setW(0x1e2e, a.w(0x1e2e) - 1); break;
+    case 0x25:
+      for (let k = 0; k < 4; k++) {
+        if (a.sb(CHAR(k) + 0x69) < 0x4b) continue;
+        a.setB(CHAR(k) + 0x69, a.b(CHAR(k) + 0x69) - 0x4b);
+        if ((mode === 1 || mode === 10) && alive(k)) a.setB(0x174c, 1);
+      }
+      a.setW(0x1a1e, 1); a.setB(0x1748, 1);
+      break;
+    default: throw new Error('applyExpiry: event type ' + ev.type);
+  }
+}

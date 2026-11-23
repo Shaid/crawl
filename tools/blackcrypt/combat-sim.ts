@@ -5,9 +5,9 @@
  *
  * Evidence labels used in comments:
  *   [H] the piece is a harness-verified port (player melee, monster melee / bolts / hold calls, behaviour VM, activation scan, type-10 switch,
- *       pathfinder, pursue / approach / wander, mover + stacking, XP, level-up, vitals tick, heals / cures / buffs, rays, memorise, recharge, DISMISS / BINDING / REFRESH)
+ *       pathfinder, pursue / approach / wander, mover + stacking, XP, level-up, vitals tick, heals / cures / buffs and their expiry events 0x1E-0x25, rays, memorise, recharge, DISMISS / BINDING / REFRESH)
  *   [C] read from code, not executed in the harness (DamageCharacter, AdjustVitals, event ordering, swing cooldown, per-step costs, the hold counter, slot shift on a spent cast)
- *   [h] hypothesis / simplification (buff-expiry handlers 0x1E-0x24, possession / stone not applied, doors and items absent)
+ *   [h] hypothesis / simplification (possession / stone not applied, doors and items absent)
  *
  * Original code. The model: a rectangular map (at most 48 x 48) with blocked squares (modelled as pillars), four party members
  * (slot = class), any number of monsters (up to four same-gfx monsters share a square, in corners: real stacking), real-time ticks, scripted party commands.
@@ -17,7 +17,7 @@
 import { BcRng, levelUp, meleeAttack, weaponInfo, type RuleTables, type WeaponBase } from './rules';
 import {
   castRay, castSpell, castFacing, castRefresh, memoriseClick, rechargeTick, pickSquareTargets, casterValues, RAY_SPELLS,
-  type RayWorld, type RayObj, type SpellBook, type SpChar, type SpFull, type SpEvent,
+  A4Mem, applyExpiry, type RayWorld, type RayObj, type SpellBook, type SpChar, type SpFull, type SpEvent,
 } from './rules-spell';
 import {
   awardXp, hpAtLeastMorale, runBehaviour, vitalsTick, VM_CALLS,
@@ -156,6 +156,8 @@ export class CombatSim {
   formation: number[];
   light = 0; hold = 0;
   compass = 0; wizSight = 0; detect = 0; haste = 0;
+  /** A4+0x1A1E: set to 1 by the event 0x25 handler (PROTECTOR's expiry); the Ram-boss stage variable (game-rules.md 11) */
+  a1a1e = 0;
   resting = false;
   hazard: boolean;
   gameOver = false;
@@ -485,19 +487,23 @@ export class CombatSim {
   }
 
   /**
-   * Buff-expiry handlers, event types 0x1E-0x24 [h]: the real handlers are not decoded (game-rules.md 10.4, open); this reverses what the cast did.
-   * 0x1E: AC -= a3, 0x1F: strength -= a3 (both on char a1, counter - 1); 0x20 / 0x21 / 0x23 / 0x24: the party counter - 1.
+   * Buff-expiry handlers, event types 0x1E-0x25 [H applyExpiry, the real handlers of the tick handler's due-event dispatch, 600 / 600 against the 68k]:
+   * the sim state is mirrored into the A4 bytes the handler reads, the handler runs, and the changed fields are read back.
    */
   private expire(e: SpEvent) {
-    const c = this.chars[e.a1];
-    switch (e.type) {
-      case 0x1e: c.ac = ((c.ac - e.a3) << 24) >> 24; c.acCnt = Math.max(0, (c.acCnt ?? 0) - 1); break;
-      case 0x1f: c.str = (c.str - e.a3) & 0xff; c.strCnt = Math.max(0, (c.strCnt ?? 0) - 1); break;
-      case 0x20: this.compass = Math.max(0, this.compass - 1); break;
-      case 0x21: this.wizSight = Math.max(0, this.wizSight - 1); break;
-      case 0x23: this.detect = Math.max(0, this.detect - 1); break;
-      case 0x24: this.haste = Math.max(0, this.haste - 1); break;
-    }
+    const a = new A4Mem(), CH = (k: number) => 0x1758 + 0xa8 * k;
+    a.setW(0x174a, 1);
+    this.chars.forEach((c, k) => {
+      a.setW(CH(k) + 0x4e, c.hp); a.setB(CH(k) + 0x62, c.ac); a.setB(CH(k) + 0x64, c.str); a.setB(CH(k) + 0x69, c.resist);
+      a.setB(CH(k) + 0x82, c.acCnt ?? 0); a.setB(CH(k) + 0x78, c.strCnt ?? 0); a.setB(CH(k) + 0x85, c.wizCnt ?? 0); a.setB(CH(k) + 0x84, c.detCnt ?? 0);
+    });
+    a.setW(0x1e28, this.compass); a.setW(0x1e2a, this.wizSight); a.setW(0x1e2c, this.detect); a.setW(0x1e2e, this.haste); a.setW(0x1a1e, this.a1a1e);
+    applyExpiry(a, e);
+    this.chars.forEach((c, k) => {
+      c.ac = a.sb(CH(k) + 0x62); c.str = a.b(CH(k) + 0x64); c.resist = a.sb(CH(k) + 0x69);
+      c.acCnt = a.b(CH(k) + 0x82); c.strCnt = a.b(CH(k) + 0x78); c.wizCnt = a.b(CH(k) + 0x85); c.detCnt = a.b(CH(k) + 0x84);
+    });
+    this.compass = a.w(0x1e28); this.wizSight = a.w(0x1e2a); this.detect = a.w(0x1e2c); this.haste = a.w(0x1e2e); this.a1a1e = a.w(0x1a1e);
     this.log.push({ t: this.tick, ev: 'expire', type: e.type, char: e.a1 });
   }
 

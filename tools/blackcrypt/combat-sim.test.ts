@@ -228,7 +228,7 @@ describe('combat-sim: executable form of game-rules.md section 9', () => {
       expect(sim.chars[1].hp).toBe(3);
       expect(sim.chars[1].slots![0]).toBe(0xff);
     });
-    it('SHIELD (15): AC rises, the expiry event fires 1800 ticks later [expiry handler: hypothesis]', () => {
+    it('SHIELD (15): AC rises, the expiry event 0x1E fires 1800 ticks later and takes it back [handler harnessed, rules-events.test.ts]', () => {
       const p = wounded(); p[1].slots = [15, 0xff, 0xff, 0xff, 0xff];
       const sim = new CombatSim(sp({ party: p }));
       const ac0 = sim.chars[1].ac;
