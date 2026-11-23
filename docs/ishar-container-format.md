@@ -2099,8 +2099,8 @@ the gate between two legs.
       sends 20 and PCAVE `+0x32f` toggles the lever state `0x357c[i]` and
       the door flag `0x3544[i]` (`ishar3PullLever`; a door's index is its
       grid-B value - 60). Doors with an index above 24 get a second PCAVE
-      with forms 4/5 (materials 67/68, door 39 the latter): keyholes, not
-      driven. Plain doors get no form, so a click on the door itself does
+      with forms 4/5 (materials 67/68, door 39 the latter): keyholes
+      (driven 2026-11-23, below). Plain doors get no form, so a click on the door itself does
       nothing. Message 19 toggles a door (PCAVE `+0x282`: it rises 4 px a
       frame for 24 frames). Oracle walk from the dungeon trip, poked onto
       lever 13 at CONT5-3 (8,45) facing raw 2, one `U` then 39 moves and
@@ -2109,6 +2109,34 @@ the gate between two legs.
       the mouse pointer, 54 px; 41 px over three frames at (9,40..42), not
       traced). Before the restart passed every `shim*` variable, the pull
       frame missed both lever sprites (9/11).
+    - **Ishar 3 keyhole doors (2026-11-23, traced and driven).** SOURIS's
+      code after its first `cstop` (`+0x33..+0x154b`) decodes linearly with
+      the engine-3.0 operand shapes; the static CFG ends at `+0x32`
+      because it has no resume edge after `cstop` (row
+      `ishar-cstop-yield-cfg`), which is why it looked undecodable. DJ1
+      `+0x13ad` starts a second PCAVE (local 60 = 1, local 77 = the door
+      index) for a front door whose index is above 24; at depth 0 PCAVE
+      `+0x1c4` gives it form 5 (material 68) for door 39 and form 4
+      (material 67) for the others, and draws the keyhole plate (sprite
+      62 + depth). SOURIS `+0xb73`: with an item below -9 in the hand
+      (`0x168e`) and `0x353c` = 0, a click tests the forms at the pointer
+      (mask 32767); material 67 needs item -19 and 68 item -21
+      (`cswitch2` base -67). It then sends message 19 to every PCAVE with
+      local 60 = 0 and the keyhole's local 77, kills the cursor entity
+      (`0x19c8`) and clears the hand: the key is used up. Message 19
+      (`+0x282`) raises the door 4 px per tick to +96 and the entity then
+      sleeps; a fresh PCAVE on an open door draws nothing (`+0x1bb`).
+      Oracle (CONT5-3, keyhole at (179, 87)): door 25 opens with -19 and
+      not with -21 or an empty hand, door 39 with -21 and not with -19,
+      from either side of the door's edge. Ported as `ishar3DoorKey` /
+      `ishar3FacingDoor` in `ISHAR3_TITLE.use` (the walker's E assumes
+      the key). Walk (poked to (28,47), then only the game's buttons and
+      the keyhole click): refused at the shut door, `U`, then through:
+      13/13 moves, 1/1 tables, 154/155 placements; every other frame
+      100% of pixels. On the click frame the game's door entity is
+      still in the display list, raised to 3 rows inside the view, and the
+      view behind it shows the rising leaf's trail until the next step
+      redraws it; crawl draws the end state.
 
 20. **Ishar 3 beyond Maz (2026-11-23, driven and measured).**
     - **Trips without a gate cell.** The oracle sends MAIN message 38 (what
@@ -2273,6 +2301,15 @@ the gate between two legs.
     | Back from the mountains, Maz location 6 | 12 | 6 | 12/12 | 88/88 (was 5/17 on one frame) | 99.692% |
     | Dungeon region 7, from (4,53), doors as at a new game | 17 | 21, 22 | 17/17 | 252/252 | 99.997% |
     | Dungeon region 7, doors poked open (`0x3544`), hp kept | 81 | 21, 22, 23 | 81/81 | 1228/1228 | 99.995% (34 frames black, see below) |
+    | Dungeon region 7 from the room behind keyhole door 39 (37,52), opened with key -21 (2026-11-23) | 43 | 21, 26, 27 | 43/43 | 670/671 (the click frame's raised door) | 100% on every frame but the click |
+
+    Correction (2026-11-23): region 7's group holds a DJDEC and location
+    26 starts another; the scene kept the add-on by name on the way to 27
+    (11 extra placements over 11 frames). MAIN `+0x26bf` kills by entity
+    type, so the scene now marks add-ons and drops them on every location
+    change. Locations 24 (7,3) and 28 (51,19) are not reachable from the
+    dungeon trip's side with one door open (`planRoute` on CONT5-3), and
+    region 8 has not been reached: not measured.
 
     Residuals: at location 6 VJARDIN's tree (4-bit bitmap, bank 22)
     shows palette entries 20-21 in the game where crawl draws 36-37
@@ -2340,11 +2377,11 @@ the gate between two legs.
 **Not covered yet** (rewritten 2026-11-23; Ishar 3 items 2026-11-24):
 
 - ~~how a click reaches a door's form, and the levers~~ (Ishar 1 solved
-  2026-11-25, item 18; Ishar 3's levers driven, its keyhole doors not;
+  2026-11-25, item 18; Ishar 3's levers and keyhole doors driven, item 19;
   Ishar 2 traced in part, not driven);
 - Ishar 2's island NPCs, the jail and the cliff (item 19);
-- Ishar 3's dungeon region 8 and the dungeon locations past the shut
-  doors (23-28), not measured; the VJARDIN bank residual (item 21);
+- Ishar 3's dungeon region 8 and locations 24 and 28, not measured
+  (23, 26 and 27 measured 2026-11-23); the VJARDIN bank residual (item 21);
 - monster movement and combat. The walker draws the NPCs at their EN1
   places; GEREN moves them and spawns the roaming ones;
 - Ishar 3's townspeople table at a new game: its loader is not found, so

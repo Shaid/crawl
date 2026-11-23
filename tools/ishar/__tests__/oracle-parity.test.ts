@@ -442,3 +442,90 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
     }
   }, 300_000);
 });
+
+/**
+ * Ishar 3's keyhole doors (2026-11-23): trip to the dungeon (location 4),
+ * poke the party into CONT5-3 (28,47) facing raw -2, turn to face door 25
+ * on the cell's col-1 edge, walk into it (refused), then `U` clicks its
+ * keyhole (179, 87) with key -19 in the hand (`ishar3DoorKey`). SOURIS
+ * sends the door's PCAVE message 19 and the hand empties; crawl predicts
+ * the door table and redraws. The walk then goes through the door.
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 keyhole door vs the game (alis oracle)', () => {
+  it('opens the door with its key like the game and matches the view', () => {
+    const out = tempDir('ishar3-keydoor-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const trip = join(out, 'trip.state');
+      const at0 = captureTrip('ishar3', [38], trip, 600, { commands: ['poke 3b33 4'] });
+      const state = join(out, 'poked.state');
+      const pre = captureLegWalk('ishar3', (_c, done) => (done.length ? null : ['R']), join(out, 'pre'), { noNpcs: true, maxLegs: 1, startState: trip, start: at0, legCommands: ['poke 257 28', 'poke 14b6 47', 'poke 14b7 254', 'pokew 16e0 500'], finalState: state });
+      const p = pre.at(-1)!;
+      const at = { region: p.region, row: p.row, col: p.col, facingRaw: p.facingRaw };
+      expect(at).toEqual({ region: 7, row: 28, col: 47, facingRaw: 1 });
+      const actions = [...'FUFFLFRFFRRFF'] as Array<'F' | 'L' | 'R' | 'U'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: state, start: at, maxLegs: 1, legCommands: ['pokew 16e0 500'], use: [179, 87], useCommands: ['pokew 19c8 -1', 'pokew 168e -19'] });
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 1, p.mem?.zone?.[0], false);
+      expect(steps[0]!.mem!.doors![25]).toBe(0);
+      expect(steps[1]!.mem!.doors![25]).toBe(1);
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        // The use frame: the game's door entity is still in the display list,
+        // raised 96 px (3 rows left in the view), and the view behind it keeps
+        // the rising leaf's trail until the next step redraws; crawl draws the
+        // end state (no door sprite). Every later frame matches.
+        const missing = steps[i]!.action === 'U' ? 1 : 0;
+        expect({ i, move: w.moveAgrees, tables: w.tablesAgree ?? true, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, tables: true, matched: r.oracle - missing, crawl: r.oracle - missing });
+        if (!missing) expect(r.pixelsMasked - r.pixelsMaskedEqual, `step ${i} pixels`).toBe(0);
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
+
+/**
+ * Ishar 3's dungeon locations 26 and 27 through a door opened the real way
+ * (2026-11-23): poked into the closed room behind keyhole door 39 at
+ * CONT5-3 (37,52), the party walks onto the door's cell, clicks the keyhole
+ * with key -21 and walks out to location 26 (DJ4/FDJ4 + DJDEC) and 27
+ * (DJ1/FDJ1 + DJDEC2/DJDEC). Region 7's group also holds a DJDEC, so the
+ * scene must kill location 26's own DJDEC on the way to 27, as MAIN
+ * `+0x26bf` does (it kills by entity type, not by name).
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 dungeon locations 26-27 through a keyhole door vs the game (alis oracle)', () => {
+  it('walks through door 39 like the game and matches the view', () => {
+    const out = tempDir('ishar3-loc26-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const trip = join(out, 'trip.state');
+      const at0 = captureTrip('ishar3', [38], trip, 600, { commands: ['poke 3b33 4'] });
+      const state = join(out, 'poked.state');
+      const pre = captureLegWalk('ishar3', (_c, done) => (done.length ? null : ['R']), join(out, 'pre'), { noNpcs: true, maxLegs: 1, startState: trip, start: at0, legCommands: ['poke 257 37', 'poke 14b6 52', 'poke 14b7 254', 'pokew 16e0 500'], finalState: state });
+      const p = pre.at(-1)!;
+      const at = { region: p.region, row: p.row, col: p.col, facingRaw: p.facingRaw };
+      expect(at).toEqual({ region: 7, row: 37, col: 52, facingRaw: 1 });
+      const actions = [...'FUFFRFFFFFLFFLFRFFRFFFFFLFFRFLFFFFLRLRRFFRF'] as Array<'F' | 'L' | 'R' | 'U'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: state, start: at, maxLegs: 1, legCommands: ['pokew 16e0 500'], use: [179, 87], useCommands: ['pokew 19c8 -1', 'pokew 168e -21'] });
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 1, p.mem?.zone?.[0], false);
+      expect(steps.length).toBe(actions.length);
+      expect(steps[1]!.mem!.doors![39]).toBe(1);
+      expect(new Set(steps.map((s) => s.mem!.zone![0]))).toEqual(new Set([21, 26, 27]));
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        // the use frame: the raised door entity and its trail, as in the keyhole test above
+        const missing = steps[i]!.action === 'U' ? 1 : 0;
+        expect({ i, move: w.moveAgrees, tables: w.tablesAgree ?? true, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, tables: true, matched: r.oracle - missing, crawl: r.oracle - missing });
+        if (!missing) expect(r.pixelsMasked - r.pixelsMaskedEqual, `step ${i} pixels`).toBe(0);
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});

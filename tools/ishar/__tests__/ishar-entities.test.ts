@@ -171,4 +171,25 @@ describe.skipIf(!existsSync('data/ishar3/amigaaga/CONT5-3.FIC'))('Ishar 3 dungeo
     // the door at (9,31) holds grid-B 73: index 13
     expect(cellB(7, 9, 31)).toBe(73);
   });
+
+  it('opens a keyhole door from either side of its edge (SOURIS +0xb73, oracle-driven)', async () => {
+    const { ishar3FacingDoor, ishar3DoorKey, ISHAR3_TITLE: T, ISHAR3_DOOR_TABLE } = await import('../../shared/ishar-scene.ts');
+    const f = new Uint8Array(readFileSync('data/ishar3/amigaaga/CONT5-3.FIC'));
+    const n = 57 * 82;
+    const cell = (_r: number, row: number, col: number) => ((f[row * 57 + col]! << 24) >> 24);
+    const cellB = (_r: number, row: number, col: number) => ((f[n + row * 57 + col]! << 24) >> 24);
+    // door 25 on (28,47)'s col-1 edge: from inside facing raw 1 (walker 0), from (28,46) facing raw -1 (walker 2)
+    expect(ishar3FacingDoor({ region: 7, row: 28, col: 47, facing: 0 }, cell, cellB)).toBe(25);
+    expect(ishar3FacingDoor({ region: 7, row: 28, col: 46, facing: 2 }, cell, cellB)).toBe(25);
+    expect(ishar3FacingDoor({ region: 7, row: 28, col: 47, facing: 1 }, cell, cellB)).toBe(-1);
+    expect([ishar3DoorKey(25), ishar3DoorKey(39), ishar3DoorKey(13)]).toEqual([-19, -21, null]);
+    const st = { region: 7, row: 28, col: 47, facing: 0 as const };
+    const u = T.use!(st, cell, cellB);
+    expect(u?.tables[ISHAR3_DOOR_TABLE]![25]).toBe(1);
+    expect(u?.message).toEqual({ script: 'PCAVE', local: 77, index: 25, exit: false });
+    // already open: nothing to use
+    expect(T.use!({ ...st, tables: u!.tables }, cell, cellB)).toBeNull();
+    // door 13 (no keyhole) is opened by its lever only
+    expect(ishar3FacingDoor({ region: 7, row: 9, col: 31, facing: 0 }, cell, cellB) === 13 ? T.use!({ region: 7, row: 9, col: 31, facing: 0 }, cell, cellB) : null).toBeNull();
+  });
 });

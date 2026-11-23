@@ -212,3 +212,9 @@ each `U` with the title's `spec.use` and reports `tablesAgree`.
 Ishar 3 uses the same `U` point for its dungeon levers (a lever in the
 party's own cell, `ishar3FacingLever`); the walk dumps the lever states
 `0x357c` as `levers` next to `doors`.
+Ishar 3 keyhole doors (2026-11-23): doors with an index above 24 open by
+a click on their keyhole, (179, 87) with the door on the edge ahead, with
+the key in the hand: `captureLegWalk(..., { use: [179, 87], useCommands:
+['pokew 19c8 -1', 'pokew 168e -19'] })` (`0x168e` is the held item,
+`0x19c8` the cursor entity; key -21 for door 39, `ishar3DoorKey`). The
+click uses the key up.

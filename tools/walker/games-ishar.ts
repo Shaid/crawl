@@ -469,7 +469,8 @@ export class IsharView implements GameView {
    * (an empty-hand click, PCAVE message 20), else open the locked door in
    * front (doors 0..15, a key or a picked lock, message 19; the walker
    * keeps no inventory, so it assumes the key). Ishar 3: pull the dungeon
-   * lever in the party's cell (`ishar3FacingLever`), which toggles its door. The scene redraws at once, the way PCAVE's handler
+   * lever in the party's cell (`ishar3FacingLever`), which toggles its door,
+   * else open the keyhole door ahead (`ishar3DoorKey`, again assuming the key). The scene redraws at once, the way PCAVE's handler
    * slides the lever or the door. Returns true if something changed.
    */
   private use(): boolean {

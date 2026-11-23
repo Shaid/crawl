@@ -1198,6 +1198,43 @@ export function ishar3PullLever(levers: readonly number[], doors: readonly numbe
   return { levers: l, doors: d };
 }
 
+/**
+ * The key a keyhole door takes (traced 2026-11-23, driven in the oracle).
+ * DJ1 (`+0x13ad`) starts a second PCAVE, local 60 = 1, for a front door
+ * whose index is above 24; at depth 0 PCAVE (`+0x1c4`) gives it form 5
+ * (material 68) for door 39 and form 4 (material 67) for the rest. SOURIS
+ * (`+0xb73..+0xbfa`), with an item below -9 in the hand (`0x168e`) and
+ * `0x353c` = 0, tests the forms at the pointer: material 67 needs item -19
+ * and 68 item -21; it then sends message 19 to the door's PCAVE (local 60
+ * = 0, same local 77) and empties the hand, so the key is used up.
+ * Oracle (CONT5-3): door 25 opens with -19 and not with -21, door 39 with
+ * -21 and not with -19, from either side of the door's edge.
+ */
+export function ishar3DoorKey(index: number): number | null {
+  if (index <= 24 || index >= 50) return null;
+  return index === 39 ? -21 : -19;
+}
+
+/**
+ * The door on the edge the party faces in the Ishar 3 dungeons (regions
+ * 7/8), or -1: on its own cell's edge or on the near edge of the cell
+ * ahead, the two edges GERDEP's step test checks. Its index is the cell's
+ * grid-B value - 60 (61..109).
+ */
+export function ishar3FacingDoor(st: IsharPartyState, cell: (region: number, row: number, col: number) => number, cellB: (region: number, row: number, col: number) => number): number {
+  if (st.region !== 7 && st.region !== 8) return -1;
+  const raw = ISHAR3_TITLE.facingRaw[st.facing];
+  const dir2 = raw === 1 ? 1 : raw === 2 ? 2 : raw === -1 ? 3 : 4;
+  const door = (b: number) => (b > 60 && b < 110 ? b - 60 : -1);
+  if (ishar2DoorSide(cell(st.region, st.row, st.col)) === dir2) {
+    const i = door(cellB(st.region, st.row, st.col));
+    if (i >= 0) return i;
+  }
+  const to = ISHAR3_TITLE.stepFrom(st, st.facing);
+  if (to && ishar2DoorSide(cell(to.region, to.row, to.col)) === [0, 3, 4, 1, 2][dir2]) return door(cellB(to.region, to.row, to.col));
+  return -1;
+}
+
 export const ISHAR3_TITLE: IsharTitleSpec = {
   game: 'ishar3',
   stride: 57,
@@ -1305,10 +1342,21 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   // Ishar 2's `+0xc8b`; the party check (`+0xdc2`) is not modelled.
   use(st, cell, cellB) {
     if (!cellB) return null;
+    const doors = st.tables?.[ISHAR3_DOOR_TABLE] ?? this.tables![ISHAR3_DOOR_TABLE]!;
     const i = ishar3FacingLever(st, cell, cellB);
-    if (i < 0) return null;
-    const p = ishar3PullLever(st.tables?.[ISHAR3_LEVER_TABLE] ?? this.tables![ISHAR3_LEVER_TABLE]!, st.tables?.[ISHAR3_DOOR_TABLE] ?? this.tables![ISHAR3_DOOR_TABLE]!, i);
-    return { tables: { [ISHAR3_DOOR_TABLE]: p.doors, [ISHAR3_LEVER_TABLE]: p.levers }, message: { script: 'PCAVE', local: 60, index: i, exit: false } };
+    if (i >= 0) {
+      const p = ishar3PullLever(st.tables?.[ISHAR3_LEVER_TABLE] ?? this.tables![ISHAR3_LEVER_TABLE]!, doors, i);
+      return { tables: { [ISHAR3_DOOR_TABLE]: p.doors, [ISHAR3_LEVER_TABLE]: p.levers }, message: { script: 'PCAVE', local: 60, index: i, exit: false } };
+    }
+    // a keyhole door ahead (`ishar3DoorKey`): the walker keeps no inventory, so it assumes the key.
+    // Message 19 (PCAVE +0x282) raises the door 96 px and the entity then sleeps; a restart
+    // under the new table draws it where the slide ends (+0x1bb), and the keyhole is unchanged.
+    const d = ishar3FacingDoor(st, cell, cellB);
+    if (d < 0 || ishar3DoorKey(d) === null || doors[d]) return null;
+    const next = [...doors];
+    next[d] = 1;
+    const tables: Record<number, number[]> = { [ISHAR3_DOOR_TABLE]: next };
+    return { tables, message: { script: 'PCAVE', local: 77, index: d, exit: false } };
   },
   enter(from, to, cell, occupied, cellB) {
     const v = cell(to.region, to.row, to.col);
@@ -1590,6 +1638,8 @@ interface LoadedScript {
   handle?: number;
   /** The variables its parent wrote (`shim*`), which a restart passes again. */
   passed?: Set<number>;
+  /** Started as a zone/location add-on (so a same-named region-group script is not mistaken for it). */
+  addOn?: boolean;
 }
 
 /** Element `index` (byte or big-endian signed word) of the table at `addr`, if a block of `blocks` holds it. */
@@ -1861,7 +1911,9 @@ export class IsharScene {
     if (this.spec.addOnSwap === 'restart' && !restart) return;
     const names = want.map(addOnName);
     const base = [...(this.spec.sceneGroup(st.region)?.scripts ?? []), ...(this.spec.entities?.persistent ?? [])];
-    const keep = this.scripts.filter((s) => s.handle !== undefined || base.includes(s.name) || (names.includes(s.name) && !restart));
+    // An add-on that shares a group script's name (Ishar 3's DJDEC at location 26 next to
+    // region 7's DJDEC) is still an add-on: the game kills it on the next location change.
+    const keep = this.scripts.filter((s) => s.handle !== undefined || (!s.addOn && base.includes(s.name)) || (names.includes(s.name) && !restart));
     const have = new Set(keep.map((s) => s.name));
     const env = this.env();
     const fresh: LoadedScript[] = [];
@@ -1873,6 +1925,7 @@ export class IsharScene {
       const s = this.create(name);
       if (!s) continue;
       if (typeof a !== 'string') for (const [k, v] of Object.entries(a.locals)) s.runner.locals.set(Number(k), v);
+      s.addOn = true;
       s.runner.settle(env);
       fresh.push(s);
       // An add-on wins equal-depth ties against the region group (oracle,
