@@ -80,6 +80,9 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
 - `absdump ADDR N NAME` — N bytes of engine memory at an absolute address
   (a script's `org` from the display list), e.g. to compare a loaded
   script with crawl's unpack;
+- `abspoke ADDR VAL` — writes one byte of engine memory at an absolute
+  address (for example a form's material in a loaded script, to try a
+  lock kind);
 - `send ENTRY V1 [V2 ...]` — queues a message for the entity at `atent`
   offset ENTRY (0 = MAIN), the same queue write the engine's `csend` makes.
   `captureTrip(game, [14, selector], statePath)` uses it to drive an
@@ -96,6 +99,7 @@ These variables change how it runs:
 | `ALIS_HARNESS_MS=1` | Keys commands to wall-clock milliseconds instead of frames. This is not deterministic; it was only used before the virtual clock existed. |
 | `ALIS_HARNESS_TRACE=1` | Logs every script load, start, wake-up and kill. |
 | `ALIS_HARNESS_WATCH=hexoff,...` | Reports which script changed a main-segment byte. |
+| `ALIS_HARNESS_FORMS=1` | Logs every form test (`ctstform`/`cftstset`...: the testing script and pc, the point, the mask, each candidate entity's form, hit or miss, and its material) and every `csend` (sender and pc). That is how the Ishar 1 door and lever clicks were traced. |
 
 ## Caveats
 
@@ -174,3 +178,14 @@ dungeon with location 4 (`poke 3b33 4`); keep the party alive with
 `pokew 16e0 500` (hp of party slot 0) and open its doors by poking
 `0x3545..0x356b` to 1 (`ISHAR3_DOOR_TABLE`, dumped every step as
 `doors`). Fireball traps are in `npcScripts`.
+
+Doors and levers (Ishar 1, 2026-11-25): a walk action `U` clicks the view
+at the title's `use` point ((128, 60) for Ishar 1: a lever in the cell's
+wall, an empty-hand click; SOURIS sends PCAVE message 20). A locked door
+opens when its lock plate is clicked with the right key in the hand:
+`captureLegWalk(..., { use: [184, 65], useCommands: ['pokew 1742 -1',
+'pokew 1506 <kind>'] })` puts key kind `<kind>` in the hand just before
+the click (`0x1506` is the held item's kind, `0x1742` the cursor entity).
+With an item in the hand the arrows do not move the party, so hold it
+only for the click. `crawlWalk` predicts the door and lever tables after
+each `U` with the title's `spec.use` and reports `tablesAgree`.

@@ -69,7 +69,7 @@ index 26375e3..00547a1 100644
  }
  
 diff --git a/src/opcodes.c b/src/opcodes.c
-index 1151bed..37e1ca0 100644
+index 1151bed..b1b345e 100644
 --- a/src/opcodes.c
 +++ b/src/opcodes.c
 @@ -1142,6 +1142,7 @@ static void cwakeup(void)
@@ -96,7 +96,23 @@ index 1151bed..37e1ca0 100644
       killent(alis.varD7);
  }
  
-@@ -7021,6 +7024,7 @@ static void csinput(void)
+@@ -2804,6 +2807,7 @@ void clipform(void)
+                 }
+                 
+                 ALIS_DEBUG(EDebugInfo, "    = %d", result);
++                if (getenv("ALIS_HARNESS_FORMS")) fprintf(stderr, "[form] %s pc=%x at %d,%d,%d mask=%d forme=%d -> %s forme=%d %s mat=%d\n", alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org), alis.wcx, alis.wcy, alis.wcz, alis.matmask, alis.wforme, sc->name, get_0x1a_cforme(ent_vram), result ? "miss" : "HIT", alis.goodmat);
+                 if (!result)
+                 {
+                     if (alis.witmov != 0)
+@@ -4395,6 +4399,7 @@ static void corient(void)
+ static void csend(void)
+ {
+     s16 length = script_read8();
++    if (getenv("ALIS_HARNESS_FORMS")) fprintf(stderr, "[send] from %s pc=%x len=%d\n", alis.script->name, (unsigned)(alis.script->pc - alis.script->pc_org), length);
+ 
+     do
+     {
+@@ -7021,6 +7026,7 @@ static void csinput(void)
  {
      alis.charmode = 0;
      getstring();
@@ -139,10 +155,10 @@ index d3b0040..e68f4f2 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..89cbb8f
+index 0000000..a4139f4
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,225 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -157,6 +173,7 @@ index 0000000..89cbb8f
 +//   derefdump OFF N NAME                (N bytes of an indirect v3 array: the handle at basemain+OFF)
 +//   derefpoke OFF IDX VAL               (byte IDX of that array := VAL, IDX decimal)
 +//   absdump ADDR N NAME                 (N bytes of engine memory at absolute ADDR, e.g. a script's org)
++//   abspoke ADDR VAL                    (byte of engine memory at absolute ADDR := VAL, e.g. a form's material)
 +//   send ENTRY V1 [V2 ...]              (queue a message for the entity at atent offset ENTRY, 0 = MAIN, as csend does)
 +//   dump NAME                           (NAME.ppm frame + NAME.spr live sprite list)
 +//   save | quit | mark TEXT
@@ -281,6 +298,7 @@ index 0000000..89cbb8f
 +        fprintf(stderr, "[send] %ld entity %d: %d values\n", h_frameno, ent, n);
 +      } else fprintf(stderr, "[send] %ld entity %d: not queued\n", h_frameno, ent);
 +    }
++    else if (!strcmp(cmd, "abspoke")) { unsigned off; int v; sscanf(h_line, "%*ld %*s %x %d", &off, &v); *(u8 *)(alis.mem + off) = (u8)v; }
 +    else if (!strcmp(cmd, "absdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + off, 1, n, o); fclose(o); } }
 +    else if (!strcmp(cmd, "derefpoke")) { unsigned off; int idx, v; sscanf(h_line, "%*ld %*s %x %d %d", &off, &idx, &v); u32 a = xread32(xread32(alis.basemain + off)); *(u8 *)(alis.mem + a + idx) = (u8)v; }
 +    else if (!strcmp(cmd, "dump")) { sscanf(h_line, "%*ld %*s %159s", name); h_dump_ppm(name); h_dump_sprites(name); fprintf(stderr, "[dump] %ld %s\n", h_frameno, name); }

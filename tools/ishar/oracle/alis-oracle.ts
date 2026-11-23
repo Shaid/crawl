@@ -42,6 +42,8 @@ export interface OracleTitle {
   /** Screen pixels of the "turn left" and "forward" arrows. */
   turnLeft: readonly [number, number];
   forward: readonly [number, number];
+  /** Where a "use" action (`U`) clicks in the view with an empty hand: a lever in front (Ishar 1: SOURIS's lever test, form mask 64). */
+  use?: readonly [number, number];
   /** View screen geometry as the oracle's `S` line prints it. */
   viewScreen: { x: number; y: number; w: number; h: number };
   /**
@@ -107,6 +109,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     turnRight: [309, 103],
     turnLeft: [267, 103],
     forward: [290, 78],
+    // a lever's form (PCAVE form 16) at the view centre, adjacent wall
+    use: [128, 60],
     viewScreen: { x: 0, y: 0, w: 255, h: 125 },
     // logo -> title -> language menu ('1' = English) -> in game at frame ~1000,
     // CONT1 row 11 col 29, raw facing 2; saved before any step or turn.
@@ -471,7 +475,17 @@ export function capturePoses(game: OracleGame, poses: readonly OraclePose[], out
   return frames;
 }
 
-export type WalkAction = 'F' | 'L' | 'R';
+/** F/L/R click the game's arrows; U clicks the view at the title's `use` point (pull a lever). */
+export type WalkAction = 'F' | 'L' | 'R' | 'U';
+
+/** The screen pixel a walk action clicks. */
+export function actionClick(t: OracleTitle, a: WalkAction): readonly [number, number] {
+  if (a === 'U') {
+    if (!t.use) throw new Error('this title has no use point');
+    return t.use;
+  }
+  return a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;
+}
 
 export interface WalkStep {
   action: WalkAction;
@@ -538,7 +552,7 @@ export function captureWalk(
   for (const m of t.bootMemdumps ?? []) ev.push([2, `memdump ${m.off.toString(16)} ${m.len} ${m.name}`]);
   actions.forEach((a, i) => {
     const f0 = 4 + i * WALK_STRIDE;
-    const [x, y] = a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;
+    const [x, y] = actionClick(t, a);
     ev.push([f0, `click ${x} ${y}`], [f0 + 2, 'up']);
     ev.push(...partyDumps(t, f0 + WALK_STRIDE - 8, `s${i}`));
     ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);
@@ -581,6 +595,10 @@ export function captureLegWalk(
     finalState?: string;
     /** Harness commands run at the start of every leg (e.g. `pokew` to keep the party alive on a scenery walk). */
     legCommands?: readonly string[];
+    /** Where `U` clicks instead of the title's `use` point (Ishar 1: a door's lock plate, (184, 65), with a key in hand). */
+    use?: readonly [number, number];
+    /** Harness commands run just before each `U` click (e.g. put a key in the hand: Ishar 1 `pokew 1506 <kind>`). */
+    useCommands?: readonly string[];
   } = {},
 ): WalkStep[] {
   const t = ORACLE_TITLES[game];
@@ -608,7 +626,8 @@ export function captureLegWalk(
       const ev: Array<[number, string]> = (opts.legCommands ?? []).map((c) => [2, c] as [number, string]);
       actions.forEach((a, i) => {
         const f0 = 4 + i * WALK_STRIDE;
-        const [x, y] = a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;
+        const [x, y] = actionClick(opts.use ? { ...t, use: opts.use } : t, a);
+        if (a === 'U') for (const c of opts.useCommands ?? []) ev.push([f0 - 1, c]);
         ev.push([f0, `click ${x} ${y}`], [f0 + 2, 'up']);
         ev.push(...partyDumps(t, f0 + WALK_STRIDE - 8, `s${i}`));
         ev.push([f0 + WALK_STRIDE - 8, `dump w${i}`]);

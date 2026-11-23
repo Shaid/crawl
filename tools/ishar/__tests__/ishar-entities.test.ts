@@ -99,11 +99,55 @@ describe.skipIf(!existsSync(`${D}/CONT5.FIC`))('Ishar 1 cave doors (the walker E
     expect(ishar1FacingDoor({ ...inside, region: 5 }, cell)).toBe(-1);
     expect(ishar1DoorClickable(11)).toBe(true);
     expect(ishar1DoorClickable(30)).toBe(false); // a lever door
+    expect(ishar1DoorClickable(16)).toBe(false); // PCAVE form 16 is the lever form
     const shut = T.tables![0x3b64]!;
     const open = [...shut];
     open[11] = 1;
     const south = { ...inside, row: 17 };
     expect(T.enter!({ ...inside, tables: { 0x3b64: shut } }, south, cell)).toBeNull();
     expect(T.enter!({ ...inside, tables: { 0x3b64: open } }, south, cell)).toEqual(south);
+  });
+});
+
+describe('Ishar 1 locks and levers (SOURIS, FRISE and PCAVE, oracle-driven 2026-11-25)', () => {
+  it('reads each lockable door\'s key kind and pick-lock threshold off PCAVE\'s forms', async () => {
+    const { ishar1DoorLock } = await import('../../shared/ishar-scene.ts');
+    // door 11: form material 44 = 32 | 12 (oracle: the click at the lock plate reported mat 44, key 12 opened it)
+    expect(ishar1DoorLock(11)).toEqual({ key: 12, pick: null });
+    // door 1: kind 2, picked with skill above 60 (oracle: 61 opened it, 60 did not)
+    expect(ishar1DoorLock(1)).toEqual({ key: 2, pick: 60 });
+    expect(ishar1DoorLock(16)).toBeNull();
+    expect(ishar1DoorLock(40)).toBeNull();
+  });
+  it('pulls a lever the way PCAVE +0x213 does', async () => {
+    const { ishar1PullLever, ISHAR1_TITLE: T } = await import('../../shared/ishar-scene.ts');
+    const doors = T.tables![0x3b64]!;
+    const levers = T.tables![0x3b98]!;
+    // oracle: lever 1 at CONT5 (28,55): state 1, door 17 opens, doors 21-23 follow the lever-13 rule
+    const a = ishar1PullLever(levers, doors, 1);
+    expect(a.levers[1]).toBe(1);
+    expect([a.doors[17], a.doors[21], a.doors[22], a.doors[23]]).toEqual([1, 0, 0, 1]);
+    // lever 19 swaps gates 24/25; pulled again it swaps them back
+    const b = ishar1PullLever(levers, doors, 19);
+    expect([b.doors[24], b.doors[25]]).toEqual([1, 0]);
+    const c = ishar1PullLever(b.levers, b.doors, 19);
+    expect([c.levers[19], c.doors[24], c.doors[25]]).toEqual([0, 0, 1]);
+    // lever 13 goes to 2 and then only a pick moves the doors
+    const d = ishar1PullLever(levers, doors, 13);
+    expect(d.levers[13]).toBe(2);
+    expect(ishar1PullLever(d.levers, d.doors, 13)).toEqual(d);
+    expect(ishar1PullLever(d.levers, d.doors, 13, true).doors.slice(21, 24)).toEqual([1, 1, 0]);
+  });
+  it.skipIf(!existsSync(`${D}/CONT5.FIC`))('finds the lever the party faces (cells 66..69, the door edge order)', async () => {
+    const { ishar1FacingLever, ishar1Use, ISHAR1_TITLE: T } = await import('../../shared/ishar-scene.ts');
+    const g = new Uint8Array(readFileSync(`${D}/CONT5.FIC`));
+    const cell = (_r: number, row: number, col: number) => ((g[row * 90 + col]! << 24) >> 24);
+    // (35,13) = 69: lever 19 on the east edge (walker facing 2 = raw 3)
+    const at = { region: 15, row: 35, col: 13, facing: 2 as const };
+    expect(ishar1FacingLever(at, cell)).toBe(19);
+    expect(ishar1FacingLever({ ...at, facing: 1 }, cell)).toBe(-1);
+    const u = ishar1Use(at, cell, T.tables![0x3b64]!, T.tables![0x3b98]!);
+    expect(u?.lever).toBe(19);
+    expect(u?.levers[19]).toBe(1);
   });
 });

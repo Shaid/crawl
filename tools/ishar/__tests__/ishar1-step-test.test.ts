@@ -66,6 +66,20 @@ describe.skipIf(!existsSync(EN1))('Ishar 1 caves: doors, passages, the cave mout
     // (30,33) = 53: door on the east edge, refused coming in from the east
     expect(ishar1DoorShut(at(15, 30, 34), at(15, 30, 33), cell, shut)).toBe(true);
   });
+  it('a gate (82..85) is an edge door: (34,13) = 82 holds door 25 on its north edge only', () => {
+    const shut = new Array(41).fill(1);
+    shut[25] = 0;
+    // oracle lever walk: with door 25 shut, north from (35,13) onto the gate is allowed ...
+    expect(ishar1DoorShut(at(15, 35, 13), at(15, 34, 13), cell, shut)).toBe(false);
+    // ... and north out of it is refused
+    expect(ishar1DoorShut(at(15, 34, 13), at(15, 33, 13), cell, shut)).toBe(true);
+    expect(ishar1DoorShut(at(15, 33, 13), at(15, 34, 13), cell, shut)).toBe(true);
+    // (39,12) = 84: door 34 on its west edge
+    const s34 = new Array(41).fill(1);
+    s34[34] = 0;
+    expect(ishar1DoorShut(at(15, 39, 12), at(15, 39, 11), cell, s34)).toBe(true);
+    expect(ishar1DoorShut(at(15, 39, 13), at(15, 39, 12), cell, s34)).toBe(false);
+  });
   it('a passage keeps the step: (49,19) east onto the -81 lands one east of (36,26)', () => {
     expect(ISHAR1_TITLE.enter!({ ...at(15, 49, 19), tables: { 0x3b64: new Array(41).fill(1) } }, at(15, 49, 20), cell)).toEqual(at(15, 36, 27));
   });

@@ -38,7 +38,7 @@ data-structure.md` / `docs/ishar3/amigaaga/data-structure.md` /
 
 Movement rules, all measured in the oracle:
 - **Doors** (`ishar1DoorShut`). A cell holding 50..69 has a door on one edge: (value - 50) mod 4 gives north, south, west or east. Crossing that edge, in either direction, is refused while the door's PARAM entry is shut. Example: (16,24) = 51 refuses the step south; opening entry 11 (`poke 3b6f 1`) lets the party through. (30,33) = 53 refuses the step into it from the east.
-- **Gates.** A cell holding 82..85 refuses the step onto it while its entry is shut.
+- **Gates.** A cell holding 82..85 refuses the step onto it while its entry is shut. **Correction (2026-11-25):** the gates are edge doors like 46..65 (edge (value - 46) mod 4): the game let the party step north onto the shut gate (34,13) = 82, whose door is on its north edge. 66..69 are levers, not doors. See `ishar-container-format.md` §8.8 item 18.
 - **Passages.** The move delta still applies after the jump (GERDEP `+0x5d8`/`+0x9d2` add the step). For example, (49,19) east onto the -81 lands on (36,27), not on the table's (36,26).
 - **Cave mouth.** CONT5 (13,24) switches the region code 5 <-> 15 (`ishar1CavePortal`; the writer is MAIN `+0x1b11`).
 
@@ -56,7 +56,7 @@ Results, all at 100% of placements and of pixels outside NPC boxes:
 | Temple (region 6), entered by the -82 cell | 79 | 79/79 |
 
 Still open:
-- how doors and levers are worked in play (the walks poked them open);
+- ~~how doors and levers are worked in play~~ (done 2026-11-25, see below);
 - ~~town codes 13/14 and the other cave codes~~ (done, see below);
 - ~~the zone add-on INCAVE~~ (done, see below);
 - the walker does not model regions 12-15 (its world has no cave or town layer).
@@ -65,11 +65,23 @@ Still open:
 
 Doors, partly traced: PCAVE gives a door a click form (`cforme`) only when it is adjacent and its index is below 24 or above 40; index 40 also needs item -24 in a party inventory (`0x1568`); PCAVE `+0x1c4` then sets the door's PARAM flag. Negative indices are levers (state `0x3b98`; lever drawn up at 0, down at 1/2). Clicking the door, or ACTION then the door, in the oracle did not open CONT5 door 11 (16,24): the click has to hit the form in the mouse entity's coordinates, not yet worked out. The ACTION menu offers PICK LOCK. **2026-11-23 (later):** PCAVE's interrupt handler (`+0x20`, `cswitch2` on the message) runs `+0x1c4` on message 19: it sets the door's `0x3b64` flag and plays the door sound. Message 20 runs the lever switch `+0x213`, which writes `0x3b64`/`0x3b98` per lever. No script sends 19 with a literal `csend`. FRISE's view hit test is `cftstset` at `+0x3113`: it takes a pointer entity's x/depth/height and steps the depth by 2 until a form answers. Clicks and holds on door 11 (CONT5 16,24, facing south) changed nothing in the oracle, and neither did clicks on the plate beside it: no script woke and the flag stayed 0. Door 40 (`+0x120`): facing it from the adjacent cell, PCAVE looks for item -24 in inventory column 11 (`0x1568`) of a living member and starts MESSAGEI (id 14) with message 18 when one holds it, 17 when none does. The walker's E key opens a clickable door the party faces (`ishar1FacingDoor`, `ishar1DoorClickable`). Levers are not modelled.
 
-The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONSTRE's and TELEP's tables and answers a prompt by trying the words (verified at the cave mouth, about 60 s per try). | `docs/ishar-container-format.md` §8.8 | 2026-11-23 |
+**2026-11-25: doors and levers solved and driven.** The sender is the mouse entity SOURIS (`+0x405`, code the static CFG misses), not FRISE: FRISE's `+0x3113` loop places thrown objects. An empty-hand click in the view tests objects, then levers (form mask 64: PCAVE message 20). With an item in the hand it tests doors (mask 32): message 19 when the door form's material & 31 equals the held kind (a key). PICK LOCK (FRISE `+0x1d7e`) sends 19 when the acting member's skill (`0x3d2c`) is above the lock kind's threshold (oracle: kind 2 opens at 61, not 60). PCAVE's form `i` = door `i`, material 32 | (i + 1) for doors 0..15; doors 16..39 are lever doors. The lever handler `+0x213` is ported (`ishar1PullLever`); lever cells hold 66..69 with the door edge order. The walker's E pulls the faced lever or opens a faced locked door (`ishar1Use`). Oracle walks with real pulls and a key click (`U` action): lever puzzle 53/53 moves, 6/6 tables, 2853/2853 placements, 99.999% pixels; a second lever walk 53/53, 8/8, 2906/2906, 100%; door 11 with key 12: 12/12, 1/1, 342/342, 100%. Ishar 2's SOURIS opens doors of material 65 with a plain click (traced, not driven). Details: `ishar-container-format.md` §8.8 item 18.
+
+The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONSTRE's and TELEP's tables and answers a prompt by trying the words (verified at the cave mouth, about 60 s per try). | `docs/ishar-container-format.md` §8.8 | 2026-11-25 |
 | ishar-npcs | open (narrowed) | **2026-11-23:** NPCs and monsters are drawn by the game's own entity scripts, now run by `IsharScene` (`spec.entities`). Ishar 1 uses ENCONT, which `clive`s a monster script per EN1 slot in view and passes it x/depth/height through `shimw`. Ishar 2 uses EAFF, the same mechanism. Ishar 3 uses AFFPV (the Maz townspeople, VPERSO1..5) plus EAFF. EN1.FIC is MAIN's `cfreadb` run in all three titles (`ISHAR*_EN1_READS`). Measured with no NPC masking: Ishar 1 walks 100% of placements (Bormin, Kiriela, Naim, Fragorn, roaming wolves, 111 town-guard sprites in town 13) and 99.99-100% of pixels. Ishar 2: 91 of 93 bear sprites exact. Ishar 3: 131 of 133 townspeople within 12 px (their x adds `ornd`, the engine's shared random generator, which crawl cannot reproduce; 63 exact). Open: (1) a monster in the cell in front plays a per-frame close-up animation (MINOTOR `+0xb6`) that crawl draws as idle; (2) GEREN's monster movement and roaming spawns (the walker shows the new-game EN1 places); (3) Ishar 3's townspeople table (`0x4012..`) has no loader found yet, so the walker draws none; (4) floor objects (AFFOBJ/OBJET) | `docs/ishar-container-format.md` §8.8 item 17, §9.3; `tools/ishar/__tests__/ishar-entities.test.ts`, `oracle-parity.test.ts` (townspeople) | 2026-11-23 |
 | ishar-scene-tie-slots | open (low) | After a region change the game's equal-depth tie order follows each new script's entity slot (slots freed by the killed group are reused); `IsharScene` uses start order. Costs 10 pixels over a 129-frame walk. Model slot allocation (`script_live` slot reuse) if it ever matters | `tools/ishar/__tests__/oracle-parity.test.ts` (walk test comment) | 2026-11-22 |
 
 ## Session log
+
+- **2026-11-25 (doors and levers in play):** the click path is traced
+  through SOURIS, the mouse entity (FRISE `+0x3113` was a red herring: it
+  places thrown objects). Levers open with an empty-hand click (message
+  20), locked doors with the matching key in the hand or PICK LOCK
+  (message 19). PCAVE's lever handler is ported, the gates corrected to
+  edge doors, and the oracle has a `U` walk action, `abspoke` and
+  `ALIS_HARNESS_FORMS`. Ishar 1 cave walks with real pulls and a key:
+  every move, table, placement, and 99.999-100% of pixels. See §8.8
+  item 18.
 
 - **2026-11-24 (Ishar 3 locations and dungeons):** MAIN's location
   starter (`+0x2060`) found and ported; GERDEP's location rule runs in the

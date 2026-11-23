@@ -16,7 +16,7 @@
  */
 import { copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { gameDir, ORACLE_TITLES, runOracle, tempDir, type OracleGame, type WalkAction } from './alis-oracle.ts';
+import { actionClick, gameDir, ORACLE_TITLES, runOracle, tempDir, type OracleGame, type WalkAction } from './alis-oracle.ts';
 
 export interface ManualEntry {
   page: number;
@@ -82,7 +82,7 @@ export function answerManualPrompt(game: OracleGame, stateIn: string, stateOut: 
       const ev: Array<[number, string]> = [];
       let f = 4;
       for (const a of lead) {
-        const [x, y] = a === 'F' ? t.forward : a === 'L' ? t.turnLeft : t.turnRight;
+        const [x, y] = actionClick(t, a);
         ev.push([f, `click ${x} ${y}`], [f + 2, 'up']);
         f += 80;
       }

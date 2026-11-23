@@ -298,6 +298,8 @@ export interface WalkComparison {
   actual: IsharPartyState;
   /** crawl's walker rules reach the same state as the game (a refused move = unchanged). */
   moveAgrees: boolean;
+  /** A use action (`U`): crawl's predicted scene tables (doors, levers) equal the game's dump after it. */
+  tablesAgree?: boolean;
   scripts: string[];
   leaves: IsharSceneLeaf[];
   canvas: Uint8Array;
@@ -313,7 +315,7 @@ export interface WalkComparison {
 export function crawlWalk(
   data: TitleData,
   start: IsharPartyState,
-  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number>; mem?: Record<string, Uint8Array> }>,
+  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R' | 'U'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number>; mem?: Record<string, Uint8Array> }>,
   layers: (region: number) => readonly Uint8Array[] | undefined,
   initial: { A?: GridReader; B?: GridReader } = {},
   /** Extra scene wakes at the start pose: a walk that starts from a mid-game savestate meets scripts with a per-wake phase (FOND's alternation) already advanced. */
@@ -343,6 +345,24 @@ export function crawlWalk(
     const globals = memGlobals ? { ...s.globals, ...memGlobals } : s.globals;
     const actual: IsharPartyState = { region: s.region, row: s.row, col: s.col, facing: (facing < 0 ? 0 : facing) as 0 | 1 | 2 | 3, globals, tables: stepTables(game(data), s.mem), memory: stepMemory(game(data), s.mem) };
     let predicted: IsharPartyState | null;
+    if (s.action === 'U') {
+      // a use moves nothing; its effect is the tables (compared below) and
+      // the entities whose message handlers redraw it
+      const cell = (region: number, row: number, col: number) => s8(layers(isharContOf(spec, region))?.[0]?.[row * spec.stride + col] ?? 0);
+      const u = spec.use?.(cur, cell) ?? null;
+      // nothing usable in front: the tables stay as they were
+      const pred = u ? u.tables : (cur.tables ?? {});
+      const tablesAgree = Object.entries(pred).every(([a, t]) => {
+        const got = actual.tables?.[Number(a)];
+        return !!got && t.every((v, i) => (got[i] ?? 0) === v);
+      });
+      const same = cur.region === actual.region && cur.row === actual.row && cur.col === actual.col && cur.facing === actual.facing;
+      if (u?.message) scene.messageChild(u.message.script, u.message.index, u.message.exit, actual);
+      const leaves = scene.leaves();
+      out.push({ predicted: cur, actual, moveAgrees: same, tablesAgree, scripts: scene.scriptNames, leaves, canvas: compositeIsharView(leaves, spec.screen, scene.palette) });
+      cur = actual;
+      continue;
+    }
     if (s.action !== 'F') predicted = { ...cur, facing: ((cur.facing + (s.action === 'R' ? 1 : 3)) & 3) as 0 | 1 | 2 | 3 };
     else {
       const t = spec.stepFrom(cur, cur.facing);

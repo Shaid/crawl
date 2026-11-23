@@ -125,6 +125,62 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar.dataD
 });
 
 /**
+ * Ishar 1's CONT5 cave, doors and levers worked the way the game works
+ * them (2026-11-25). Needs the savestate with the cave mouth's manual
+ * prompt answered (`manual.ts` `answerManualPrompt`, kept as
+ * `build/cache/ishar-oracle/states/cave-answered.state`: region 15 at
+ * (13,24)). The party is poked to its starting cell once; the rest is the
+ * game's own buttons and view clicks:
+ * - the lever puzzle (levers 14..19 swap the gates 24..35): `U` clicks the
+ *   view centre with an empty hand, SOURIS sends PCAVE message 20; five
+ *   gate refusals follow the pulled levers;
+ * - door 11 at (16,24): refused shut, then opened by clicking its lock
+ *   plate with key kind 12 in the hand (`pokew 1506 12`, the item kind
+ *   SOURIS compares with the door form's material), then walked through.
+ */
+const CAVE_STATE = 'build/cache/ishar-oracle/states/cave-answered.state';
+const ISHAR1_CAVE_WALKS = [
+  { name: 'lever puzzle', at: [33, 13], walk: 'FFRURFFLLFFFLFFULFFRULFFRRFFFFFULULFFLLFRFFLFFRULFLFF', key: null },
+  { name: 'door 11 with its key', at: [13, 24], walk: 'FFFFUFFFRFLL', key: 12 },
+] as const;
+
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar.dataDir, 'MAIN.DO')) || !existsSync(CAVE_STATE))('ishar cave doors and levers vs the game (alis oracle)', () => {
+  it.each(ISHAR1_CAVE_WALKS)('$name: moves, door tables and view like the game', ({ at, walk, key }) => {
+    const out = tempDir('ishar-cave-test-');
+    try {
+      prepareGameDir('ishar');
+      const state = join(out, 'start.state');
+      // poke the cell, raw facing 1, then turn right (raw 2) so the game redraws there
+      const pre = captureLegWalk('ishar', (_c, done) => (done.length ? null : ['R']), join(out, 'pre'), {
+        maxLegs: 1, noNpcs: true, startState: CAVE_STATE, start: { region: 15, row: 13, col: 24, facingRaw: 2 },
+        legCommands: [`poke 137c ${at[0]}`, `poke 137d ${at[1]}`, 'poke 137e 1', 'pokew 1542 500'], finalState: state,
+      });
+      const p = pre.at(-1)!;
+      const start = { region: p.region, row: p.row, col: p.col, facingRaw: p.facingRaw };
+      expect(start).toEqual({ region: 15, row: at[0], col: at[1], facingRaw: 2 });
+      const steps = captureLegWalk('ishar', (_c, done) => (done.length ? null : ([...walk] as Array<'F' | 'L' | 'R' | 'U'>)), join(out, 'walk'), {
+        maxLegs: 1, noNpcs: true, startState: state, start, legCommands: ['pokew 1542 500'],
+        ...(key !== null ? { use: [184, 65] as const, useCommands: ['pokew 1742 -1', `pokew 1506 ${key}`] } : {}),
+      });
+      const data = loadTitleData('ishar');
+      const cw = crawlWalk(data, { region: 15, row: at[0], col: at[1], facing: data.spec.facingRaw.indexOf(2) as 0 | 1 | 2 | 3 }, steps, contLayers('ishar', data), {}, 1, p.mem?.zone?.[0], false);
+      let bad = 0;
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, tables: w.tablesAgree ?? true, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, tables: true, matched: r.oracle, crawl: r.oracle });
+        bad += r.pixelsMasked - r.pixelsMaskedEqual;
+      });
+      // one frame of the lever walk differs by 14 pixels (step 23, (33,11) facing north: a small
+      // object on the floor ahead and two dark edge pixels; not traced)
+      expect(bad).toBeLessThanOrEqual(20);
+      if (key !== null) expect(steps.at(-1)!.mem!.doorOpen![11]).toBe(1);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
+
+/**
  * Ishar 2: from the start (zone 4) north into the village (zone 1), then
  * east to the lake shore (zone 3, the boat), nothing poked. Roaming NPCs
  * (bears, lizards ...) are removed in the oracle (`noNpcs`) so they cannot

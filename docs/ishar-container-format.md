@@ -1748,7 +1748,9 @@ plausibility.
      mod 4 (north, south, west, east). Crossing that edge is refused
      while the door is shut.
    - **Gates.** Stepping onto a cell holding 82..85 is refused while the
-     gate is shut.
+     gate is shut. **Correction (2026-11-25):** wrong as stated. The
+     gates are edge doors too (edge (value - 46) mod 4), and 46..49 are
+     doors, 66..69 not (they are levers); see item 18.
    - **Passages** (-80/-81/-82) keep the move's own step after the jump.
 
    MCAVE also reads a lever list (`0x3c68`/`0x3c9c`) and its state
@@ -2004,24 +2006,90 @@ the gate between two legs.
     - **Ishar 3.** ALSTAR (EAFF) is one cell farther in the game, on 2
       frames.
 
-18. **Doors in play, partly traced (2026-11-23).**
+18. **Doors and levers in play (2026-11-23 traced in part; 2026-11-25
+    solved and driven).**
     - **Opening a door.** PCAVE's interrupt handler (`+0x20`) switches on
       the message. Message 19 runs `+0x1c4`: set the door's `0x3b64` flag,
-      play the sound, slide the door.
-    - **Levers.** Message 20 runs the lever switch `+0x213`, which writes
-      `0x3b64` and `0x3b98` per lever.
-    - **Which doors can be clicked.** A door gets its click form
-      (`cforme`, `+0xb0`) only when it is in the adjacent cell and its index
-      is below 24 or above 40.
+      play the sound, slide the leaf 4 px a frame to 40, then `cexit`.
+    - **Levers.** Message 20 runs the lever switch `+0x213` (ported as
+      `ishar1PullLever`): the lever goes down (state 1; lever 13 to 2,
+      after which only a pick moves it) or back up, then every door flag
+      the levers drive is recomputed from the lever states (`+0x2f8`:
+      door 17 = lever 1; 16 = 2, not 3, 4; 18 = not 5, not 6, 7; 19 = 8,
+      not 9; 20 = not 10, 11; 21-23 from levers 12/13; each of levers
+      14..19 swaps a gate pair among 24..35; levers 20/21 doors 36-39 and
+      `0x41e5`). The second message value is 1 when PICK LOCK sends it.
+    - **Who sends 19 and 20 (the open question of 2026-11-23).** The
+      mouse entity SOURIS, in code the static CFG misses (`+0x405`
+      onward; its entry only sets the screen). A left click in the view
+      (x < 256 and y < 127; SOURIS stores y as 199 - y) runs form tests at
+      the pointer (x, depth 0, 199 - y):
+      - empty hand (`0x1506` = 0): objects (form mask 128), then levers
+        (mask 64): message 20 to the lever's PCAVE entity (`+0x668`);
+      - an item in the hand (`0x1506` = its kind): objects, then doors
+        (mask 32): message 19 when the door form's material & 31 equals
+        the held kind (`+0x82c`). A key opens its door;
+      - PICK LOCK (ACTION menu; FRISE `+0x1ca2` sets `0x3d08` = 1 and a
+        lock-pick cursor): the door form's material & 31 goes to `0x3668`
+        and the entity to `0x3666`; FRISE `+0x1d7e` sends 19 when the
+        acting member's skill (`0x3d2c` + member) is above the lock's
+        threshold (kinds 2:60, 3:70, 4:80, 5:60, 6:80, 7:90, 8:65, 9:92,
+        11:85, 13:60, 14:80; others cannot be picked). Lever 13 can be
+        picked too (skill above 70, message 20 with value 1).
+      FRISE's `cftstset` loop at `+0x3113` is not a click test: it steps
+      a thrown or cast object's depth by 2 until it clears every form.
+      The 2026-11-23 clicks on door 11 did nothing because an empty-hand
+      click never tests door forms.
+    - **The forms.** PCAVE's form `i` belongs to door index `i` (`cforme
+      d13`, only when the door is in the adjacent cell and its index is
+      below 24 or above 40): material 32 | (i + 1) for doors 0..15, a box
+      17 px wide at the lock plate right of the door (x +52, height
+      +44..+56, depth 0..1). Form 16 (material 64) is the lever form,
+      given to every lever entity (index -lever). Doors 17..23 and above
+      40 ask for forms past the table's 17; the reference VM skips them.
+      So doors 0..15 open with a key or a pick, the rest by levers.
+    - **Levers on the map.** PARAM's lever list (`0x3c68` row, `0x3c9c`
+      col, levers 1..9 and 12..21) and states `0x3b98`. A lever cell holds
+      66..69; the lever is on its edge (value - 50) mod 4 (north, south,
+      west, east). MCAVE `+0x3713` starts a PCAVE with index -lever when
+      the party stands in the cell facing that edge.
+    - **Gates (correction).** GERDEP's edge switches (`+0x11d5` current
+      cell, `+0x13a9` target) cover 46..65 and 82..85 with the edge
+      (value - 46) mod 4; 66..81 are no-ops. The gates 82..85 are edge
+      doors like the rest, not "refused on entry" as item 9 had it: with
+      door 25 shut the game let the party step north from (35,13) onto
+      the gate (34,13) = 82, whose door is on its north edge. The door
+      check `+0x1629` is skipped while `0x41e7` = 1.
     - **Door 40** (`+0x120`) needs item -24 in inventory column 11 of a
       living member. PCAVE then starts MESSAGEI with message 18; without
-      the item it sends 17.
-    - **The view hit test** is FRISE's `cftstset` at `+0x3113`, which steps
-      a pointer entity's depth by 2 until a form answers.
-    - **Not driven yet.** Clicking door 11 in the oracle did nothing (no
-      wake, flag unchanged), so how a click reaches the form is still open.
-    - **Walker.** The E key opens a clickable door the party faces, which
-      is the effect of `+0x1c4`.
+      the item it sends 17. Not driven.
+    - **Driven in the oracle** (savestate with the cave mouth's prompt
+      answered; the party poked to its first cell once, then only the
+      game's buttons and view clicks; the new walk action `U` clicks the
+      view, `crawlWalk` predicts the tables with `ISHAR1_TITLE.use`):
+
+      | Walk | Actions | Moves | Uses (tables) | Placements | Masked pixels |
+      |---|---|---|---|---|---|
+      | Lever puzzle, CONT5 (33,13): levers 19, 15, 14 pulled, 15 pulled back, 18; five gate refusals | 53 | 53/53 | 6/6 | 2853/2853 | 99.999% |
+      | First lever walk, same area | 53 | 53/53 | 8/8 | 2906/2906 | 100.000% |
+      | Door 11 (16,24): refused, opened with key kind 12 at the lock plate, walked through | 12 | 12/12 | 1/1 | 342/342 | 100.000% |
+
+      Before this pass crawl's gate rule refused 2 of the first walk's 53
+      moves. The 14 pixels are one frame at (33,11) facing north (a small
+      object on the floor ahead and two dark edge pixels; not traced).
+      The views right after a pull or an opening match: crawl restarts
+      the lever's PCAVE entity under the new tables (a fresh start draws
+      the lever where the handler's slide ends) and drops the door's
+      (the handler `cexit`s), `IsharScene.messageChild`.
+    - **Walker.** E pulls the lever the party faces, else opens the locked
+      door in front (doors 0..15; the walker has no inventory, so it
+      assumes the key), and redraws at once (`ishar1Use`).
+    - **Ishar 2/3.** Ishar 2's SOURIS (`+0x66f`) tests every form mask
+      with an empty hand: material 64 sends 20 (a lever), 65 sends 19 (a
+      door that opens with a plain click), 70 goes to a trap-door path.
+      Ishar 2's PCAVE gives forms 1/2 (material 65) to doors whose entity
+      variable 9 is 1/2 when adjacent, forms 0/3 (64) to levers, and forms
+      4/5 (67/68) to doors 29/30. Not driven yet.
 
 20. **Ishar 3 beyond Maz (2026-11-23, driven and measured).**
     - **Trips without a gate cell.** The oracle sends MAIN message 38 (what
@@ -2199,7 +2267,9 @@ the gate between two legs.
 
 **Not covered yet** (rewritten 2026-11-23; Ishar 3 items 2026-11-24):
 
-- how a click reaches a door's form, and the levers (item 18; the walks poke them open);
+- ~~how a click reaches a door's form, and the levers~~ (Ishar 1 solved
+  2026-11-25, item 18); Ishar 2's and Ishar 3's dungeon doors in play
+  (Ishar 2 traced in part, item 18; the Ishar 3 walks poke them open);
 - Ishar 2's island NPCs, the jail and the cliff (item 19);
 - Ishar 3's dungeon region 8 and the dungeon locations past the shut
   doors (23-28), not measured; the VJARDIN bank residual (item 21);

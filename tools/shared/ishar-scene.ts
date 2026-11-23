@@ -146,6 +146,13 @@ export interface IsharTitleSpec {
    */
   enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number, occupied?: IsharOccupancy, cellB?: (region: number, row: number, col: number) => number): IsharPartyState | null;
   /**
+   * "Use" what the party faces (pull a lever, open a locked door): the
+   * scene tables after it, or null when nothing in front can be used.
+   * `message` names the entity whose message handler redraws it
+   * (`IsharScene.messageChild`).
+   */
+  use?(st: IsharPartyState, cell: (region: number, row: number, col: number) => number): { tables: Record<number, number[]>; message?: { script: string; index: number; exit: boolean } } | null;
+  /**
    * The engine's day/night darkening (`cdarkpal r g b first count`): when
    * any factor is not 256, every `cpalette` scales palette entries
    * [first, first + count) by factor/256 per channel (truncated) and
@@ -431,21 +438,25 @@ export function ishar1RegionPortal(_from: IsharPartyState, to: IsharPartyState):
 }
 
 /**
- * Doors and gates inside the caves (region code >= 10), measured in the
- * oracle against PARAM's door table (`0x3c00` row, `0x3c34` col, `0x3b64`
- * open), whose flags the walk poked one by one:
- * - a cell holding 50..69 has a door on one edge, (value - 50) mod 4 =
- *   north / south / west / east. Crossing that edge, out of the cell or
- *   into it, is refused while the door is shut. Seen: CONT5 (16,24) = 51
- *   refuses the step south out of it; (30,33) = 53 refuses the step into
- *   it from the east.
- * - a cell holding 82..85 is a gate: stepping onto it is refused while it
- *   is shut (CONT5 34,11 / 38,13 / 40,13 / 41,12).
- * A door cell with no table entry never blocks. GERDEP's side-wall arms
- * (`+0x11d5`/`+0x13a9`, which call the gate check `+0x1629`) have the same
- * north/south/west/east order. How the cave cell values reach those arms
- * is not traced.
+ * Doors and gates inside the caves (region code >= 10): GERDEP's edge
+ * switches on the current cell (`+0x11d5`) and the target cell (`+0x13a9`)
+ * take the values 46..65 and 82..85, and the edge is (value - 46) mod 4 =
+ * north / south / west / east. Crossing that edge, out of the cell or into
+ * it, calls the door check `+0x1629`: refused when PARAM's door table
+ * (`0x3c00` row, `0x3c34` col, 50 entries) has an entry at that cell whose
+ * flag `0x3b64` is 0, unless `0x41e7` = 1. A door cell with no table entry
+ * never blocks. 66..81 are not doors (66..69 are the levers).
+ * Measured: CONT5 (16,24) = 51 refuses the step south out of it; (30,33)
+ * = 53 refuses the step into it from the east.
+ * **Correction (2026-11-25):** the gates 82..85 are edge doors too, not
+ * "refused on entry": with door 25 shut the game let the party step north
+ * from (35,13) onto the gate (34,13) = 82, whose door is on its north edge
+ * (oracle lever walk). The old rule refused it.
  */
+export function ishar1DoorCell(v: number): boolean {
+  return (v >= 46 && v <= 65) || (v >= 82 && v <= 85);
+}
+
 export function ishar1DoorShut(
   from: IsharPartyState,
   to: IsharPartyState,
@@ -465,18 +476,15 @@ export function ishar1DoorShut(
   const side = (r: number, c: number) => (r < 0 ? 0 : r > 0 ? 1 : c < 0 ? 2 : 3);
   const edgeDoor = (row: number, col: number, edge: number) => {
     const v = cell(from.region, row, col);
-    return v >= 50 && v <= 69 && (v - 50) % 4 === edge && shut(row, col);
+    return ishar1DoorCell(v) && (v - 46) % 4 === edge && shut(row, col);
   };
-  if (edgeDoor(from.row, from.col, side(dr, dc)) || edgeDoor(to.row, to.col, side(-dr, -dc))) return true;
-  const g = cell(to.region, to.row, to.col);
-  return g >= 82 && g <= 85 && shut(to.row, to.col);
+  return edgeDoor(from.row, from.col, side(dr, dc)) || edgeDoor(to.row, to.col, side(-dr, -dc));
 }
 
 /**
  * The PARAM door (or gate) the party faces inside a cave, or -1: a door on
- * the facing edge of the party's own cell, a door on the near edge of the
- * cell in front, or a gate (82..85) in front (the edge rule of
- * `ishar1DoorShut`).
+ * the facing edge of the party's own cell or on the near edge of the cell
+ * in front (the edge rule of `ishar1DoorShut`, gates included).
  */
 export function ishar1FacingDoor(st: IsharPartyState, cell: (region: number, row: number, col: number) => number): number {
   if (st.region < 10) return -1;
@@ -487,7 +495,7 @@ export function ishar1FacingDoor(st: IsharPartyState, cell: (region: number, row
     for (let i = 0; i < ISHAR1_DOOR_ROWS.length; i++) if (ISHAR1_DOOR_ROWS[i] === row && ISHAR1_DOOR_COLS[i] === col) return i;
     return -1;
   };
-  const door = (v: number, e: number) => v >= 50 && v <= 69 && (v - 50) % 4 === e;
+  const door = (v: number, e: number) => ishar1DoorCell(v) && (v - 46) % 4 === e;
   if (door(cell(st.region, st.row, st.col), edge)) {
     const i = index(st.row, st.col);
     if (i >= 0) return i;
@@ -495,25 +503,134 @@ export function ishar1FacingDoor(st: IsharPartyState, cell: (region: number, row
   const fr = st.row + dr;
   const fc = st.col + dc;
   const w = cell(st.region, fr, fc);
-  if (door(w, edge ^ 1) || (w >= 82 && w <= 85)) return index(fr, fc);
+  if (door(w, edge ^ 1)) return index(fr, fc);
   return -1;
 }
 
 /**
- * Whether the party can open PARAM door `index` by clicking it (PCAVE):
- * PCAVE gives a door a click form (`cforme`, `+0xb0`) only when it is in
- * the adjacent cell and its index is below 24 or above 40. Message 19 to
- * that entity (PCAVE's interrupt handler `+0x20` -> `+0x1c4`) sets the
- * door's PARAM flag `0x3b64` and plays the door sound. Doors 24..40 have
- * no click form: the levers drive them (message 20, `+0x213`, a switch
- * per lever that writes `0x3b64`/`0x3b98`). Door 40 is checked at
- * `+0x120` instead: facing it from the adjacent cell (|x| < 20), PCAVE
- * looks for item -24 in inventory column 11 (`0x1568`) of a living party
- * member (hp `0x1542`) and starts MESSAGEI (id 14) with message 18 when
- * one holds it, 17 when none does.
+ * How a cave door opens in play (traced 2026-11-25, driven in the oracle).
+ * The mouse entity SOURIS (`+0x405`) handles a left click in the view
+ * (x < 256, y < 127) with three form tests at the pointer:
+ * - **Empty hand** (`0x1506` = 0): objects (form mask 128), then levers
+ *   (mask 64): a lever's PCAVE entity gets message 20 (`+0x668`).
+ * - **An item in hand** (`0x1506` = its kind): objects, then doors
+ *   (mask 32): when the door form's material & 31 equals the held kind,
+ *   its PCAVE entity gets message 19 (`+0x82c`): the key opens the door.
+ * - **PICK LOCK** (ACTION menu; FRISE `+0x1ca2` sets `0x3d08` = 1): the
+ *   door form's material & 31 goes to `0x3668`; FRISE `+0x1d7e` sends 19
+ *   when the acting member's skill (`0x3d2c`, one byte per member) is
+ *   above the lock's threshold (`ISHAR1_PICK_LOCK`).
+ * The click has to land on the door's form: a box 17 px wide right of the
+ * door at the lock plate (PCAVE forms: x +52, height +44..+56), only in
+ * the adjacent cell (PCAVE `+0xb0`). An empty-hand click on a door does
+ * nothing, which is why clicking door 11 did nothing in earlier passes.
+ *
+ * PCAVE's form `i` (door index `i`) has material 32 | kind: doors 0..12
+ * take kind i + 1, 13 kind 14, 14 kind 15, 15 kind 16. Form 16 is the
+ * lever form (material 64), so door 16 has no lock; doors 17..23 and
+ * above 40 ask for forms past the table's 17 (the reference VM skips
+ * them), and PCAVE gives doors 24..40 no form. The doors above 15 are
+ * worked by the levers (`ishar1PullLever`).
  */
+export function ishar1DoorLock(index: number): { key: number; pick: number | null } | null {
+  if (index < 0 || index > 15) return null;
+  const key = index + 1;
+  return { key, pick: ISHAR1_PICK_LOCK[key] ?? null };
+}
+
+/** FRISE `+0x1d7e`: the skill (`0x3d2c` of the acting member) a lock kind needs, strictly above; kinds not listed cannot be picked. Oracle: kind 2 opens at 61, not at 60. */
+export const ISHAR1_PICK_LOCK: Readonly<Record<number, number>> = { 2: 60, 3: 70, 4: 80, 5: 60, 6: 80, 7: 90, 8: 65, 9: 92, 11: 85, 13: 60, 14: 80 };
+
+/** Whether the party can open door `index` from its own side (a key or a picked lock): doors 0..15. */
 export function ishar1DoorClickable(index: number): boolean {
-  return index >= 0 && (index < 24 || index > 40);
+  return ishar1DoorLock(index) !== null;
+}
+
+/** PARAM's lever list (`0x3c68` row, `0x3c9c` col; index 0, 10 and 11 unused) and its state table `0x3b98`. */
+export const ISHAR1_LEVER_ROWS: readonly number[] = [0, 28, 25, 25, 25, 51, 49, 49, 39, 39, 0, 0, 33, 23, 35, 37, 39, 41, 39, 35, 40, 45];
+export const ISHAR1_LEVER_COLS: readonly number[] = [0, 55, 52, 54, 56, 33, 33, 35, 15, 17, 0, 0, 35, 32, 11, 11, 11, 11, 13, 13, 28, 41];
+
+/**
+ * The lever the party faces, or -1: a lever cell holds 66..69 and the
+ * lever is on its edge (value - 50) mod 4 (north, south, west, east, the
+ * door order); the party stands in that cell facing the edge. MCAVE
+ * (`+0x3713`) starts a PCAVE entity with index -lever there, whose form
+ * 16 (material 64) answers the click.
+ */
+export function ishar1FacingLever(st: IsharPartyState, cell: (region: number, row: number, col: number) => number): number {
+  if (st.region < 10) return -1;
+  const raw = ISHAR1_TITLE.facingRaw[st.facing];
+  const edge = raw === 4 ? 0 : raw === 2 ? 1 : raw === 1 ? 2 : 3;
+  const v = cell(st.region, st.row, st.col);
+  if (v < 66 || v > 69 || (v - 50) % 4 !== edge) return -1;
+  for (let i = 1; i < ISHAR1_LEVER_ROWS.length; i++) if (ISHAR1_LEVER_ROWS[i] === st.row && ISHAR1_LEVER_COLS[i] === st.col) return i;
+  return -1;
+}
+
+/**
+ * PCAVE's lever handler (message 20, `+0x213`), ported. `picked` is the
+ * message's second value: 1 when FRISE's PICK LOCK sends it (lever 13
+ * only, skill above 70). A lever goes down (state 1; lever 13 to 2, after
+ * which only a pick moves it) or back up (0), then the door flags follow
+ * the lever states (`+0x2f8`):
+ * - door 17 = lever 1; door 16 = 2 and not 3 and 4; door 18 = not 5, not
+ *   6 and 7; door 19 = 8 and not 9; door 20 = not 10 and 11;
+ * - doors 21/22 open and 23 shut unless lever 13 is down or 12 is up;
+ * - each of levers 14..19 swaps a pair: 14 -> 28 open (up) / 29, 15 -> 27 / 26,
+ *   16 -> 33 / 32, 17 -> 30 / 31, 18 -> 34 / 35, 19 -> 25 / 24;
+ * - lever 20 (only when it is the one pulled) 36 / 37, lever 21 38 / 39.
+ * Oracle: lever 1 at CONT5 (28,55) facing south, an empty-hand click on
+ * the view: state 1, door 17 opens, doors 21/22/23 follow the lever-13 rule.
+ */
+export function ishar1PullLever(levers: readonly number[], doors: readonly number[], lever: number, picked = false): { levers: number[]; doors: number[] } {
+  const s = [...levers];
+  const d = [...doors];
+  const L = (i: number) => s[i] ?? 0;
+  if (L(lever) === 2 && !picked) return { levers: s, doors: d };
+  if (picked && lever === 13) {
+    d[23] = 0; d[22] = 1; d[21] = 1;
+    return { levers: s, doors: d };
+  }
+  if (L(lever) === 0) s[lever] = lever === 13 ? 2 : 1;
+  else if (lever !== 13) s[lever] = 0;
+  const b = (c: boolean) => (c ? 1 : 0);
+  d[17] = b(L(1) === 1);
+  d[16] = b(L(2) === 1 && L(3) === 0 && L(4) === 1);
+  d[18] = b(L(5) === 0 && L(6) === 0 && L(7) === 1);
+  d[19] = b(L(8) === 1 && L(9) === 0);
+  d[20] = b(L(10) === 0 && L(11) === 1);
+  const up = L(13) === 2 || L(13) === 1 || L(12) === 0;
+  d[23] = b(up); d[22] = b(!up); d[21] = b(!up);
+  d[28] = b(L(14) === 0); d[29] = b(L(14) !== 0);
+  d[26] = b(L(15) !== 0); d[27] = b(L(15) === 0);
+  d[32] = b(L(16) !== 0); d[33] = b(L(16) === 0);
+  d[30] = b(L(17) === 0); d[31] = b(L(17) !== 0);
+  d[35] = b(L(18) !== 0); d[34] = b(L(18) === 0);
+  d[24] = b(L(19) !== 0); d[25] = b(L(19) === 0);
+  if (lever === 20) { d[36] = b(L(20) === 0); d[37] = b(L(20) !== 0); }
+  if (lever === 21) { d[38] = b(L(21) === 0); d[39] = b(L(21) !== 0); }
+  return { levers: s, doors: d };
+}
+
+/**
+ * The walker's "use" (E): pull the lever the party faces, else open the
+ * locked door it faces as a key or a picked lock would (the walker keeps
+ * no inventory, so it assumes the key). Returns the new door and lever
+ * tables, or null when nothing in front can be used.
+ */
+export function ishar1Use(
+  st: IsharPartyState,
+  cell: (region: number, row: number, col: number) => number,
+  doors: readonly number[],
+  levers: readonly number[],
+): { doors: number[]; levers: number[]; lever?: number; door?: number } | null {
+  const lv = ishar1FacingLever(st, cell);
+  if (lv >= 0) return { ...ishar1PullLever(levers, doors, lv), lever: lv };
+  const i = ishar1FacingDoor(st, cell);
+  if (!ishar1DoorClickable(i) || doors[i]) return null;
+  const d = [...doors];
+  d[i] = 1;
+  return { doors: d, levers: [...levers], door: i };
 }
 
 /** PARAM's door table (new game; static in every oracle run): row and column of 41 doors and gates. */
@@ -542,9 +659,10 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
     0x3c00: ISHAR1_DOOR_ROWS,
     0x3c34: ISHAR1_DOOR_COLS,
     0x3b64: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0],
-    // a second PARAM (row, col) list, 22 entries (MCAVE draws something at each; levers?)
-    0x3c68: [0, 28, 25, 25, 25, 51, 49, 49, 39, 39, 0, 0, 33, 23, 35, 37, 39, 41, 39, 35, 40, 45],
-    0x3c9c: [0, 55, 52, 54, 56, 33, 33, 35, 15, 17, 0, 0, 35, 32, 11, 11, 11, 11, 13, 13, 28, 41],
+    // PARAM's lever list (row, col) and the lever states (all up at a new game)
+    0x3c68: ISHAR1_LEVER_ROWS,
+    0x3c9c: ISHAR1_LEVER_COLS,
+    0x3b98: new Array(22).fill(0),
   },
   // oracle `S 14 x=0 y=0 w=255 h=125`
   screen: { xCenter: 127, horizonY: 86, width: 256, height: 126 },
@@ -626,6 +744,13 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
     if (ishar1DoorShut(from, to, cell, from.tables?.[0x3b64] ?? this.tables![0x3b64]!)) return null;
     const r = isharEnter(to, cell(to.region, to.row, to.col), occupied, from);
     return r && ishar1RegionPortal(from, r);
+  },
+  use(st, cell) {
+    const doors = st.tables?.[0x3b64] ?? this.tables![0x3b64]!;
+    const levers = st.tables?.[0x3b98] ?? this.tables![0x3b98]!;
+    const u = ishar1Use(st, cell, doors, levers);
+    // PCAVE's handlers redraw it: the lever entity (index -lever) slides its lever, the door entity slides away and exits
+    return u && { tables: { 0x3b64: u.doors, 0x3b98: u.levers }, message: { script: 'PCAVE', index: u.lever !== undefined ? -u.lever : u.door!, exit: u.lever === undefined } };
   },
   zone: { script: 'GERDEP', entry: 0x1baf, exits: [0x1d34, 0x2278], addr: 0x3eac, prevRegionLocal: 25 },
   addOns(region, zone, st) {
@@ -1532,6 +1657,33 @@ export class IsharScene {
     }
     this.prevRegion = state.region;
     this.updatePalette();
+  }
+
+  /**
+   * A message handler changed an entity without a wake (PCAVE's lever and
+   * door handlers, messages 20 and 19). `exit`: the entity ends (the door
+   * slides open and `cexit`s, PCAVE `+0x1de..+0x211`). Otherwise restart
+   * it with the variables its parent passed (vram 0..13), the way COLCAVE
+   * and MCAVE start a new one on the next wake: a fresh start under the new
+   * tables draws where the handler's animation ends (the lever down).
+   * Only the children whose local 13 (PCAVE's door or -lever index) is
+   * `index` are touched.
+   */
+  messageChild(name: string, index: number, exit: boolean, state: IsharPartyState): void {
+    this.state = state;
+    const env = this.env();
+    const hit = (s: LoadedScript) => s.name === name && s.handle !== undefined && ((((s.runner.locals.get(13) ?? 0) & 0xff) ^ 0x80) - 0x80) === index;
+    if (exit) this.scripts = this.scripts.filter((s) => !hit(s));
+    else
+      for (const s of this.scripts) {
+        if (!hit(s)) continue;
+        const fresh = this.create(name);
+        if (!fresh) continue;
+        for (const [k, v] of s.runner.locals) if (k < 14) fresh.runner.locals.set(k, v);
+        s.runner = fresh.runner;
+        s.runner.settle(env);
+      }
+    this.tagNewSprites();
   }
 
   /** Game state changed without a step or turn (e.g. the day phase): nothing is woken, only state-derived things (the palette) follow. */

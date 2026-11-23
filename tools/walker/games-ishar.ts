@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, isharContOf, isharSceneScriptNames, ishar1DoorClickable, ishar1FacingDoor, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, isharContOf, isharSceneScriptNames, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -457,32 +457,37 @@ export class IsharView implements GameView {
   /** The party state in the game's terms: pose.x = storage row, pose.y = storage column, region code = CONT number (+10 in a cave or town). */
   private partyState(pose: Pose = this.pose_): IsharPartyState {
     const st: IsharPartyState = { region: pose.level, row: pose.x, col: pose.y, facing: (pose.facing & 3) as 0 | 1 | 2 | 3 };
-    return this.doorOpen ? { ...st, tables: { 0x3b64: this.doorOpen } } : st;
+    return this.usedTables ? { ...st, tables: this.usedTables } : st;
   }
 
-  /** Ishar 1's PARAM door flags (`0x3b64`) as the party has opened them (new game: the spec's table). */
-  private doorOpen: number[] | null = null;
+  /** Ishar 1's PARAM door flags (`0x3b64`) and lever states (`0x3b98`) as the party has changed them (new game: the spec's tables). */
+  private usedTables: Record<number, number[]> | null = null;
 
   /**
-   * Ishar 1, E: open the cave door the party faces, as clicking it does in
-   * the game (`ishar1DoorClickable`: PCAVE's click form and its message-19
-   * handler, which sets the door's PARAM flag). Levers and door 40 are not
-   * modelled. Returns true if a door opened.
+   * Ishar 1, E: "use" what the party faces, as the game's view click does
+   * (`ishar1Use`): pull the lever in front (an empty-hand click, PCAVE
+   * message 20), else open the locked door in front (doors 0..15, a key
+   * or a picked lock, message 19; the walker keeps no inventory, so it
+   * assumes the key). The scene redraws at once, the way PCAVE's handler
+   * slides the lever or the door. Returns true if something changed.
    */
-  private useDoor(): boolean {
+  private use(): boolean {
     const sc = this.data.scene;
-    if (this.id !== 'ishar' || !sc) return false;
+    if (this.id !== 'ishar' || !sc || !sc.spec.use) return false;
     const cellAt = (lv: number, row: number, col: number) => {
       const r = this.gridOf(lv);
       const v = r ? (r.terrain[col * r.width + row] ?? 0) : 0;
       return v >= 128 ? v - 256 : v;
     };
-    const i = ishar1FacingDoor(this.partyState(), cellAt);
-    if (!ishar1DoorClickable(i)) return false;
-    const open = [...(this.doorOpen ?? (sc.spec.tables?.[0x3b64] ?? []))];
-    if (open[i]) return false;
-    open[i] = 1;
-    this.doorOpen = open;
+    const u = sc.spec.use(this.partyState(), cellAt);
+    if (!u) return false;
+    this.usedTables = { ...(this.usedTables ?? {}), ...u.tables };
+    if (u.message && this.scene) {
+      const st = this.partyState();
+      this.scene.messageChild(u.message.script, u.message.index, u.message.exit, st);
+      const leaves = this.scene.leaves();
+      this.sceneFrame = { key: `${st.region}:${st.row},${st.col},${st.facing}`, rgba: compositeIsharView(leaves, sc.spec.screen, this.scene.palette), placements: leaves.length };
+    }
     return true;
   }
 
@@ -607,9 +612,7 @@ export class IsharView implements GameView {
     this.travelKeyWasDown = travelDown;
 
     const useDown = keys.isDown('KeyE');
-    // (the door shows open from the next step or turn, when the scene wakes;
-    // the game animates it at once)
-    if (useDown && !this.useKeyWasDown && this.useDoor()) {
+    if (useDown && !this.useKeyWasDown && this.use()) {
       this.useKeyWasDown = useDown;
       return this.pose_;
     }
