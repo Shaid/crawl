@@ -57,7 +57,7 @@ static const uint32_t KEEP[] = {
   0x0B308,                       /* monsters-in-front lookup ($8B360)  */
   0x002B4,                       /* step position by facing */
   0x17D2A, 0x1451E,              /* level-up check, player melee (the routines under test) */
-  0x268A6, 0x7ED0, 0xAAFC, 0x9D28, 0x8B2, 0x17686, 0x17EEA,  /* raw byte rand; monster death/XP, behaviour VM, monster attack, tick, DamageCharacter, AdjustVitals */
+  0x268A6, 0x98A8, 0x96E8, 0x97F0, 0x7ED0, 0xAAFC, 0x9D28, 0x8B2, 0x17686, 0x17EEA,  /* raw byte rand; monster death/XP, behaviour VM, monster attack, tick, DamageCharacter, AdjustVitals */
   0
 };
 static int keep(uint32_t off){ for(int i=0;KEEP[i];i++) if(KEEP[i]==off) return 1; return 0; }
@@ -264,6 +264,50 @@ int main(int argc,char**argv){
       run_call(0x7ED0,3,sz,vv);
       unsigned char sa[6]; get_seed(sa);
       printf("xp %s : %u %u %u %u %02x%02x%02x%02x%02x%02x\n",sh,r32x(CH(0)+0xA0),r32x(CH(1)+0xA0),r32x(CH(2)+0xA0),r32x(CH(3)+0xA0),sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
+    }
+
+  } else if(!strcmp(mode,"tick")){
+    /* Tick handler 8B2, party-vitals sections only (event list empty).
+       in: seed tick resting hazard b1752 light hold then 4 x (hp maxhp level food water poison disease regen b86 state)
+       out: hp0..3 light hold nlog then (off w0 w1 w2 w3)* */
+    while(fgets(line,sizeof line,stdin)){
+      char sh[32]; int v[64]; int n=parse_line(line,sh,v,64);
+      if(n!=6+40) continue;
+      unsigned char sd[6]; for(int i=0;i<6;i++){ unsigned q; sscanf(sh+2*i,"%2x",&q); sd[i]=q; }
+      memcpy(mem,snap,MEM_SIZE); set_seed(sd);
+      hooks_clear(); hook_add(0x17686,0); hook_add(0x17EEA,0); hook_add(0x5EA,0); hook_add(0xB614,0);
+      w16(A4V+0x174E,1); w32(A4V+0x1750,(uint32_t)v[0]-1u); w16(A4V+0x1746,v[1]);
+      w16(A4V+0x1754,v[4]); w16(A4V+0x1756,v[5]);
+      uint32_t cell=A4V-0x37CA+(5<<8)+(5<<2); w16(A4V+0x1740,5); w16(A4V+0x1742,5); w32(cell,v[2]?0x80000000u:0);
+      for(int i=0;i<4;i++){ const int*c=&v[6+10*i]; uint32_t ch=CH(i);
+        w16(ch+0x4E,c[0]); w16(ch+0x50,c[1]); w8(ch+0x5E,c[2]); w16(ch+0x52,c[3]); w16(ch+0x54,c[4]); w8(ch+0x9A,c[5]); w8(ch+0x97,c[6]); w8(ch+0x6D,c[7]); w8(ch+0x86,c[8]);
+        w16(A4V+0x19F8+2*i,i); w8(A4V+0x1A07+i,c[9]); }
+      run_call(0x8B2,0,NULL,NULL);
+      printf("tick %s %d : %d %d %d %d %u %u %d",sh,(int)r32x(A4V+0x1750),r16s(CH(0)+0x4E),r16s(CH(1)+0x4E),r16s(CH(2)+0x4E),r16s(CH(3)+0x4E),r16(A4V+0x1754),r16(A4V+0x1756),nlog);
+      for(int i=0;i<nlog;i++) printf(" | %x %u %u %u %u",logv[i].off,logv[i].w[0],logv[i].w[1],logv[i].w[2],logv[i].w[3]);
+      printf("\n");
+    }
+
+  } else if(!strcmp(mode,"spec")){
+    /* Monster special attack 98A8, bits 0xE (disease) / 0xF (poison).
+       in: seed bit dir pos facing maxhp form0..3 hp0..3 resist0..3 shield0..3 prot0..3 con0..3
+       out: dmg list [char dmg kind], poison0..3 disease0..3 sched seed */
+    while(fgets(line,sizeof line,stdin)){
+      char sh[32]; int v[64]; int n=parse_line(line,sh,v,64); if(n!=29) continue;
+      unsigned char sd[6]; for(int i=0;i<6;i++){ unsigned q; sscanf(sh+2*i,"%2x",&q); sd[i]=q; }
+      memcpy(mem,snap,MEM_SIZE); set_seed(sd);
+      hooks_clear(); hook_add(0x17686,0); hook_add(0x5EA,0); hook_add(0x8388,0); hook_add(0x825C,0);
+      int bit=v[0],dir=v[1],pos=v[2],facing=v[3],maxhp=v[4];
+      w16(A4V+0x1744,facing);
+      for(int i=0;i<4;i++){ w16(A4V+0x1E74+2*i,v[5+i]); w16(CH(i)+0x4E,v[9+i]); w8(CH(i)+0x69,v[13+i]); w8(CH(i)+0x83,v[17+i]);
+        w8(CH(i)+0x88,v[21+i]); w8(CH(i)+0x8B,v[21+i]); w8(CH(i)+0x67,v[25+i]); }
+      int P=1,S=2; w16(OB(P),0x80B3); w16(OB(P)+0x10,S); w16(OB(S)+8,maxhp); w8(OB(S)+0xB,pos);
+      int sz[5]={1,2,2,2,2}; uint32_t vv[5]={(uint32_t)dir,(uint32_t)bit,5,5,(uint32_t)P};
+      run_call(0x98A8,5,sz,vv);
+      unsigned char sa[6]; get_seed(sa);
+      int nd=0,ns=0; for(int i=0;i<nlog;i++){ if(logv[i].off==0x17686) nd++; if(logv[i].off==0x5EA) ns++; }
+      printf("spec %s : %d",sh,nd); for(int i=0;i<nlog;i++) if(logv[i].off==0x17686) printf(" %u %u %u",logv[i].w[0],logv[i].w[1],logv[i].w[2]);
+      printf(" p %u %u %u %u d %u %u %u %u s %d %02x%02x%02x%02x%02x%02x\n",r8(CH(0)+0x9A),r8(CH(1)+0x9A),r8(CH(2)+0x9A),r8(CH(3)+0x9A),r8(CH(0)+0x97),r8(CH(1)+0x97),r8(CH(2)+0x97),r8(CH(3)+0x97),ns,sa[0],sa[1],sa[2],sa[3],sa[4],sa[5]);
     }
   } else if(!strcmp(mode,"ai")){
     /* Behaviour VM AAFC. in: seed type pc speedb5 hp maxhp b3 w0C b7 gfx px py x y rc vars(8) s11 s12 f1E8E

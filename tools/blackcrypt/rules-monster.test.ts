@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BcRng } from './rules';
-import { monsterMelee, awardXp, runBehaviour, hpAtLeastMorale, VM_CALLS, type AiScripts, type VmResult } from './rules-monster';
+import { monsterMelee, awardXp, runBehaviour, hpAtLeastMorale, vitalsTick, monsterSpecial, VM_CALLS, type AiScripts, type VmResult, type TickCall } from './rules-monster';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const V = JSON.parse(readFileSync(resolve(here, 'rules_oracle/vectors.json'), 'utf8'));
@@ -103,5 +103,51 @@ describe('behaviour VM (real AAFC) vs TS', () => {
       if (ev && r.event && r.event.due !== ((ev.w[1] << 16) | ev.w[2])) bad++;
     }
     expect(bad).toBeGreaterThan(100);
+  });
+});
+
+describe('tick handler vitals (real 8B2) vs TS', () => {
+  const run = (c: any, tweak = false) => {
+    const rng = new BcRng(c.in.seed);
+    const chars = c.in.chars.map((x: number[]) => ({ hp: x[0], maxHp: x[1], level: x[2], food: x[3], water: x[4], poison: x[5], disease: x[6], regen: x[7], prot86: x[8], state: x[9] }));
+    const r = vitalsTick({ t: c.in.t + (tweak ? 64 : 0), resting: !!c.in.resting, hazard: !!c.in.hazard, light: c.in.light, hold: c.in.hold, chars }, rng);
+    return r;
+  };
+  const enc = (calls: TickCall[]) => calls.map(k => k.kind === 'scan' ? ['b614', 0, 0, 0, 0] : k.kind === 'adjust' ? ['17eea', k.char, k.energy & 0xffff, k.food & 0xffff, k.water & 0xffff] : ['17686', k.char, k.dmg, k.type, 1]);
+  it('matches the oracle on 1500 cases (hp, counters, call sequence incl. RNG-dependent damage)', () => {
+    for (const c of V.tick) {
+      const r = run(c);
+      expect({ hp: r.hp, light: r.light, hold: r.hold, calls: enc(r.calls) }).toEqual({ hp: c.hp, light: c.light, hold: c.hold, calls: c.calls });
+    }
+  });
+  it('covers every periodic section', () => {
+    const kinds = new Set<string>();
+    for (const c of V.tick) for (const k of c.calls) kinds.add(k[0] + ':' + (k[0] === '17686' ? k[3] : ''));
+    for (const k of ['b614:', '17eea:', '17686:4', '17686:5', '17686:6']) expect(kinds.has(k), k).toBe(true);
+  });
+  it('null control: shifting the tick by 64 disagrees', () => {
+    const bad = V.tick.filter((c: any) => JSON.stringify(enc(run(c, true).calls)) !== JSON.stringify(c.calls)).length;
+    expect(bad).toBeGreaterThan(200);
+  });
+});
+
+describe('monster special attacks, disease and poison (real 98A8) vs TS', () => {
+  const run = (c: any, tweak = false) => {
+    const f = c.in; const rng = new BcRng(f[0]);
+    const r = monsterSpecial({ bit: f[1], dir: f[2], pos: f[3], facing: f[4], maxHp: f[5], form: f.slice(6, 10), hp: f.slice(10, 14), resist: f.slice(14, 18), shield: f.slice(18, 22), prot: f.slice(22, 26), con: f.slice(26, 30) }, tweak ? V.tables.statBonusT1.map(() => 0) : V.tables.statBonusT1, rng);
+    return { r, seed: hex(rng) };
+  };
+  it('matches the oracle on 1500 cases', () => {
+    for (const c of V.special) {
+      const { r, seed } = run(c);
+      expect({ dmg: r.dmg, poison: r.poison, disease: r.disease, sched: r.sched, seed }).toEqual({ dmg: c.dmg, poison: c.poison, disease: c.disease, sched: c.sched, seed: c.seedAfter });
+    }
+  });
+  it('covers both statuses landing and being resisted', () => {
+    expect(V.special.filter((c: any) => c.dmg.some((d: number[]) => d[2] === 5)).length).toBeGreaterThan(100);
+    expect(V.special.filter((c: any) => c.dmg.some((d: number[]) => d[2] === 6)).length).toBeGreaterThan(30);
+  });
+  it('null control: zeroing the constitution table changes disease outcomes', () => {
+    expect(V.special.filter((c: any) => c.in[1] === 14 && JSON.stringify(run(c, true).r.dmg) !== JSON.stringify(c.dmg)).length).toBeGreaterThan(10);
   });
 });

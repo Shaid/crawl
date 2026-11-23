@@ -168,5 +168,49 @@ for c in al:
     vec['ai'].append({'in': list(c), 'pc': pc, 'pHp': php, 'sMax': smax, 'gfx': gfx, 'b7': b7, 'type': t_, 's0e': s0e, 's11': s11, 's12': s12, 'vars': vs, 'sc0': sc0, 'sc4': sc4, 'log': log, 'seedAfter': seed_after})
 vec['aiScripts'] = {'cells': [[s2[o], s2[o + 1], (s2[o + 2] << 8) | s2[o + 3], (s2[o + 4] << 8) | s2[o + 5]] for o in range(FIRST, TABLE, 6)], 'starts': starts}
 
+# ---- tick handler vitals (real 8B2; due-event list empty)
+tl = []
+interesting = [0x40, 0x80, 0x100, 0x140, 0x1c0, 0x200, 0x10, 0x20, 0x25, 0x28, 0x08, 0x0d, 0x15, 0x30, 0x50, 0x5, 0x1f0, 0x140 + 0x200, 0x180 + 0x400]
+for _ in range(1500):
+    t = rnd.choice(interesting) + rnd.choice([0, 0, 0x400, 0x800, 0x1000]) if rnd.random() < 0.7 else rnd.randrange(1, 5000)
+    resting = rnd.random() < 0.4
+    chars = []
+    for _c in range(4):
+        mx = rnd.randrange(10, 90)
+        chars.append((rnd.choice([-2, 0, 1, rnd.randrange(1, mx + 1), mx]), mx, rnd.randrange(1, 12),
+                      rnd.choice([0, 500, 1999, 2000, 3000, 5000]), rnd.choice([0, 700, 1999, 2000, 5000]),
+                      rnd.choice([0, 0, 1, 3, 9]), rnd.choice([0, 0, 1, 4]), rnd.choice([0, 1]), rnd.choice([0, 0, 1]), rnd.choice([1, 1, 2, 3])))
+    tl.append((seed(), t, int(resting), rnd.choice([0, 0, 1]), 0, rnd.choice([0, 3]), rnd.choice([0, 2]), chars))
+lines = []
+for c in tl:
+    lines.append(' '.join(str(x) for x in c[:7]) + ' ' + ' '.join(' '.join(str(x) for x in ch) for ch in c[7]))
+res = run('tick', lines)
+vec['tick'] = []
+for c, r in zip(tl, res):
+    head, tail = r.split(' : ')
+    f = tail.split(' | ')
+    nums = [int(x) for x in f[0].split()]
+    hps, light, hold = nums[:4], nums[4], nums[5]
+    calls = []
+    for e in f[1:]:
+        o, a, b, cc, d = e.split()
+        calls.append([o, int(a), int(b), int(cc), int(d)])
+    vec['tick'].append({'in': {'seed': c[0], 't': c[1], 'resting': c[2], 'hazard': c[3], 'light': c[5], 'hold': c[6], 'chars': [list(ch) for ch in c[7]]}, 'hp': hps, 'light': light, 'hold': hold, 'calls': calls})
+
+# ---- monster special attacks (real 98A8; disease / poison bits)
+sp = []
+for _ in range(1500):
+    form = list(range(4)); rnd.shuffle(form)
+    sp.append((seed(), rnd.choice([14, 15]), rnd.randrange(4), rnd.randrange(5), rnd.randrange(4), rnd.randrange(10, 300), *form,
+               *[rnd.choice([-2, 0, 20]) for _ in range(4)], *[rnd.choice([0, 0, 10, 50, 100]) for _ in range(4)], *[rnd.choice([0, 0, 1]) for _ in range(4)],
+               *[rnd.choice([0, 0, 0, 1]) for _ in range(4)], *[rnd.randrange(0, 31) for _ in range(4)]))
+res = run('spec', [' '.join(str(x) for x in c) for c in sp])
+vec['special'] = []
+for c, r in zip(sp, res):
+    t = r.split(' : ')[1].split()
+    nd = int(t[0]); dm = [[int(t[1 + 3 * k]), int(t[2 + 3 * k]), int(t[3 + 3 * k])] for k in range(nd)]
+    rest = t[1 + 3 * nd:]
+    vec['special'].append({'in': list(c), 'dmg': dm, 'poison': [int(x) for x in rest[1:5]], 'disease': [int(x) for x in rest[6:10]], 'sched': int(rest[11]), 'seedAfter': rest[12]})
+
 json.dump(vec, open(here / 'vectors.json', 'w'), separators=(',', ':'))
 print('wrote vectors.json', {k: (len(v) if hasattr(v, '__len__') else v) for k, v in vec.items()})

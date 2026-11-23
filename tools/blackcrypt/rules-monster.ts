@@ -256,3 +256,88 @@ export function awardXp(
     return (c.xp + a + b + mon.w6) >>> 0;
   });
 }
+
+// ---------------------------------------------------------------- party vitals tick
+
+export interface VChar { hp: number; maxHp: number; level: number; food: number; water: number; poison: number; disease: number; regen: number; prot86: number; state: number }
+export interface TickIn { t: number; resting: boolean; hazard: boolean; light: number; hold: number; chars: VChar[] }
+export type TickCall =
+  | { kind: 'scan' }
+  | { kind: 'adjust'; char: number; energy: number; food: number; water: number }
+  | { kind: 'damage'; char: number; dmg: number; type: number };
+
+/**
+ * The vitals/periodic part of the tick handler (S_1 +0x08B2) after the tick counter `t` has been incremented.
+ * Not modelled: the due-event list, item charge decay (t & 63 == 32), spell recharge (+0x10D2), light blanking redraw.
+ * DamageCharacter itself is not applied here: callers subtract the damage (see the death rules in the spec).
+ */
+export function vitalsTick(i: TickIn, rng: BcRng): { hp: number[]; light: number; hold: number; calls: TickCall[] } {
+  const { t, resting } = i;
+  const hp = i.chars.map(c => c.hp);
+  const calls: TickCall[] = [];
+  const alive = (k: number) => hp[k] > 0;
+  const rested = (k: number) => !resting || i.chars[k].state === 1;
+  const light = i.light > 0 ? i.light - 1 : 0;
+  const hold = i.hold > 0 ? i.hold - 1 : 0;
+  if ((t & 15) === 0) calls.push({ kind: 'scan' });
+  // everything below runs only when (t & 15) == 0, or (resting and t & 7 == 0): the section tests for resting-only
+  // cadences (food/water at t & 7 == 5) sit inside this gate and are unreachable.
+  if ((t & 15) === 0 || (resting && (t & 7) === 0)) {
+    if (resting) {
+      for (let k = 0; k < 4; k++) {
+        if (!alive(k) || i.chars[k].state !== 1) continue;
+        let h = i.chars[k].level * 2;
+        if (i.hazard && i.chars[k].prot86 === 0) h >>= 1;
+        hp[k] += h;
+        if (hp[k] > i.chars[k].maxHp) hp[k] = i.chars[k].maxHp;
+      }
+    }
+    for (let k = 0; k < 4; k++) {
+      if (!alive(k)) continue;
+      const c = i.chars[k];
+      calls.push({ kind: 'adjust', char: k, energy: resting && c.state === 1 ? 125 : 0, food: -1, water: -1 });
+      if (c.regen !== 0 && (t & 0x200) === 0 && hp[k] < c.maxHp) hp[k]++;
+      if (i.hazard && c.prot86 === 0) calls.push({ kind: 'damage', char: k, dmg: rng.rand16(5) + 1, type: 4 });
+    }
+  if ((t & 0x1ff) === 0x100 || (resting && (t & 0x1f) === 0x10)) {
+    for (let k = 0; k < 4; k++) if (alive(k) && i.chars[k].disease !== 0 && rested(k)) calls.push({ kind: 'damage', char: k, dmg: i.chars[k].disease, type: 6 });
+  }
+  if ((t & 0xff) === 0x80 || (resting && (t & 0xf) === 8)) {
+    for (let k = 0; k < 4; k++) if (alive(k) && i.chars[k].poison !== 0 && rested(k)) calls.push({ kind: 'damage', char: k, dmg: rng.rand16(i.chars[k].poison * 10) + 1, type: 5 });
+  }
+  if ((t & 0x7f) === 0x40) {
+    for (let k = 0; k < 4; k++) {
+      if (!alive(k) || !rested(k)) continue;
+      const c = i.chars[k];
+      if (c.food < 2000) calls.push({ kind: 'damage', char: k, dmg: 2 - Math.trunc(c.food / 2000), type: 4 });
+      if (c.water < 2000) calls.push({ kind: 'damage', char: k, dmg: 2 - Math.trunc(c.water / 2000), type: 4 });
+    }
+  }
+  }
+  return { hp, light, hold, calls };
+}
+
+// ---------------------------------------------------------------- monster special attacks
+
+export interface SpecIn { bit: number; dir: number; pos: number; facing: number; maxHp: number; form: number[]; hp: number[]; resist: number[]; shield: number[]; prot: number[]; con: number[] }
+/**
+ * S_1 +0x98A8 for the disease (bit 14) and poison (bit 15) spell-flag bits. (Possession bit 12 and flesh-to-stone bit 13 are
+ * documented in game-rules.md but not modelled here.) `t1` is the stat bonus table T1.
+ */
+export function monsterSpecial(i: SpecIn, t1: number[], rng: BcRng) {
+  const out = { dmg: [] as [number, number, number][], poison: [0, 0, 0, 0], disease: [0, 0, 0, 0], sched: 0 };
+  const tgt = pickTarget(i.dir, i.pos, i.facing, i.form, i.hp, rng);
+  if (tgt === 4) return out;
+  out.sched = 1;
+  if (rng.rand8(100) < (((i.resist[tgt] << 24) >> 24) & 0xffff)) return out;
+  if (i.shield[tgt] && rng.rand8(100) > 50) return out;
+  if (i.bit === 14) {
+    if (i.prot[tgt] === 0 && ((rng.rand16(20) + 20 - t1[i.con[tgt]]) & 0xffff) > 30) {
+      out.disease[tgt]++;
+      out.dmg.push([tgt, rng.rand16(10) + 1, 6]);
+    }
+  } else if (i.bit === 15) {
+    if (i.prot[tgt] === 0) { out.poison[tgt]++; out.dmg.push([tgt, rng.rand16(10) + 1, 5]); }
+  }
+  return out;
+}
