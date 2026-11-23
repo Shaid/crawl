@@ -213,7 +213,7 @@ export interface TriggerResult { ran: boolean; executed: number[] }
  * a2 = y, a3 = the structure type) unless the type is 0x1F, and the structure's +0xA is incremented (the 0x29 consumer decrements it again, section rules-pop.ts: the trigger cannot re-fire while
  * its own delayed actions are still pending). Finally the structure keeps a cursor: word +0xC = the index the walk stopped at, word +0x10 = the generation (0 when the chain wrapped).
  */
-export function triggerActions(a: A4Mem, x: number, y: number, type: number, tick: number): TriggerResult {
+export function triggerActions(a: A4Mem, x: number, y: number, type: number, tick: number, exec?: (id: number) => void): TriggerResult {
   const res: TriggerResult = { ran: false, executed: [] };
   const id = lookupType(a, x, y, type);
   if (id === 0 || a.w(OBJ(id) + 0xa) !== 0) return res;
@@ -231,7 +231,7 @@ export function triggerActions(a: A4Mem, x: number, y: number, type: number, tic
     if (a.b(r + 4) !== 0) {
       if (a.sb(r + 4) > 0) a.setB(r + 4, a.b(r + 4) - 1);
       const d3 = a.b(r + 5);
-      if (d3 === 0) res.executed.push(d2);
+      if (d3 === 0) { res.executed.push(d2); if (exec) exec(d2); }
       else {
         scheduleEvent(a, 0x28, (tick + d3) >>> 0, a.b(r + 2), a.b(r + 3), a.b(r + 6), a.b(r), 0);
         if (d3 > d5) d5 = d3;
