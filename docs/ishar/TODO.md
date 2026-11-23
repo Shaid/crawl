@@ -76,7 +76,10 @@ The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONST
   scene; the dungeon backdrops use their own palette slots; dungeon door
   edges and the -2 one-way cell ported. Maz districts 100% over 516
   actions, location 6 from 5/17 to 88/88 placements, dungeon region 7
-  100% placements. See §8.8 item 21.
+  100% placements. See §8.8 item 21. Sprite atlases (gitignored)
+  regenerated after the unpacker fix (`267b357`): Ishar 1 1608 -> 1728
+  sprites, Ishar 2 2244 -> 2327, Ishar 3 2744 -> 2823; no file lost a
+  sprite (per-file counts compared against the old atlases).
 
 - **2026-11-23 (Ishar 3 jungle and mountains; unpacker fix):** the
   oracle's new `absdump` showed the `0xA1` unpacker dropping the last byte
