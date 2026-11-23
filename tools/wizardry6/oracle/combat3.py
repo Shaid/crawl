@@ -417,6 +417,40 @@ def make_cast_vectors(n, seed):
 MAKERS['cast'] = make_cast_vectors
 
 
+
+# ---------------------------------------------------------------------------
+# item removal LAB_0DE6 (CODE+0x22278)
+def make_remove_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    c.disabled = set(getattr(c, 'disabled', ())) | {0x22278}      # run the real removal; its callees stay logged
+    c._stub(0x2200e, 'unequip', log=2); c._stub(0x21f1a, 'weight', log=2)
+    A4 = c.A4
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        ai = rng.randrange(4); P = A4 - 17922 + ai * 0x1b0
+        cnt = rng.randrange(1, 12)
+        w8(fx, P + 428, cnt)
+        for s in range(14):
+            w16(fx, P + 64 + 8 * s, rng.randrange(0, 300))
+            w8(fx, P + 70 + 8 * s, rng.choice([0, 1, 1, 2, 5]))
+        for k in range(8): w8(fx, P + 272 + k, rng.choice([0xff, 0xff, rng.randrange(cnt), rng.randrange(cnt)]))
+        for k in range(352, 360): w8(fx, P + k, rng.randrange(0, 12))
+        w16(fx, A4 - 15136, ai)
+        slot = rng.randrange(cnt)
+        c.apply(fx.writes)
+        c.apply([(RNG_ADDR, bytes(6))])
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        try:
+            res = c.run_call(0x22278, [slot], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'slot': slot}))
+    return out
+
+
+MAKERS['remove'] = make_remove_vectors
+
+
 if __name__ == '__main__':
     kind, outp = sys.argv[1], sys.argv[2]
     V = MAKERS[kind](argv('--n', 200), argv('--seed', 1))
