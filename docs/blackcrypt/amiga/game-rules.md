@@ -6,7 +6,7 @@ Evidence grades: **harness** = diffed against the game's real 68k routine run in
 
 Companion data: `game-rules-spells.json` (60-spell table, machine readable), `game-rules-world.json` (field maps, vitals constants, item-effect tables). Exported by `buildAssets`: `public/assets/blackcrypt/amiga/data/rules-tables.json` (see §6).
 
-## 2026-11-23 status summary (pass 2 in §8-§9, pass 3 in §10, pass 4 in §11; the first table is the pass-2 state, kept for history; the **pass-4 table below it is current**)
+## 2026-11-23 status summary (pass 2 in §8-§9, pass 3 in §10, pass 4 in §11, pass 5 in §12; the first table is the pass-2 state, kept for history; **§12.1 is the current status**)
 
 | Area | Done | Open |
 |---|---|---|
@@ -438,7 +438,7 @@ Hold: §11.1. The generator-structure half of `+0xB614` (type 0x2E: spawn when c
 ### 11.9 Housekeeping
 Vector sets: §6 (build-time generation, small committed subsets, 91 tests in `tools/blackcrypt` pass on both the subsets and the full sets). `rules-tables.json` gains `spellBook` (page heads, next-page words, per-spell next / level, recharge) which the sim and the spell tests read; `rules_oracle/spellbook.json` is its 0.5 KB test fixture.
 
-### 11.10 Remake-ready combat spec: what is implementable, graded
+### 11.10 Remake-ready combat spec: what is implementable, graded (pass-4 table; **superseded where §12 says so**: door open, FORCEHAMMER, weight, swing cooldown, AdjustVitals and seven of the nine spells are now harness, see §12.1)
 | System | Grade | Where (spec + TS) |
 |---|---|---|
 | Clock, tick order, event queue, tie order | H arithmetic, C wiring / ordering | §9.1, §10.1, §10.2, §11.4; `combat-sim.ts` |
@@ -456,11 +456,83 @@ Vector sets: §6 (build-time generation, small committed subsets, 91 tests in `t
 | Held party | C | §10.6, §11.1 |
 | 9 remaining spells, recast cancel, generators, doors in the sim, loot, weight | C / O | §11.11 |
 
-### 11.11 What is still not harness-verified, and the smallest next steps
+### 11.11 What is still not harness-verified, and the smallest next steps (pass 4; **current list: §12.5**)
 * **Code only (C)**: DamageCharacter and AdjustVitals (the sim's own copies), swing cooldown and per-step costs (formula read, weight term **O**), slot shift after a spent cast, the hold counter, door open `+0x9056`, FORCEHAMMER, the 9 spells (RAISE DEAD `+0x5CFA`, TELEPORT, CREATE FOOD, REVEAL TRUTH, REMOVE GLYPH, DISPEL MAGIC, REMOVE TRAP, CREATE WALL, READ RUNE), the recast-cancels-old-buff path (`+0x49B4`), event 0x22 and the 0x28 / 0x29 handlers, item effects other than 0x8D-0x8F, the click whitelist while held, the generator structures.
 * **Open (O)**: generator half of `+0xB614`; the weight term (`weight/23` in the swing cooldown and the per-step cost: needs the inventory weight routine); what the monster VM `TELEPORT` op's event argument moves; possession / stone effects applied in the sim; node-pool exhaustion.
 * **Hyp (h)**: PAL as the remake default; the uninitialised ray-mode selector in `+0x9D28` (§10.3).
 * **Smallest next steps**: (1) harness the nine code-read spells with the new `G` token: each is a case of the dispatcher `+0x7044` the spell harness already drives, so it needs only world pokes and peeks per spell, 1-2 hours each for the five that touch only party state (CREATE FOOD, REVEAL TRUTH, REMOVE TRAP, READ RUNE, DISPEL MAGIC) and a little more for TELEPORT / CREATE WALL / REMOVE GLYPH / RAISE DEAD (object creation); (2) harness `+0x9056` and `+0x7C40` with the same `G` / hook setup as the boss fixture; (3) the weight routine and the swing-cooldown event 0x14 / 0x15 handler; (4) `+0xB614` generator half, with the activation-scan harness as the template.
+
+## 12. Pass 5 (2026-11-23): seven party-state spells, doors, FORCEHAMMER, inventory weight, vitals, swing cooldown, build guide
+
+Evidence labels as before (**harness**, **code**, **hyp**, **open**). No protection data was read or recorded. One new vector file, `rules_oracle/vectors_spells9.json.gz` (about 280 KB, committed; generator `make_vectors_spells9.py`, called from `gen_vectors.sh`), one new TS module `rules-spell9.ts`, one new test `rules-spell9.test.ts` (34 tests).
+
+**Method (new).** Each case builds a synthetic world as a list of A4-relative pokes (object table, free list, cell map, character records, globals), runs the real routine, and stores the oracle's **complete diff of the A4 data segment** plus the hook log and RNG state. The TS model is applied to the same pokes and must reproduce *every changed byte*, not a chosen list. New oracle features (`oracle_spell.c`): token `K off` runs a routine that is normally stubbed to RTS (object allocator `+0x6`, free `+0x46`, unlink `+0xFE`, lookup `+0x27D28`, insert `+0x1744A`, weight `+0x126D2` / `+0x11992`); the script output now also prints `A2` / `A3`. **Trap found:** the lookup helper `+0x27D28` loads the cell-array and object-table bases as long *immediates* that the decompressed image carries 0x80 below this harness's A4 (the same skew the VM script table shows); the generator patches both immediates in place (`+0x27D2E`, `+0x27D34`). Without that every lookup silently returns 0. All earlier vector sets regenerate **byte-identical** with the new oracle (checked: spell set, events set, boss set).
+
+### 12.1 Status of the pass-5 priorities
+| Item | Grade | Parity (cases) | Null control |
+|---|---|---|---|
+| CREATE FOOD `+0x5952` | **harness** | 70 / 70 | one level lower: 40+ cases disagree |
+| REVEAL TRUTH / DISPEL ILLUSION `+0x6C92` (+ weight call) | **harness** | 70 + 70 | weights ignored: 3+ disagree |
+| REMOVE TRAP `+0x60BE` | **harness** | 70 / 70 | facing flipped: 8+ disagree |
+| READ RUNE `+0x655C` | **harness** | 70 / 70 | rune byte cleared: 5+ disagree |
+| DISPEL MAGIC `+0x4C46` (both pages) incl. the linked group | **harness** | 70 + 70 | (coverage test: some cases remove 2+ fields) |
+| REMOVE GLYPH `+0x4E0A` | **harness** | 70 / 70 | |
+| CREATE WALL `+0x4F18` (incl. event 0x22 arguments) | **harness** | 70 / 70 | one level higher: 10+ disagree |
+| Anti-magic square in the dispatcher (all of the above) | **harness** | covered in every spell set | |
+| Door open `+0x9056` | **harness** (world change); UI hooked | 70 / 70 | |
+| FORCEHAMMER `+0x7C40` (world changes; ending sequence is UI) | **harness** | 70 / 70 (14+ effective) | stage one lower, facing flipped: disagree |
+| Inventory weight `+0x126D2` / `+0x11992` (add, remove, containers) | **harness** | 70 / 70 (both accept and refuse) | strength limit halved: 10+ disagree |
+| AdjustVitals `+0x17EEA` | **harness** | 70 / 70 (tired crossings covered) | sustenance ignored: 8+ disagree |
+| Per-step cost (`+0x16FC6` loop) | **harness** | 70 / 70 | weight term dropped: 50+ disagree |
+| Swing cooldown (weapon weight / 23 + T3[DEX]) `+0x138F0..+0x1394E` | **harness** | 70 / 70 | weights 0: 5+ disagree |
+| Swing tail: event 0x14, busy byte, swing cost `+0x13E8C` | **harness** | 70 / 70 | haste dropped: 10+ disagree |
+| Hit-ready event 0x15 in `+0x1451E` | **harness** (timing); consumer **open** | every hit (about a quarter of the swing cases) schedules exactly one, no miss does | |
+| TELEPORT `+0x6AF0`, RAISE DEAD `+0x5CFA`, recast-cancel `+0x49B4` | **code** (RAISE DEAD partly decoded below) | not harnessed | |
+| Generator half of `+0xB614`, VM `TELEPORT` position change | **open** | | |
+
+### 12.2 Rules, as implemented in `rules-spell9.ts`
+**Object primitives (harness).** Object record 0x14 bytes at `A4-0x6E7A + 0x14*id`; free list head = the word at `A4-0x6E68` (object 0's next field); `+0x6` takes the head (clears the new object's next), `+0x46` pushes, `+0xFE (id, x, y)` unlinks from the square's chain, `+0x27D28 (type, x, y)` returns the first **non-monster** object (word 0 bit 15 clear) with structure byte `+5 == type`, `+0x1744A` inserts at the END of the chain and, for non-monsters, stores a random sub-square pair into the high nibble of byte `+4`: `d3 = (rand16(4) + facing) & 3`, nibbles `(1 << ((d3+3)&3)) + (1 << d3)`.
+**Spell dispatcher.** After the slot is read and the caster values computed, a cell with bit 30 (anti-magic) on the party square fizzles any spell and spends the charge (`+0x4876(0)`). Handler result `r`: `r > 0` spends (`+0x4876(r-1)`), `r < 0` fails (`+0x4960(-1-r)`), `0` does neither.
+* **CREATE FOOD (10)**: `n = ((D4 + 2) / 3) * 2` objects (type word 0x15, name 0x8005, byte `+4` 0xF, `+5` 0xE, weight `+8` 100, `+0xA` 0x4B, `+0xE` 0x1C2, `+0x10` 2, `+7` 2), allocated one by one from the free list and appended to the party square, each with its own `rand16(4)` draw. Returns 1.
+* **REVEAL TRUTH (2) / DISPEL ILLUSION (51)**: for every character with hp > 0, the two hand slots `+0x1A`, `+0x1C`: an item of type 0x18 with word `+0xE == 1` is removed (weight call, freed, slot cleared). Returns 2. *Quirk:* it ignores the weight routine's refusal (a carried weight above the limit makes the subtraction "too heavy"); the item is still destroyed and the weight stays.
+* **REMOVE TRAP (41)**: no wall ahead; the type-0x1E structure on the front square with word `+0xE == 1` is unlinked and freed. **REMOVE GLYPH (21)**: type-0x10 structure with `+0xC == 3`, `+0xE <= D4`. **DISPEL MAGIC (22, 24)**: `+0xC == 2`, `+0xE <= D4`, then follows the link (`x = word +0x10`, `y = byte +7`) through further type-0x10 fields with `+0xC == 2` until the link is (0, 0) or leads to something else. All return 1 whether or not anything was removed (the charge is spent).
+* **CREATE WALL (44)**: needs the front side open and the front square EMPTY; creates a type-0x10 structure (`+0xC = +0xE = 1`) and schedules event 0x22 at `tick + ((D4 * 180) & 0xFFFF)` with a1 = x, a2 = y; returns -1 (fail 0) when the square is occupied. *Quirk:* with a wall ahead it returns the **caller's D3** (the caster's stat bonus) because d3 is never initialised on that path, so the dispatcher then calls spend with argument `D3 - 1` (stat bonus above 0), fail with `-1 - D3` (below 0) or does nothing (exactly 0).
+* **READ RUNE (26)**: when the byte at `A4-0x779A` is 0x6A it opens the reader and removes its own slot (later slots move down, last = 0xFF) and returns 0 (so the dispatcher does not spend it again); otherwise returns 1.
+**Door open (`+0x9056`, x, y).** The type-0x11 structure at (x, y) gets state word `+0xE = 1`; with none, the write lands on object 0 (harmless). The rest is redraw and sound. Who may open a door is the enter test (§10.3) and the monster flag `b6` bit 0; **the party-side door and key rules are not harnessed** (Appendix B(d), **code**).
+**FORCEHAMMER (`+0x7C40`).** Stage 4, no wall ahead, the Ram boss (gfx 0x80C5) as first target of the front square (`+0xB308` on raw memory, `pickTargetsMem`): the boss is unlinked, its primary then its secondary record are freed, its events cancelled (`+0xB25A(id)`), the state word `+0xA` of the type-0x12 structure at (x = 12, y = 17) is cleared (object 0 if there is none), stage = 5, word `A4+0x1E88 = 3` (ending). §11.3 step 5 is now **harness**.
+**Inventory weight (`+0x126D2 (char, add, remove)`).** Item weight (`+0x11992`): the word at `+8`; containers (type 0x13 / 0x23) add their contents' `+8` words recursively (chain `+0xC`, next `+0x12`); the second sum (`+0xA`) is added for type 0x13 only. New carried weight = long at char `+0xA4` + signed(w(add)) - signed(w(remove)); if it exceeds `signed(char +0x6E) * 1000` the call **refuses** (returns 0, the "too heavy" message; this is the pickup limit) else it is stored (negative stored as 0).
+**AdjustVitals (`+0x17EEA`, char, dEnergy, dFood, dWater).** Skip when hp <= 0. All words wrap. Sustenance byte `+0x90 != 0`: food delta becomes `(d >> 1) + 1` (arithmetic shift, so -1 / -2 become 0). Clamps: energy <= 10000, food / water <= 5000, everything >= 0. **Tired crossing** (energy crosses 1000 either way): STR (`+0x64`) and DEX (`+0x68`) change by +1 up / -1 down; AC (`+0x62`) is unchanged on the way up and changes by `T1[dex-1] - T1[dex]` on the way down (an asymmetry in the original); the redraw call follows.
+**Per-step cost.** Every character: `dEnergy = -1 - (carried >> 11)` (arithmetic shift of the long at `+0xA4`, word subtraction), food -1, water -1. Turning costs -1 / -1 / -1 with no weight term (`+0x1702A`, **code**).
+**Swing timing.** `c = 5` with bare hands, else `max(5, floor(weaponWeight / 23) + speedT3[signed DEX byte +0x68])` (weapon weight = the item's unsigned word `+8`). With haste (`A4+0x1E2E != 0`) `c = (c >> 1) + 1`. After every resolved swing (hit or miss): event **0x14** at `tick + c` with a1 = character, a2 = 0, a3 = hand, a4 = 2 - hand; the character's busy byte `+0x5F += 2 - hand`; the swing costs energy -4, food -2, water -1. A **hit** additionally schedules event **0x15** at `tick + 5` (haste: `min(5, (c >> 1) + 1)`); the consumer of 0x15 is **open**. Pass 3's formula `max(5, T3[DEX])` was missing the weight term and the bare-hand case (**Correction (2026-11-23):** superseded here; the earlier text in §2.2 / §9.3 / §10 keeps the old formula for history).
+
+### 12.3 RAISE DEAD `+0x5CFA` and the other two open spells (**code**, not harnessed)
+RAISE DEAD scans the four formation slots for living characters holding a corpse item (type 0x26, record word `+0xC < 4` = the dead character's party slot) in the hand slots (`+0x1C` first, then `+0x1A`); candidates are recorded in the tables at `A4+0x1A0C` (corpse slot, 0x8000 = none) and `A4+0x1A07` (3 = `+0x1C`, 2 = `+0x1A`). No candidate: returns -2 (fail 1). Otherwise the target-pick UI (`+0x908AA`) chooses a candidate; the corpse item leaves the hand slot (weight call, freed) and the revive routine `+0x5C06` runs: hp = `signed(maxHp) / 10 + 1`, memorised slots set to 0xFF, buff counter bytes cleared (`+0x82`.. and `+0x91`..), current stats reloaded from the maxima (`+0x6E..` to `+0x64..`, `+0x78..` zeroed), energy raised to at least 1000; the exact tail is not transcribed. Returns 2. TELEPORT (`+0x6AF0`) needs wizard sight and the map-pick UI and is only summarised in Appendix A. The recast-cancel path `+0x49B4` is called with the hooks in every buff harness (`H 0x49B4 0`) and has no test of its own. These three are the smallest remaining spell items; each needs a UI-pick hook like the heal harness already uses, plus the same A4-diff method.
+
+### 12.4 Combat-sim, pass 5 scope
+`combat-sim.ts` now runs `adjustVitals` through the harnessed function (sustenance, tired STR / DEX / AC change, the clamps), the swing cooldown with weapon weight and haste, and the per-step energy cost with carried weight (`SimChar.weaponWeight`, `SimChar.carried`, both default 0). 3 new tests (weight / 23 and the bare-hand 5, haste, carried weight per step). **Still not in the sim:** possession and flesh-to-stone, items (pickup / drop / equip / use, the effects table), loot on death, doors, locks and keys, traps and glyph objects, generators, the seven new spells (the TS functions exist and are verified in `rules-spell9.ts`, but the sim has no object table for them: it works on a `MoveWorld`), TELEPORT, RAISE DEAD. All of these are verified or code-read as above; wiring them needs the sim to own an `A4Mem`-style object table (see 12.6).
+
+### 12.5 What is not harness-verified after pass 5
+* **Code only:** DamageCharacter (the sim's own copy), slot shift after a spent cast, the hold counter, event ordering, event 0x22 consumer and the 0x28 / 0x29 handlers, the consumer of event 0x15, item effects other than 0x8D-0x90, turn cost, the party-side door / lock / key rules, traps and glyph triggering when walked on, the click whitelist while held, TELEPORT, RAISE DEAD, the recast-cancel path.
+* **Open:** the generator half of `+0xB614` (monster spawning in the generator structure; the activation-scan harness is the template), what the monster VM `TELEPORT` op moves, possession / stone applied in the sim, node-pool exhaustion (150 events).
+* **Hyp:** PAL as the remake default; the uninitialised ray-mode selector in `+0x9D28`.
+* **Harness gaps inside verified pieces:** the spell cases always cast from slot 0 of the active character; door visibility (`+0x8388`) and the UI helpers are hooked out; the insert routine's monster branch (`+0x1744A`, `+0xBAA6` placement) is not exercised (food and wall objects are non-monsters).
+
+### 12.6 Building the remake's combat core from this
+**Modules** (all in `tools/blackcrypt/`, original TypeScript, each diffed against the game's own 68k code):
+| Module | Role |
+|---|---|
+| `rules.ts` | `BcRng` (the game's byte generator), `levelUp`, `weaponInfo`, `meleeAttack`, tick length |
+| `rules-tables.ts` + `buildAssets` | `rules-tables.json`: stat tables T1/T2/T3, weapon table, AI scripts, spell book |
+| `rules-monster.ts` | behaviour VM (`runBehaviour`), `monsterMelee`, `awardXp`, `vitalsTick` (periodic block) |
+| `rules-move.ts` | `MoveWorld`, pathfinder, `pursue` / `approach` / `wander`, `monsterAct`, stacking, activation scan |
+| `rules-spell.ts` | spells (`castSpell`, rays, memorise, recharge, DISMISS / BINDING / REFRESH), `A4Mem`, `applyExpiry` |
+| `rules-boss.ts` | Ram-boss stage machine (PROTECTOR / SOULFREEZER / VORTEX) |
+| `rules-spell9.ts` | object primitives, the seven party-state spells, door open, FORCEHAMMER, inventory weight, `adjustVitals`, `stepCost`, swing cooldown and tail |
+| `combat-sim.ts` | `CombatSim`: tick loop composing the modules |
+
+**Public API of `combat-sim.ts`.** `new CombatSim(cfg: SimConfig)` with `cfg = { tables, weaponBase, scripts, seed, width, height, blocked, party: SimChar[] (startingParty(tables)), px, py, facing, monsters: SimMonster[], initiallyActive?, book? }`; `sim.run(ticks, plan)` where `plan(sim) => SimCmd[]` per tick, `SimCmd = attack | turn | move | ray | memorise | cast | plotItem | rest | wait`; `sim.step1()`; state `sim.chars`, `sim.monsters`, `sim.tick`, `sim.log: LogEntry[]` (swing, damage, death, monster-hit, monster-dead, ray, spell and expiry entries, game-over). Everything is deterministic for a seed. Region (tick length) is the caller's: `TICK_MS.pal` / `.ntsc`.
+**How to extend it.** The remake needs one object table in the original's layout (`A4Mem`: objects at `OBJ(id)`, cells at `CELL(x, y)`, free list) as the single source of truth for squares; the sim's own `MoveWorld` already mirrors the same layout, so the missing step is to let `rules-spell9.ts`'s functions run on that memory (`castSpell9(a, rng, tables, slot, tick)` already does, including the dispatcher result convention and scheduled events; pass the events to the sim's queue). Items then plug in as object records (type, weight `+8`, container chain `+0xC`), with `adjustWeight` as the pickup rule, `swingCooldown` for weapons, and the structures (doors type 0x11, traps 0x1E, glyphs / fields 0x10, wall 0x10, boss-room 0x12) as objects on cells.
+**How the tests guard it.** `rules*.test.ts` and `rules-spell9.test.ts` diff each function against the oracle vectors and carry null controls (a deliberate change must produce disagreement); `rules_oracle/gen_vectors.sh` regenerates the big sets into the gitignored `generated/`, the small subsets and `vectors_events.json.gz`, `vectors_boss.json.gz`, `vectors_spells9.json.gz` are committed, so a fresh checkout still runs every test. `combat-sim.test.ts` (26 tests) checks determinism, composition (first monster act equals `monsterMelee`), XP, vitals, AC, activation window, spells, rays, the boss sequence, and the pass-5 weight rules.
 
 ## Appendix A — Spells (from the spells analysis; all offsets S_1)
 
