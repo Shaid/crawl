@@ -2319,6 +2319,7 @@ the gate between two legs.
     | Back from the mountains, Maz location 6 | 12 | 6 | 12/12 | 88/88 (was 5/17 on one frame) | 99.692% |
     | Dungeon region 7, from (4,53), doors as at a new game | 17 | 21, 22 | 17/17 | 252/252 | 99.997% |
     | Dungeon region 7, doors poked open (`0x3544`), hp kept | 81 | 21, 22, 23 | 81/81 | 1228/1228 | 99.995% (34 frames black, see below) |
+    | Maz location 4, the dungeon gate's way back (location 21 poked; arrives region 1 (11,13), CONT1-3) (2026-11-23) | 35 | 4 | 35/35 | 690/690 | 99.992% |
     | Dungeon region 7 from the room behind keyhole door 39 (37,52), opened with key -21 (2026-11-23) | 43 | 21, 26, 27 | 43/43 | 670/671 (the click frame's raised door) | 100% on every frame but the click |
 
     Correction (2026-11-23): region 7's group holds a DJDEC and location

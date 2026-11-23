@@ -580,3 +580,42 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.data
     }
   }, 300_000);
 });
+
+/**
+ * Maz location 4 (2026-11-23): the dungeon gate's way back. Trip to the
+ * dungeon (location 4 poked), then MAIN message 38 again with location 21
+ * poked: the party arrives in Maz, region 1, location 4, at (11,13) of
+ * CONT1-3 (`0x3dbb` = 1; an earlier note had CONT2-3). The arrival state
+ * has not been woken, so the scene starts with no extra wake (one extra
+ * wake mirrors FVILLE's ground against the game's).
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 Maz location 4 vs the game (alis oracle)', () => {
+  it('arrives from the dungeon gate and walks like the game', () => {
+    const out = tempDir('ishar3-loc4-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const dj = join(out, 'dj.state');
+      captureTrip('ishar3', [38], dj, 600, { commands: ['poke 3b33 4'] });
+      const back = join(out, 'back.state');
+      const at = captureTrip('ishar3', [38], back, 600, { startState: dj, commands: ['poke 3b33 21'] });
+      expect(at).toEqual({ region: 1, row: 11, col: 13, facingRaw: -1 });
+      const actions = [...'FFFLFFFFFRRFFFFFFFFFLFFFLFFFFFRFFFF'] as Array<'F' | 'L' | 'R'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: back, start: at, maxLegs: 1, legCommands: ['pokew 16e0 500'] });
+      expect(new Set(steps.map((s) => s.mem!.zone![0]))).toEqual(new Set([4]));
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 0, 4, false);
+      let px = 0, pt = 0;
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, matched: r.oracle, crawl: r.oracle });
+        px += r.pixelsMaskedEqual;
+        pt += r.pixelsMasked;
+      });
+      expect(px / pt).toBeGreaterThan(0.9999);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
