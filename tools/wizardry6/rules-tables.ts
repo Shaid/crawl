@@ -8,6 +8,7 @@
  * Evidence and addresses: docs/wizardry6/amiga/game-rules.md. Original code, derived from the
  * game's disassembly only.
  */
+import spellRecipes from './spell-recipes.json' with { type: 'json' };
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writeJson } from '@seer-project/pipeline';
@@ -193,6 +194,9 @@ export function extractRulesTables(dataDir: string) {
     realms: realmNames,
     spells,
     spellTierLevels: [...SPELL_TIER_LEVELS],
+    spellEffectRecipes: { _doc: 'Per spell id: the engine calls the dispatcher LAB_0F06 makes, as affine words in [1, power, d, tg, ti, ag, ai, side] (derived by fitting the game call log; see game-rules section 8).', ...spellRecipes },
+    roundActions: { 0: 'attack', 1: 'heal/rest', 2: 'equip', 3: 'cast', 4: 'use item', 5: 'swap', 6: 'hide', 7: 'run', 8: 'breath' },
+    groupTrailer: { '396..401': 'shield/buff bytes (fire, cold, ?, air, all-element, anti-magic)', '402..405': 'cloud durations (firestorm, poison gas, toxic vapors, acid)', '406..409': 'cloud trigger ticks', '413': 'member count' },
     combat: combatTables(m),
     creation: {
       bonusPool: { base: 5, randomDie: 6, extraEightChance: '2 independent rolls of Random(20)==0, +8 each', cheatValue: 21 },

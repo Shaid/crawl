@@ -273,11 +273,51 @@ Generate big sets into a gitignored place and point the test at them: `python3 -
 * Random state coverage: fixtures randomise the fields the routines read but not the whole game state (for example items flagged cursed, real equipment).
 * Evidence grade for `+4`, state names, stance names: **hyp**.
 
+> **Correction (2026-11-24, pass 3):** items 1, 2 and 4 below are now done (section 8); the planner, spell engines and item removal are harness-verified. Items 3 (flee, hide, morale) and the encounter start remain.
+
 ### 7.10 Smallest next steps
 1. Harness the planner `LAB_0C63` (`CODE+0x1e21a`): it decides order of play and the action word; its inputs are all in the member structs this pass mapped.
 2. Harness `LAB_0F06` per engine with the fixture generator in `combat.py` (`run_call` already runs any routine): start with `0x23758` (area selection), then `0x238ac`/`0x23aa0`, then spell strength (`CODE+0x22c08`).
 3. Find the flee (`RUN`, msg 3007) and hide handlers, then morale; then the monster AI callees `LAB_0C5B`/`LAB_0C5F`.
 4. Port `CODE+0x22278` (item removal) so `use_ammo` can execute; then a spell-casting round in the simulator.
+
+## 8. Combat, pass 3 (2026-11-24): planner, round, spells, cast gate, item removal
+
+Method as in section 7 (footprint-diff parity under Unicorn: the TS port runs on exactly the bytes the game read, throws on any other read, and the writes, logged calls and RNG state are diffed; every test has null controls). All new routines live in `tools/wizardry6/`; generator `oracle/combat3.py <planner|monsters|round|spells|engines|cast|remove>`.
+
+| System | Code | Grade | Parity (generated, 0 mismatches) | Committed subset |
+|---|---|---|---|---|
+| Monster round planner `LAB_0C63` (`CODE+0x1e21a`) with `LAB_0C5B/0C5F/0C00` | `planner.ts` `planGroup` | **harness** | 3,000 | `planner-vectors.json` (60) |
+| Round entry `LAB_0C96` (`CODE+0x1e96c`): which group a monster group targets, ally group | `planMonsters` | **harness** | 1,500 | `planner-monsters-vectors.json` (25) |
+| Round driver `LAB_102D` (100-tick order of play) + executor `LAB_0FF9` + retargeting `LAB_0FE6/0FEE`, action callees logged | `round.ts` | **harness** | 1,500 | `round-vectors.json` (14) |
+| Spell dispatcher `LAB_0F06`: id -> engine calls, strength = d + 3(level-1) + 3(power-1), buffs, clouds, heals | `spells.ts` `castEffect`, `spell-recipes.json` | **harness** (calls and bytes); recipes fitted from the game's own call log | 3,000 | `spell-vectors.json` (158) |
+| Area/status engines `LAB_0E6C/0E7C/0E90`, shield trim `LAB_0E62/0E66`, group wrappers `LAB_0EA8/0EAD/0EB5` | `engines.ts` | **harness**, SetStatus and kill cleanup real | 2,000 | `engine-vectors.json` (100) |
+| Cast gate `LAB_0F72` (`CODE+0x27132`): anti-magic, success chance, fizzle/backfire, silence, SP cost, stamina | `spells.ts` `castSpell` | **harness** | 3,000 | `cast-vectors.json` (60) |
+| Item removal `LAB_0DE6` (`CODE+0x22278`) | `inventory.ts` | **harness** | 500 | `remove-vectors.json` (45) |
+
+### 8.1 Planner (harness)
+`planGroup(c, g, tg)` gives every member: initiative `roll = max(1, Random(10) + R[211] + s8(A[41]))`, attack times `A[24..27]` (roll, then minus `roll / R[213]` per further attack), two distinct attack slots `A[28]/A[29]`, a target (retry while the target state is >= 3), then in order: spell (`Random(100) < R[168]`; spell picked by a rising threshold ladder 5,10,15,25..55,70,85 over `R[138..]`, a heal spell with nothing wounded falls back), breath (`Random(100) < R[170]`), melee (reach from the attack record: 3 front, 6 deep, 9 for allies, capped by group size; `A[30]` = action 0, kind mask via `LAB_0C00`). `A[10]/A[12]` are the action words (kind, or `(power<<8)+spell`). The round driver then fires an action when `A[24+A[33]]` equals the current tick; blink (`A[36]/A[37]/A[43]`) delays it.
+
+### 8.2 Round driver and executor (harness)
+Ticks 100..1; per tick groups 0..6, members in order. Executor pre-checks (paralysis, sleep, fear, charm...: status bytes `A[15..22]`) can swallow the action or turn it on the actor; a dead or blinked target is retargeted; the party pseudo-record is synced; then the action dispatch (0 attack, 1 rest, 2 equip, 3 cast, 4 use item, 5 swap, 6 hide, 7 run, 8 breath) and a stamina cost. Lingering group clouds (firestorm, poison gas, toxic vapors, acid) fire at their stored tick. Combat ends when game state `-18610(A4)` leaves 0xd. Callees not ported (hide, run, swap, equip, use item, breath) are logged with their exact stack words.
+
+### 8.3 Spells (harness for the dispatch, engines and gate)
+`castEffect` reproduces the dispatcher's engine calls for 79 of 82 ids; summon spells 45, 59 and 71 throw (not harnessed). Group trailer bytes written: `+396..401` shields/buffs (fire, cold, ?, air, all, anti-magic), `+402..405` cloud durations, `+406..409` cloud ticks. Engines: area damage picks `min(|t|, count)` consecutive members from a random start for a negative target; shield trim (`LAB_0E62`: with probability s/10 reduce the dice by `val*s/100` coin flips, min 1). Cast gate: the anti-magic byte (`+401`) can fizzle first, then the caster's chance `skill/3 + 90 - level*power` (party; casters of class 4, 5, 13 use another skill byte) or `3*level + 88 - level*power` (monsters); failure splits into backfire (aimed at the caster) or fizzle by the spell's flag bits; party casters pay `SP per power * power`; the return is the stamina cost `Random(power) + level + power`. Recipes are exported in `rules-tables.json` (`spellEffectRecipes`).
+
+### 8.4 The simulator now runs the game's round
+`CombatWorld.enableGameRound()` + `gameRound()`/`runGame()` run `planMonsters`, then `runRound` with attacks executed inline through `resolveAttack` (shared `W6Rng`), replacing the `Random(10)+1` stand-in (which stays as `round()`). The party plan is a policy (the game reads it from the menus). `__tests__/combat-playthrough.test.ts` is a scripted multi-round reference fight (4 fighters vs two kobold groups, plus a losing control); it pins composition behaviour, it is not a game recording.
+
+### 8.5 Not verified after this pass
+* Engines `LAB_0EC0` (weaken/slow) and `LAB_0ED3` (prismic missile); summon spells 45, 59, 71; recipe cases for non-affine ids were written by hand from the call logs.
+* Action callees not ported: use item `LAB_0F8A`, breath `LAB_0FB1`, equip `LAB_0FC4`, hide `LAB_0FC5`, run `LAB_0FD2`, swap `LAB_0FDB`; monster spell/breath rounds are not wired into the sim (`gameRound` casts nothing).
+* Encounter start (`CODE+0x17fde`: surprise, formation, group count, tables, XP and loot), flee/morale, resting, food and time, chest traps, searching, find traps, pick locks, per-turn status effects and cloud decay: untouched this pass (priorities 3 to 6).
+* The party's plan and the real UI order are a policy; the pseudo-record write-back only in the cases the vectors reach.
+
+### 8.6 Can the combat core be built from the spec?
+For fights in which the party attacks and monsters melee: yes. Keep state in the game's layout, call `planMonsters`, then `runRound(ctx, ret, on)` with `on` executing `attack` effects through `resolveAttack` and `cast` effects through `castSpell(c, A, effect)` + `castEffect` + `engines.ts` (set `ret.cast` from `castSpell`'s return before the stamina charge, as `gameRound` does for attacks). Everything shares one `W6Rng`. The open list in 8.5 is what remains before a complete remake loop.
+
+### 8.7 Rerun
+`W6_PLANNER_VECTORS`, `W6_ROUND_VECTORS`, `W6_SPELL_VECTORS`, `W6_ENGINE_VECTORS`, `W6_CAST_VECTORS`, `W6_REMOVE_VECTORS` point the tests at large sets generated with `combat3.py ... --n 3000`.
 
 ## 6. Hypotheses to treat with care
 Anything marked **hyp** above (and in section 7: member `+4`, the names of `+0x22` states and `+0x1e` stances, the simulator round loop). In particular: `-10456(A4)` flag, byte meanings of treasure tail bytes 36-38, `+321` skill mapping in 2.4, record `+162` as treasure id, and the group/member struct field names in 2.3.
