@@ -6,7 +6,7 @@ Evidence grades: **harness** = diffed against the game's real 68k routine run in
 
 Companion data: `game-rules-spells.json` (60-spell table, machine readable), `game-rules-world.json` (field maps, vitals constants, item-effect tables). Exported by `buildAssets`: `public/assets/blackcrypt/amiga/data/rules-tables.json` (see §6).
 
-## 2026-11-23 status summary (pass 2 updates in §8 and §9)
+## 2026-11-23 status summary (pass 2 in §8-§9, pass 3 in §10; the table below is the pass-2 state, see §10.9 for what is still open)
 
 | Area | Done | Open |
 |---|---|---|
@@ -120,7 +120,7 @@ S_1 holds a manual-question table (~+0x1B1E6..+0x1B4F9). It was neither read for
 * `tools/blackcrypt/rules-tables.ts` (wired into `tools/shared/game-config.ts` `buildAssets`) writes `rules-tables.json`: T1/T2/T3, XP thresholds, new-character defaults, class templates, 60-spell table (name, recharge, level, nextInPage), weapon base table decoded statically from the dispatch chain (test confirms it equals the harness table). Needs `build/cache/blackcrypt/bcdft_*.bin` (run `tools/bcdft_decompress/build.sh run`).
 * The older `classes.json` export (stat labels str/dex/con/int/wis/cha) is wrong; `rules-tables.json` supersedes it.
 
-## 7. Smallest next steps (ranked, after pass 2)
+## 7. Smallest next steps (pass 2 list; superseded by §10.9)
 1. Wall-clock tick length: find the reload of the countdown byte `+0x150(a5)` (an interrupt server in the `BlackCrypt` executable) or time a captured session (§8.7).
 2. Harness the monster pathfinder `+0x866C` / step `+0x9116` on a synthetic map, then the spell-branch of `+0x9D28` and `+0x940C` / `+0x9626`.
 3. Harness the player-side spell routines (heals, cures, buffs: `+0x5070`, `+0x52D6`, `+0x54E2`, `+0x5710`) and `CastSpellRay +0x6D9A` ranges (`+0x435C`).
@@ -230,7 +230,7 @@ The tick counter `t` (A4+0x1750) is incremented first; the light timer `A4+0x175
 
 Damage kinds (4 = physical / hunger, 5 = poison, 6 = disease) are passed to DamageCharacter unchanged. Spell recharge (`+0x10D2`) is outside the gate (every tick not on the gate path). **Corrections to pass 1:** hunger / thirst damage is every 128 ticks (not 64), poison every 256, disease every 512, and the pairing is +0x9A poison / +0x97 disease as pass 1 guessed.
 
-### 8.7 Time (**open**, evidence)
+### 8.7 Time (superseded by §10.1: tick = 8 vblanks PAL / 10 NTSC, **harness + code**; the text below is the pass-2 evidence, kept for history)
 One game tick = one call of the tick handler, which the main loop runs when the input library's idle event (code 1, `+0x1FDB6`) is returned. The library's timer unit is a decisecond (`VBlankFrequency / 10` frames, `+0x1EFB4`; reload byte 10 at `+0x151(a5)`), but no code in `bcdft`, `bcdfp`, `bcdfq` or `BlackCrypt` loads the countdown byte `+0x150(a5)` with a positive value, so the cadence is set by something outside the overlays (an interrupt server). **Working assumption for the remake: 1 tick = 0.1 s (`TICK_MS = 100`, hyp)**; 0.2 s (10 vblanks at 50 Hz) is the alternative. Every duration below is in ticks so the constant is the only thing to change. Smallest next step: read the `BlackCrypt` executable's `AddIntServer` / `CIA` setup for the 0x150 reload, or time a captured session.
 
 ### 8.8 Armour and the two defence bytes (**harness / code**)
@@ -250,6 +250,8 @@ One game tick = one call of the tick handler, which the main loop runs when the 
 * **Mask of True Sight** (gfx 0xC0, the item at character offset +0x36): without it the weapon bonus against monster type 0xB1 is -10 (`+0xBFFE`, part of the **harness-verified** weapon matrix).
 * Counters `+0x89`, `+0x8D`, `+0x8E`: `+0x8D` / `+0x8E` are the ice / fire bolt resist flags (A.4); `+0x89` still **open** (no reader found in the tick, melee or special-attack paths).
 
+> **Correction (2026-11-23, pass 3):** §8.7's "no code loads the countdown byte `+0x150(a5)`" was wrong. The loader is in the input library inside S_1 itself (not in an overlay or an interrupt server of the `BlackCrypt` executable): `SetIdlePeriod` at S_1 `+0x1FF7A` and the reload at `+0x1FF90`. The working assumption `TICK_MS = 100` is replaced by 160 ms (PAL) / 166.7 ms (NTSC); see §10.1.
+
 > **Correction (2026-11-23):** the class restriction line in Appendix B(g) ("class word 0 Fighter, 1 Cleric, 2 Druid, 3 MU") is wrong; see §8.9 (2 = Magic User, 3 = Druid). The "+0x65 = WIS, +0x66 = INT" hypothesis in A.1 is confirmed by the chargen labels (§8.9).
 
 > **Correction (2026-11-23):** monster poison / disease damage is `rand16(10)+1` (not `rand(5)+1` / `rand(6)+1` as written in Appendix B(c)), and disease infection needs `rand16(20)+20-T1[CON] > 30` (Appendix B(c) was right about the roll, wrong about the damage).
@@ -263,7 +265,7 @@ One game tick = one call of the tick handler, which the main loop runs when the 
 Grades: **H** = harness-verified against the real routine, **C** = read from code, **h** = hypothesis, **O** = open. All times in ticks (§9.1); all random draws use the generator of §1.4 (`rand8(n)` = byte % n, `rand16(n)` = word % n, n = 0 gives 0). Per-spell numbers: `game-rules-spells.json` and Appendix A.3; tables: `rules-tables.json`.
 
 ### 9.1 Clock
-`TICK_MS = 100` (h; §8.7). `tick` is a counter incremented at the start of every tick. Per tick, in order (C): increment; light and hold timers decrement; the periodic block of §9.6; spell recharge; then the due events of the event list (types 1 monster act, 5 animation, 0x14 / 0x15 weapon cooldown, 0x1E / 0x1F / 0x20-0x25 buff expiries). The party is real-time; nothing waits for the player.
+`TICK_MS = 160` on PAL / `166.7` on NTSC (**H** for the arithmetic, **C** for the wiring; §10.1; the pass-2 value 100 was a hypothesis and is wrong). `tick` is a counter incremented at the start of every tick. Per tick, in order (C): increment; light and hold timers decrement; the periodic block of §9.6; spell recharge; then the due events of the event list (types 1 monster act, 5 animation, 0x14 / 0x15 weapon cooldown, 0x1E / 0x1F / 0x20-0x25 buff expiries). The party is real-time; nothing waits for the player.
 
 ### 9.2 Characters (H for the formulas, C for the layout)
 * Four fixed characters, slot = class: Fighter, Cleric, Magic User, Druid. Stats STR / INT / WIS / DEX / CON (§8.9), each 1..30 (creation 20 max, items add), `T1[v]` = bonus table (`rules-tables.json`), `T3[v]` speed table.
@@ -289,12 +291,85 @@ Five memorised slots per character, no mana, no failure roll (anti-magic squares
 ### 9.8 Loot and the world (C)
 Monsters carry one item chain (record word +0xA) dropped on death; no gold, shops or random encounters; the only spawners are generator structures (type 0x2E: spawn when count > 0, cooldown 30 + rand(30) ticks, live monsters in range <= limit, Appendix B e). Items, weights and enchantments: Appendix B(g).
 
-### 9.9 What the spec still lacks
-1. The wall-clock tick length (hyp, §8.7).
-2. Monster pathfinder (`+0x866C`) and square-stacking rules, the ranged-spell branch of `+0x9D28` and `+0x940C` / `+0x9626` formulas as harness (only the gating is read, A.4).
-3. Possession / stone (`+0x98A8` bits 12 / 13) and the player-side spell routines are code-read, not harnessed.
-4. Item decay at `t & 63 == 32`, spell recharge ticking, and the due-event ordering inside the handler are code-read.
-5. Ray range / path rule (`+0x435C`), event 0x25 users beyond the item, and the counter `+0x89`.
+### 9.9 What the spec still lacks (after pass 3; the full list is §10.9)
+See §10.9. In short: the real pathfinder search order beyond what §10.3 harnesses, the ranged / spell branch of monster acts as harness, party-side spell effects wired into `combat-sim.ts`, square stacking beyond the cases listed in §10.3, the weight term of the swing cooldown and per-step cost, the Ram-boss stage machine (item effects 0x8E-0x90, gfx 0x80C5), and the generator scan `+0xB614`.
+
+## 10. Pass 3 (2026-11-23): real tick length, movement, player spells, specials, combat-sim
+
+Evidence labels: **harness** (diffed against the real 68k in musashi, with null controls), **code**, **hyp**, **open**. New harness files: `rules_oracle/oracle.c` modes `period` / `decay` (vectors in `vectors.json`), `oracle_move.c` (+ `vectors_move.json.gz`, TS `rules-move.ts`), `oracle_spell.c` (+ `vectors_spell.json.gz`, TS `rules-spell.ts`). No protection data was read or recorded.
+
+| Rule | Routine (S_1) | Parity | Null control |
+|---|---|---|---|
+| Tick period arithmetic (SetIdlePeriod + reload) | +0x1FF7A / +0x1FF90 | 16 / 16 | divisor 50 disagrees on > 4 |
+| Stat-enchantment decay in the tick handler | +0x8B2 (block +0xC50..+0xE5A) | 600 / 600 | tick + 1 disagrees on > 100 |
+| Square-enter test + position mask | +0x8532, +0x8458 | 1,200 | party shifted: > 100 disagree |
+| Pathfinder (BFS) | +0x866C | 1,500 | same |
+| Adjacency scan / direction pick | +0x8D7E / +0x937A | 600 / 500 | same |
+| Mover + stacking | +0x9116, +0x74, +0xFE | 2,100 (32 door-opens) | > 5 disagree (weak: party rarely adjacent) |
+| Ray scan | +0x435C | 1,200 (move) + 1,200 (spell) | same |
+| Monster act incl. bolts, hold, special calls | +0x9D28 | 7,500 | > 100 |
+| Activation scan, movement type 10 switch | +0xB614 (monster half) | 1,500 | > 100 |
+| Pursue / caster approach / wander | +0xA664 / +0x940C / +0x9626 | 1,500 each | > 100 |
+| Heals, cures, buffs via dispatcher (20 spells) | +0x7044 | 1,000 | caster level +3: > 30 |
+| CastSpellRay with march, target pick, kills, boss hold | +0x6D9A, +0x435C, +0xB308 | 1,200 | range +1: > 20 |
+| 26 ray spells (magnitude / damage / pre / range, antimagic, water, lifestealer) | +0x7268..+0x7618 | 1,040 | zeroed stat table: > 100 |
+| Memorise click | +0xF548 | 600 | T2 = 0: > 20 |
+| Recharge section | +0x10D2 | 200 | no resting double speed: > 20 |
+| DISMISS (34) / BINDING (43) / REFRESH (46) | spell handlers | 900 | level +1: > 3 |
+| Possession / flesh-to-stone | +0x98A8 bits 12, 13 | 1,600 | protection byte ignored: > 20 |
+
+### 10.1 Tick length (**harness** on the arithmetic, **code** on the wiring)
+* The countdown byte `+0x150(a5)` and its reload byte `+0x151` belong to the **input library inside S_1** (data frame `a5`), which pass 2 did not search (it looked at the overlays and the `BlackCrypt` executable). Start-up (S_1 `+0x1A7DE`) calls `SetIdlePeriod(10)` (`+0x1FF7A`): `reload = max(1, d0 * VBlankFrequency / 60)` (`mulu.w` then `divu.w #60`), where `VBlankFrequency` is the byte at ExecBase `+0x212` copied to `+0x154(a5)` by the library init (`+0x1EFAC`). The unit is therefore 1/60 s, and 10 gives **8 vblanks on PAL (160 ms) and 10 on NTSC (166.7 ms)**. Harness: 16 / 16 for hz 50 / 60, d0 in {0,1,3,6,10,12,30,60}.
+* The vblank interrupt (the library's level-3 handler `+0x1E928`, chain entry `+0x1F008` -> `+0x1F112`) decrements `+0x150` once per vblank while it is above 0 (code). The idle poll (`+0x1FC72`) returns event 1 when it is 0 and sets it to 0xFF. The tick handler's tail (`+0x1FDA` -> `+0x1FF90`) copies `+0x151` into `+0x150`, so the countdown restarts when the handler has finished: tick = handler run time + 8 (PAL) / 10 (NTSC) vblanks (code). The wait function at `+0x1FD06` uses a separate unit (decisecond = `VBlankFrequency / 10` vblanks) and is not the tick.
+* `TICK_MS` for the remake: **160 ms (PAL, default) / 166.7 ms (NTSC)**. Which region the shipped disk targets is **open** (the code reads the machine's value).
+
+### 10.2 Tick handler order (**code**, addresses are S_1 +0x8B2 offsets from the disassembly)
+Counter `t++` (+0x80920) -> light timer -> hold timer -> `t & 15 == 0` generator scan (+0xB614) -> per-char periodic block (adjust, rest heal, regen, hazard, resting at `t & 7`) -> **enchantment decay** (`t & 63 == 32`, not resting, +0xC50) -> disease (`t & 0x1FF == 0x100`) -> poison (`t & 0xFF == 0x80`) -> hunger / thirst (`t & 0x7F == 0x40`) -> spell recharge (+0x10D2) -> due events (+0x1312 loop; tie order among equal due times **hyp**: insertion order).
+* **Decay (harness, `itemDecay`)**: only when not resting. Every character (**alive or not**, no HP test) is scanned over 3 groups x 6 item words from record `+0x16` (word index = group*6 + slot). An item whose object type (byte `+5`) is in {0,1,2,3,7,8,9,10,11,13,21,25,26,27,28,36,42,45} (measured by running the real routine over types 0..63), with charges (byte `+7`) 1..254 and effect word (`+0xE`) < 0x80, loses one charge; at charges == 1 the enchantment is removed first (`+0x18088`, args char, group, slot). 0xFF charges never decay.
+
+### 10.3 Monster movement (**harness**, `rules-move.ts`)
+Directions: 0 = y+1, 1 = x+1, 2 = y-1, 3 = x-1; a cell wall bit `0x1000 << d` blocks leaving in direction d.
+* **Stacking.** A square is a chain: the cell's low 12 bits = head object id, next link = object word `+0x12`; add inserts at the head. A monster's position on its square is S byte `+0xB` (0-3 corner, 4 centre). The occupancy mask (`+0x8458`) sets bit n per monster at position n and returns 0x1F (full) if any monster on the square has a different gfx word or sits at the centre: **only same-gfx monsters share a square, in corners**.
+* **Enter test `+0x8532`** (0 free, 1 blocked, 2 open the door; walks the chain by type byte `+5`, first non-zero wins; mode 1 = first ring of the search, 0 beyond, 2 = the real move): `0x10` illusion wall blocks while `+0xA == 0`; `0x11` door frame blocks unless monster `b3` bit 4 (pass doors), blocks if `+0xE == 2` (locked), in mode 1 blocks unless door `+0xF` bit 0 (open) or monster `b6` bit 0 (opens doors), in mode 2 with `b6` bit 0 and `+0xE == 0` returns 2; `0x12` blocks while `+0xA == 0` and signed `+0x10 <= 3`; `0x14` pit blocks while `+0xA == 0` and `+0x10 == 0`, flyers (`b3` bit 7) when `+0x10 == 1`; `0x17` pillar blocks while `+0xA == 0`; `0x1F` and `0x2F` always. Items and other monsters do not block here.
+* **Pathfinder `+0x866C`**: breadth-first search monster -> party over a 64x64 visited buffer, depth `3 * (speedIdx + 1)` (speedIdx = `b3` bits 2-3). Result `A4+0x1E8F`: 1 adjacent with a direct line, 2 path found (or adjacent after an in-square shift), 3 none. `A4+0x1E90` = mask of first-step directions (OR-ed when several reach the party), candidate list `+0x1E8A..` = set bits ascending (not built on 3), `A4+0x1E91` = path length (unchanged on 3). Corner monsters shift within the square; a non-side direction needs the near corner free and the final approach checks the far corner. The party square can only be entered as the goal. `+0x8D7E` is the one-step variant (result 2 if any direction is open, else 3; distance = manhattan).
+* **Facing and step** (`+0x937A`, `+0x9116`): the current facing S.b0C is kept when it is a candidate, else `rand16(count)` picks one (S.b0D, 4 = none). If facing differs from S.b0D and `b3` bit 5 is **set**, the monster turns a quarter per act (opposite: a raw byte > 0x7F turns +1, else +3) and the act returns 1; with bit 5 **clear** it snaps and moves in the same act (this corrects §8.1's "do not turn to face the party"). A corner monster moving along an edge shifts corner; leaving the square sets the new corner first. The move is refused into the party square or when the enter test returns 1; a result of 2 logs "open door" and the move proceeds (door-open routine `+0x9056` not harnessed).
+* **Pursue `+0xA664`**: path search; none -> retry toward last-seen S.w0/S.w2 with S.b13 = 2; neither -> returns 2. A path sets S.b13 = 1, S.b0E = length, S.w0/S.w2 = party. Result 1: face `list[0]`, attack (flag 1). Else it may cast first (aligned, dist < 4, `b6` bit 2, S.b13 == 1), then picks a facing and steps unless it attacked. **Caster approach `+0x940C`** (mode 0xC): when aligned, 2-3 squares, S.b13 == 1, facing `list[0]`, with charges it acts at once (flag 0), else adjacency scan, prefers directions the search did not offer, steps. **Wander `+0x9626`** (VM op 0x1E): adjacency scan, choose among open directions, step.
+* **Monster act `+0x9D28`, full**: gates as §8.4. Wrong facing with a non-zero flag: a clear straight line (ray length == distance) sets S.b0D and steps (output 1), else returns 2. Magic path: needs a clear line equal to the distance; candidate bits from 2 (12 if no charges) up to 11 (15 at distance 1), chosen with `rand16(count)`, gfx 0x80B7 at distance 1 forces bit 12. Fire bolts bits 2-6 (base, range) = (2,4) (4,7) (5,0xB) (0xA,0x10) (0x14,0x1F); ice bolts bits 7-10 = (2,4) (4,7) (0xA,0x10) (0x14,0x1F); `dmg = rand16(range) + base + m`, `m = max(1, maxHp/10)`, kind 4. Draw order per bolt target: `rand16(100)` (unused), if `+0x83` `rand8(100)` (<= 50 skips), skip if the fire (`+0x8E`) / ice (`+0x8D`) flag is set (no draw), `rand8(100) < +0x69` skips, then `rand16(range)`. **Original bug: the second target's shield test reads the first target's `+0x83`.** Bolts cost no charge; hold (bit 11) costs one. Bits 12-15 call `+0x98A8` (§10.5). The ray mode selector reads an uninitialised stack byte (`-0x29(a5)`; 0 in the harness; **hyp**: meant to be S.b0B).
+* **Ray `+0x435C`** (monster bolts and player rays share it; **harness** twice, by the movement and the spell harness): a wall bit on the square being left stops the ray before it moves (blocked 2); otherwise it enters the next square and stops (blocked 1) at any monster (mode 2) or, in modes 0/1, a monster at the centre or the two near corners; pillar `0x17` / fountain `0x1F` with state 0, illusion wall `0x10` with `+0xC == 2`, `0x12` with `+0x10 <= 3`, closed door `0x11` (`+0xF` bit 0 clear). **Walls and closed doors block rays; open doors and items do not.**
+* **Who switches a monster to movement type 10 (harness, `activationScan`, `+0xB614` monster half)**: every 16 ticks the 7x7 window around the party (squares with x or y <= 0 or >= 63 skipped) is scanned; for each monster with S.b13 == 0 the pathfinder runs. A path shorter than 5 **activates** it (S.b0E = length, S.w0/S.w2 = party, S.b13 = 1, act event type 1 at `tick + rand16(6) + 1`). No path, or length >= 5: unless the movement type is 1 (stationary guard) the monster is **switched to type 10** (S var[2] = old type, var[3] = 150, S.pc = 1, P word `+0xE` = 10, S.b13 = 1, same schedule). gfx 0x804F is always activated as if the length were 2. In type 10 the script's FLEE_TICK (§8.3) re-runs the pathfinder each tick: a path restores the saved type; at counter 0 the monster leaves the event list until the next scan. The generator-structure half of `+0xB614` is **open**.
+
+### 10.4 Player-side spells (**harness**, `rules-spell.ts`)
+* **Cast**: `D4 = byte(level + int8(b6A))`, `D5 = D4 > 3 ? 2*D4 - 4 : 2`, `D3 = T1[stat]` (stat `+0x65` for class 1 / 3, else `+0x66`). An antimagic square (cell bit 30 at the party square) fizzles any spell and still spends the charge.
+* **Heals / buffs**: HEAL `hp += (2 << n) + rand16(16n)` capped (n = 2 for spell 9, else 1); RESTORE sets max; cures clear the status byte; SUSTENANCE food and water 5000 for living chars. SHIELD / PROTECTION (15, 27): `n = D4 <= 5 ? 1 : ((D4-4)>>1) + 1`, AC += n, counter + 1, event 0x1E at `tick + 1800` (`a3 = n`). STRENGTH: +2 strength, event 0x1F at +1800. Party shields use the plain level: ETHEREAL (45) `n = 2 + (L >= 6 ? (L-5)>>1 : 0)`, SHADOW (56) `n = 1 + (L >= 4 ? (L-3)>>1 : 0)`, one event per living char. WIZARD SIGHT (12) / DETECT TRAP (19): counter + 1 per living char. Event times: WIZARD SIGHT +3600 (type 0x21), COMPASS +3600 (0x20), DETECT TRAP `D4*360` (0x23), HASTE `D4*120` (0x24); LIGHT +120.
+* **CastSpellRay `+0x6D9A`**: damage per target `mag + rand16(die + 1)`; up to 2 targets from `+0xB308` (centre first, else the two front corners by facing); a ray with zero steps returns before any pick; every picked target's alert byte S.b12 increments even when spared; fire (pre 0x67) fizzles on a water square (cell bit 31) unless `A4+0x1E5C == 3`. Hurt filter: gfx 0x80B2 never; 0x80B1 only with the item at char `+0x36` of gfx 0xC0; 0x80BE only for pre 0x64; 0x80C5 only for pre 0x65; others only pre 1 / 0x66 / 0x67. gfx 0x80C5 with hp < 50 is held at 49 (stage flag). Lifestealer adds `3*total/10`. The 26 ray spells' (mag, die, pre, range) are `RAY_SPELLS`; they match Appendix A.3.
+* **Memorise `+0xF548`**: needs an owned page, timer 0, spell level <= char level, a free slot. `R = (L-1)*540 + 1260`, minus 180 per level that `level + int8(b6B)` exceeds L, floor 360; then `R += R*T2[stat]/100` (truncating; stat `+0x66` for class 2, else `+0x65`), clamp [60, 32767]. **Recharge `+0x10D2`**: each tick every nonzero timer loses 1, or 2 while `A4+0x1746` (resting) and the page owner's state byte == 1; the page open on screen is skipped unless `A4+0x1A18`.
+* **DISMISS (34)**: blocked by a wall bit on the party square, skips 0x80B2 / 0x80BE / 0x80C5, `thr = clamp(b2 + 7 - ((level-1)>>1), 2, 20)`, kills (hp 0, XP) iff `rand8(20)+1 >= thr`. **BINDING (43)**: `resist = clamp((S.maxHp/10 - level)*20 + 50, 0, 100)`, bound iff `rand16(100) > resist`; a bound monster's events are cancelled and a type-1 event is scheduled at now + **200**. **REFRESH (46)**: zeroes the timer of every spell of level < 5 on the caster's owned pages.
+* Still code-read: RAISE DEAD, REVEAL TRUTH, CREATE FOOD, TELEPORT, REMOVE GLYPH, DISPEL MAGIC, REMOVE TRAP, CREATE WALL, READ RUNE, the buff-expiry handlers (event types 0x1E-0x24) and the recast-cancels-old-buff path.
+
+> **Correction (2026-11-23, pass 3):** A.3 gave BINDING as `random(100)` vs `HP/10 - level` and +20 ticks. The real code uses a 16-bit draw, the secondary record's max HP, and +200 ticks.
+
+### 10.5 Possession and flesh-to-stone (**harness**, `+0x98A8` bits 12, 13; 1,600 / 1,600)
+Common prefix: one-target pick, `rand8(100) < +0x69` resists, then `+0x83 && rand8(100) > 50` resists. **Possession (bit 12)** acts only for gfx 0x80B7: picks the two front targets, swaps when `rand16(100) > 50`, takes the first with `+0x8F == 0`, kills it (DamageCharacter with its full HP, kind 4, flag 0), creates a corpse object linked into the monster's carried chain, turns the monster into gfx 0x80B8 with hp = maxHp = 150 and sets UI flags `A4-0x708E = 0x15`, `A4-0x708A = 10`. **Stone (bit 13)** acts for any monster: the prefix target unless `+0x87 != 0`, same kill, creates a type 0x2F statue at the per-character position table (S_2 `+0x24C`) remembering the character.
+
+### 10.6 Item effects 0x8D-0x90, counter `+0x89`, held-party input, starting vitals
+* **Item effects (code from the dispatch jump table at S_1 `+0x136FA`, names from the shipped `bcdfs` item records whose effect word `+0xE` has the value)**: **0x8D PROTECTOR** (map 8) -> `+0x78DA` (event 0x25: +75 resistance `+0x69` to every living character for 200 ticks); **0x8E SOULFREEZER** (map 5) -> `+0x79C2`, **0x8F VORTEX** (map 7) -> `+0x7B2E`, **0x90 FORCEHAMMER** (map 10) -> `+0x7C40`: the three Ram-boss stage-machine routines on `A4+0x1A1E` (named, **not decoded**). Other holders seen in the data: 0x8A HORN OF PLENTY, 0x8B ORB OF LIFE / ROD OF RESURRECTION, 0x8C MIRROR SHIELD.
+* **Counter `+0x89`** (effect index 0x1B in `+0x82 + (effect - 0x14)`): no direct reader or writer exists in S_1 (searched all `0x17E1(a4)` forms and every constant 0x1B), so it is **unused** (negative evidence, code).
+* **Held party** (`+0x1756 > 0`, input dispatcher `+0xD6D8`, "party-click whitelist"): mouse events (event codes 2 and 4) are ignored while held **except** in screen mode 1 (`A4+0x174A == 1`) when the clicked region id `A4+0x1EB4` is 8, 9 or 0x5B (code); keyboard / movement events while held are diverted to `+0x14920(0, 1)` unless the screen mode is 1 (code). What regions 8 / 9 / 0x5B are is **hyp** (the on-screen turn controls); not harnessed.
+* **Starting vitals (code, direct instructions in the new-game init, bcdfp)**: `+0x52` food = `0x1388` (5000), `+0x54` water = `0x1388` (5000), `+0x56` energy = `0x2710` (10000), confirmed from the `MOVE.W #imm,disp(A0,D0)` stores (the S_1 routine `+0x5AA6` that also writes 5000 is the refill used by sustenance effects).
+
+### 10.7 Combat sim (`tools/blackcrypt/combat-sim.ts`, tests `combat-sim.test.ts`, 9 tests)
+An executable §9: a headless tick loop over a small rectangular map. Composed from **harness** pieces: player melee + weapon rules, monster melee (`monsterMelee`), the behaviour VM (`runBehaviour`, now with a live `onCall` callback that returns the act result and the new position), XP and level-up, the vitals tick, and player ray spells (`castRay` + `RAY_SPELLS`, walls as solid pillars). Marked **code** in the source: `DamageCharacter` / `AdjustVitals` (clamps, tired penalty), event ordering, swing cooldown and costs, per-step costs. Marked **hyp / not modelled**: the monster step is a greedy axis step (the harnessed `rules-move.ts` `pursue` / `pathfind` are **not yet wired in**), ranged monsters do nothing, one monster per square, no party spells besides rays (memorise / recharge / heals exist as harness-verified functions in `rules-spell.ts` but are not wired), no items, no loot, no generator scan, no weight term. Tests: determinism, null control (other seeds diverge), composition (first monster act equals `monsterMelee` on the same RNG stream), XP and level-ups, vitals cadence (food/water every 16 ticks, poison 256, hunger 128), game over, AC null control, blocked squares, ray damage and wall blocking, ray kill XP.
+
+### 10.8 Pass 3 corrections
+> **Correction (2026-11-23, pass 3):** §8.1 read `b3` bit 5 as "do not turn to face the party". It means the monster turns one quarter per act (and the act is spent turning) instead of snapping (§10.3).
+> **Correction (2026-11-23, pass 3):** §8.4 / §9.4 listed the pathfinder and stacking as open and the ranged branch as code-read; they are now harness (§10.3). Monsters' bolts cost no charge; hold costs one.
+
+### 10.9 What the spec still lacks
+1. Combat-sim does not yet use `rules-move.ts` (pursue / activation scan) or the spell memorise / recharge / heal functions.
+2. The generator half of `+0xB614`, the door-open routine `+0x9056`, the hold effect `+0x58FA`, the Ram-boss stage machine (`+0x79C2` / `+0x7B2E` / `+0x7C40`, gfx 0x80C5).
+3. Buff-expiry event handlers (0x1E-0x24), RAISE DEAD / TELEPORT / CREATE FOOD and the other code-read spells.
+4. The real wall-clock region (PAL or NTSC) of the shipped disk; the weight term of cooldown / step cost.
+5. The `A4+0x1A26` branches in the pursue routine (`+0x95F7E`, `+0x9642C`, `+0x9653C`).
 
 ## Appendix A — Spells (from the spells analysis; all offsets S_1)
 
@@ -401,7 +476,7 @@ Item effect id = obj rec word +0xE (0x80+n, n<0x20) via dispatcher +0x12FEA ("HE
 3. ~~AC sign convention~~ **solved** (§8.8, harness): higher AC is better.
 4. `+0x098A8` bits 12-15: **read** (§8.4; bits 14 / 15 harness); event 0x25 and item effects 13-16: `+0x78DA` read (§8.10), the three boss-stage routines named but not decoded.
 5. ~~XP formula inside +0x07ED0~~ **solved** (§8.5, harness).
-6. `+0x435C` ray range / pathing and `+0xB308` target selection: **open** (smallest step: harness `+0x435C` on a synthetic map with doors).
+6. ~~`+0x435C` ray range / pathing and `+0xB308` target selection~~ **harness** (§10.3, §10.4) (smallest step: harness `+0x435C` on a synthetic map with doors).
 
 ## Appendix B — World rules (from the world-rules analysis; static analysis, not harness-verified)
 
@@ -468,4 +543,4 @@ None: no BUY/SELL/PRICE/COIN strings (GOLD occurs only in key names), no currenc
 - OGREBLADE "slowly drain" text: no equipped-item drain found in tick or elsewhere. [open: smallest step = search tick handler for per-tick HP loss tied to weapon gfx]
 
 ### B. Open list (status 2026-11-23)
-1. Use-effects 0x8D-0x90 names (0x81-0x8C named in A.5 / §8.10).  2. ~~Stat index to name map~~ solved (§8.9).  3. ~~Ogreblade curse~~ no mechanical drain found (§8.10).  4. Counters `+0x89` open, `+0x8D` / `+0x8E` = ice / fire resist flags.  5. ~~Starting food/water/energy~~ solved (§1.3).  6. Exact held-party click whitelist: open (`+0xD6D8`).
+1. ~~Use-effects 0x8D-0x90 names~~ named (§10.6).  2. ~~Stat index to name map~~ solved (§8.9).  3. ~~Ogreblade curse~~ no mechanical drain found (§8.10).  4. Counter `+0x89` unused (§10.6), `+0x8D` / `+0x8E` = ice / fire resist flags.  5. ~~Starting food/water/energy~~ solved (§1.3).  6. Held-party click whitelist read (§10.6; region meaning hyp).
