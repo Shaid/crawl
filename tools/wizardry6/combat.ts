@@ -46,6 +46,7 @@ export class Mem {
   u32(a: number): number { return ((this.u16(a) << 16) | this.u16(a + 2)) >>> 0; }
   w8(a: number, v: number): void { this.b.set(a, v & 0xff); this.wrote.set(a, v & 0xff); }
   w16(a: number, v: number): void { this.w8(a, v >> 8); this.w8(a + 1, v); }
+  w32(a: number, v: number): void { this.w16(a, v >>> 16); this.w16(a + 2, v); }
 }
 
 const hex16 = (v: number): string => (v & 0xffff).toString(16).padStart(4, '0');
@@ -484,4 +485,68 @@ export function weaponProc(m: Mem, rng: W6Rng, a4: number, A: number, blk: numbe
     }
   }
   return fx;
+}
+
+
+/**
+ * LAB_0E27/LAB_0E2B... kill cleanup (CODE+0x22c36): the defender (grp, idx) is dead. For a monster:
+ * credit the attacker's kill counter (record -17906+i*432, a long), set the "unique monster slain" bit
+ * when record +0xdc bit 0 is set (bit index = record +0xda, bit set at -30150(A4)), clear its cell in the
+ * five-by-five formation grids, and add the record's XP (+0x40) to the pool at -15300(A4). Always:
+ * state 3, HP and stamina 0, and the four action slots cleared.
+ */
+export function killCleanup(m: Mem, a4: number, tg: number, ti: number): void {
+  const D = ti * 0x2c + m.u32(a4 - 15266 + 4 * tg);
+  const mr = m.u32(a4 - 15294 + 4 * tg);
+  if (tg !== 0) {
+    const ai = m.s16(a4 - 15136);
+    if (m.u16(a4 - 15138) === 0 && ai >= 0 && ai < m.s16(a4 - 15306)) {
+      const ka = a4 - 17906 + ai * 0x1b0;
+      m.w32(ka, m.u32(ka) + 1);
+    }
+    if ((m.u8(mr + 0xdc) & 1) !== 0) {
+      const bit = m.u8(mr + 0xda);
+      const ba = a4 - 30150 + (bit >> 3);
+      m.w8(ba, m.u8(ba) | (1 << (bit & 7)));
+    }
+    if (m.u8(D + 0x2a) !== 0xff) {
+      const c = m.s8(D + 0x2a);
+      const r = tdiv(c, 10);
+      const col = c % 10;
+      m.w16(a4 - 11734, 0);
+      m.w16(a4 - 10478 + col * 2 + r * 10, 0);
+      m.w16(a4 - 15160 + col * 2 + r * 10, 0);
+      m.w8(a4 - 15124 + col + r * 5, 0);
+      m.w8(a4 - 15114 + col + r * 5, 0);
+    }
+  }
+  m.w8(D + 0x2a, 0xff);
+  m.w8(D + 0x22, 3);
+  m.w16(D + 2, 0);
+  m.w16(D + 6, 0);
+  m.w8(D + 0x24, 0);
+  m.w8(D + 0x25, 0);
+  for (let i = 0; i < 4; i++) m.w8(D + 0x18 + i, 0);
+  if (tg > 0 && tg < 6) m.w32(a4 - 15300, m.u32(a4 - 15300) + m.u32(mr + 0x40));
+}
+
+/**
+ * LAB_0E3D (CODE+0x2300c) SetStatus(grp, idx, msg, resist, state, mod, ., ., ., flag): raise the
+ * defender's state byte (+0x22: 0 ok, 1 asleep?, 2 paralysed?, 3 dead; names open) to `state` unless it
+ * is already at least that, or the member is flagged (+0x2b). With a resist index the save is
+ * Random(100) > record byte +0x94+res - mod (a failed save leaves it unchanged). State 3 or more runs
+ * {@link killCleanup}.
+ */
+export function setStatus(m: Mem, rng: W6Rng, a4: number, args: number[]): void {
+  const [tg, ti, , res, state, mod] = args;
+  const D = ti * 0x2c + m.u32(a4 - 15266 + 4 * tg);
+  if (m.u8(D + 0x22) >= (state & 0xffff)) return;
+  if (m.u8(D + 0x2b) !== 0) return;
+  const mr = (g: number) => m.u32(a4 - 15294 + 4 * g);
+  if (tg === 0) for (let i = 0; i < 14; i++) m.w8(mr(0) + 0x94 + i, m.u8(a4 - 17584 + ti * 0x1b0 + i));
+  if (res !== 0 && !(rng.random(100) > s16(m.u8(mr(tg) + 0x94 + res) - mod))) return;
+  m.w8(D + 0x22, state);
+  if (s16(state) >= 3) {
+    killCleanup(m, a4, tg, ti);
+  }
 }

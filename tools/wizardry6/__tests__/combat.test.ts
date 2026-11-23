@@ -8,12 +8,14 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Mem, resolveAttack, weaponProc } from '../combat.ts';
+import { Mem, resolveAttack, setStatus, weaponProc } from '../combat.ts';
 import { W6Rng } from '../rules.ts';
 
 const path = process.env.W6_COMBAT_VECTORS ?? resolve('tools/wizardry6/oracle/combat-vectors.json');
 const V: any[] = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : [];
 const ppath = process.env.W6_PROC_VECTORS ?? resolve('tools/wizardry6/oracle/combat-proc-vectors.json');
+const spath = process.env.W6_SETSTATUS_VECTORS ?? resolve('tools/wizardry6/oracle/combat-setstatus-vectors.json');
+const SS: any[] = existsSync(spath) ? JSON.parse(readFileSync(spath, 'utf8')) : [];
 const P: any[] = existsSync(ppath) ? JSON.parse(readFileSync(ppath, 'utf8')) : [];
 
 /** Message-text scratch buffers (-10836..-10596 rel. A4): presentation, not rules. */
@@ -104,5 +106,30 @@ describe.skipIf(P.length === 0)('weapon on-hit effects (CODE+0x1ede0 with ApplyS
   it('null control: a different seed disagrees', () => {
     const bad = P.filter((v) => { try { return !runProc(v, (r) => { r.rng.s[1] = (r.rng.s[1] + 7) % 30000 || 1; }); } catch { return true; } });
     expect(bad.length).toBeGreaterThan(P.length / 4);
+  });
+});
+
+function runSet(v: any, tweak?: (r: { rng: W6Rng; mem: Mem }) => void): boolean {
+  const mem = new Mem(v.foot);
+  const rng = new W6Rng(v.seed);
+  tweak?.({ rng, mem });
+  setStatus(mem, rng, v.a4, v.args);
+  const wrote = Object.fromEntries([...mem.wrote].sort((a, b) => a[0] - b[0]));
+  const want = Object.fromEntries(Object.entries<number>(v.diff).sort((a, b) => +a[0] - +b[0]));
+  return JSON.stringify(wrote) === JSON.stringify(want) && JSON.stringify([...rng.s]) === JSON.stringify(v.rng);
+}
+
+describe.skipIf(SS.length === 0)('SetStatus and kill cleanup (CODE+0x2300c, 0x22c36)', () => {
+  it('matches the game on every vector: bytes written (state, kill counter, XP pool, formation grid) and RNG state', () => {
+    expect(SS.filter((v) => { try { return !runSet(v); } catch { return true; } }).length).toBe(0);
+  });
+  it('covers party and monster defenders, saves, and the death branch', () => {
+    expect(SS.some((v) => v.args[0] === 0)).toBe(true);
+    expect(SS.some((v) => v.args[0] !== 0 && v.args[4] >= 3 && Object.keys(v.diff).length > 10)).toBe(true);
+    expect(SS.some((v) => v.args[3] !== 0)).toBe(true);
+  });
+  it('null control: a different seed disagrees where a save is rolled', () => {
+    const bad = SS.filter((v) => { try { return !runSet(v, (r) => { r.rng.s[2] = (r.rng.s[2] + 5) % 30000 || 1; }); } catch { return true; } });
+    expect(bad.length).toBeGreaterThan(0);
   });
 });

@@ -107,6 +107,20 @@ class Combat(W6):
         diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}
         return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs)}
 
+    def run_setstatus(self, args, seed):
+        """LAB_0E3D (CODE+0x2300c) SetStatus with its kill cleanup (CODE+0x22c36) running for real."""
+        self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
+        self.seed(*seed)
+        self.tracking = True
+        self.disabled = {0x2300c}
+        try:
+            self.call(0x2300c, args)
+        finally:
+            self.tracking = False
+            self.disabled = set()
+        diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}
+        return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs)}
+
     def run_attack(self, target, hand, kind, seed):
         self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
         self.seed(*seed)
@@ -299,6 +313,38 @@ def make_proc_vectors(n, seed):
     return out
 
 
+def make_setstatus_vectors(n, seed):
+    rng = pyrandom.Random(seed)
+    c = Combat()
+    out = []
+    A4 = c.A4
+    for v in range(n):
+        tg = rng.choice([0, 0, 1, 2, 3, 4, 5]); ti = rng.randrange(4 if tg == 0 else 9)
+        ag, ai = (0, rng.randrange(4)) if tg else (rng.randrange(1, 6), rng.randrange(9))
+        if rng.random() < 0.3: ag, ai = 0, rng.randrange(-1, 7)
+        fx = Fixture(c, rng).build(ag, ai, tg % 6, ti, 0, 0)
+        w16 = lambda a, val: fx.writes.append((a, struct.pack('>H', val & 0xffff)))
+        w16(A4 - 15306, rng.randrange(1, 7))
+        fx.writes.append((A4 - 15300, struct.pack('>I', rng.randrange(0, 5000))))
+        D = MEM_BASE + (tg % 6) * MEM_STRIDE + ti * 44
+        if rng.random() < .5: fx.writes.append((D + 0x2a, bytes([rng.choice([0xff, rng.randrange(0, 40)])])))
+        for g in range(1, 6): fx.writes.append((REC_MON_BASE + g * REC_MON_STRIDE + 0xdc, bytes([rng.randrange(0, 4)])))
+        c.apply(fx.writes)
+        res = rng.choice([0, 0, rng.randrange(0, 20)])
+        state = rng.choice([1, 2, 3, 3, 4]); mod = rng.randrange(-40, 60)
+        args = [tg, ti, 0xd9e, res, state, mod, 6, 6, 0xd50, rng.randrange(2)]
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        try:
+            r = c.run_setstatus(args, seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-60:], file=sys.stderr); continue
+        out.append({'args': args, 'seed': seed3, 'a4': A4,
+                    'foot': {str(a): b for a, b in r['foot'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
+                    'diff': {str(a): b for a, b in r['diff'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
+                    'effects': r['effects'], 'rng': r['rng'], 'rargs': r['rargs']})
+    return out
+
+
 def pick_subset(V, n=110):
     """A small committed subset: every effect kind, stance resets, all attack kinds, both sides."""
     chosen, seen = [], set()
@@ -322,6 +368,9 @@ if __name__ == '__main__':
         sub = pick_subset(V, int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 110)
         json.dump(sub, open(sys.argv[3], 'w'), separators=(',', ':'))
         print(len(sub), 'vectors in subset')
+    if sys.argv[1] == 'setstatus':
+        n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
+        json.dump(make_setstatus_vectors(n, 3), open(sys.argv[2], 'w'), separators=(',', ':'))
     if sys.argv[1] == 'proc':
         n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
         seed = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 1
