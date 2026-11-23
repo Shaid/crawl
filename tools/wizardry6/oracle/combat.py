@@ -133,15 +133,17 @@ class Combat(W6):
         diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}
         return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs), 'ret': ret & 0xffff}
 
-    def run_attack(self, target, hand, kind, seed):
+    def run_attack(self, target, hand, kind, seed, full=False):
         self.effects = []; self.written = {}; self.foot = {}; self.rargs = []
         self.seed(*seed)
         self.tracking = True
         self.a5 = STACK_TOP - 16
+        if full: self.disabled = {0x1ede0, 0x2300c}     # run the weapon proc and SetStatus (with kill cleanup) for real
         try:
             ret = self.call(ATTACK, [(target, 4), hand, kind])
         finally:
             self.tracking = False
+            self.disabled = set()
         diffs = {a: self.uc.mem_read(a, 1)[0] for a in self.written}   # every byte written, final value
         self.ibuf = bytes(self.uc.mem_read(self.a5 - 74, 32)).hex()
         return {'foot': self.foot, 'diff': diffs, 'effects': self.effects, 'rng': list(self.state()), 'rargs': list(self.rargs)}
@@ -260,7 +262,7 @@ def itemword28(c, iid):
     return _IW[iid]
 
 
-def make_vectors(n, seed):
+def make_vectors(n, seed, full=False):
     rng = pyrandom.Random(seed)
     c = Combat()
     base_state = None
@@ -282,7 +284,7 @@ def make_vectors(n, seed):
         for iid in fx.items: items[iid] = itemword28(c, iid)
         c.apply([(RNG_ADDR, bytes(6))])
         try:
-            res = c.run_attack(T, hand, kind, seed3)
+            res = c.run_attack(T, hand, kind, seed3, full)
         except RuntimeError as e:
             print('skip', v, fam, ag, ai, tg, ti, hand, kind, str(e)[-60:], file=sys.stderr); continue
         out.append({'fam': fam, 'ag': ag, 'ai': ai, 'tg': tg, 'ti': ti, 'hand': hand, 'kind': kind, 'T': T,
@@ -416,6 +418,6 @@ if __name__ == '__main__':
     if sys.argv[1] == 'vectors':
         n = int(sys.argv[sys.argv.index('--n') + 1]) if '--n' in sys.argv else 200
         seed = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 1
-        v = make_vectors(n, seed)
+        v = make_vectors(n, seed, '--full' in sys.argv)
         json.dump(v, open(sys.argv[2], 'w'), separators=(',', ':'))
         print(len(v), 'vectors')

@@ -18,6 +18,8 @@ const spath = process.env.W6_SETSTATUS_VECTORS ?? resolve('tools/wizardry6/oracl
 const SS: any[] = existsSync(spath) ? JSON.parse(readFileSync(spath, 'utf8')) : [];
 const dpath = process.env.W6_SPELLDMG_VECTORS ?? resolve('tools/wizardry6/oracle/combat-spelldmg-vectors.json');
 const SD: any[] = existsSync(dpath) ? JSON.parse(readFileSync(dpath, 'utf8')) : [];
+const fpath = process.env.W6_FULL_VECTORS ?? resolve('tools/wizardry6/oracle/combat-full-vectors.json');
+const FV: any[] = existsSync(fpath) ? JSON.parse(readFileSync(fpath, 'utf8')) : [];
 const P: any[] = existsSync(ppath) ? JSON.parse(readFileSync(ppath, 'utf8')) : [];
 
 /** Message-text scratch buffers (-10836..-10596 rel. A4): presentation, not rules. */
@@ -159,5 +161,33 @@ describe.skipIf(SD.length === 0)('spell damage engine (CODE+0x23366)', () => {
   it('null control: a changed dice count disagrees', () => {
     const bad = SD.filter((v) => { try { return !runDmg({ ...v, args: [v.args[0], v.args[1], v.args[2] + 1, ...v.args.slice(3)] }); } catch { return true; } });
     expect(bad.length).toBeGreaterThan(SD.length / 3);
+  });
+});
+
+function runFull(v: any, tweak?: (r: { rng: W6Rng; mem: Mem }) => void): boolean {
+  const mem = new Mem(v.foot);
+  const rng = new W6Rng(v.seed);
+  tweak?.({ rng, mem });
+  const fx = resolveAttack(mem, rng, {
+    a4: v.a4, attacker: v.T, hand: v.hand, kind: v.kind, exec: true,
+    itemCastWord: (id) => v.items[id],
+  });
+  const wrote = Object.fromEntries([...mem.wrote].filter(([a]) => !isText(a, v.a4)).sort((a, b) => a[0] - b[0]));
+  const want = Object.fromEntries(Object.entries<number>(v.diff).filter(([a]) => !isText(+a, v.a4)).sort((a, b) => +a[0] - +b[0]));
+  return JSON.stringify(wrote) === JSON.stringify(want) && JSON.stringify(fx) === JSON.stringify(v.effects)
+    && JSON.stringify([...rng.s]) === JSON.stringify(v.rng);
+}
+
+describe.skipIf(FV.length === 0)('composed attack: resolver + weapon effects + SetStatus + kill cleanup, run inline', () => {
+  it('matches the game running the whole chain for real', () => {
+    expect(FV.filter((v) => { try { return !runFull(v); } catch { return true; } }).length).toBe(0);
+  });
+  it('exercises kills (XP pool) and weapon status effects', () => {
+    expect(FV.some((v) => Object.keys(v.diff).some((a) => (+a - v.a4) === -15300 || (+a - v.a4) === -15299 || (+a - v.a4) === -15298 || (+a - v.a4) === -15297))).toBe(true);
+    expect(FV.some((v) => Object.keys(v.diff).some((a) => (+a - v.a4) < -30000 && (+a - v.a4) > -30400))).toBe(true);
+  });
+  it('null control: a different seed disagrees', () => {
+    const bad = FV.filter((v) => { try { return !runFull(v, (r) => { r.rng.s[0] = (r.rng.s[0] + 3) % 30000 || 1; }); } catch { return true; } });
+    expect(bad.length).toBeGreaterThan(FV.length / 4);
   });
 });

@@ -158,6 +158,12 @@ export interface AttackIn {
   kind: number;
   /** item id -> word at +28 of its scenario record (A5-46 in the routine) (the cast word of a thrown item) */
   itemCastWord: (id: number) => number;
+  /**
+   * Run the weapon on-hit effects ({@link weaponProc}) and SetStatus ({@link setStatus}) inline, at the
+   * point the game calls them (they consume the shared random stream between strikes). When false (the
+   * default) they are only recorded as effects.
+   */
+  exec?: boolean;
 }
 
 /** LAB_0CD0 (CODE+0x1f33e). Returns the effect log; state changes are made through `m` and `rng`. */
@@ -371,10 +377,12 @@ export function resolveAttack(m: Mem, rng: W6Rng, x: AttackIn): Effect[] {
         if (c > 0xff) c = 0xff;
         m.w8(D + 0x11, c);
         if (m.s16(D + 2) < 1) {
-          fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, 0)]);
+          if (x.exec) setStatus(m, rng, a4, [tg, ti, 0x0d9e, 0, 3, 0, 6, 6, 0x0d50, 0]);
+          else fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, 0)]);
           if (m.u8(A + 0x2b) === 0xff) m.w8(A + 0x2b, 1);
         } else if (m.u8(MR(tg) + 0xd0) !== 0x16) {
-          fx.push(['weapon_proc', hex32(A) + hex32(blk) + hex16(tg) + hex16(ti)]);
+          if (x.exec) weaponProc(m, rng, a4, A, blk, tg, ti, true);
+          else fx.push(['weapon_proc', hex32(A) + hex32(blk) + hex16(tg) + hex16(ti)]);
         }
       }
     } else {
@@ -436,8 +444,12 @@ export function applyStatus(
  *   4 none   5 monster-only stamina drain (record byte +217 = 3) or life drain (= 11, record +161)
  *   6 save vs res 11 (party) / 13 (monster) or die   7 status slot 2 (res 9, different dice)
  */
-export function weaponProc(m: Mem, rng: W6Rng, a4: number, A: number, blk: number, tg: number, ti: number): Effect[] {
+export function weaponProc(m: Mem, rng: W6Rng, a4: number, A: number, blk: number, tg: number, ti: number, exec = false): Effect[] {
   const fx: Effect[] = [];
+  const ss = (msg: number, res: number, state: number, md: number, w7 = 6): void => {
+    fx.push(['set_status', setStatusArgs(tg, ti, msg, res, state, md, w7)]);
+    if (exec) setStatus(m, rng, a4, [tg, ti, msg, res, state, md, w7, 6, 0x0d50, 0]);
+  };
   m.w16(a4 - 10488, 4);
   const D = ti * 0x2c + m.u32(a4 - 15266 + 4 * tg);
   const mr = (g: number) => m.u32(a4 - 15294 + 4 * g);
@@ -449,7 +461,7 @@ export function weaponProc(m: Mem, rng: W6Rng, a4: number, A: number, blk: numbe
       case 0: applyStatus(m, rng, a4, tg, ti, 9, 2, mod, pow, 2, pow); break;
       case 1: applyStatus(m, rng, a4, tg, ti, 4, 3, mod, s16(pow * pow * 2), 5, pow); break;
       case 2: applyStatus(m, rng, a4, tg, ti, 6, 5, mod, s16(pow * 10), 2, m.u8(blk + 12)); break;
-      case 3: fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9d, 11, 2, mod, 0x0e)]); break;
+      case 3: ss(0x0d9d, 11, 2, mod, 0x0e); break;
       case 5: {
         if (m.u16(a4 - 15138) === 0) break;
         const ag = m.u16(a4 - 15138);
@@ -472,12 +484,12 @@ export function weaponProc(m: Mem, rng: W6Rng, a4: number, A: number, blk: numbe
             }
           }
         }
-        if (dmg > 0 && m.s16(D + 2) <= 0) fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, mod)]);
+        if (dmg > 0 && m.s16(D + 2) <= 0) ss(0x0d9e, 0, 3, mod);
         break;
       }
       case 6: {
         const res = tg === 0 ? 11 : 13;
-        if (rng.random(100) > s16(m.u8(mr(tg) + 0x94 + res) - mod)) fx.push(['set_status', setStatusArgs(tg, ti, 0x0d9e, 0, 3, mod)]);
+        if (rng.random(100) > s16(m.u8(mr(tg) + 0x94 + res) - mod)) ss(0x0d9e, 0, 3, mod);
         break;
       }
       case 7: applyStatus(m, rng, a4, tg, ti, 9, 2, mod, s16(pow * 2), 3, pow); break;
