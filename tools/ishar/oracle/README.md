@@ -218,3 +218,8 @@ the key in the hand: `captureLegWalk(..., { use: [179, 87], useCommands:
 ['pokew 19c8 -1', 'pokew 168e -19'] })` (`0x168e` is the held item,
 `0x19c8` the cursor entity; key -21 for door 39, `ishar3DoorKey`). The
 click uses the key up.
+
+Ishar 2 click doors (2026-11-23): `U` clicks (128, 60) with an empty hand.
+Trip with selector 7, poke the party to CONT5 (44,25) facing raw 1 and step
+onto (44,24) so the game itself sets zone 35 (DJ2); door 9 is at (50,22).
+GERDEP shuts doors 5, 9 and 17 after every move.

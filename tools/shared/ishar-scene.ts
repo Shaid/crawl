@@ -182,7 +182,9 @@ export interface IsharTitleSpec {
    * `message` names the entity whose message handler redraws it
    * (`IsharScene.messageChild`).
    */
-  use?(st: IsharPartyState, cell: (region: number, row: number, col: number) => number, cellB?: (region: number, row: number, col: number) => number): { tables: Record<number, number[]>; message?: IsharUseMessage } | null;
+  use?(st: IsharPartyState, cell: (region: number, row: number, col: number) => number, cellB?: (region: number, row: number, col: number) => number, zone?: number): { tables: Record<number, number[]>; message?: IsharUseMessage } | null;
+  /** Tables the game changes after every move the party makes (Ishar 2's GERDEP `+0x13d5` shuts the click doors), or null when nothing changes. */
+  afterMove?(st: IsharPartyState): Record<number, number[]> | null;
   /**
    * The engine's day/night darkening (`cdarkpal r g b first count`): when
    * any factor is not 256, every `cpalette` scales palette entries
@@ -1014,6 +1016,33 @@ const ISHAR2_REGION_GROUPS: Readonly<Record<number, { scripts: readonly string[]
   7: { scripts: [], palette: DUNGEON_PALETTE },
 };
 
+/**
+ * Ishar 2's click doors (traced 2026-11-23, driven in the oracle). DJ2
+ * (`+0x1979`, the zones whose add-ons include it: 35, 45-50) draws a door
+ * of cell code 70..77 face-on and, when its index (grid-B - 60) is shut,
+ * starts a PCAVE with local 9 = 2 (local 13 = the index): at depth 0 it
+ * gets form 2 (material 65) and draws the leaf (sprite 46 + depth). An
+ * empty-hand click on it (SOURIS `+0x66f`) sends message 19; PCAVE `+0x385`
+ * sets `0x4aa4[index]`, slides the leaf 2 px a tick and exits. GERDEP
+ * `+0x13d5` shuts doors 5, 9 and 17 (the three doors with these codes) after
+ * every move, so a click door lets the party through once. Oracle: CONT5
+ * door 9 (50,22), clicked from (50,23) facing raw 1.
+ */
+export const ISHAR2_CLICK_DOORS: readonly number[] = [5, 9, 17];
+
+/** The door on the edge the party faces in Ishar 2's dungeons (regions 5-7), with its cell code, or null. */
+export function ishar2FacingDoor(st: IsharPartyState, cell: (region: number, row: number, col: number) => number, cellB: (region: number, row: number, col: number) => number): { index: number; code: number } | null {
+  if (st.region < 5 || st.region > 7) return null;
+  const dir = ISHAR2_TITLE.facingRaw[st.facing]!;
+  const v = cell(st.region, st.row, st.col);
+  if (ishar2DoorSide(v) === dir) return { index: cellB(st.region, st.row, st.col) - 60, code: v };
+  const to = ISHAR2_TITLE.stepFrom(st, st.facing);
+  if (!to) return null;
+  const t = cell(to.region, to.row, to.col);
+  if (ishar2DoorSide(t) === [0, 3, 4, 1, 2][dir]) return { index: cellB(to.region, to.row, to.col) - 60, code: t };
+  return null;
+}
+
 export const ISHAR2_TITLE: IsharTitleSpec = {
   game: 'ishar2',
   stride: 60,
@@ -1045,6 +1074,24 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
   gridBuffers: 'layers',
   enter(from, to, cell, occupied, cellB) {
     return ishar2Enter(from, to, cell, occupied, cellB, from.tables?.[ISHAR2_DOOR_TABLE]);
+  },
+  // the click doors (`ISHAR2_CLICK_DOORS`): an empty-hand click on the leaf of a shut one in front, in a DJ2 zone
+  use(st, cell, cellB, zone) {
+    if (!cellB || zone === undefined || !(ISHAR2_ZONE_ADDONS[zone] ?? []).includes('DJ2')) return null;
+    const d = ishar2FacingDoor(st, cell, cellB);
+    if (!d || d.code < 70 || d.code > 77 || d.index <= 0) return null;
+    const doors = [...(st.tables?.[ISHAR2_DOOR_TABLE] ?? new Array(70).fill(0))];
+    if (doors[d.index]) return null;
+    doors[d.index] = 1;
+    const tables: Record<number, number[]> = { [ISHAR2_DOOR_TABLE]: doors };
+    return { tables, message: { script: 'PCAVE', local: 13, index: d.index, exit: true } };
+  },
+  afterMove(st) {
+    const doors = st.tables?.[ISHAR2_DOOR_TABLE];
+    if (!doors || ISHAR2_CLICK_DOORS.every((i) => !doors[i])) return null;
+    const shut = [...doors];
+    for (const i of ISHAR2_CLICK_DOORS) shut[i] = 0;
+    return { [ISHAR2_DOOR_TABLE]: shut };
   },
   stepFrom(st, dir) {
     // Same raw-facing directions as Ishar 1 (the scripts' own facing

@@ -529,3 +529,45 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
     }
   }, 300_000);
 });
+
+/**
+ * Ishar 2's click door (2026-11-23): trip to the first dungeon (selector
+ * 7), poke the party next to CONT5's zone-35 cell (44,24) so a step onto it
+ * starts DJ2, walk to (50,23), click the leaf of door 9 with an empty hand
+ * (`U` at the title's use point): PCAVE opens it, the party walks through,
+ * and GERDEP `+0x13d5` shuts it after that move (`ISHAR2_CLICK_DOORS`).
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.dataDir, 'MAIN.DO')))('ishar2 click door vs the game (alis oracle)', () => {
+  it('opens door 9 with a click like the game and matches the view', () => {
+    const out = tempDir('ishar2-clickdoor-test-');
+    try {
+      prepareGameDir('ishar2');
+      if (!existsSync(savestatePath('ishar2'))) bootToSavestate('ishar2', join(out, 'boot'));
+      const trip = join(out, 'trip.state');
+      const at = captureTrip('ishar2', [14, 7], trip);
+      expect(at).toEqual({ region: 5, row: 10, col: 46, facingRaw: 2 });
+      // the first F (from the poked (44,25)) steps onto the zone cell; then the route to the door, U, through, and back
+      const actions = [...'FLLFFLFFFFFFLFFFUFFRRFFF'] as Array<'F' | 'L' | 'R' | 'U'>;
+      const steps = captureLegWalk('ishar2', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: trip, start: at, maxLegs: 1, legCommands: ['poke 2ab4 44', 'poke 2ab5 25', 'poke 2ab6 1', 'pokew 2d5c 500'] });
+      expect(steps.length).toBe(actions.length);
+      const u = actions.indexOf('U');
+      expect(steps[u - 1]!.mem!.doorOpen![9]).toBe(0);
+      expect(steps[u]!.mem!.doorOpen![9]).toBe(1);
+      expect(steps[u + 1]!.mem!.doorOpen![9]).toBe(0);
+      expect([steps[u + 1]!.row, steps[u + 1]!.col]).toEqual([50, 22]);
+      const data = loadTitleData('ishar2');
+      // the walk starts at the poked cell (the first step is the move onto the zone cell)
+      const start = { region: 5, row: 44, col: 25, facing: 0 as const };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar2', data), {}, 0, 30, false);
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar2', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        // the click frame: the game's leaf is mid-slide (PCAVE +0x3a9), crawl draws the end state
+        const missing = steps[i]!.action === 'U' ? 1 : 0;
+        expect({ i, move: w.moveAgrees, tables: w.tablesAgree ?? true, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, tables: true, matched: r.oracle - missing, crawl: r.oracle - missing });
+        if (!missing) expect(r.pixelsMasked - r.pixelsMaskedEqual, `step ${i} pixels`).toBeLessThanOrEqual(0);
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});

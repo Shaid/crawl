@@ -193,3 +193,24 @@ describe.skipIf(!existsSync('data/ishar3/amigaaga/CONT5-3.FIC'))('Ishar 3 dungeo
     expect(ishar3FacingDoor({ region: 7, row: 9, col: 31, facing: 0 }, cell, cellB) === 13 ? T.use!({ region: 7, row: 9, col: 31, facing: 0 }, cell, cellB) : null).toBeNull();
   });
 });
+
+describe.skipIf(!existsSync('data/ishar2/amigaaga/CONT5.FIC'))('Ishar 2 click doors (DJ2 +0x1979, PCAVE +0x385, GERDEP +0x13d5)', () => {
+  it('opens door 9 from a DJ2 zone and shuts it after the next move', async () => {
+    const { ishar2FacingDoor, ISHAR2_TITLE: T, ISHAR2_DOOR_TABLE } = await import('../../shared/ishar-scene.ts');
+    const f = new Uint8Array(readFileSync('data/ishar2/amigaaga/CONT5.FIC'));
+    const n = 60 * 90;
+    const cell = (_r: number, row: number, col: number) => ((f[row * 60 + col]! << 24) >> 24);
+    const cellB = (_r: number, row: number, col: number) => ((f[n + row * 60 + col]! << 24) >> 24);
+    // door 9 (code 70, grid-B 69) on (50,22)'s col+1 edge: faced from (50,23) at raw 1 (walker 0) and from (50,22) at raw 3 (walker 2)
+    const at = { region: 5, row: 50, col: 23, facing: 0 as const };
+    expect(ishar2FacingDoor(at, cell, cellB)).toEqual({ index: 9, code: 70 });
+    expect(ishar2FacingDoor({ ...at, col: 22, facing: 2 }, cell, cellB)).toEqual({ index: 9, code: 70 });
+    const u = T.use!(at, cell, cellB, 35);
+    expect(u?.tables[ISHAR2_DOOR_TABLE]![9]).toBe(1);
+    expect(u?.message).toEqual({ script: 'PCAVE', local: 13, index: 9, exit: true });
+    // DJ1 zones draw the door without a click form
+    expect(T.use!(at, cell, cellB, 33)).toBeNull();
+    expect(T.afterMove!({ ...at, tables: u!.tables })![ISHAR2_DOOR_TABLE]![9]).toBe(0);
+    expect(T.afterMove!(at)).toBeNull();
+  });
+});

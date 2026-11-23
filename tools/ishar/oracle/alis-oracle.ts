@@ -179,6 +179,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     npcScripts: ['pours1', 'lezard1', 'fly1', 'people1', 'people2', 'golem1', 'wizard1', 'aigle'],
     // everything EAFF reads to place the monsters (the EN1 arrays and its front-row slots)
     // and GERDEP's sub-zone `0x4ef2` (MAIN swaps the zone add-ons on it)
+    // `U`: an empty-hand click in the view centre (a click door's leaf, SOURIS +0x66f)
+    use: [128, 60],
     stepMemdumps: [...entityDumps(ISHAR2_TITLE), { name: 'zone', off: 0x4ef2, len: 1 }, { name: 'doorOpen', off: 0x4aa4, len: 70, table: true }],
     bootMemdumps: entityDumps(ISHAR2_TITLE),
     // the day phase: MAIN advances it on a timer (frames 12965, 14965 ... of play)

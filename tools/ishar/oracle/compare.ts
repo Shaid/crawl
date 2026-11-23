@@ -359,7 +359,7 @@ export function crawlWalk(
       // the entities whose message handlers redraw it
       const cell = (region: number, row: number, col: number) => s8(layers(isharContOf(spec, region))?.[0]?.[row * spec.stride + col] ?? 0);
       const cellB = (region: number, row: number, col: number) => s8(layers(isharContOf(spec, region))?.[1]?.[row * spec.stride + col] ?? 0);
-      const u = spec.use?.(cur, cell, cellB) ?? null;
+      const u = spec.use?.(cur, cell, cellB, scene.zone) ?? null;
       // nothing usable in front: the tables stay as they were
       const pred = u ? u.tables : (cur.tables ?? {});
       const tablesAgree = Object.entries(pred).every(([a, t]) => {

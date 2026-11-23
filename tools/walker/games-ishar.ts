@@ -470,7 +470,9 @@ export class IsharView implements GameView {
    * front (doors 0..15, a key or a picked lock, message 19; the walker
    * keeps no inventory, so it assumes the key). Ishar 3: pull the dungeon
    * lever in the party's cell (`ishar3FacingLever`), which toggles its door,
-   * else open the keyhole door ahead (`ishar3DoorKey`, again assuming the key). The scene redraws at once, the way PCAVE's handler
+   * else open the keyhole door ahead (`ishar3DoorKey`, again assuming the key).
+   * Ishar 2: open the click door ahead in a DJ2 zone (`ISHAR2_CLICK_DOORS`; it
+   * shuts again after the next move, `afterMove`). The scene redraws at once, the way PCAVE's handler
    * slides the lever or the door. Returns true if something changed.
    */
   private use(): boolean {
@@ -486,7 +488,7 @@ export class IsharView implements GameView {
       const v = l ? (l[row * sc.spec.stride + col] ?? 0) : 0;
       return v >= 128 ? v - 256 : v;
     };
-    const u = sc.spec.use(this.partyState(), cellAt, cellB);
+    const u = sc.spec.use(this.partyState(), cellAt, cellB, this.scene?.zone);
     if (!u) return false;
     this.usedTables = { ...(this.usedTables ?? {}), ...u.tables };
     if (u.message && this.scene) {
@@ -643,6 +645,9 @@ export class IsharView implements GameView {
       if (!region) return null;
       this.region = region;
       this.pose_ = next;
+      // tables the game changes after every move (Ishar 2: the click doors shut again)
+      const after = this.data.scene?.spec.afterMove?.(this.partyState());
+      if (after) this.usedTables = { ...(this.usedTables ?? {}), ...after };
     }
     this.stepCooldown = STEP_COOLDOWN_MS;
     // The game wakes its scene on every step or turn whichever view is up.

@@ -2089,7 +2089,25 @@ the gate between two legs.
       with a plain click), 70 goes to a trap-door path. PCAVE gives forms
       1/2 (material 65) to doors whose entity variable 9 is 1/2 when
       adjacent, forms 0/3 (64) to levers, and forms 4/5 (67/68) to doors
-      29/30. Not driven yet.
+      29/30.
+      **Click doors (2026-11-23, traced and driven).** Only DJ2 (zones
+      35, 45-50) starts a PCAVE with local 9 = 2: `+0x1979` draws a door of
+      cell code 70..77 face-on (sprite 117) and, when its index (grid-B -
+      60) is shut, starts PCAVE with local 13 = the index; at depth 0
+      PCAVE gives it form 2 and draws the leaf (46 + depth). The click sends
+      19; PCAVE `+0x385` sets `0x4aa4[index]`, slides the leaf 2 px a tick
+      and exits. GERDEP `+0x13d5`, after every move and before the zone
+      routine, shuts doors 5, 9 and 17, the only doors with codes 70..77:
+      a click door lets the party through once (found with
+      `ALIS_HARNESS_WATCH`). DJ1/DJCAT start door PCAVEs with local 9 = 0
+      only, so doors 5 and 17, which border DJ1 zones, look unclickable
+      (not driven). Ported as `ISHAR2_CLICK_DOORS`, `ishar2FacingDoor`,
+      `ISHAR2_TITLE.use` (needs the zone) and `afterMove`. Oracle walk
+      (trip selector 7, poked next to the zone-35 cell (44,24), then only
+      the game's buttons and a view click at (128, 60)): to (50,23),
+      click door 9, through, turn back into the shut door: 24/24 moves,
+      1/1 tables, 392/393 placements (the click frame's sliding leaf),
+      100.000% of masked pixels.
     - **Ishar 3 (driven 2026-11-25).** The dungeon levers work the same
       way: DJ1/DJ3 (`+0x123d`) draw a lever on a cell whose layer-0 code
       is 46..49 when the party faces raw -1, 2, 1, -2 respectively (the
@@ -2378,7 +2396,7 @@ the gate between two legs.
 
 - ~~how a click reaches a door's form, and the levers~~ (Ishar 1 solved
   2026-11-25, item 18; Ishar 3's levers and keyhole doors driven, item 19;
-  Ishar 2 traced in part, not driven);
+  Ishar 2's click doors driven 2026-11-23, its levers and doors 29/30 not);
 - Ishar 2's island NPCs, the jail and the cliff (item 19);
 - Ishar 3's dungeon region 8 and locations 24 and 28, not measured
   (23, 26 and 27 measured 2026-11-23); the VJARDIN bank residual (item 21);
