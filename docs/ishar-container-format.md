@@ -2004,10 +2004,73 @@ the gate between two legs.
     - **Walker.** The E key opens a clickable door the party faces, which
       is the effect of `+0x1c4`.
 
+19. **Ishar 2's islands (2026-11-23, driven and measured).**
+    - **Who sends the selector.** MAP (the travel map) sends MAIN message
+      14 with `0x4f10` = the clicked form - 20 (`+0xcf`, selectors 1..8;
+      0 exits). It does so only in travel mode, MAP's `dirb 12`, which MAIN
+      copies from `0x51c4` when it opens the map (`+0x367d`). MAIN message
+      25 stores that mode and opens the map (`+0x35fc`): FRISE's map button
+      sends 25,0 (view only); GERDEP sends 25,1 when the party steps forward
+      onto region 4's grid-B 127 (a dock), and 14,-2 on 126 (`+0xebf`).
+      Islands 2-4 and 6-8 also need the flags `0x4fc2..0x4fc5` (MAP draws
+      only the islands the party knows). MAIN message 30 (from PP3MN, a
+      dialogue) plays a picture and sends the party to selector -1.
+    - **Not loaders.** `+0x377a`, `+0x37f4`, `+0x3872` and `+0x38d9` set a
+      file name (main/dj1/plaine1/fville/sville/ewok2 with the `.co`/`.ao`/
+      `.fo`/`.do` suffix per variant) and call `+0x38f2`, which prints
+      "Disk A/B/C/D" until that file exists: the disk prompts.
+    - **Scene groups.** MAIN `+0x16f8` (`cswitch2` on the region code):
+      1 FOND1 + PLAINE1, 2 FARBO + ARBO, 3 FVILLE + VHOUSE2 (Zach's town),
+      4 MONTAGNE + FMONT (Jon's Island), 5-7 nothing. The zone starters
+      `+0x2156` (zones 1..52) and `+0x24ce` (zones 10..58) `clive` the
+      add-ons: the town quarters (VARCHE, VILLE, VPONT, VHOUSE1, VMAIRIE,
+      VPASSAGE, VJAIL, VTEMPLE, VBIBLI, VPORT, VNIGHT, VDEC1-3) and the
+      dungeon walls (FDJCAT + DJCAT, FDJ1 + DJ1, FDJ2 + DJ2, DJDEC, DJCOL).
+      The DJ scripts start PCAVE (doors) as a child. `ISHAR2_ZONE_ADDONS`
+      is checked against MAIN's bytes. Script id 81 is both VDEC1.DO and
+      VLINGE.DO; MAIN's `cload` names it vdec1.
+    - **Palettes.** Each outdoor backdrop picks its slot from the day phase
+      `0x519f` (FARBO 1/3/4, FMONT 3/5/6, FVILLE 0/7/8, like FOND1 3/4/5);
+      the dungeon backdrops have one palette each.
+    - **Step test** (GERDEP `+0xb72`, ported as `ishar2Enter`). A negative
+      layer-0 target is refused (-21..-18 and -5 are house doors: message
+      17). In region 4 a layer-1 target above 87 is refused. In region 1 a
+      monster on the target refuses it (EN1 slots 50..109 in the party's
+      zone `0x449a`, kind `0x43ba` < 0 or 99, row `0x3412`, col `0x34f0`;
+      note row and col are this way round). Elsewhere a monster with hp in
+      the party's own cell holds the side its type `0x35ce` names (1..4 =
+      raw direction). In regions 5-7 the cell codes 38-45, 54-57, 70-77 and
+      84 put a door on one edge (east/south/west/north classes); crossing it
+      reads the door index from that cell's layer 1 and is refused when the
+      index is above 60 and `0x4aa4[index - 60]` is 0.
+    - **Hazards.** GERDEP takes hp every step on Jon's Island (cold,
+      `+0x229` and `+0x32e`; the second depends on the item -78 in
+      inventory column 11); hp is the word array `0x2d5c`. With the new-game
+      party (one member) that, or the monsters, kills the party within a
+      dozen steps: LOSTGAME shows and the game reloads at CONT1 (27,47).
+      Region 4 (76,2) is a cliff edge: stepping onto it shows LOSTGAME even
+      with the hp poked. The walks poke the hp; the cliff is not modelled.
+
+    | Arrival (selector) | Island | Actions | Moves | Placements | Masked pixels |
+    |---|---|---|---|---|---|
+    | 1 | 1 (boat zone) | 40 | 40/40 | 3712/3712 | 100.000% |
+    | 6 | 2 (FARBO/ARBO) | 40 | 40/40 | 2806/2806 | 100.000% |
+    | 5 | 3, Zach's town | 40 | 40/40 | 1418/1421 | 99.943% |
+    | -2 | 3, the jail | 40 | 40/40 | 1317/1317 | 99.974% |
+    | 2, 3 | 4, Jon's Island | 40 + 40 | 80/80 | 5815/5815 | 100.000% |
+    | 7 | 5, dungeon | 40 | 40/40 | 639/639 | 100.000% |
+    | 8 | 6, dungeon | 40 | 40/40 | 914/914 | 100.000% |
+    | -1 | 7, dungeon | 40 | 40/40 | 600/600 | 100.000% |
+
+    Roaming NPCs removed (`noNpcs`). The three Zach's Island misses are one
+    VHOUSE2 sprite (slot 5) placed at height 26 by the game and -1 by crawl
+    on the first three frames after the arrival. Before this pass the
+    islands had no scene at all (0%).
+
 **Not covered yet** (rewritten 2026-11-23):
 
 - how a click reaches a door's form, and the levers (item 18; the walks poke them open);
-- Ishar 2 outside its start group (`ishar2-scene-groups`);
+- Ishar 2's island NPCs, the jail and the cliff (item 19);
 - Ishar 3 beyond Maz and the forest (item 16: the jungle, dungeon and
   mountain groups are decoded but not measured);
 - monster movement and combat. The walker draws the NPCs at their EN1

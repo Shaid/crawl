@@ -141,7 +141,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     region: 0x2d18,
     npcScripts: ['pours1', 'lezard1', 'fly1', 'people1', 'people2', 'golem1', 'wizard1', 'aigle'],
     // everything EAFF reads to place the monsters (the EN1 arrays and its front-row slots)
-    stepMemdumps: entityDumps(ISHAR2_TITLE),
+    // and GERDEP's sub-zone `0x4ef2` (MAIN swaps the zone add-ons on it)
+    stepMemdumps: [...entityDumps(ISHAR2_TITLE), { name: 'zone', off: 0x4ef2, len: 1 }, { name: 'doorOpen', off: 0x4aa4, len: 70, table: true }],
     bootMemdumps: entityDumps(ISHAR2_TITLE),
     // the day phase: MAIN advances it on a timer (frames 12965, 14965 ... of play)
     stateGlobals: [0x519f],
@@ -635,6 +636,37 @@ export function captureLegWalk(
     rmSync(dirname(own), { recursive: true, force: true });
   }
   return steps;
+}
+
+/**
+ * Drive a trip the way the game's own scripts do: queue a message for MAIN
+ * (harness `send`, the same queue write as `csend`), let the game play it
+ * for `frames` frames from the boot savestate, and keep the savestate it
+ * reaches in `statePath`. Ishar 2: `[14, selector]` is what MAP (the travel
+ * map), GERDEP (region 4's cell 126) and GESORT (recall) send; MAIN
+ * `+0x374` stores the selector and runs the arrival table (`ISHAR2_TRAVEL`).
+ * Returns the party state the game holds at the end.
+ */
+export function captureTrip(game: OracleGame, message: readonly number[], statePath: string, frames = 400): { region: number; row: number; col: number; facingRaw: number } {
+  const t = ORACLE_TITLES[game];
+  const own = join(tempDir(`${game}-trip-`), 'game');
+  mkdirSync(own, { recursive: true });
+  for (const f of readdirSync(gameDir(game))) {
+    const d = join(own, f);
+    if (f === 'alis.state') copyFileSync(join(gameDir(game), f), d);
+    else linkSync(join(gameDir(game), f), d);
+  }
+  try {
+    const out = join(dirname(own), 'out');
+    const ev: Array<[number, string]> = [[2, `send 0 ${message.join(' ')}`], ...partyDumps(t, frames, 'trip'), [frames + 2, 'save'], [frames + 6, 'quit']];
+    const r = runOracle(game, ev, out, { loadState: true, gameDir: own, timeoutMs: 120_000 });
+    if (!existsSync(join(out, 'trip.row.bin'))) throw new Error(`oracle did not finish the trip\n${r.stderr.slice(-2000)}`);
+    copyFileSync(join(own, 'alis.state'), statePath);
+    const p = readParty(t, out, 'trip');
+    return { region: p.region, row: p.row, col: p.col, facingRaw: p.facingRaw };
+  } finally {
+    rmSync(dirname(own), { recursive: true, force: true });
+  }
 }
 
 export function tempDir(prefix: string): string {

@@ -139,10 +139,10 @@ index d3b0040..e68f4f2 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..7e0d903
+index 0000000..38fb1cf
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,221 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -156,6 +156,7 @@ index 0000000..7e0d903
 +//   memdump OFF N NAME                  (raw bytes at basemain+OFF -> NAME.bin)
 +//   derefdump OFF N NAME                (N bytes of an indirect v3 array: the handle at basemain+OFF)
 +//   derefpoke OFF IDX VAL               (byte IDX of that array := VAL, IDX decimal)
++//   send ENTRY V1 [V2 ...]              (queue a message for the entity at atent offset ENTRY, 0 = MAIN, as csend does)
 +//   dump NAME                           (NAME.ppm frame + NAME.spr live sprite list)
 +//   save | quit | mark TEXT
 +#include <stdio.h>
@@ -258,6 +259,27 @@ index 0000000..7e0d903
 +    else if (!strcmp(cmd, "peek")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d", &off, &n); fprintf(stderr, "[peek] %ld %x:", h_frameno, off); for (int i = 0; i < n; i++) fprintf(stderr, " %d", (s8) * (u8 *)(alis.mem + alis.basemain + off + i)); fprintf(stderr, "\n"); }
 +    else if (!strcmp(cmd, "memdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + alis.basemain + off, 1, n, o); fclose(o); } }
 +    else if (!strcmp(cmd, "derefdump")) { unsigned off; int n; sscanf(h_line, "%*ld %*s %x %d %159s", &off, &n, name); u32 a = xread32(xread32(alis.basemain + off)); char p[512]; snprintf(p, sizeof p, "%s/%s.bin", h_out(), name); FILE *o = fopen(p, "wb"); if (o) { fwrite(alis.mem + a, 1, n, o); fclose(o); } }
++    else if (!strcmp(cmd, "send")) {
++      /* the same queue write as the engine's csend (engine 2.0 layout): values go
++         at scan_clr (vram-0x1c), stepping by 2 and wrapping by the script's queue size */
++      int ent = 0, vals[16], n = 0; const char *q = h_line; int skip = 0;
++      sscanf(q, "%*ld %*s %d%n", &ent, &skip); q += skip;
++      while (n < 16 && sscanf(q, "%d%n", &vals[n], &skip) == 1) { q += skip; n++; }
++      u32 vram = xread32(alis.atent + ent);
++      if (vram && n && !(get_0x24_scan_inter(vram) & 1)) {
++        s16 limit = alis.platform.version >= 30 ? -0x3f : -0x35;
++        s16 qoff = xread16(get_0x14_script_org_offset(vram) + 0x16);
++        s16 at = get_0x1c_scan_clr(vram);
++        for (int i = 0; i < n; i++) {
++          s16 nx = at + 2; if (limit < nx) nx -= qoff;
++          if (nx == get_0x1e_scan_clr(vram)) break;
++          xwrite16(vram + at, (s16)vals[i]); at = nx;
++        }
++        set_0x1c_scan_clr(vram, at);
++        set_0x24_scan_inter(vram, get_0x24_scan_inter(vram) | 0x80);
++        fprintf(stderr, "[send] %ld entity %d: %d values\n", h_frameno, ent, n);
++      } else fprintf(stderr, "[send] %ld entity %d: not queued\n", h_frameno, ent);
++    }
 +    else if (!strcmp(cmd, "derefpoke")) { unsigned off; int idx, v; sscanf(h_line, "%*ld %*s %x %d %d", &off, &idx, &v); u32 a = xread32(xread32(alis.basemain + off)); *(u8 *)(alis.mem + a + idx) = (u8)v; }
 +    else if (!strcmp(cmd, "dump")) { sscanf(h_line, "%*ld %*s %159s", name); h_dump_ppm(name); h_dump_sprites(name); fprintf(stderr, "[dump] %ld %s\n", h_frameno, name); }
 +    else if (!strcmp(cmd, "save")) { alis.state = eAlisStateSave; }

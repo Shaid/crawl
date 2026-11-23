@@ -77,6 +77,10 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
   at `0x14ae`);
 - `derefpoke OFF IDX VAL` — writes byte IDX (decimal) of such an array
   (for example, a gate value 100 into Ishar 3's buffer B to drive a trip);
+- `send ENTRY V1 [V2 ...]` — queues a message for the entity at `atent`
+  offset ENTRY (0 = MAIN), the same queue write the engine's `csend` makes.
+  `captureTrip(game, [14, selector], statePath)` uses it to drive an
+  Ishar 2 island trip (what the travel map sends) and keeps the savestate;
 - `dump NAME` — writes the frame and the display list;
 - `save`, `mark`, `quit`.
 
@@ -143,3 +147,13 @@ CONT4-3) at (3,5). Caveat: every savestate load advances Ishar 3's game
 clock by hours (the clock is not in the saved state the same way), so
 multi-leg walks jump through day and night; use single-leg walks for
 measurements.
+
+Ishar 2 island trips (2026-11-23): `captureTrip('ishar2', [14, selector],
+state)` sends MAIN message 14 from the new-game state (MAP, the travel map,
+sends it when an island is clicked; MAIN `+0x374` stores the selector and
+runs the arrival table). All ten selectors land where `ISHAR2_TRAVEL` says.
+Walk from the saved state in short legs with `legCommands: ['pokew 2d5c
+500']`: hp is the word array `0x2d5c`, and GERDEP takes 1-2 hp per step on
+Jon's Island (cold, `+0x229`/`+0x32e`) and the dungeon monsters attack, so
+an unpoked party dies within a dozen steps (LOSTGAME, then the game reloads
+at CONT1 (27,47)).

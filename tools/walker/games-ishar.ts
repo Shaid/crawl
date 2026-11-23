@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, isharSceneScriptNames, ishar1DoorClickable, ishar1FacingDoor, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, isharContOf, isharSceneScriptNames, ishar1DoorClickable, ishar1FacingDoor, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -417,6 +417,8 @@ export class IsharView implements GameView {
   private travelKeyWasDown = false;
   private useKeyWasDown = false;
   private travelIndex = 0;
+  /** The sub-zone a travel arrival sets (MAIN's arrival table), applied when the new scene starts. */
+  private pendingZone: number | null = null;
   private locationIndex = 0;
   private fpCache: { key: string; frame: ReturnType<typeof renderIsharLocationFrame> } | null = null;
   private fpCanvas: HTMLCanvasElement | null = null;
@@ -505,6 +507,8 @@ export class IsharView implements GameView {
       this.scene = new IsharScene(sc.spec, (n) => sc.scripts.get(n.toUpperCase()), grids);
       // NPCs and monsters at their new-game EN1 places (the walker does not move them)
       this.scene.memory = sc.memory ?? {};
+      if (this.pendingZone !== null) this.scene.zone = this.pendingZone;
+      this.pendingZone = null;
       this.scene.enter(st);
     } else {
       this.scene.setGrids(grids);
@@ -588,12 +592,13 @@ export class IsharView implements GameView {
 
     // Ishar 2: T jumps to the next of the game's own travel destinations
     // (MAIN's arrival table, `ISHAR2_TRAVEL`), as a boat trip or a spell
-    // would; the sub-zone is not carried over yet.
+    // would, with the arrival's sub-zone (its add-ons: town houses, dungeon walls).
     const travelDown = keys.isDown('KeyT');
     if (travelDown && !this.travelKeyWasDown && this.id === 'ishar2') {
       const d = ISHAR2_TRAVEL[this.travelIndex++ % ISHAR2_TRAVEL.length]!;
       const facing = ISHAR2_TITLE.facingRaw.indexOf(d.facingRaw) as Pose['facing'];
       if (this.gridOf(d.region)) {
+        this.pendingZone = d.zone;
         this.setPose({ level: d.region, x: d.row, y: d.col, facing });
         this.travelKeyWasDown = travelDown;
         return this.pose_;
@@ -666,7 +671,13 @@ export class IsharView implements GameView {
       const from = this.partyState();
       // Ishar 1: monsters hold their cells (GERDEP +0x1584), at their new-game EN1 places
       const table = this.id === 'ishar' ? ishar1MonsterTableFromMemory(sc.memory ?? {}) : null;
-      const to = sc.spec.enter(from, { ...from, region: target.level, row: target.x, col: target.y }, cellAt, table ? ishar1Occupancy(table) : undefined);
+      // the layer-1 grid (Ishar 2's door indices); `storage` holds each CONT file's layers by file number
+      const cellB = (lv: number, row: number, col: number) => {
+        const l = this.data.storage.get(isharContOf(sc.spec, lv))?.[1];
+        const v = l ? (l[row * sc.spec.stride + col] ?? 0) : 0;
+        return v >= 128 ? v - 256 : v;
+      };
+      const to = sc.spec.enter(from, { ...from, region: target.level, row: target.x, col: target.y }, cellAt, table ? ishar1Occupancy(table) : undefined, cellB);
       return to ? { level: to.region, x: to.row, y: to.col, facing: this.pose_.facing } : null;
     }
     if (!this.noclip && isBlocked(cell)) return null;

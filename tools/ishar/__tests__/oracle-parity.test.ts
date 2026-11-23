@@ -14,7 +14,8 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { bootToSavestate, captureWalk, capturePoses, ORACLE_TITLES, oracleAvailable, prepareGameDir, savestatePath, tempDir, type OracleGame, type OraclePose } from '../oracle/alis-oracle.ts';
+import { bootToSavestate, captureLegWalk, captureTrip, captureWalk, capturePoses, ORACLE_TITLES, oracleAvailable, prepareGameDir, savestatePath, tempDir, type OracleGame, type OraclePose } from '../oracle/alis-oracle.ts';
+import { ISHAR2_TRAVEL } from '../../shared/ishar-scene.ts';
 import { bootGridB, comparePose, contLayers, crawlSequence, crawlWalk, loadTitleData, oracleRunGrids, oracleRunMemory } from '../oracle/compare.ts';
 
 /**
@@ -152,6 +153,56 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.data
       rmSync(out, { recursive: true, force: true });
     }
   }, 180_000);
+});
+
+/**
+ * Ishar 2's other islands. Each trip is driven the way MAP (the travel map)
+ * does it: MAIN message 14 with the selector (harness `send`), from the
+ * new-game state; MAIN's arrival table moves the party and loads the
+ * island. Then a walk in 5-action legs, each poking the party's hp up
+ * (`0x2d5c`: GERDEP takes cold damage on Jon's Island and the dungeon
+ * monsters attack). Roaming monsters are removed; the step test reads the
+ * monsters left in EN1 and the door flags (`ishar2Enter`).
+ */
+const ISHAR2_TRIPS: ReadonlyArray<{ selector: number; walk: string; groups: string[] }> = [
+  { selector: 6, walk: 'FFFFFFFFFFFFFLLFLLLLFLLL', groups: ['FARBO', 'ARBO'] },
+  { selector: 2, walk: 'FLFFFFFFLFLLLFFFLFLLFLLL', groups: ['FMONT', 'MONTAGNE'] },
+  { selector: 7, walk: 'FFFFFFFFLFFFFLFFFLFFFLLL', groups: ['FDJCAT', 'FDJ1'] },
+  { selector: 8, walk: 'FFFFFFFFLFFFLFFLLFLLFLLL', groups: ['FDJ1'] },
+];
+
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.dataDir, 'MAIN.DO')))('ishar2 island trips vs the game (alis oracle)', () => {
+  it.each(ISHAR2_TRIPS)('selector $selector: arrives where MAIN says, moves like the game and matches the view', ({ selector, walk, groups }) => {
+    const out = tempDir('ishar2-trip-test-');
+    try {
+      prepareGameDir('ishar2');
+      if (!existsSync(savestatePath('ishar2'))) bootToSavestate('ishar2', join(out, 'boot'));
+      const state = join(out, 'trip.state');
+      const at = captureTrip('ishar2', [14, selector], state);
+      const d = ISHAR2_TRAVEL.find((t) => t.selector === selector)!;
+      expect(at).toEqual({ region: d.region, row: d.row, col: d.col, facingRaw: d.facingRaw });
+      const actions = [...walk] as Array<'F' | 'L' | 'R'>;
+      const steps = captureLegWalk('ishar2', (_c, done) => (done.length >= actions.length ? null : actions.slice(done.length, done.length + 5)), join(out, 'walk'), {
+        noNpcs: true, startState: state, start: at, legCommands: ['pokew 2d5c 500'],
+      });
+      expect(steps.length).toBe(actions.length);
+      const data = loadTitleData('ishar2');
+      const spec = data.spec;
+      const start = { region: at.region, row: at.row, col: at.col, facing: spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar2', data), {}, 0, d.zone, false);
+      expect(groups.every((g) => cw.some((w) => w.scripts.includes(g)))).toBe(true);
+      let px = 0, pxEq = 0;
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar2', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, matched: r.oracle, crawl: r.oracle });
+        px += r.pixelsMasked;
+        pxEq += r.pixelsMaskedEqual;
+      });
+      expect(pxEq / px).toBeGreaterThan(0.9995);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
 });
 
 /**

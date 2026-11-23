@@ -67,8 +67,12 @@ export interface IsharPartyState {
 export interface IsharSceneGroup {
   /** Scene scripts in MAIN's `clive` order (= the entity order they run in each frame). Names without extension. */
   scripts: readonly string[];
-  /** The backdrop script whose palette the view uses, and the directory slot its `cpalette` installs. */
-  paletteFrom?: { script: string; slot: number | ((readMain: (addr: number) => number) => number) };
+  /**
+   * The backdrop script whose palette the view uses, and the directory slot
+   * its `cpalette` installs. A list names candidates: the first one alive
+   * wins (Ishar 2's dungeons, whose backdrop is a zone add-on).
+   */
+  paletteFrom?: { script: string | readonly string[]; slot: number | ((readMain: (addr: number) => number) => number) };
 }
 
 export interface IsharTitleSpec {
@@ -140,7 +144,7 @@ export interface IsharTitleSpec {
    * party state after the step (a passage can move the party elsewhere) or
    * null when the game refuses it. Default: refused on a negative cell.
    */
-  enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number, occupied?: IsharOccupancy): IsharPartyState | null;
+  enter?(from: IsharPartyState, to: IsharPartyState, cell: (region: number, row: number, col: number) => number, occupied?: IsharOccupancy, cellB?: (region: number, row: number, col: number) => number): IsharPartyState | null;
   /**
    * The engine's day/night darkening (`cdarkpal r g b first count`): when
    * any factor is not 256, every `cpalette` scales palette entries
@@ -183,9 +187,12 @@ export interface IsharTitleSpec {
 /**
  * True when a monster stands on (region, row, col) in the sense of GERDEP's
  * monster check (Ishar 1 `+0x1584`). Absent = nothing is known to stand
- * anywhere (the walker does not simulate monsters).
+ * anywhere (the walker does not simulate monsters). With `dir` (a raw
+ * facing, 1..4) the question is instead whether a monster in that cell
+ * blocks leaving it that way (Ishar 2 GERDEP `+0xc8b`: a monster standing
+ * in the party's own cell holds one side of it).
  */
-export type IsharOccupancy = (region: number, row: number, col: number) => boolean;
+export type IsharOccupancy = (region: number, row: number, col: number, dir?: number) => boolean;
 
 /**
  * Ishar 1's monster table: 70 slots, loaded from `EN1.FIC` by MAIN
@@ -664,6 +671,134 @@ export const ISHAR2_TRAVEL: ReadonlyArray<{ selector: number; region: number; ro
   { selector: 8, region: 6, row: 11, col: 45, zone: 41, facingRaw: 2 },
 ];
 
+/**
+ * Ishar 2's zone add-ons: the scripts MAIN `clive`s for each sub-zone
+ * `0x4ef2`, in its order. Read off MAIN's two starter switches, `+0x2156`
+ * (`cswitch2` base -1, zones 1..52) and `+0x24ce` (base -10, zones 10..58);
+ * every arm is a run of `clive id` until the jump out. Zone 35 adds DJCOL
+ * (`+0x2616`). Names follow MAIN's own `cload` list (`+0x1928..`): id 81 is
+ * `vdec1.AO` (VLINGE.DO carries the same header id). Checked against MAIN's
+ * bytes in `ishar2-travel.test.ts`, and against the oracle's arrival runs
+ * (zone 19 VJAIL + VILLE, 23 VARCHE + VPORT + VDEC1, 51 FDJCAT + DJCAT).
+ */
+export const ISHAR2_ZONE_ADDONS: Readonly<Record<number, readonly string[]>> = {
+  1: ['VILLAGE1'], 3: ['BOAT'], 5: ['FORET1'], 9: ['FORET1'],
+  10: ['VARCHE', 'VARCADE', 'VDEC1'], 11: ['VARCHE', 'VILLE', 'VPONT'], 12: ['VHOUSE1', 'VILLE', 'VDEC1'],
+  13: ['VHOUSE1', 'VMAIRIE', 'VPASSAGE', 'VDEC1'], 14: ['VARCHE', 'VILLE', 'VPONT'], 15: ['VARCHE', 'VARCADE', 'VDEC1'],
+  16: ['VARCHE', 'VILLE', 'VPASSAGE'], 17: ['VHOUSE1', 'VARCHE', 'VPASSAGE', 'VDEC2'], 18: ['VNIGHT', 'VARCHE'],
+  19: ['VJAIL', 'VILLE'], 20: ['VHOUSE1', 'VTEMPLE'], 21: ['VHOUSE1', 'VMAIRIE', 'VPASSAGE'], 22: ['VHOUSE1', 'VBIBLI', 'VDEC3'],
+  23: ['VARCHE', 'VPORT', 'VDEC1'], 24: ['DJCAT', 'FDJCAT'], 30: ['FDJCAT', 'DJCAT'], 31: ['FDJ1', 'DJ1'], 32: ['DJDEC', 'FDJ1', 'DJ1'],
+  33: ['FDJ1', 'DJ1'], 34: ['FDJ1', 'DJ1'], 35: ['DJDEC', 'FDJ2', 'DJ2', 'DJCOL'], 36: ['FDJCAT', 'DJCAT'], 37: ['FDJ1', 'DJ1'],
+  38: ['FDJCAT', 'DJCAT'], 39: ['FDJ1', 'DJ1'], 40: ['FDJCAT', 'DJCAT'], 41: ['FDJCAT', 'DJCAT'], 42: ['FDJ1', 'DJ1'], 43: ['FDJ1', 'DJ1'],
+  44: ['DJDEC', 'FDJ1', 'DJ1'], 45: ['FDJ2', 'DJ2'], 46: ['DJDEC', 'FDJ2', 'DJ2'], 47: ['DJDEC', 'FDJ2', 'DJ2'], 48: ['FDJ2', 'DJ2'],
+  49: ['DJDEC', 'FDJ2', 'DJ2'], 50: ['FDJ2', 'DJ2'], 51: ['FDJCAT', 'DJCAT'], 52: ['DJDEC', 'FDJ1', 'DJ1'], 53: ['FDJCAT', 'DJCAT'], 58: ['FDJ1', 'DJ1'],
+};
+
+/** Ishar 2's door flags (one byte per door index - 60; 0 = shut), GERDEP `+0x12a9`. */
+export const ISHAR2_DOOR_TABLE = 0x4aa4;
+
+/** Raw direction of a step (1 = col-1, 2 = row+1, 3 = col+1, 4 = row-1), or 0. */
+function stepDirRaw(from: IsharPartyState, to: IsharPartyState): number {
+  if (to.col === from.col - 1) return 1;
+  if (to.row === from.row + 1) return 2;
+  if (to.col === from.col + 1) return 3;
+  if (to.row === from.row - 1) return 4;
+  return 0;
+}
+
+/** Ishar 2 dungeon door codes (layer 0) -> the cell edge holding the door, as a raw direction (GERDEP `+0xf33`/`+0x10ed`). */
+function ishar2DoorSide(v: number): number {
+  if ([38, 39, 57, 70, 71].includes(v)) return 3;
+  if ([40, 41, 56, 72, 73].includes(v)) return 2;
+  if ([42, 43, 55, 74, 75, 84].includes(v)) return 1;
+  if ([44, 45, 54, 76, 77].includes(v)) return 4;
+  return 0;
+}
+
+/**
+ * Ishar 2's step test, GERDEP `+0xb72` (called for every move button with
+ * the target cell in local 18, the current one in 19 and their layer-1
+ * values in 20/21; it clears local 22 to refuse):
+ * - a negative layer-0 target is refused (`+0xe54`, `+0xf14`; -21..-18 and
+ *   -5 are house doors, which send MAIN message 17 instead);
+ * - region 4: a layer-1 target above 87 is refused (`+0xbbe`, a message);
+ * - region 1: a monster (EN1 slots 50.., in the party's zone, kind < 0 or
+ *   99) on the target refuses it (`+0xc14`);
+ * - elsewhere a monster with hp in the party's own cell refuses the move
+ *   toward the side its type names (`+0xc8b`, `cswitch2` on `0x35ce`: type
+ *   1..4 = raw direction 1..4);
+ * - regions 5-7 (the dungeons): a door code on either cell (`+0xf33` current,
+ *   `+0x10ed` target) puts a door on one edge; crossing it reads the door
+ *   index from that cell's layer 1 and is refused when the index is above
+ *   60 and the flag `0x4aa4[index - 60]` is 0 (`+0x12a9`).
+ * The party check (`+0xb7c`, a living member) is not modelled.
+ */
+export function ishar2Enter(
+  from: IsharPartyState,
+  to: IsharPartyState,
+  cell: (region: number, row: number, col: number) => number,
+  occupied?: IsharOccupancy,
+  cellB?: (region: number, row: number, col: number) => number,
+  doors?: readonly number[],
+): IsharPartyState | null {
+  const vt = cell(to.region, to.row, to.col);
+  if (vt < 0) return null;
+  const bt = cellB?.(to.region, to.row, to.col) ?? 0;
+  if (from.region === 4 && bt > 87) return null;
+  const dir = stepDirRaw(from, to);
+  if (from.region === 1) {
+    if (occupied?.(to.region, to.row, to.col)) return null;
+  } else if (occupied?.(from.region, from.row, from.col, dir)) return null;
+  if (from.region > 4 && cellB) {
+    const shut = (idx: number) => idx > 60 && (doors?.[idx - 60] ?? 0) === 0;
+    const vf = cell(from.region, from.row, from.col);
+    if (ishar2DoorSide(vf) === dir && shut(cellB(from.region, from.row, from.col))) return null;
+    const opposite = [0, 3, 4, 1, 2][dir]!;
+    if (ishar2DoorSide(vt) === opposite && shut(bt)) return null;
+  }
+  return to;
+}
+
+/**
+ * GERDEP's monster tests (Ishar 2 `+0xc14`/`+0xc8b`) over EN1 slots 50..109:
+ * zone `0x449a`, row `0x3412`, col `0x34f0`, hp `0x36ac`, kind `0x43ba`,
+ * type `0x35ce` (words where noted). `zone` is the party's zone `0x4ef2`.
+ */
+export function ishar2Occupancy(read: (addr: number, len: number) => Uint8Array | undefined, zone: number): IsharOccupancy | undefined {
+  const w = (a: Uint8Array, i: number) => (((a[2 * i]! << 8) | a[2 * i + 1]!) << 16) >> 16;
+  const b = (a: Uint8Array, i: number) => (a[i]! << 24) >> 24;
+  const zs = read(0x449a, 110), rows = read(0x3412, 220), cols = read(0x34f0, 220), hp = read(0x36ac, 220), kind = read(0x43ba, 110), type = read(0x35ce, 220);
+  if (!zs || !rows || !cols || !hp || !kind || !type) return undefined;
+  const target = new Set<string>();
+  const side = new Map<string, Set<number>>();
+  for (let i = 50; i < 110; i++) {
+    if (b(zs, i) !== zone) continue;
+    const k = b(kind, i);
+    if (!(k < 0 || k === 99)) continue;
+    const key = `${w(rows, i)},${w(cols, i)}`;
+    target.add(key);
+    if (w(hp, i) !== 0) (side.get(key) ?? side.set(key, new Set()).get(key)!).add(w(type, i));
+  }
+  return (_region, row, col, dir) => (dir === undefined ? target.has(`${row},${col}`) : !!side.get(`${row},${col}`)?.has(dir));
+}
+
+/** Ishar 2's region groups other than the start island (MAIN `+0x16f8`); see `ISHAR2_TITLE.sceneGroup`. */
+// Palettes: each outdoor backdrop picks its slot from the day phase 0x519f
+// like FOND1 (FARBO +0x122, FMONT +0x144, FVILLE +0x142: phase 1/2/3 ->
+// FARBO 1/3/4, FMONT 3/5/6, FVILLE 0/7/8); the dungeon backdrops carry one
+// palette each (FDJCAT 0, FDJ1 2, FDJ2 1). Oracle arrival frames: FVILLE 0
+// gives 100% of the Zach's Island view's pixels.
+const phaseSlot = (slots: readonly [number, number, number]) => (m: (addr: number) => number) => slots[m(0x519f) - 1] ?? slots[0];
+const DUNGEON_PALETTE: IsharSceneGroup['paletteFrom'] = { script: ['FDJCAT', 'FDJ1', 'FDJ2'], slot: -1 };
+const ISHAR2_REGION_GROUPS: Readonly<Record<number, { scripts: readonly string[]; palette?: IsharSceneGroup['paletteFrom'] }>> = {
+  2: { scripts: ['FARBO', 'ARBO'], palette: { script: 'FARBO', slot: phaseSlot([1, 3, 4]) } },
+  3: { scripts: ['FVILLE', 'VHOUSE2'], palette: { script: 'FVILLE', slot: phaseSlot([0, 7, 8]) } },
+  4: { scripts: ['MONTAGNE', 'FMONT'], palette: { script: 'FMONT', slot: phaseSlot([3, 5, 6]) } },
+  5: { scripts: [], palette: DUNGEON_PALETTE },
+  6: { scripts: [], palette: DUNGEON_PALETTE },
+  7: { scripts: [], palette: DUNGEON_PALETTE },
+};
+
 export const ISHAR2_TITLE: IsharTitleSpec = {
   game: 'ishar2',
   stride: 60,
@@ -678,7 +813,7 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
     // 0x4a81: the EN1 slot count EAFF scans up to (110 in every oracle run)
     return { 0x2ab4: s.row, 0x2ab5: s.col, 0x2ab6: this.facingRaw[s.facing], 0x2d18: s.region, 0x519f: 1, 0x4a80: 1, 0x4a81: 110 };
   },
-  sceneScripts: ['FOND1', 'PLAINE1', 'VILLAGE1', 'BOAT', 'FORET1'],
+  sceneScripts: ['FOND1', 'PLAINE1', 'VILLAGE1', 'BOAT', 'FORET1', 'FARBO', 'ARBO', 'FVILLE', 'VHOUSE2', 'MONTAGNE', 'FMONT', ...new Set(Object.values(ISHAR2_ZONE_ADDONS).flat()), 'PCAVE'],
   // EAFF, Ishar 2's ENCONT (same shape; oracle trace: GERDEP wakes it every
   // step, it kills and re-`clive`s POURS1 the bear): EN1 slots 50..109 in
   // the party's zone (`0x449a` = `0x4ef2`) with hp > 0 (`0x36ac`), rows
@@ -693,6 +828,9 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
     scratch: [[0x4b80, 3]],
   },
   gridBuffers: 'layers',
+  enter(from, to, cell, occupied, cellB) {
+    return ishar2Enter(from, to, cell, occupied, cellB, from.tables?.[ISHAR2_DOOR_TABLE]);
+  },
   stepFrom(st, dir) {
     // Same raw-facing directions as Ishar 1 (the scripts' own facing
     // dispatch scans the same wedges); travel between CONT files is not
@@ -711,7 +849,13 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
     // (POURS1 = roaming bears, an NPC); the sub-zone add-ons come and go.
     // FOND1 +0xe1: `cpalette` 3/4/5 for day phase 0x519f = 1/2/3.
     if (region === 1) return { scripts: ['FOND1', 'PLAINE1'], paletteFrom: { script: 'FOND1', slot: (m) => [3, 3, 4, 5][m(0x519f)] ?? 3 } };
-    return null;
+    // The other islands (MAIN +0x16f8, `clive` per region code; the oracle's
+    // arrival runs list the same scripts): 2 FARBO + ARBO, 3 FVILLE +
+    // VHOUSE2 (the town), 4 MONTAGNE + FMONT. Regions 5-7 start nothing of
+    // their own: their dungeon walls are zone add-ons (FDJCAT/DJCAT,
+    // FDJ1/DJ1, FDJ2/DJ2), and the DJ scripts start PCAVE (the doors).
+    const g = ISHAR2_REGION_GROUPS[region];
+    return g ? { scripts: g.scripts, ...(g.palette ? { paletteFrom: g.palette } : {}) } : null;
   },
   // GERDEP +0x162a..+0x18ff, run after each step (+0x1411) with local 20 =
   // the grid-B cell the party stepped onto: regions 2/3/5/6/7 take the zone
@@ -728,18 +872,12 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
     onMoveOnly: true,
   },
   initialZone: 4,
-  addOns(region, zone) {
-    // MAIN's zone switch (MAIN +0x18b2 loads / +0x24ce starts; the decoder
-    // does not get through those blocks yet, so this table was read off the
-    // oracle's start/kill trace for every zone-pair transition in CONT1):
-    // zone 1 village1, zone 3 boat, zones 5 and 9 foret1 (restarted on
-    // entering 9), zones 2 and 4 none.
-    if (region !== 1) return null;
-    if (zone === 1) return ['VILLAGE1'];
-    if (zone === 3) return ['BOAT'];
-    if (zone === 5 || zone === 9) return ['FORET1'];
-    if (zone === 2 || zone === 4) return [];
-    return null;
+  addOns(_region, zone) {
+    // MAIN's zone starters (+0x2156, then +0x24ce for zones 10..; table
+    // `ISHAR2_ZONE_ADDONS`). Zones are numbered across all the islands. In
+    // CONT1 the oracle's start/kill trace agrees: zone 1 village1, zone 3
+    // boat, zones 5 and 9 foret1 (restarted on entering 9), 2 and 4 none.
+    return ISHAR2_ZONE_ADDONS[zone] ?? [];
   },
   addOnRestartZones: [9],
 };
@@ -1114,7 +1252,8 @@ export class IsharScene {
     const group = this.state ? this.spec.sceneGroup(this.state.region) : null;
     if (!group?.paletteFrom) return;
     const { script, slot } = group.paletteFrom;
-    const pal = this.scripts.find((s) => s.name === script);
+    const names = typeof script === 'string' ? [script] : script;
+    const pal = names.map((n) => this.scripts.find((s) => s.name === n)).find((s) => s);
     if (!pal) return;
     const env = this.env();
     const base = paletteOf(pal.data, typeof slot === 'function' ? slot(env.readMain) : slot);
