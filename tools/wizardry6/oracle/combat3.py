@@ -376,6 +376,47 @@ def make_engine_vectors(n, seed):
 MAKERS['engines'] = make_engine_vectors
 
 
+
+# ---------------------------------------------------------------------------
+# the cast gate LAB_0F72 (CODE+0x27132): anti-magic gate, success chance, fizzle / backfire, silence, SP cost
+def make_cast_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        spell = rng.randrange(0, 82); power = rng.randrange(1, 7)
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 4), party=rng.randrange(1, 5))
+        ag = rng.choice([0, 0, 0, 1, 2, 6]); ag = ag if ag <= ng or ag == 6 else 1
+        if ag == 6 and counts[6] == 0: ag = 0
+        ai = rng.randrange(counts[ag])
+        tg = rng.choice([0, 1, 2]); tg = tg if tg <= ng else 0
+        A = MEM_BASE + ag * MEM_STRIDE + ai * 44
+        w8(fx, A + 31, tg); w8(fx, A + 32, rng.randrange(counts[tg]))
+        w16(fx, A + 10, power * 256 + spell)
+        w8(fx, A + 14, rng.choice([0, 0, 0, 3]))
+        w16(fx, A, rng.randrange(0, 40))
+        w16(fx, A4 - 15138, ag); w16(fx, A4 - 15136, ai)
+        for g in range(7): w8(fx, MEM_BASE + g * MEM_STRIDE + 401, rng.choice([0, 0, 0, 5, 30, 200]))
+        for g in range(7): w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + 208, rng.choice([0, 3, 4, 5, 13, 0x16]))
+        for i in range(6):
+            r = A4 - 17922 + i * 0x1b0
+            w8(fx, r + 415, rng.randrange(0, 14))
+            for k in (321, 333, 307): w8(fx, r + k, rng.choice([0, 20, 50, 80, 100, 3, 17]))
+            for k in range(0, 6): w16(fx, r + 40 + 4 * k, rng.randrange(0, 60))
+            w16(fx, r + 36, rng.randrange(1, 25))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(0x27132, [(A, 4)], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'A': A, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['cast'] = make_cast_vectors
+
+
 if __name__ == '__main__':
     kind, outp = sys.argv[1], sys.argv[2]
     V = MAKERS[kind](argv('--n', 200), argv('--seed', 1))

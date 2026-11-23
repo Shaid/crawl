@@ -12,7 +12,7 @@
  * Not ported (recorded as open): ids 45 CREATE LIFE, 59 ILLUSION, 71 CONJURATION (they call the summon
  * routine LAB_0EEE); ids 39, 46, 52, 56, 60, 62, 73, 77 have no combat effect (the game's case is empty).
  */
-import { type Mem, s16, dice69 } from './combat.ts';
+import { type Mem, s16, dice69, skillUse } from './combat.ts';
 import { type Ctx, grpBase, member, groupCount } from './planner.ts';
 import recipes from './spell-recipes.json' with { type: 'json' };
 
@@ -254,3 +254,70 @@ export function castEffect(c: Ctx, A: number, spell: number, power: number, eng:
   }
 }
 
+
+/**
+ * LAB_0F72 (CODE+0x27132): one cast by member A: the action word at A+10 is `power*256 + spell`. Rolls the
+ * anti-magic gate, the caster's success chance, fizzle / backfire, the silence check, runs the effect through
+ * `effect(A, spell, power)` (LAB_0F06) and charges the party caster's spell points. Returns the stamina cost
+ * `Random(power) + spellLevel + power`.
+ *
+ * Spell table row (6 bytes at A4-31698): +0 realm (SP pool), +1 level, +2 SP per power, +3 flags (bit 0 can
+ * fizzle, bit 1 can backfire), +4 heal-ally flag (planner), +5 open.
+ */
+export function castSpell(c: Ctx, A: number, effect: (A: number, spell: number, power: number) => void): number {
+  const { m, rng, a4 } = c;
+  m.w8(grpBase(c, 0) + 413, m.u8(a4 - 15305));
+  const w = s16(m.u16(A + 10));
+  const power = tdiv(w, 256);
+  const spell = w % 256;
+  const ag = s16(m.u16(a4 - 15138)), ai = s16(m.u16(a4 - 15136));
+  const row = a4 - 31698 + spell * 6;
+  const lvl = m.u8(row + 1);
+  m.w16(a4 - 10484, 0); m.w16(a4 - 10482, 0);                      // backfire B, fizzle F
+  let F = 0, B = 0;
+  const anti = m.u8(grpBase(c, ag) + 401);
+  if (rng.random(anti + s16(m.u16(A)) + 1) < anti) F = 1;
+  const P = a4 - 17922 + ai * 0x1b0;                                // party record (caster, party side)
+  if (ag === 0) {
+    const cls = m.u8(P + 415);
+    let chance: number;
+    if (cls === 5 || cls === 4 || cls === 13) chance = s16(Math.floor(m.u8(P + 333) / 3) + 90 - lvl * power);
+    else {
+      chance = s16(Math.floor(m.u8(P + 321) / 3) + 90 - lvl * power);
+      skillUse(m, rng, a4, ai, 13, 2);
+    }
+    if (rng.random(100) > chance) {
+      if (rng.random(36) > m.u8(P + 307) + 18) { F = 0; B = 1; } else F = 1;
+    }
+  } else {
+    const chance = s16(s16(m.u16(member(c, ag, ai))) * 3 + 88 - lvl * power);
+    if (rng.random(100) > chance) {
+      if (rng.random(7) === 0) { F = 0; B = 1; } else F = 1;
+    }
+  }
+  let silenceable = 1;
+  if (ag === 0) {
+    const cls = m.u8(P + 415);
+    if (cls === 5 || cls === 4 || cls === 13) silenceable = 0;
+  } else {
+    const t = m.u8(m.u32(a4 - 15294 + 4 * ag) + 208);
+    if (t === 5 || t === 4 || t === 0xd) silenceable = 0;
+  }
+  const flags = () => m.u8(a4 - 31695 + spell * 6);
+  if (B === 1 && !(flags() & 2)) { B = 0; F = 1; }
+  if (F === 1 && !(flags() & 1)) F = 0;
+  m.w16(a4 - 10484, B); m.w16(a4 - 10482, F);
+  if (silenceable === 1 && m.u8(A + 14) > 0) {
+    /* SILENCED! */
+  } else if (F === 1) {
+    /* FIZZLE! */
+  } else {
+    if (B === 1) { m.w8(A + 31, ag); m.w8(A + 32, ai); }            // BACKFIRE!: aimed at the caster itself
+    effect(A, spell, power);
+  }
+  if (ag === 0) {
+    const pool = a4 - 17882 + ai * 0x1b0 + m.u8(row) * 4;
+    m.w16(pool, m.u16(pool) - m.u8(row + 2) * power);
+  }
+  return s16(rng.random(power) + lvl + power);
+}
