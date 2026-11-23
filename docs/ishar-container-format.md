@@ -2333,7 +2333,16 @@ the gate between two legs.
     Residuals: at location 6 VJARDIN's tree (4-bit bitmap, bank 22)
     shows palette entries 20-21 in the game where crawl draws 36-37
     (FVILLE slot 5): one 16-colour bank off, cause not found (no script
-    in the group changes the palette; 0.3% of the pixels). Two pixels per
+    in the group changes the palette; 0.3% of the pixels).
+    **Correction (2026-11-23):** not a bank change: palOffset 22 plus the
+    nibbles 14 and 15 passes the bank's end, and the game keeps the pixel
+    inside the bank (`(palOffset & 0xf0) | ((palOffset + nibble) & 15)`).
+    With that rule location 6 (back from the mountains, 4 actions) goes
+    from 98.675% to 100.000% of masked pixels; every other oracle walk is
+    unchanged. 11 bitmaps in the three Ishar corpora have such pixels (Ishar
+    1 COLCAVE; Ishar 2 OBJET; Ishar 3 SPACE, VDEC1, VJARDIN). The reference
+    VM's chunky path adds without wrapping, so the wrap comes from its Amiga
+    drawing path; which line was not traced. Two pixels per
     frame differ in location 22. A witch (WITCH7) puts the party to
     sleep on the way; GERDEP `+0x32f` then covers the view with a black
     sprite (slot 9, numelem 20) until a member with hp has `0x183e` = 0

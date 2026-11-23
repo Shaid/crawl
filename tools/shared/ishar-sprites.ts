@@ -35,7 +35,8 @@
  *      of Arborea (an older/related-but-not-identical engine revision).
  *    - `0x10`/`0x12` ("draw_4to8bit_*", masked/opaque) — 4-bit nibble-
  *      packed, `u8 palOffset` at header+6 (a 16-colour bank selector into
- *      a 256-colour AGA palette, added to each decoded nibble) + 1
+ *      a 256-colour AGA palette, added to each decoded nibble and wrapped
+ *      inside the bank, see `decodeIsharBitmap`) + 1
  *      reserved byte, pixel data starting at header+8. The dominant type
  *      across Ishar 1-3.
  *    - `0x14`/`0x16` ("draw_8bit_*", masked/opaque) — one palette-index
@@ -207,8 +208,12 @@ export function decodeIsharBitmap(data: Uint8Array, index: number, headerOffset:
         const byte = data[rowOff + xb];
         const hi = byte >> 4;
         const lo = byte & 0x0f;
-        indices[y * width + xb * 2] = hi === 0 ? 0 : palOffset + hi;
-        indices[y * width + xb * 2 + 1] = lo === 0 ? 0 : palOffset + lo;
+        // The nibble stays inside palOffset's 16-colour bank (2026-11-23): when palOffset's low
+        // nibble plus the pixel passes 15 it wraps, as the oracle draws Ishar 3 VJARDIN slot 9
+        // (palOffset 22, nibbles 14/15 shown as entries 20/21, not 36/37). 11 bitmaps in the
+        // three Ishar corpora have such pixels; every measured walk is unchanged or better.
+        indices[y * width + xb * 2] = hi === 0 ? 0 : (palOffset & 0xf0) | ((palOffset + hi) & 0x0f);
+        indices[y * width + xb * 2 + 1] = lo === 0 ? 0 : (palOffset & 0xf0) | ((palOffset + lo) & 0x0f);
       }
     }
   } else {

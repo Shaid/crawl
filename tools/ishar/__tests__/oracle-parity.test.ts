@@ -622,3 +622,36 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
     }
   }, 300_000);
 });
+
+/**
+ * Maz location 6 (2026-11-23): back from the mountains (trip to location 6,
+ * then MAIN message 38 again from region 9): region 1 (55,35). VJARDIN's
+ * tree (slot 9, palOffset 22) has nibbles that pass the bank's end; the
+ * game keeps them in the bank (`decodeIsharBitmap`).
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 Maz location 6 vs the game (alis oracle)', () => {
+  it('draws VJARDIN in the game\'s colours', () => {
+    const out = tempDir('ishar3-loc6-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const mt = join(out, 'mt.state');
+      captureTrip('ishar3', [38], mt, 600, { commands: ['poke 3b33 6'] });
+      const back = join(out, 'back.state');
+      const at = captureTrip('ishar3', [38], back, 600, { startState: mt, commands: ['poke 3b33 35'] });
+      expect(at).toEqual({ region: 1, row: 55, col: 35, facingRaw: -1 });
+      const actions = [...'RLFFRFFLFFLLFF'] as Array<'F' | 'L' | 'R'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: back, start: at, maxLegs: 1, legCommands: ['pokew 16e0 500'] });
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 0, 6, false);
+      expect(cw.some((w) => w.leaves.some((l) => l.script === 'VJARDIN' && l.index === 9))).toBe(true);
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, matched: r.matched, crawl: r.crawl, px: r.pixelsMasked - r.pixelsMaskedEqual }).toEqual({ i, move: true, matched: r.oracle, crawl: r.oracle, px: 0 });
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
