@@ -324,7 +324,7 @@ export interface WalkComparison {
 export function crawlWalk(
   data: TitleData,
   start: IsharPartyState,
-  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R' | 'U'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number>; mem?: Record<string, Uint8Array> }>,
+  steps: ReadonlyArray<{ action: 'F' | 'L' | 'R' | 'U'; region: number; row: number; col: number; facingRaw: number; globals?: Record<number, number>; mem?: Record<string, Uint8Array>; frame?: { cordspr?: Record<string, number> } }>,
   layers: (region: number) => readonly Uint8Array[] | undefined,
   initial: { A?: GridReader; B?: GridReader } = {},
   /** Extra scene wakes at the start pose: a walk that starts from a mid-game savestate meets scripts with a per-wake phase (FOND's alternation) already advanced. */
@@ -333,12 +333,20 @@ export function crawlWalk(
   startZone?: number,
   /** Run the NPC/monster entities (default); false for a walk that removed them (`noNpcs`). */
   npcs = true,
+  /**
+   * Give each new entity the `cordspr` byte the game's had (each step's
+   * dump, `frame.cordspr`). The engine never initialises it, so crawl cannot
+   * know it; this checks that the display-list rules are otherwise exact.
+   */
+  oracleCordspr = false,
 ): WalkComparison[] {
   const spec = data.spec;
   const buffers = new IsharGridBuffers(spec, layers, initial);
   const scene = new IsharScene(spec, data.load, buffers.update(start));
   scene.memory = data.entityMemory;
   scene.npcs = npcs;
+  let stepCordspr: Record<string, number> | undefined = oracleCordspr ? steps[0]?.frame?.cordspr : undefined;
+  if (oracleCordspr) scene.cordsprOf = (name) => stepCordspr?.[name.toLowerCase()];
   const z0 = startZone ?? (steps[0] && steps[0].action !== 'F' ? steps[0].mem?.zone?.[0] : undefined);
   if (z0 !== undefined) scene.zone = z0;
   scene.enter(start);
@@ -349,6 +357,7 @@ export function crawlWalk(
   // (the first step uses its own dump; monsters may have moved by one cell)
   let occupied = stepOccupancy(game(data), steps[0]?.mem);
   for (const s of steps) {
+    if (oracleCordspr && s.frame?.cordspr) stepCordspr = s.frame.cordspr;
     const facing = spec.facingRaw.indexOf(s.facingRaw);
     const memGlobals = stepGlobals(game(data), s.mem);
     const globals = memGlobals ? { ...s.globals, ...memGlobals } : s.globals;

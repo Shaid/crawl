@@ -455,16 +455,30 @@ export interface OracleFrame {
   rgb: Uint8Array;
   screens: OracleScreen[];
   entities: string[];
+  /** Entity run order (the `atent` chain from MAIN; dumps from 2026-11-23 on). */
+  runOrder?: string[];
+  /** Each live entity's `cordspr` byte (vram -0x2b), first entity per name; dumps from 2026-11-23 on. */
+  cordspr?: Record<string, number>;
 }
 
 const stripExt = (n: string) => n.replace(/\.(do|ao|co)$/i, '').toLowerCase();
 
-export function parseSpr(text: string): { screens: OracleScreen[]; entities: string[] } {
+export function parseSpr(text: string): Pick<OracleFrame, 'screens' | 'entities' | 'runOrder' | 'cordspr'> {
   const screens: OracleScreen[] = [];
   const entities: string[] = [];
+  let runOrder: string[] | undefined;
+  let cordspr: Record<string, number> | undefined;
   for (const line of text.split('\n')) {
-    if (line.startsWith('E ')) {
-      entities.push(stripExt(line.split(' ')[2]!));
+    if (line === 'R' || line.startsWith('R ')) {
+      runOrder = line.split(' ').slice(1).filter(Boolean).map(stripExt);
+    } else if (line.startsWith('E ')) {
+      const name = stripExt(line.split(' ')[2]!);
+      entities.push(name);
+      const co = / co=(-?\d+)/.exec(line);
+      if (co) {
+        cordspr ??= {};
+        if (!(name in cordspr)) cordspr[name] = +co[1]!;
+      }
     } else if (line.startsWith('S ')) {
       const m = /^S (\d+) state=-?\d+ x=(-?\d+) y=(-?\d+) w=(-?\d+) h=(-?\d+)/.exec(line);
       if (m) screens.push({ id: +m[1]!, x: +m[2]!, y: +m[3]!, w: +m[4]!, h: +m[5]!, sprites: [] });
@@ -478,7 +492,7 @@ export function parseSpr(text: string): { screens: OracleScreen[]; entities: str
       }
     }
   }
-  return { screens, entities };
+  return { screens, entities, ...(runOrder ? { runOrder } : {}), ...(cordspr ? { cordspr } : {}) };
 }
 
 export function parsePpm(buf: Uint8Array): { width: number; height: number; rgb: Uint8Array } {

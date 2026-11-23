@@ -111,13 +111,20 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar.dataD
         px += r.pixelsMasked;
         bad += r.pixelsMasked - r.pixelsMaskedEqual;
       });
-      // Known residual: after the region change two equal-depth sprites
-      // (an RPLAINE vs an FBUIS sprite, same y and element) overlap in the opposite
-      // order on 2 frames, 5 pixels each. The game's tie order follows the
-      // entity slot each script was given (slots freed by the killed group
-      // are reused), which crawl approximates by creation order.
+      // Known residual: after the region change an FBUIS sprite ties in depth
+      // and element with RPLAINE/FORET ones, and the game draws it on top on 2
+      // frames (5 pixels each). The tie is settled by `cordspr`, the entity
+      // byte at vram -0x2b, which the engine never initialises (FBUIS starts
+      // with -84 here, memory residue); crawl starts every entity at 0.
       expect(bad).toBeLessThanOrEqual(10);
       expect(px).toBeGreaterThan(0);
+      // Given the game's cordspr bytes, the display-list model is exact.
+      const exact = crawlWalk(data, { ...t.start }, steps, contLayers('ishar', data), { B: bootGridB(data, out) }, 0, undefined, true, true);
+      const residue = exact.reduce((n, w, i) => {
+        const r = comparePose('ishar', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves);
+        return n + r.pixelsMasked - r.pixelsMaskedEqual;
+      }, 0);
+      expect(residue).toBe(0);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

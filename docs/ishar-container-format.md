@@ -1819,9 +1819,10 @@ The old-walker column scores placements by screen box (owner, position,
 size, mirror), because the old renderer did not record slots.
 
 The residual is two frames just after a region change. Two equal-depth
-sprites overlap in the opposite order there, 5 pixels each. The game's
+sprites overlap in the opposite order there, 5 pixels each. ~~The game's
 tie order follows the entity slot each new script was given, and crawl
-approximates that by start order.
+approximates that by start order.~~ **Corrected 2026-11-23 (item 23):**
+the tie is settled by FBUIS's uninitialised `cordspr` byte (-84).
 
 15. **Ishar 2 travel (2026-11-23, traced, not driven).** MAIN `+0x374`
     stores a message value in `0x51bf` and starts `+0xede`. The
@@ -1993,7 +1994,8 @@ the gate between two legs.
     | Ishar 3, the 58-action Maz walk with its townspeople | 58 | 1,427/1,497 exact; 131/133 people within 12 px | 94.8% | 57/58 |
 
     The pixel residual on the Ishar 1 route is the known equal-depth tie
-    order after a region change (`ishar-scene-tie-slots`).
+    order after a region change (`ishar-scene-tie-slots`; 2026-11-23: an
+    uninitialised `cordspr` byte, item 23).
 
     Measured gaps:
     - **Close-up animation.** A monster in the cell right in front plays a
@@ -2399,8 +2401,51 @@ the gate between two legs.
     The walks remove the enemy bands (EBRAIN, EMOVE, ORC_ELF, MORGOT,
     SHAMNIR; `poke 2d3f 0`): EMOVE walks them and GUGUS `+0xb86` starts a
     fight when one is within a cell. Residual: about 0.01% of the pixels,
-    small equal-depth overlaps. Not modelled: the bands, the house
-    interiors, the clock (the walker keeps the start hour; `T` steps it).
+    small equal-depth overlaps (**corrected 2026-11-23**, item 23: signed
+    element numbers; the outdoor walk now matches every pixel). Not
+    modelled: the bands, the house interiors, the clock (the walker keeps
+    the start hour; `T` steps it).
+23. **Display order and equal-depth ties (2026-11-23, traced and measured).**
+    The engine keeps one sprite list per screen across frames (`image.c`):
+    - `createlem` links a new sprite at the list head (state -1); a put of
+      an existing element marks it re-put (state 2); `ccancall` deletes at
+      once, `cerasall`/`cerasen` mark state 1;
+    - the draw loop walks the list from the head and re-inserts every
+      changed sprite (`rangesprite`) by the key (depth desc, `cordspr` desc,
+      element desc). A new sprite goes in front of the first ranked equal
+      (so it is drawn under its equals); a re-put one goes behind them all
+      (on top); untouched sprites keep their place. Not-yet-ranked new
+      sprites are skipped as comparators, and re-put ones not reached yet
+      compare at their old depth;
+    - element numbers and `cordspr` compare as signed bytes. Crystals' trees
+      use elements 125..200: 200 sorts as -56, below 1;
+    - scripts run in the entity chain order (`atent` +4 links): a new
+      entity is linked right after its creator, so MAIN's children run
+      newest first. The harness's `R` line prints it: e.g. Ishar 1 CONT1
+      `village, fboishar, arbre, samb, plaine, rplaine, fond, ...`;
+    - `cordspr` is the entity byte at vram -0x2b, copied into each sprite
+      at put time (`putmapin`). Only the `cordspr` opcode sets it, and the
+      entity allocator never clears it: Ishar 1 `T.X` `$aa42..$aad2` clears
+      the vram and the context fields -1..-52 around it but not -43, and
+      alis `script_live` does the same. So a new entity starts with memory
+      residue. In the CONT1 -> CONT2 change FBUIS gets -84 and FOND 20
+      (`co=` in the dump), which puts FBUIS's tree on top of RPLAINE's and
+      FORET's at depth 594. Crawl cannot know the residue and starts every
+      entity at 0. That is the whole remaining Ishar 1 walk residual (10 px
+      over 129 frames); with the game's bytes (`crawlWalk` `oracleCordspr`)
+      the walk matches every pixel.
+
+    `IsharScene.drawPass` and `runFrames` model this (the runner keeps a
+    sprite's identity across re-puts). Measured: Crystals outdoor walk 717
+    -> 0 bad pixels, cave walk 422 -> 393; every other oracle walk
+    unchanged. The cave's 393 are not order: SOLCAVE's flat rect does not
+    cover view rows 10..12, and the game leaves the previous frame's CAVINT
+    pixels there, where crawl shows colour 0.
+
+    **Correction to item 12 and §8.8's measured note (2026-11-23):** the
+    tie order does not follow entity slots. "INCAVE got entity slot 13,
+    FORET 12" was a coincidence; the order comes from the list history and
+    `cordspr`.
 
 **Not covered yet** (rewritten 2026-11-23; Ishar 3 items 2026-11-24):
 

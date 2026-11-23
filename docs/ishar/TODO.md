@@ -68,9 +68,29 @@ Doors, partly traced: PCAVE gives a door a click form (`cforme`) only when it is
 
 The protection answers are automated: `tools/ishar/oracle/manual.ts` reads MONSTRE's and TELEP's tables and answers a prompt by trying the words (verified at the cave mouth, about 60 s per try). | `docs/ishar-container-format.md` §8.8 | 2026-11-25 |
 | ishar-npcs | open (narrowed) | **2026-11-23:** NPCs and monsters are drawn by the game's own entity scripts, now run by `IsharScene` (`spec.entities`). Ishar 1 uses ENCONT, which `clive`s a monster script per EN1 slot in view and passes it x/depth/height through `shimw`. Ishar 2 uses EAFF, the same mechanism. Ishar 3 uses AFFPV (the Maz townspeople, VPERSO1..5) plus EAFF. EN1.FIC is MAIN's `cfreadb` run in all three titles (`ISHAR*_EN1_READS`). Measured with no NPC masking: Ishar 1 walks 100% of placements (Bormin, Kiriela, Naim, Fragorn, roaming wolves, 111 town-guard sprites in town 13) and 99.99-100% of pixels. Ishar 2: 91 of 93 bear sprites exact. Ishar 3: 131 of 133 townspeople within 12 px (their x adds `ornd`, the engine's shared random generator, which crawl cannot reproduce; 63 exact). Open: (1) a monster in the cell in front plays a per-frame close-up animation (MINOTOR `+0xb6`) that crawl draws as idle; (2) GEREN's monster movement and roaming spawns (the walker shows the new-game EN1 places); (3) ~~Ishar 3's townspeople table (`0x4012..`) has no loader found yet, so the walker draws none~~ (2026-11-23: PARAM `+0x24a0` reads `INITPV.FIC`; `entities.files`; the walker draws them at their new-game places); (4) floor objects (AFFOBJ/OBJET) | `docs/ishar-container-format.md` §8.8 item 17, §9.3; `tools/ishar/__tests__/ishar-entities.test.ts`, `oracle-parity.test.ts` (townspeople) | 2026-11-23 |
-| ishar-scene-tie-slots | open (low) | After a region change the game's equal-depth tie order follows each new script's entity slot (slots freed by the killed group are reused); `IsharScene` uses start order. Costs 10 pixels over a 129-frame walk. Model slot allocation (`script_live` slot reuse) if it ever matters | `tools/ishar/__tests__/oracle-parity.test.ts` (walk test comment) | 2026-11-22 |
+| ishar-scene-tie-slots | closed | **Closed 2026-11-23.** Equal-depth ties are settled by the engine's persistent screen list (`image.c` `createlem`/`rangesprite`), keyed (depth desc, `cordspr` desc, element desc, element as a signed byte): a new sprite goes in front of its ranked equals, a re-put one behind them, an untouched one stays. `IsharScene.drawPass` now keeps that list and runs the scripts frame by frame in the engine's run order (a new entity is linked right after its creator). Crystals' 0.01% residual was element numbers above 127 (signed): outdoor walk 717 -> 0 px, cave 422 -> 393 (the rest is stale pixels, see the session log). Ishar 1's last 10 px: `cordspr` (vram -0x2b) is never initialised by the engine (`T.X` `$aa42..$aad2`, alis `script_live`), so a new entity starts with memory residue (FBUIS -84 after the CONT1->CONT2 change); crawl starts at 0. Fed the game's bytes (`crawlWalk` `oracleCordspr`), the walk matches every pixel. Was: tie order by entity slot, modelled as start order | `tools/ishar/__tests__/oracle-parity.test.ts` (Ishar 1 walk), `crystals-oracle.test.ts`; `ishar-container-format.md` §8.8 item 23 | 2026-11-23 |
 
 ## Session log
+
+- **2026-11-23 (equal-depth ties):** the display order is now the engine's
+  own screen list, not a per-script rank. `IsharScene.drawPass` keeps the
+  list across frames (new sprites linked at the head and ranked in front of
+  their equals, re-puts behind them, untouched ones in place), the runner
+  keeps a sprite's identity across re-puts, and the scene runs its scripts
+  frame by frame in the engine's run order (`atent` chain: a new entity
+  right after its creator, so the newest first). The key is (depth desc,
+  `cordspr` desc, element desc) with the element a signed byte. Crystals'
+  outdoor walk went from 717 to 0 bad pixels (elements 125..200 sort as
+  signed bytes), its cave walk from 422 to 393. Ishar 1's last 10 pixels
+  are `cordspr`: the engine never initialises that entity byte (Ishar 1
+  `T.X` `$aa42..$aad2` clears the context fields around it, not -0x2b),
+  so it holds memory residue; with the oracle's bytes fed in, the walk
+  matches every pixel (now asserted). Oracle additions: an `R` run-order
+  line and `co=` per entity in each dump, `ALIS_HARNESS_RANGELOG=1`.
+  Every other oracle walk unchanged (26 tests). The Crystals cave's 393
+  pixels are not order: SOLCAVE's flat rect leaves view rows 10..12
+  uncovered, and the game keeps the previous frame's CAVINT pixels there
+  (crawl clears uncovered pixels to colour 0).
 
 - **2026-11-23 (VJARDIN bank):** a 4-bit pixel whose palOffset + nibble
   passes the 16-colour bank's end wraps inside the bank. Maz location 6:

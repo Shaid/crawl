@@ -57,8 +57,9 @@ describe.skipIf(!oracleAvailable() || !haveData)('crystals outdoor walk vs the g
         px += r.pixelsMasked;
         bad += r.pixelsMasked - r.pixelsMaskedEqual;
       });
-      // known residual: a few equal-depth overlaps in the opposite order (about 0.01%)
-      expect(bad / px).toBeLessThan(0.0002);
+      // every pixel (2026-11-23: the old 0.01% residual was element numbers above 127, which the engine sorts as signed bytes)
+      expect(px).toBeGreaterThan(0);
+      expect(bad).toBe(0);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

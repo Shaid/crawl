@@ -87,7 +87,13 @@ npx vitest run tools/ishar/__tests__/oracle-parity.test.ts         # fixed sampl
   offset ENTRY (0 = MAIN), the same queue write the engine's `csend` makes.
   `captureTrip(game, [14, selector], statePath)` uses it to drive an
   Ishar 2 island trip (what the travel map sends) and keeps the savestate;
-- `dump NAME` — writes the frame and the display list;
+- `dump NAME` — writes the frame and the display list. Since 2026-11-23
+  each `E` (entity) line also carries `co=`, the entity's `cordspr` byte
+  (vram -0x2b, the display list's tie-break, never initialised by the
+  engine), and an `R` line gives the entity run order (the `atent` chain
+  from MAIN). `parseSpr` reads them as `frame.cordspr` and
+  `frame.runOrder`; `crawlWalk(..., oracleCordspr = true)` gives crawl's
+  new entities the game's `cordspr` bytes;
 - `save`, `mark`, `quit`.
 
 These variables change how it runs:
@@ -99,6 +105,7 @@ These variables change how it runs:
 | `ALIS_HARNESS_MS=1` | Keys commands to wall-clock milliseconds instead of frames. This is not deterministic; it was only used before the virtual clock existed. |
 | `ALIS_HARNESS_TRACE=1` | Logs every script load, start, wake-up and kill. |
 | `ALIS_HARNESS_WATCH=hexoff,...` | Reports which script changed a main-segment byte. |
+| `ALIS_HARNESS_RANGELOG=1` | Logs every display-list ranking (`rangesprite`): frame, the sprite (owner, coordinates, depth, state before, `clinking`, element, `cordspr`) and the sprite it was linked after. That is how the equal-depth tie order was traced (2026-11-23). |
 | `ALIS_HARNESS_FORMS=1` | Logs every form test (`ctstform`/`cftstset`...: the testing script and pc, the point, the mask, each candidate entity's form, hit or miss, and its material) and every `csend` (sender and pc). That is how the Ishar 1 door and lever clicks were traced. |
 
 ## Crystals of Arborea (2026-11-23)

@@ -122,7 +122,15 @@ export interface RetainedPlacement {
   invertX: boolean;
   /** Reference sprite state: 0 = drawn last frame, -1 = created this frame, 2 = re-put this frame. */
   state: number;
+  /** Puts of this sprite so far (a re-put keeps the object, as the engine keeps its sprite cell; the scene's display list re-ranks a sprite whose count moved). */
+  puts: number;
+  /** Creation order across every runner (`createlem` links a new sprite at the head of the screen's list). */
+  born: number;
+  /** The entity's `cordspr` byte when it was put (`putmapin`), the display list's second sort key. */
+  cordspr: number;
 }
+
+let bornCounter = 0;
 
 const s8 = (v: number) => ((v & 0xff) ^ 0x80) - 0x80;
 const s16 = (v: number) => ((v & 0xffff) ^ 0x8000) - 0x8000;
@@ -153,6 +161,14 @@ export class AlisScriptRunner {
   /** Local `cdim` arrays: base offset -> dims. */
   private readonly arrays = new Map<number, number[]>();
   xinv = 0;
+  /**
+   * `cordspr` (vram -0x2b, signed byte): copied into every sprite the entity
+   * puts and used by the display list as the tie-break after depth. Only the
+   * `cordspr` opcode sets it; the entity allocator never clears it (Ishar 1
+   * `T.X` `$aa42..$aad2`, alis `script_live`), so a new entity starts with
+   * whatever byte the memory held. Crawl starts it at 0.
+   */
+  cordspr = 0;
   sleeping = false;
   dead = false;
   /** Number of activations run so far. */
@@ -401,26 +417,24 @@ export class AlisScriptRunner {
         // plain put (`fmuldes` = 0): reuse the FIRST sprite of this element,
         // whatever its state, else create one at the end of the group.
         const [a, b] = group(numelem);
-        const sp: RetainedPlacement = { idx, x: p.x, y: p.y, z: p.z, numelem, invertX: p.invertX, state: -1 };
         if (b > a) {
           const prev = this.sprites[a]!;
-          sp.state = prev.state > -1 ? 2 : prev.state;
-          this.sprites[a] = sp;
-        } else this.sprites.splice(b, 0, sp);
+          Object.assign(prev, { idx, x: p.x, y: p.y, z: p.z, invertX: p.invertX, state: prev.state > -1 ? 2 : prev.state, puts: prev.puts + 1, cordspr: this.cordspr });
+        } else this.sprites.splice(b, 0, { idx, x: p.x, y: p.y, z: p.z, numelem, invertX: p.invertX, state: -1, puts: 1, born: ++bornCounter, cordspr: this.cordspr });
         return;
       }
       // composite: each leaf takes the next old (state 0) sprite of the
       // element, else a new one at the end of the group; then `putfin`
       // kills the element's old sprites that were not reused.
       for (const leaf of resolveIsharComposite(this.data, dir, idx, slotOf, p.invertX)) {
-        const sp: RetainedPlacement = { idx: leaf.index, x: p.x + leaf.dx, y: p.y + leaf.dy, z: p.z + leaf.dz, numelem, invertX: leaf.invertX, state: -1 };
+        const at = { idx: leaf.index, x: p.x + leaf.dx, y: p.y + leaf.dy, z: p.z + leaf.dz, invertX: leaf.invertX };
         const [a, b] = group(numelem);
         let k = a;
         while (k < b && this.sprites[k]!.state !== 0) k++;
         if (k < b) {
-          sp.state = 2;
-          this.sprites[k] = sp;
-        } else this.sprites.splice(b, 0, sp);
+          const prev = this.sprites[k]!;
+          Object.assign(prev, at, { state: 2, puts: prev.puts + 1, cordspr: this.cordspr });
+        } else this.sprites.splice(b, 0, { ...at, numelem, state: -1, puts: 1, born: ++bornCounter, cordspr: this.cordspr });
       }
       this.sprites = this.sprites.filter((sp) => sp.numelem !== numelem || sp.state !== 0);
     };
@@ -571,11 +585,15 @@ export class AlisScriptRunner {
             idx = evalExpr(args[3]!);
             numelem = evalExpr(args[4]!);
           }
-          put(instr, x, y, z, idx, numelem, instr.op === 'cxputat');
+          // the engine keeps element numbers as signed bytes (`image.numelem`, `sSprite.numelem`: s8), which orders them
+          put(instr, x, y, z, idx, s8(numelem), instr.op === 'cxputat');
           break;
         }
         case 'cxinv':
           this.xinv ^= 1;
+          break;
+        case 'cordspr':
+          this.cordspr = s8(evalExpr(instr.fields.expr as AlisToken));
           break;
         case 'cxinvon':
           this.xinv = 1;
@@ -587,7 +605,7 @@ export class AlisScriptRunner {
           this.sprites = [];
           break;
         case 'cerasen': {
-          const n = evalExpr(instr.fields.expr as AlisToken);
+          const n = s8(evalExpr(instr.fields.expr as AlisToken));
           this.sprites = this.sprites.filter((sp) => sp.numelem !== n);
           break;
         }
@@ -629,7 +647,7 @@ export class AlisScriptRunner {
         case 'cpaper': case 'ctoblack': case 'cmovcolor': case 'ctopalet': case 'cnumput': case 'cscheart':
         case 'cscpos': case 'cscsize': case 'cschoriz': case 'cscvertic': case 'cscreduce': case 'cscscale':
         case 'creducing': case 'cscmap': case 'cscdump': case 'cnearcla': case 'cviewcla':
-        case 'cinstru': case 'cminstru': case 'cordspr': case 'calign': case 'cbackstar': case 'cstarring':
+        case 'cinstru': case 'cminstru': case 'calign': case 'cbackstar': case 'cstarring':
         case 'cengine': case 'cautobase': case 'cquality': case 'chsprite': case 'cselpalet': case 'clinepalet':
         case 'cautomode': case 'cautofile': case 'cscback': case 'cscrolpage': case 'cmatent': case 'cshrink':
         case 'csavepal': case 'csczoom': case 'calloctab': case 'cfreetab': case 'cscantab': case 'cneartab':

@@ -79,10 +79,18 @@ index b8719c7..aea1a4e 100644
                      s32 script_offset = xread32(script_org + 0x1c);
                      if (script_offset != 0)
 diff --git a/src/image.c b/src/image.c
-index 26375e3..00547a1 100644
+index 26375e3..f9a1c7c 100644
 --- a/src/image.c
 +++ b/src/image.c
-@@ -6030,6 +6030,7 @@ void draw(void)
+@@ -2859,6 +2859,7 @@ u16 rangesprite(u16 elemidx1, u16 elemidx2, u16 elemidx3)
+         sprite3 = linksprite;
+     }
+ 
++    { extern void h_range(u16 e, u16 after); h_range(elemidx1, elemidx3); }
+     sprite1->state = 0;
+     sprite1->link = sprite3->link;
+     sprite3->link = elemidx1;
+@@ -6030,6 +6031,7 @@ void draw(void)
          setphysic();
      }
  
@@ -177,10 +185,10 @@ index d3b0040..e68f4f2 100644
  
 diff --git a/src/sys/harness.inc b/src/sys/harness.inc
 new file mode 100644
-index 0000000..faf7b92
+index 0000000..4f491dc
 --- /dev/null
 +++ b/src/sys/harness.inc
-@@ -0,0 +1,226 @@
+@@ -0,0 +1,252 @@
 +// crawl Ishar oracle harness (not part of upstream alis; see crawl's
 +// tools/ishar/oracle/README.md). Drives the VM from a command file named by
 +// $ALIS_HARNESS, keyed by FRAME number (count of draw() calls), so runs are
@@ -245,14 +253,40 @@ index 0000000..faf7b92
 +  fclose(o);
 +}
 +
++// `ALIS_HARNESS_RANGELOG=1`: log every display-list ranking (`rangesprite`): frame, the sprite (owner, dep, newd,
++// state before, clinking, numelem) and the sprite it was linked after (`-` = the screen head).
++static void h_sprname(sSprite *s, char *buf, size_t n) {
++  sAlisScriptLive *ent = ENTSCR(s->script_ent);
++  snprintf(buf, n, "%s@%d,%d,%d", ent && ent->name ? ent->name : "?", s->depx, s->depy, s->depz);
++}
++void h_range(u16 e, u16 after) {
++  static int on = -1;
++  if (on < 0) on = getenv("ALIS_HARNESS_RANGELOG") != 0;
++  if (!on) return;
++  sSprite *s = SPRITE_VAR(e), *a = SPRITE_VAR(after);
++  char b1[96], b2[96];
++  h_sprname(s, b1, sizeof b1);
++  if (a && a->screen_id != 0 && after != s->screen_id && a->data) h_sprname(a, b2, sizeof b2); else snprintf(b2, sizeof b2, "-");
++  fprintf(stderr, "[range] %ld %s d=%d st=%d lk=%d ne=%d co=%d after %s\n", h_frameno, b1, s->newd, s->state, (s16)s->clinking, s->numelem, (s8)s->cordspr, b2);
++}
++
 +// Live display list, in draw order, per screen: what was actually composited.
 +static void h_dump_sprites(const char *name) {
 +  char p[512]; snprintf(p, sizeof p, "%s/%s.spr", h_out(), name);
 +  FILE *o = fopen(p, "w"); if (!o) return;
 +  for (int i = 0; i < MAX_SCRIPTS; i++) {
 +    sAlisScriptLive *l = alis.live_scripts[i];
-+    if (l && l->name) fprintf(o, "E %d %s run=%d sleep=%d org=%x pc=%x\n", i, l->name, l->running, (s8)get_0x04_cstart_csleep(l->vram_org), l->data ? l->data->data_org : 0, (unsigned)(get_0x08_script_ret_offset(l->vram_org) - l->pc_org));
++    if (l && l->name) fprintf(o, "E %d %s run=%d sleep=%d org=%x pc=%x co=%d\n", i, l->name, l->running, (s8)get_0x04_cstart_csleep(l->vram_org), l->data ? l->data->data_org : 0, (unsigned)(get_0x08_script_ret_offset(l->vram_org) - l->pc_org), (s8)get_0x2b_cordspr(l->vram_org));
 +  }
++  // Run order: the entity chain from MAIN (`atent` +4 links; a new entity is linked right after its creator).
++  fprintf(o, "R");
++  for (u16 e = xread16(alis.atent + 4), n = 0; e != 0 && n < MAX_SCRIPTS; e = xread16(alis.atent + e + 4), n++) {
++    u32 vo = xread32(alis.atent + e);
++    const char *nm = "?";
++    for (int i = 0; i < MAX_SCRIPTS; i++) { sAlisScriptLive *l = alis.live_scripts[i]; if (l && l->name && l->vram_org == vo) { nm = l->name; break; } }
++    fprintf(o, " %s", nm);
++  }
++  fprintf(o, "\n");
 +  for (u16 scn = screen.ptscreen; scn; scn = get_scr_to_next(scn)) {
 +    fprintf(o, "S %u state=%d x=%d y=%d w=%d h=%d\n", scn, get_scr_state(scn), get_scr_newx(scn), get_scr_newy(scn), get_scr_width(scn), get_scr_height(scn));
 +    u16 sp = get_scr_screen_id(scn);

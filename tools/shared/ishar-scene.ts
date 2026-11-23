@@ -18,18 +18,19 @@
  *   between wake-ups (element rules: `AlisScriptRunner`), which is why the
  *   backdrop alternates per step (FOND flips one layer every wake-up and the
  *   other on every facing change).
- * - Display order is the engine's depth list (`image.c` `rangesprite`):
- *   farther first; at equal depth, higher element number first; at equal
- *   element, the oracle's lists put the most recently created script's
- *   sprites first, and within one script keep put order (new sprites enter
- *   the screen list at its head and each is inserted in front of its equals,
- *   which reverses twice).
+ * - Display order is the engine's persistent screen list (`image.c`
+ *   `createlem`/`rangesprite`), kept by `drawPass`: farther first; at equal
+ *   depth, higher element number first; a full tie is settled by history.
+ *   A new sprite enters at the list head and, when ranked, goes in front of
+ *   its ranked equals (under them); a re-put sprite goes behind them (on
+ *   top); an untouched sprite keeps its place. (2026-11-23: this replaced a
+ *   per-script rank, which got the ties wrong after region changes.)
  * - Uncovered view pixels are palette index 0 (`clrfen`).
  *
  * Per-title constants (addresses, region-code groups) live in the
  * `IsharTitleSpec`s below; each one cites its trace.
  */
-import { AlisScriptRunner, type SceneEnv } from './alis-interp.ts';
+import { AlisScriptRunner, type RetainedPlacement, type SceneEnv } from './alis-interp.ts';
 import { decodeIsharBitmap, findIsharDirectory, isharBitmapToNormalizedGreyscaleRGBA, resolveIsharSlot, type IsharBitmap } from './ishar-sprites.ts';
 import { isharBitmapToPaletteRGBA, resolveIsharOwnPalette, resolveIsharPaletteSlot, type IsharPalette } from './ishar-palette.ts';
 
@@ -1703,6 +1704,10 @@ interface LoadedScript {
   passed?: Set<number>;
   /** Started as a zone/location add-on (so a same-named region-group script is not mistaken for it). */
   addOn?: boolean;
+  /** Creation order (the engine links a new entity right after its creator, so the latest runs first). */
+  born: number;
+  /** The scene script that `clive`d it (absent: MAIN). */
+  creator?: LoadedScript;
 }
 
 /** Element `index` (byte or big-endian signed word) of the table at `addr`, if a block of `blocks` holds it. */
@@ -1734,8 +1739,17 @@ export class IsharScene {
   private addOnZone = -1;
   private prevPos = '';
   private state: IsharPartyState | null = null;
-  private seqCounter = 0;
-  private readonly seqOf = new WeakMap<object, number>();
+  private scriptBorn = 0;
+  /**
+   * The `cordspr` byte a new entity of this script starts with. The engine
+   * never initialises it (memory residue), so only a comparison against the
+   * oracle can supply it (`crawlWalk`'s `oracleCordspr`); default 0.
+   */
+  cordsprOf: ((name: string) => number | undefined) | null = null;
+  /** The script whose activation is running (the creator of a `clive`d child). */
+  private running: LoadedScript | undefined;
+  /** The view screen's sprite list, head first (= drawn first), as of the last `drawPass`. */
+  private display: Array<{ sp: RetainedPlacement; owner: LoadedScript; d: number; state: number; puts: number }> = [];
   /** Sub-zone global (0 at the start of the game). */
   zone = 0;
   /** Region at the previous step (GERDEP's local 25 when the zone rules run). */
@@ -1845,6 +1859,7 @@ export class IsharScene {
       return -1;
     }
     s.handle = this.nextHandle++;
+    s.creator = this.running;
     this.scripts.push(s);
     return s.handle;
   }
@@ -1856,9 +1871,53 @@ export class IsharScene {
       return null;
     }
     const runner = new AlisScriptRunner(data, name);
+    runner.cordspr = this.cordsprOf?.(name) ?? 0;
     if (this.spec.coordOffsets) runner.coordOffsets = this.spec.coordOffsets;
     if (this.spec.engineVersion) runner.version = this.spec.engineVersion;
-    return { name, data, runner };
+    return { name, data, runner, born: ++this.scriptBorn };
+  }
+
+  /** `scripts` in the engine's run order: a new entity is linked right after its creator, so siblings run newest first, each followed by its own children. */
+  private chainOrder(scripts: readonly LoadedScript[]): LoadedScript[] {
+    const set = new Set(scripts);
+    const out: LoadedScript[] = [];
+    const visit = (s: LoadedScript) => {
+      out.push(s);
+      for (const k of scripts.filter((k) => k.creator === s).sort((a, b) => b.born - a.born)) visit(k);
+    };
+    for (const r of scripts.filter((s) => !s.creator || !set.has(s.creator)).sort((a, b) => b.born - a.born)) visit(r);
+    return out;
+  }
+
+  /**
+   * Run `scripts` frame by frame, the way the engine's main loop does: each
+   * frame activates every one that is not asleep, in run order (a child
+   * `clive`d during a frame runs right after its creator, in that frame),
+   * then the screen's draw pass ranks the sprites that frame put. Stops when
+   * all sleep or exit, or after `maxFrames` (the runner's `settle` bound).
+   * `runKids` = false leaves the children `clive`d by start-up code for the
+   * next step (oracle: Ishar 2's DJ2 add-on starts a PCAVE that the game has
+   * not drawn by the end of the step).
+   */
+  private runFrames(scripts: readonly LoadedScript[], env: SceneEnv, runKids = true, maxFrames = 8): void {
+    const part = new Set(scripts);
+    for (let f = 0; f < maxFrames; f++) {
+      const order = this.chainOrder(this.scripts.filter((s) => part.has(s)));
+      let ran = false;
+      for (let i = 0; i < order.length; i++) {
+        const s = order[i]!;
+        if (s.runner.sleeping || s.runner.dead || !this.scripts.includes(s)) continue;
+        ran = true;
+        this.running = s;
+        s.runner.activate(env);
+        this.running = undefined;
+        const kids = runKids ? this.scripts.filter((k) => k.creator === s && !part.has(k)).sort((a, b) => b.born - a.born) : [];
+        for (const k of kids) part.add(k);
+        order.splice(i + 1, 0, ...kids);
+      }
+      if (!ran) break;
+      this.drawPass();
+    }
   }
 
   /**
@@ -1901,10 +1960,9 @@ export class IsharScene {
             fresh.push(s);
           }
         }
-        const env = this.env();
-        for (const s of fresh) s.runner.settle(env);
+        this.runFrames(fresh, this.env(), false);
         this.applyAddOns();
-        this.tagNewSprites();
+        this.drawPass();
       }
     }
     this.updatePalette();
@@ -1989,7 +2047,6 @@ export class IsharScene {
       if (!s) continue;
       if (typeof a !== 'string') for (const [k, v] of Object.entries(a.locals)) s.runner.locals.set(Number(k), v);
       s.addOn = true;
-      s.runner.settle(env);
       fresh.push(s);
       // An add-on wins equal-depth ties against the region group (oracle,
       // CONT5 7..12,24: INCAVE's wall covers FORET's tree root at depth 99;
@@ -2009,6 +2066,7 @@ export class IsharScene {
       keep.splice(at, 0, ...fresh);
     }
     this.scripts = keep;
+    this.runFrames(fresh, env, false);
     this.addOnKey = key;
   }
 
@@ -2031,13 +2089,11 @@ export class IsharScene {
       // a fresh group is not woken until the next step; the game-wide
       // entities (ENCONT) are, every step
       const persistent = this.spec.entities?.persistent ?? [];
-      for (const s of this.scripts) {
-        if (fresh && !this.spec.wakeFreshGroup && !persistent.includes(s.name) && s.handle === undefined) continue;
-        s.runner.wake();
-        s.runner.settle(env);
-      }
+      const woken = this.scripts.filter((s) => !(fresh && !this.spec.wakeFreshGroup && !persistent.includes(s.name) && s.handle === undefined));
+      for (const s of woken) s.runner.wake();
+      this.runFrames(woken, env);
       this.applyAddOns();
-      this.tagNewSprites();
+      this.drawPass();
     }
     this.prevRegion = state.region;
     this.updatePalette();
@@ -2068,7 +2124,7 @@ export class IsharScene {
         s.runner = fresh.runner;
         s.runner.settle(env);
       }
-    this.tagNewSprites();
+    this.drawPass();
   }
 
   /** Game state changed without a step or turn (e.g. the day phase): nothing is woken, only state-derived things (the palette) follow. */
@@ -2082,36 +2138,75 @@ export class IsharScene {
     return group ? `${isharContOf(this.spec, state.region)}:${group.scripts.join(',')}` : '';
   }
 
-  private tagNewSprites(): void {
-    for (const s of this.scripts) for (const sp of s.runner.sprites) if (!this.seqOf.has(sp)) this.seqOf.set(sp, this.seqCounter++);
+  /**
+   * One frame of the engine's draw loop over the view screen's list
+   * (`image.c` ~4235 and `rangesprite`). Sprites created since the last
+   * pass are linked at the head (latest first); killed ones are dropped;
+   * then the list is walked from the head and every new (-1) or re-put (2)
+   * sprite is unlinked and re-inserted by (depth desc, element desc): a new
+   * one in front of its first ranked equal, a re-put one behind them all.
+   * Not-yet-ranked new sprites are skipped as comparators; re-put ones not
+   * reached yet still compare at their old depth. The key is (depth desc,
+   * `cordspr` desc, element desc); `cordspr` is the entity's uninitialised
+   * context byte (`AlisScriptRunner.cordspr`), 0 in crawl unless
+   * `cordsprOf` supplies the game's.
+   */
+  private drawPass(): void {
+    const live = new Map<RetainedPlacement, LoadedScript>();
+    for (const s of this.scripts) for (const sp of s.runner.sprites) live.set(sp, s);
+    const known = new Set<RetainedPlacement>();
+    for (const e of this.display) {
+      known.add(e.sp);
+      if (!live.has(e.sp)) e.state = 1;
+      else if (e.sp.puts !== e.puts) {
+        e.puts = e.sp.puts;
+        if (e.state !== -1) e.state = 2;
+      }
+    }
+    const fresh = [...live].filter(([sp]) => !known.has(sp)).sort((a, b) => a[0].born - b[0].born);
+    for (const [sp, owner] of fresh) this.display.unshift({ sp, owner, d: sp.y, state: -1, puts: sp.puts });
+    const L = this.display;
+    let prev = -1; // index of the entry before the cursor (-1 = the screen head)
+    while (prev + 1 < L.length) {
+      const i = prev + 1;
+      const e = L[i]!;
+      if (e.state === 0) {
+        prev = i;
+        continue;
+      }
+      L.splice(i, 1);
+      if (e.state === 1) continue;
+      const d = e.sp.y;
+      const ne = e.sp.numelem;
+      let j = 0;
+      const co = e.sp.cordspr;
+      for (; j < L.length; j++) {
+        const o = L[j]!;
+        if (o.state > -1 && o.d <= d && (o.d < d || o.sp.cordspr < co || (o.sp.cordspr === co && (o.sp.numelem < ne || (o.sp.numelem === ne && e.state === -1))))) break;
+      }
+      L.splice(j, 0, e);
+      e.d = d;
+      e.state = 0;
+      // the walk goes on after the previous entry; it is the new one if it went right there
+      if (j === prev + 1) prev = j;
+      else if (j <= prev) prev++;
+    }
   }
 
   /** Every leaf bitmap the view currently shows, in display (painter's) order. */
   leaves(): IsharSceneLeaf[] {
     const out: IsharSceneLeaf[] = [];
-    const n = this.scripts.length;
-    this.scripts.forEach((s, rank) => {
+    this.drawPass();
+    this.display.forEach(({ sp, owner: s }, seq) => {
       const dir = findIsharDirectory(s.data);
       if (!dir) return;
-      for (const sp of s.runner.sprites) {
-        const h = resolveIsharSlot(s.data, dir, sp.idx);
-        if (h < 0) continue;
-        const bitmap = decodeIsharBitmap(s.data, sp.idx, h);
-        if (!bitmap) continue;
-        out.push({
-          script: s.name,
-          index: sp.idx,
-          x: sp.x,
-          y: sp.y,
-          z: sp.z,
-          numelem: sp.numelem,
-          invertX: sp.invertX,
-          bitmap,
-          seq: (n - 1 - rank) * 1e7 + (this.seqOf.get(sp) ?? 0),
-        });
-      }
+      const h = resolveIsharSlot(s.data, dir, sp.idx);
+      if (h < 0) return;
+      const bitmap = decodeIsharBitmap(s.data, sp.idx, h);
+      if (!bitmap) return;
+      out.push({ script: s.name, index: sp.idx, x: sp.x, y: sp.y, z: sp.z, numelem: sp.numelem, invertX: sp.invertX, bitmap, seq });
     });
-    return sortLeavesForDisplay(out);
+    return out;
   }
 
   /** Runner warnings from every live script. */
