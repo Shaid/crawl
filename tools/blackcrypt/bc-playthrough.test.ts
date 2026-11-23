@@ -58,8 +58,8 @@ export function plan(w: ReturnType<typeof playthrough>) {
 const compact = (s: BcSim) => s.log.map(l => `${l.tick}:${l.what}${l.P ? '#' + l.P : ''}${l.ch !== undefined ? '/' + l.ch : ''}${l.hit !== undefined ? (l.hit ? '+' : '-') : ''}${l.dmg ? '=' + l.dmg : ''}`);
 const SEED = 'a27740bfd561';
 const GOLDEN: string[] = [
-  '0:step-party', '1:step-party', '2:step-party', '3:blocked', '4:door open', '5:step-party', '6:cast/1', '7:step#3', '7:step-party', '8:ray/2',
-  '8:monster-dead#3', '8:cast/2', '11:step#5', '16:step#5', '21:step#5', '22:swing#5/0-', '26:monster-hit#5/1=3', '26:damage/1=3', '27:swing#5/0-',
+  '0:step-party', '1:step-party', '2:step-party', '3:blocked', '4:door open', '5:step-party', '6:cast/1', '7:step#3', '7:step-party', '8:monster-dead#3', '8:ray/2',
+  '8:cast/2', '11:step#5', '16:step#5', '21:step#5', '22:swing#5/0-', '26:monster-hit#5/1=3', '26:damage/1=3', '27:swing#5/0-',
   '32:swing#5/0-', '37:swing#5/0+=3', '42:swing#5/0-', '47:swing#5/0-', '52:swing#5/0-', '57:swing#5/0-', '62:swing#5/0-', '67:swing#5/0-',
   '72:swing#5/0-', '77:swing#5/0-', '82:swing#5/0-', '87:swing#5/0-', '92:swing#5/0-', '97:swing#5/0-', '102:swing#5/0-', '107:swing#5/0-',
   '112:swing#5/0-', '117:swing#5/0-', '122:swing#5/0-', '127:swing#5/0-', '132:swing#5/0-', '137:swing#5/0-', '141:monster-hit#5/0=3',

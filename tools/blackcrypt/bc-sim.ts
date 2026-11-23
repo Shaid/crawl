@@ -14,17 +14,20 @@
  */
 import { levelUp, meleeAttack, weaponInfo, type RuleTables, type WeaponBase } from './rules';
 import {
-  castRay, castSpell, memoriseClick, rechargeTick, pickSquareTargets, A4Mem, RAY_SPELLS,
-  monsterPossessStone, type RayWorld, type RayObj, type SpellBook, type SpChar, type SpFull,
+  castRay, castSpell, castFacing, castRefresh, healTarget, memoriseClick, rechargeTick, pickSquareTargets, A4Mem, RAY_SPELLS,
+  monsterPossessStone, type RayDeath, type RayWorld, type RayObj, type SpellBook, type SpChar, type SpFull,
 } from './rules-spell';
 import { awardXp, hpAtLeastMorale, runBehaviour, vitalsTick, VM_CALLS, type AiScripts, type VmMonster, type VmCall } from './rules-monster';
 import { MoveWorld, activationScan as _unusedMoveScan, pursue, approach, wander, monsterAct as moveAct, pathfind, addToSquare, type ActEnv, type MoveCall } from './rules-move';
 import {
   OBJ, CELL, QN, allocObj, freeObj, unlinkObj, insertObj, adjustWeight, scheduleEvent, activationScan, swingCooldown, swingTail, hitReadyDelay, pickTargetsMem, castSpell9,
-  openDoor, stepCost, adjustVitals, lookupType,
+  openDoor, stepCost, adjustVitals, lookupType, cancelEvent, forceHammer, dispel, raiseDead,
 } from './rules-spell9';
 import { popDue, type DueEvent } from './rules-pop';
-import { monsterDeath, damageCharacter, enterParty, cancelEventsFor } from './rules-death';
+import { monsterDeath, damageCharacter, enterParty, cancelEventsFor, triggerActions } from './rules-death';
+import { executeAction, glyphEffect, pitEffect, doorClick, keyUse, type ExecHooks } from './rules-action';
+import { useItem, type ItemCallee } from './rules-item';
+import { ramBossItem } from './rules-boss';
 import { ObjectWorld } from './object-world';
 
 void _unusedMoveScan;
@@ -68,7 +71,11 @@ export type Cmd =
   | { kind: 'attack'; char: number; hand?: number }
   | { kind: 'move'; dir: 'forward' | 'back' }
   | { kind: 'turn'; by: 1 | -1 }
-  | { kind: 'openDoor' }
+  | { kind: 'openDoor'; char?: number }
+  | { kind: 'trigger'; x: number; y: number; type: number }
+  | { kind: 'useKey'; char?: number }
+  | { kind: 'cursor'; char: number; item: number }
+  | { kind: 'use'; char: number; item: number; pick?: number }
   | { kind: 'cast'; char: number; slot: number; pick?: number; map?: number }
   | { kind: 'memorise'; char: number; row: number }
   | { kind: 'pickup'; char: number; item: number }
@@ -79,6 +86,7 @@ export type Cmd =
 
 export interface BcConfig {
   tables: RuleTables; weaponBase: WeaponBase; scripts: AiScripts; seed: string;
+  levelRamps?: number[];   // S_2 +0x39E: the per-map accent ramp, applied by the stairs follow-up +0x16C62
   spells?: { pageHead: number[]; next: number[]; level: number[]; pageNext: number[]; timers?: number[]; owned?: number[] };
 }
 
@@ -94,6 +102,7 @@ export class BcSim extends ObjectWorld {
     super(cfg.tables, cfg.seed, freeIds);
     this.cfg = cfg;
     this.mw = new MemMoveWorld(this.a);
+    this.a.setW(0x1a18, 1);   // the UI's "input ready" word the door click waits on
     if (cfg.spells) {
       const sp = cfg.spells;
       this.book = { pageHead: sp.pageHead, next: sp.next, level: sp.level, timers: [...(sp.timers ?? sp.next.map(() => 0))], owned: [...(sp.owned ?? sp.pageHead.map(() => 1))] };
@@ -199,6 +208,35 @@ export class BcSim extends ObjectWorld {
     if (r.dead) { this.note('monster-dead', { P, x: xy[0], y: xy[1], xp: [0, 1, 2, 3].map(k => getL(this.a, CH(k) + 0xa0) - before[k]) }); if (r.scan) activationScan(this.a, this.rng, this.tick); }
   }
 
+  // ------------------------------------------------------------------ world effects (pass 8: action executor, glyph, pit, doors, keys; all harness-diffed ports)
+  /** hooks for the pieces the rules do not own: the activation scan runs for real, map loads / UI are logged */
+  private execHooks(): ExecHooks {
+    return {
+      scan: () => activationScan(this.a, this.rng, this.tick),
+      stairs: map => { this.note('map-change', { map }); if (this.cfg.levelRamps?.[map - 1] !== undefined) this.a.setW(0x1e62, this.cfg.levelRamps[map - 1]); },
+      equipRemove: (ch, row, slot) => this.note('unequip-effects', { ch, row, slot }),
+      palette: ramp => this.note('ramp', { ramp }),
+    };
+  }
+  /** run a world effect that may hurt the party through the raw DamageCharacter port, then log the visible consequences (damage, deaths, game over) */
+  private effect(label: string | (() => string), fn: () => void, extra: Record<string, unknown> | (() => Record<string, unknown>) = {}) {
+    const a = this.a, hp0 = [0, 1, 2, 3].map(k => this.hpOf(k));
+    fn();
+    const lost = [0, 1, 2, 3].map(k => hp0[k] - this.hpOf(k));
+    this.note(typeof label === 'function' ? label() : label, { ...(typeof extra === 'function' ? extra() : extra), ...(lost.some(v => v > 0) ? { lost } : {}) });
+    for (let k = 0; k < 4; k++) if (hp0[k] > 0 && this.hpOf(k) <= 0) this.note('death', { ch: k });
+    if (a.w(0x1e88) === 2 && !this.gameOver) { this.gameOver = true; this.note('game-over'); }
+  }
+  runAction(id: number) {
+    const a = this.a, r = 0x836 + 8 * id;
+    this.effect('action', () => executeAction(a, this.rng, this.t.statBonusT1, id, this.execHooks()), { id, op: a.b(r), x: a.b(r + 2), y: a.b(r + 3), v: a.b(r + 6) });
+  }
+  /** TriggerActionsAt (+0xCF34) with its immediate records run in-line by the executor: plates, levers, buttons, trap squares */
+  trigger(x: number, y: number, type: number) {
+    const res = triggerActions(this.a, x, y, type, this.tick, id => this.runAction(id));
+    if (res.ran) this.note('trigger', { x, y, type, executed: res.executed });
+  }
+
   // ------------------------------------------------------------------ player melee
   private swing(k: number, hand = 0) {
     const a = this.a, c = CH(k);
@@ -302,8 +340,12 @@ export class BcSim extends ObjectWorld {
     a.setW(0x1742, r.x); a.setW(0x1740, r.y);
     if (r.code >= 2 && r.code <= 4 || r.code === 9) a.setW(0x1744, r.facing);
     this.note('step-party', { x: r.x, y: r.y, verdict: r.code });
-    if (r.code === 5 || r.code === 7) this.note('glyph', { x: r.x, y: r.y, kind: r.code });    // effect: +0x4662 (code only)
-    if (r.code === 6) this.note('trap', { x: r.x, y: r.y });                                        // effect: TriggerActionsAt +0xCF34 (code only)
+    // the move routine +0x16CC4 after the enter test: 2 = pit / stairs down (+0x1734A damage), 3 = teleporter / stairs (+0x16C62 when the teleporter's byte +7 names a map), 5 = glyph +0x4662,
+    // 6 = trap square: TriggerActionsAt(x, y, 0x1E); 7 (a kind-2 field) does nothing here
+    if (r.code === 2) this.effect('pit', () => pitEffect(a, this.rng, this.t.statBonusT1), { x: r.x, y: r.y });
+    if (r.code === 3) { const s = lookupType(a, nx, ny, 0x12); const map = s ? a.b(OBJ(s) + 7) : 0; if (map) this.execHooks().stairs!(map); else this.note('teleport', { x: r.x, y: r.y }); }
+    if (r.code === 5) this.effect('glyph', () => glyphEffect(a, this.rng, this.t.statBonusT1), { x: r.x, y: r.y, kind: r.code });
+    if (r.code === 6) { this.note('trap', { x: r.x, y: r.y }); this.trigger(r.x, r.y, 0x1e); }
     const flipped = stepCost(a, this.t.statBonusT1); void flipped;
     activationScan(a, this.rng, this.tick);
   }
@@ -342,6 +384,8 @@ export class BcSim extends ObjectWorld {
   castAny(k: number, slot: number, ui: { pick?: number; map?: number } = {}) {
     const a = this.a, spell = a.b(CH(k) + 0x49 + slot);
     if (spell === 0xff || this.hpOf(k) <= 0) return;
+    if (spell === 34 || spell === 43) { this.castFacingSpell(k, spell as 34 | 43); this.spendSlot(k, slot); this.note('cast', { ch: k, spell, spent: true }); return; }
+    if (spell === 46 && this.book) { castRefresh(this.book, a.b(CH(k) + 0x46), this.cfg.spells!.pageNext); this.spendSlot(k, slot); this.note('cast', { ch: k, spell, spent: true }); return; }
     const NINE = new Set([10, 2, 51, 41, 26, 22, 24, 21, 4, 18, 44]);
     if (NINE.has(spell)) {
       a.setW(0x1a14, k);
@@ -353,14 +397,16 @@ export class BcSim extends ObjectWorld {
       return;
     }
     // ray and simple spells: the JS-struct ports, with the image copied in and out
-    const sp = this.spChars(), rw = this.ray(), xpBefore = sp.map(c => c.xp ?? 0);
+    const sp = this.spChars(), rw = this.ray();
     const w: SpFull = {
       chars: sp, active: k, formation: [0, 1, 2, 3].map(i => a.w(0x1e74 + 2 * i)), tick: this.tick, light: a.w(0x1754), hold: a.w(0x1756),
       compass: a.w(0x1e28), wizSight: a.w(0x1e2a), detect: a.w(0x1e2c), haste: a.w(0x1e2e), events: [], ray: rw,
       antimagic: (getL(a, CELL(a.w(0x1742), a.w(0x1740))) & 0x40000000) !== 0,
     };
     if (RAY_SPELLS[spell] === undefined && !SIMPLE.has(spell)) { this.note('cast-unsupported', { ch: k, spell }); return; }
-    const r = castSpell(w, spell, ui.pick ?? 0, this.t, this.rng, awardXp);
+    // the real ray runs the death routine at each hit (+0x702E), so the kill goes through the image at that point: loot first, then XP, then the level-up (pass 8: this fixes the draw order of ray kills)
+    const death = this.rayDeath(sp, rw);
+    const r = castSpell(w, spell, ui.pick ?? 0, this.t, this.rng, awardXp, death);
     sp.forEach((c, i) => {
       const o = CH(i);
       a.setW(o + 0x4e, c.hp); a.setB(o + 0x62, c.ac); a.setB(o + 0x64, c.str); a.setB(o + 0x9a, c.poison); a.setB(o + 0x97, c.disease); a.setW(o + 0x52, c.food); a.setW(o + 0x54, c.water);
@@ -370,13 +416,97 @@ export class BcSim extends ObjectWorld {
     a.setW(0x1754, w.light); a.setW(0x1e28, w.compass); a.setW(0x1e2a, w.wizSight); a.setW(0x1e2c, w.detect); a.setW(0x1e2e, w.haste);
     for (const e of w.events) scheduleEvent(a, e.type, e.due >>> 0, e.a1, e.a2, e.a3, 0, 0);
     if (r.ray) {
-      for (const h of r.ray.hits) { const P = h.id; a.setW(OBJ(P) + 8, rw.objs[P].hp!); a.setB(OBJ(rw.objs[P].S!) + 0x12, rw.objs[rw.objs[P].S!].alert!); }
+      for (const h of r.ray.hits) { const P = h.id; if (!h.killed) a.setW(OBJ(P) + 8, rw.objs[P].hp!); a.setB(OBJ(rw.objs[P].S!) + 0x12, rw.objs[rw.objs[P].S!].alert!); }
       this.note('ray', { ch: k, spell, total: r.ray.total, hits: r.ray.hits.map(h => ({ P: h.id, dmg: h.dmg, killed: h.killed })) });
-      // XP was awarded by the ray port; the death itself (loot, frees, events, level-up) is the verified monsterDeath without a second XP award
-      for (const h of r.ray.hits) if (h.killed) this.killMonster(h.id, true, xpBefore);
     }
     if (r.spent) this.spendSlot(k, slot);
     this.note('cast', { ch: k, spell, spent: r.spent });
+  }
+
+  // ------------------------------------------------------------------ pass 8: facing spells, item use, boss items
+  /** the ray's per-hit death callback: the verified monsterDeath on the image (loot first, then XP and level-up), then the JS copies of the characters are refreshed */
+  private rayDeath(sp: SpChar[], rw: RayWorld): RayDeath {
+    const a = this.a;
+    return (id, hp) => {
+      a.setW(OBJ(id) + 8, hp);
+      this.killMonster(id);
+      sp.forEach((c, i) => { c.hp = a.sw(CH(i) + 0x4e); c.xp = getL(a, CH(i) + 0xa0); });
+      void rw;
+      return { hp: a.sw(OBJ(id) + 8), killed: !this.monsterAlive(id) };
+    };
+  }
+  /** a ray with fixed parameters (the item effects 0x82 / 0x83 / 0x85 / 0x87 / 0x88 / 0x89 / 0x8C call `+0x6D9A` with constants) */
+  private doRay(args: { mag: number; dmg: number; base: number; pre: number; range: number }, label: string): number {
+    const a = this.a, sp = this.spChars(), rw = this.ray();
+    rw.chars = sp as unknown as RayWorld['chars']; for (const c of sp) c.xp ??= 0;
+    const r = castRay(rw, args, this.rng, awardXp, this.rayDeath(sp, rw));
+    for (const h of r.hits) { if (!h.killed) a.setW(OBJ(h.id) + 8, rw.objs[h.id].hp!); a.setB(OBJ(rw.objs[h.id].S!) + 0x12, rw.objs[rw.objs[h.id].S!].alert!); }
+    this.note(label, { total: r.total, hits: r.hits.map(h => ({ P: h.id, dmg: h.dmg, killed: h.killed })) });
+    return 1;
+  }
+  /** DISMISS (34) and BINDING (43), the facing-square spells: the verified castFacing; a DISMISS kill runs the real death routine (`+0x6AD6` calls `+0x7ED0`), a BINDING success cancels the monster's events and schedules its act at tick + 200 */
+  private castFacingSpell(k: number, spell: 34 | 43) {
+    const a = this.a, tick = this.tick;
+    if ((getL(a, CELL(a.w(0x1742), a.w(0x1740))) & 0x40000000) !== 0) return;
+    const rw = Object.assign(this.ray(), { level: a.b(CH(k) + 0x5e), tick });
+    const sp = this.spChars(); rw.chars = sp as unknown as RayWorld['chars'];
+    const [fx, fy] = [0, 0];
+    void fx; void fy;
+    const r = castFacing(rw, spell, this.rng, awardXp, id => { a.setW(OBJ(id) + 8, 0); this.killMonster(id); });
+    for (const [id, o] of Object.entries(rw.objs)) if (o.kind === 'sec') a.setB(OBJ(+id) + 0x12, o.alert!);
+    for (const id of r.cancelled) if (!r.killed.includes(id)) cancelEventsFor(a, id);
+    for (const sc of r.sched) { const xy = this.monsterXY(sc.id) ?? [0, 0]; scheduleEvent(a, 1, (tick + 200) >>> 0, xy[0] & 0xff, xy[1] & 0xff, 0, 0, sc.id); }
+    this.note(spell === 34 ? 'dismiss' : 'binding', { ch: k, killed: r.killed, bound: r.sched.map(s => s.id) });
+  }
+  /** PROTECTOR / SOULFREEZER / VORTEX (harness 900 / 900 in rules-boss.test.ts) applied to the image; FORCEHAMMER is the A4 port in rules-spell9.ts */
+  private bossItem(fx: 'prot' | 'sf' | 'vx' | 'hammer'): number {
+    const a = this.a;
+    if (fx === 'hammer') {
+      const cancelled: number[] = []; const stage0 = a.w(0x1a1e);
+      forceHammer(a, cancelled); for (const id of cancelled) cancelEventsFor(a, id);
+      this.note('forcehammer', { stage: a.w(0x1a1e), done: stage0 === 4 && a.w(0x1a1e) === 5 });
+      return 1;
+    }
+    const px = a.w(0x1742), py = a.w(0x1740), f = a.w(0x1744), rw = this.ray();
+    const wall = ((getL(a, CELL(px, py)) >>> (12 + f)) & 1) === 1;
+    const r = ramBossItem(fx, { stage: a.w(0x1a1e), tick: this.tick, px, py, facing: f, wall, world: rw, chars: [0, 1, 2, 3].map(k => ({ hp: this.hpOf(k), res: a.b(CH(k) + 0x69) })) });
+    a.setW(0x1a1e, r.stage);
+    for (let k = 0; k < 4; k++) a.setB(CH(k) + 0x69, r.res[k]);
+    for (const [S, al] of Object.entries(r.alert)) a.setB(OBJ(+S) + 0x12, al);
+    for (const call of r.calls) {
+      if (call.fn === 'cancelType') { for (let n = a.b(0x173f), guard = 0; n !== 0x96 && guard < 200; guard++) { const nx = a.b(QN(n) + 9); if (a.b(QN(n) + 4) === call.type) cancelEvent(a, n); n = nx; } }
+      else if (call.fn === 'cancelEvents') cancelEventsFor(a, call.id!);
+      else if (call.fn === 'sched') scheduleEvent(a, call.type!, call.due! >>> 0, call.type === 1 ? (call.x ?? 0) : 0, call.type === 1 ? (call.y ?? 0) : 0, 0, 0, call.type === 1 ? call.id! : 0);
+    }
+    for (const S of r.clearB0a) a.setB(OBJ(S) + 0xa, 0);
+    this.note('boss-item', { fx, stage: r.stage });
+    return 1;
+  }
+  /**
+   * USE AN ITEM (`+0x12FEA`, harness for the shell, the effect map and the inline potions: rules-item.ts). The routines the effects 0x80..0x90 call are supplied here from the ports that are harnessed
+   * elsewhere (rays: castRay with the constant parameters, DISPEL: dispel, HEALING: healTarget, RAISE DEAD: raiseDead, the boss items: ramBossItem / forceHammer); LIGHT (`+0x58C6`) is taken to add
+   * 120 to the light counter like spell 1 (hyp: not diffed on its own).
+   */
+  useItem(k: number, item: number, ui: { pick?: number } = {}): number {
+    const a = this.a;
+    a.setW(0x1a24, k);
+    const callee: ItemCallee = (off, args) => {
+      switch (off) {
+        case 0x6d9a: return this.doRay({ mag: args[0], dmg: args[1], base: args[2], pre: args[3], range: args[4] }, 'item-ray');
+        case 0x4c46: return dispel(a, args[0], 2);
+        case 0x5070: { const tgt = a.w(0x1e74 + 2 * (ui.pick ?? k)); const c = this.spChars()[tgt]; healTarget(c as unknown as SpChar, args[0], this.rng); a.setW(CH(tgt) + 0x4e, c.hp); return 1; }
+        case 0x5cfa: return raiseDead(a, this.t.statBonusT1, ui.pick ?? 0xffff);
+        case 0x58c6: a.setW(0x1754, (a.w(0x1754) + 120) & 0xffff); return 1;
+        case 0x78da: return this.bossItem('prot');
+        case 0x79c2: return this.bossItem('sf');
+        case 0x7b2e: return this.bossItem('vx');
+        case 0x7c40: return this.bossItem('hammer');
+        default: return 0;
+      }
+    };
+    const r = useItem(a, this.rng, this.t.statBonusT1, k, item, callee);
+    this.note('use-item', { ch: k, item, result: r });
+    return r;
   }
 
   // ------------------------------------------------------------------ commands and the tick
@@ -386,7 +516,11 @@ export class BcSim extends ObjectWorld {
       case 'attack': this.swing(c.char, c.hand ?? 0); break;
       case 'move': this.move(c.dir === 'back'); break;
       case 'turn': a.setW(0x1744, (a.w(0x1744) + 4 + c.by) & 3); for (let k = 0; k < 4; k++) adjustVitals(a, this.t.statBonusT1, k, 0xffff, 0xffff, 0xffff); break;
-      case 'openDoor': { const [dx, dy] = DIRS[a.w(0x1744)]; this.openDoor(a.w(0x1742) + dx, a.w(0x1740) + dy); break; }
+      case 'openDoor': { a.setW(0x1a24, c.char ?? a.w(0x1a24)); const [dx, dy] = DIRS[a.w(0x1744)]; const e0 = this.doorState(a.w(0x1742) + dx, a.w(0x1740) + dy); const dx2 = a.w(0x1742) + dx, dy2 = a.w(0x1740) + dy; this.effect(() => { const e1 = this.doorState(dx2, dy2); return e0 === 0 && e1 === 1 ? 'door open' : e0 === 1 && e1 === 0 ? 'door close' : e0 === 2 ? 'door locked' : 'door-click'; }, () => doorClick(a, this.rng, this.t.statBonusT1, this.execHooks()), { was: e0 }); break; }
+      case 'trigger': this.trigger(c.x, c.y, c.type); break;
+      case 'use': this.useItem(c.char, c.item, { pick: c.pick }); break;
+      case 'cursor': this.unstow(c.char, c.item); a.setW(0x1a22, c.item); this.note('cursor', { ch: c.char, item: c.item }); break;
+      case 'useKey': { a.setW(0x1a24, c.char ?? a.w(0x1a24)); const held = a.w(0x1a22); this.effect('use-key', () => keyUse(a, this.rng, this.t.statBonusT1, this.execHooks()), () => ({ item: held, used: held !== 0 && a.w(0x1a22) === 0 })); break; }
       case 'cast': this.castAny(c.char, c.slot, { pick: c.pick, map: c.map }); break;
       case 'memorise': this.memorise(c.char, c.row); break;
       case 'pickup': { const xy = this.itemSquare(c.item); if (xy && this.pickup(c.char, c.item, xy[0], xy[1])) this.stow(c.char, c.item); break; }
@@ -409,6 +543,8 @@ export class BcSim extends ObjectWorld {
     for (let r = 0; r < 3; r++) for (let k = 0; k < 6; k++) { const o = CH(ch) + 0x16 + 12 * r + 2 * k; if (a.w(o) === item) a.setW(o, 0); }
     for (let k = 0; k < 5; k++) { const o = CH(ch) + 0x3a + 2 * k; if (a.w(o) === item) a.setW(o, 0); }
   }
+  /** the state word +0xE of the door in front of the party at (x, y), -1 when there is none */
+  private doorState(x: number, y: number): number { const d = lookupType(this.a, x, y, 0x11); return d ? this.a.w(OBJ(d) + 0xe) : -1; }
   itemSquare(item: number): [number, number] | null { return this.monsterXY(item); }
   private memorise(k: number, row: number) {
     const a = this.a;
@@ -439,7 +575,7 @@ export class BcSim extends ObjectWorld {
       else if (call.kind === 'scan') activationScan(a, this.rng, t);
     }
     if (this.book) rechargeTick(this.book, { resting, showActive: false, openPage: 0xff, mem: this.rechargeMem() });
-    popDue(a, { unknown: ev => { if (!this.gameOver) this.dispatchUnknown(ev); }, applied: ev => { if (ev.type >= 0x1e && ev.type <= 0x25 && ev.type !== 0x22) this.note('expire', { type: ev.type, ch: ev.a1 }); } });
+    popDue(a, { slot: (_ev, idx) => { if (!this.gameOver) this.runAction(idx); }, unknown: ev => { if (!this.gameOver) this.dispatchUnknown(ev); }, applied: ev => { if (ev.type >= 0x1e && ev.type <= 0x25 && ev.type !== 0x22) this.note('expire', { type: ev.type, ch: ev.a1 }); } });
   }
   private rechargeMem(): number[] {
     const mem = new Array(0x1a0b - 0x19f8).fill(0);

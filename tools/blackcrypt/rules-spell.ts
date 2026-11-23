@@ -196,7 +196,9 @@ export function rayCanHurt(gfx: number, pre: number, item36: boolean): boolean {
  * `pre` 0x67 (fire) on a water square (cell bit 31) fizzles unless A4+0x1E5C == 3. A ray that takes no step (blocked at once) returns
  * before any target pick; every picked target has its alert byte +0x12 incremented even when the filter spares it.
  */
-export function castRay(w: RayWorld, a: RayArgs, rng: BcRng, awardXp: (chars: { hp: number; xp: number }[], mon: { b2: number; w6: number; maxHp: number }, rng: BcRng) => number[]): RayResult {
+/** pass 8: the real ray calls the death routine `+0x7ED0` (`jsr` at `+0x702E`) right after EACH damage subtraction, hit or not; this callback replaces the port's own boss-hold / XP code so the caller can run the verified monsterDeath (loot first, then XP) at the true point of the draw order. It receives the monster id and its new hp and returns the hp after the routine and whether the monster is gone. */
+export type RayDeath = (id: number, hp: number) => { hp: number; killed: boolean };
+export function castRay(w: RayWorld, a: RayArgs, rng: BcRng, awardXp: (chars: { hp: number; xp: number }[], mon: { b2: number; w6: number; maxHp: number }, rng: BcRng) => number[], death?: RayDeath): RayResult {
   const m = marchRay(w, a.range);
   const out: RayResult = { total: 0, hits: [], fizzled: false };
   if (a.pre === 0x67 && (cellAt(w, w.px, w.py) >>> 31) === 1 && w.b1E5C !== 3) { out.fizzled = true; return out; }
@@ -212,6 +214,11 @@ export function castRay(w: RayWorld, a: RayArgs, rng: BcRng, awardXp: (chars: { 
     const d = ((rng.rand16(a.dmg + 1) + a.mag) << 16) >> 16;
     out.total = s16(out.total + d);
     mon.hp = s16(mon.hp! - d);
+    if (death) {
+      const r = death(id, mon.hp); mon.hp = r.hp;
+      out.hits.push({ id, dmg: d, killed: r.killed });
+      continue;
+    }
     /* +0x7ED0: gfx 0x80C5 (the story boss) with hp < 50 is held at 49 and starts the stage machine (A4+0x1A1E): it never dies here (HARNESS) */
     if (mon.gfx === 0x80c5 && mon.hp < 50) { mon.hp = 49; out.bossStage = true; }
     const killed = mon.hp < 1;
@@ -265,7 +272,7 @@ export interface SpFull extends SpWorld { ray: RayWorld; antimagic: boolean }
  * Lifestealer (17): caster hp += 3 * total / 10 (signed divide), capped at max (HARNESS).
  */
 export function castSpell(w: SpFull, spell: number, pick: number, t: RuleTables, rng: BcRng,
-  awardXp: Parameters<typeof castRay>[3]): CastResult & { ray?: RayResult } {
+  awardXp: Parameters<typeof castRay>[3], death?: RayDeath): CastResult & { ray?: RayResult } {
   if (w.antimagic) return { spent: true, failed: false, picks: [] };
   const fn = RAY_SPELLS[spell];
   if (!fn) return castSimple(w, spell, pick, t, rng);
@@ -273,7 +280,7 @@ export function castSpell(w: SpFull, spell: number, pick: number, t: RuleTables,
   const p = fn(casterValues(caster, t));
   w.ray.chars = w.chars as unknown as RayWorld['chars'];
   for (const c of w.chars) c.xp ??= 0;
-  const r = castRay(w.ray, { mag: p.mag, dmg: p.dmg, base: 0, pre: p.pre, range: p.range }, rng, awardXp);
+  const r = castRay(w.ray, { mag: p.mag, dmg: p.dmg, base: 0, pre: p.pre, range: p.range }, rng, awardXp, death);
   if (p.lifesteal && r.total > 0) {
     caster.hp = s16(caster.hp + Math.trunc(3 * r.total / 10));
     if (caster.hp > caster.maxHp) caster.hp = caster.maxHp;
@@ -424,7 +431,7 @@ export interface FacingOut { cancelled: number[]; sched: { type: number; id: num
  */
 export function castFacing(
   w: RayWorld & { level: number; tick: number }, spell: 34 | 43, rng: BcRng,
-  awardXp: Parameters<typeof castRay>[3],
+  awardXp: Parameters<typeof castRay>[3], death?: (id: number) => void,
 ): FacingOut {
   const out: FacingOut = { cancelled: [], sched: [], killed: [], spent: true };
   if ((cellAt(w, w.px, w.py) >>> (12 + w.facing)) & 1) return out;
@@ -440,6 +447,7 @@ export function castFacing(
       const thr = Math.max(2, Math.min(20, mon.b2! + 7 - ((w.level - 1) >> 1)));
       if (rng.rand8(20) + 1 >= thr) {
         mon.hp = 0; out.killed.push(id); out.cancelled.push(id);
+        if (death) { death(id); continue; }   // pass 8: the real DISMISS calls the death routine (+0x6AD6 -> +0x7ED0): loot, then XP, then the level-up
         const xps = awardXp(w.chars, { b2: mon.b2!, w6: sec.w6!, maxHp: sec.maxHp! }, rng);
         w.chars.forEach((c, i) => { c.xp = xps[i]; });
       }

@@ -19,7 +19,7 @@ exec(compile(pre, 'pass7-prefix', 'exec'))
 N = int(sys.argv[4]) if len(sys.argv) > 4 else 20
 KEEP_EXEC = KEEP_DEATH + ' K 0x74 K 0x126D2 K 0x11992 K 0x4600 K 0x17686 K 0xBAA6 K 0x8458 K 0xC4F6 K 0xC41A K 0xC2DA K 0xC052 K 0xC236 K 0xC288 K 0x58FA'
 HK = ' '.join('H %s 0' % h for h in ['0x16C62', '0x18088', '0x26900', '0xB614', '0x8388', '0x17D2A', '0x2D46', '0x4AE', '0x82A'])
-KEEP_LOG8 = {0x16C62, 0x18088, 0x26900, 0xB614, 0x17D2A}
+KEEP_LOG8 = {0x16C62, 0x18088, 0x26900, 0xB614, 0x17D2A, 0x58C6, 0x4C46, 0x6D9A, 0x5070, 0x5CFA, 0x78DA, 0x79C2, 0x7B2E, 0x7C40, 0x170A8}
 
 def world(w, op, x, y, v, rid):
     """common part: tick, party, characters (DamageCharacter fields), free list, event queue, the action record"""
@@ -174,6 +174,38 @@ def gen_door_key(kind):
         cur = rnd.choice([55, 55, 55, 55, 0]); w.w(0x1A22, cur)
         if cur: w.obj(55, w0=0x12, b5=rnd.choice([6, 6, 6, 5]), wC=keyid, nx=0)
     return w, dict(fam=kind, op=0x300 if kind == 'door' else 0x301, x=px, y=py, f=f)
+ITEM_CALLEES = [0x58C6, 0x4C46, 0x6D9A, 0x5070, 0x5CFA, 0x78DA, 0x79C2, 0x7B2E, 0x7C40, 0x170A8]
+def gen_item():
+    """the item-use dispatcher +0x12FEA (character, item): the shell (anti-magic gate, effect word +0xE, 0x95 = random 0x80..0x89, the 0x96..0xA9 message group, table 0x80..0x9F, charges byte +7, the energy cost,
+    the return value) and the INLINE effects 0x96..0x9F run for real; the spell routines the effects 0x80..0x90 call are hooked (logged with their arguments, return value chosen per case)"""
+    w = W(); px, py = world(w, 0, 0, 0, 0, 15)
+    ch = rnd.randrange(4); item = 5
+    eff = rnd.choice(list(range(0x7E, 0xA3)) + list(range(0x80, 0xA0)) * 2 + [0x95, 0x95])
+    w.obj(item, w0=rnd.choice([0x12, 0x13]), b5=0x15, wE=eff, w10=rnd.randrange(0, 4000), nx=0); w.b(OB(item) + 7, rnd.choice([0xFF, 0xFF, 1, 2, 5, 0]))
+    for i in range(4):
+        c = CH(i)
+        for o in (0x86, 0x88, 0x8B, 0x8C, 0x97, 0x9A, 0x78, 0x64): w.b(c + o, rnd.choice([0, 0, 1, 2, 250]))
+        w.w(c + 0x4E, rnd.choice([1, 5, 20, 60, 90])); w.w(c + 0x50, rnd.choice([40, 60, 90])); w.w(c + 0x54, rnd.choice([100, 3000, 4900, 5000]))
+    w.l(CELL(px, py), rnd.choice([0, 0, 0, 0, 0x40000000]))
+    w.w(0x1A24, rnd.randrange(4))
+    ret = rnd.choice([1, 1, 1, 0, 2, -2, 5])
+    return w, dict(fam='item', op=0x400 | eff & 0xff, ch=ch, item=item, eff=eff, ret=ret, px=px, py=py)
+def gen_popx():
+    """the pass-7 pop-loop world, with every event-0x28 node pointed at a real target square and a handled opcode so the executor behind the effect slot (`+0x8C54E` = `+0xC4F6`) does visible work"""
+    w, ex = gen_pop()
+    sq = [(rnd.randrange(3, 12), rnd.randrange(3, 12)) for _ in range(3)]
+    for (i, due, t, a1, a2, a3, a4) in ex['evs']:
+        if t != 0x28: continue
+        o = Q + 12 * i; sx, sy = rnd.choice(sq)
+        w.b(o + 5, sx); w.b(o + 6, sy); w.b(o + 7, rnd.choice([0, 1, 2, 3, 0x10, 0x11, 0x14, 0x17])); w.b(o + 8, rnd.choice([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF, 0x10, 0x11, 0x13, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1F, 0x20, 0x21, 0x22, 0x23]))
+    for (sx, sy) in sq:
+        ch = []
+        for k, t in enumerate(rnd.sample([0x17, 0x14, 0x12, 0x11, 0x10, 0x10, 0x14, 0x0F], rnd.choice([1, 2, 3]))):
+            i = 70 + 10 * sq.index((sx, sy)) + k
+            w.obj(i, w0=1, b5=t, wA=rnd.choice([0, 0, 1, 2, 3]), wC=rnd.randrange(3, 12), wE=rnd.choice([0, 1, 2]), w10=rnd.randrange(3, 12), nx=0); ch.append(i)
+        link(w, ch); w.l(CELL(sx, sy), ch[0])
+    w.b(0x83D, rnd.randrange(1, 16)); w.w(0x174A, rnd.choice([0, 1, 2, 3, 4, 10]))
+    return w, dict(fam='popx', op=0x500, head=ex['head'])
 cases = []; lines = []
 def add(w, extra, call, extra_pre=''):
     sd = ''.join('%02x' % rnd.randrange(256) for _ in range(6))
@@ -201,6 +233,14 @@ if __name__ == '__main__':
     for n in range(N * 3):
         w, ex = gen_door_key('key')
         add(w, ex, 'C 0x16AA8 0 A 5 3080192', extra_pre=KEEP_EXEC + ' K 0x16AA8 K 0x1110A K 0xCF34 K 0x2B4 ' + HK + ' ' + ' '.join(SCRIPT_PTRS))
+    ITEM_H = lambda ret: ' '.join('H 0x%X %d' % (h, ret) for h in ITEM_CALLEES)
+    for n in range(N * 6):
+        w, ex = gen_item()
+        hk = KEEP_EXEC + ' K 0x12FEA K 0x49B4 K 0x2B4 ' + HK.replace('H 0x17D2A 0', '') + ' ' + ITEM_H(ex['ret'])
+        add(w, ex, 'C 0x12FEA 2 2 %d 2 %d A 5 3080192' % (ex['item'], ex['ch']), extra_pre=hk + ' ' + ' '.join(SCRIPT_PTRS))
+    for n in range(N * 3):
+        w, ex = gen_popx()
+        add(w, ex, 'G 0x12BA 0x1FDA D 7 %d A 5 3080192' % ex['head'], extra_pre=KEEP_EXEC + ' ' + HK + ' ' + ' '.join(SCRIPT_PTRS))
     res = run2(lines)
     assert len(res) == len(cases)
     for c, r in zip(cases, res):

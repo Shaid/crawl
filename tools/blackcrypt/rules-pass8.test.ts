@@ -7,6 +7,8 @@ import { A4Mem } from './rules-spell';
 import { BcRng, type RuleTables } from './rules';
 import { executeAction, glyphEffect, pitEffect, doorClick, keyUse, type ExecHooks } from './rules-action';
 import { triggerActions } from './rules-death';
+import { useItem } from './rules-item';
+import { popDue } from './rules-pop';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const T: RuleTables = JSON.parse(readFileSync(resolve(here, 'rules_oracle/vectors.json'), 'utf8')).tables;
@@ -125,5 +127,41 @@ describe('pass 8: action executor +0xC4F6 / +0xCE9C', () => {
     if (!FULL) return;
     expect(logs).toBeGreaterThan(3);
     expect(fam('key').filter((c: any) => c.out.log.some((e: number[]) => e[0] === 0xb614)).length).toBeGreaterThan(3);
+  });
+  const runItem = (c: any, tweak?: (a: A4Mem) => void, retOverride?: number): string[] => {
+    const a = build(c); const before = new Map(a.m); const rng = new BcRng(c.seed); const d: string[] = [];
+    if (tweak) tweak(a);
+    const calls: number[][] = [];
+    const ret = retOverride ?? c.ret;
+    const r = useItem(a, rng, T.statBonusT1, c.ch, c.item, (off, args) => { calls.push([off, ...args]); return ret; }, (off, args) => calls.push([off, ...args]));
+    if (hex(rng) !== c.out.seed) d.push('seed');
+    if (r !== c.out.d0) d.push(`result ${c.out.d0} vs ${r}`);
+    const log = (c.out.log as number[][]).filter(e => e[0] !== 0xb614 && e[0] !== 0x17d2a).map(e => e[0] === 0x6d9a ? e.slice(0, 6) : e[0] === 0x5070 ? e.slice(0, 4) : e[0] === 0x170a8 ? e.slice(0, 3) : [e[0]]);
+    const mine = calls.map(e => e[0] === 0x6d9a ? e.slice(0, 6) : e[0] === 0x5070 ? e.slice(0, 4) : e[0] === 0x170a8 ? e.slice(0, 3) : [e[0]]);
+    if (JSON.stringify(log) !== JSON.stringify(mine)) d.push(`calls ${JSON.stringify(log)} vs ${JSON.stringify(mine)}`);
+    return d.concat(diffAgainst(c, a, before, uiText));
+  };
+  it(`item: the use dispatcher +0x12FEA (shell, effect map, inline potions) matches the real routine (${fam('item').length} cases)`, () => {
+    const bad = fam('item').map((c: any) => runItem(c)).filter((x: string[]) => x.length);
+    expect(bad.slice(0, 3)).toEqual([]);
+    if (!FULL) return;
+    const effs = new Set(fam('item').map((c: any) => c.eff));
+    for (const e of [0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f]) expect(effs.has(e), 'effect ' + e.toString(16)).toBe(true);
+    // null controls: a different callee return value (the charge rule) and an off-by-one charge byte
+    expect(fam('item').filter((c: any) => runItem(c, undefined, c.ret === 0 ? 1 : 0).length > 0).length).toBeGreaterThan(5);
+    expect(fam('item').filter((c: any) => runItem(c, a => a.setB(-0x6e7a + 0x14 * c.item + 7, a.b(-0x6e7a + 0x14 * c.item + 7) ^ 1)).length > 0).length).toBeGreaterThan(5);
+  });
+  it(`popx: the pop loop with event 0x28 running the real executor (the "UI effect call" +0x8C54E is +0xC4F6) matches (${fam('popx').length} cases)`, () => {
+    const run = (c: any, exec: boolean) => {
+      const a = build(c); const before = new Map(a.m); const rng = new BcRng(c.seed); const calls: number[][] = [];
+      popDue(a, { slot: (_ev, idx) => { if (exec) executeAction(a, rng, T.statBonusT1, idx, hooksOf(calls)); } });
+      const d: string[] = [];
+      if (hex(rng) !== c.out.seed) d.push('seed');
+      if (JSON.stringify(norm(c.out.log)) !== JSON.stringify(calls)) d.push(`calls ${JSON.stringify(norm(c.out.log))} vs ${JSON.stringify(calls)}`);
+      return d.concat(diffAgainst(c, a, before, uiText));
+    };
+    const bad = fam('popx').map((c: any) => run(c, true)).filter((x: string[]) => x.length);
+    expect(bad.slice(0, 3)).toEqual([]);
+    if (FULL) expect(fam('popx').filter((c: any) => run(c, false).length > 0).length).toBeGreaterThan(3);   // null control: without the executor the diff is wrong
   });
 });
