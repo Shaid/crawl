@@ -22,7 +22,10 @@ const tdiv = (a: number, b: number): number => Math.trunc(a / b);
 /** Results the stubbed callees hand back (the real ones are other harnesses). */
 export interface RoundRet { cast: number; breath: number }
 
-export interface RoundState { fx: Effect[]; ret: RoundRet; stop: boolean }
+/** `on` (optional) runs the moment an action callee is logged, so a caller can execute it inline (the simulator does: the callee may change what later actions see) and set `ret` before the stamina cost reads it. */
+export interface RoundState { fx: Effect[]; ret: RoundRet; stop: boolean; on?: (e: Effect) => void }
+
+const emit = (st: RoundState, e: Effect): void => { st.fx.push(e); st.on?.(e); };
 
 const pr = (c: Ctx, i: number): number => c.a4 - 17922 + i * 0x1b0;   // party record base
 
@@ -160,7 +163,7 @@ export function executeAction(c: Ctx, st: RoundState): void {
         let hand = m.u8(A + 28 + sl);
         if (g === 0 && m.u8(pr(c, i) + 272 + hand) === 0xff) hand = 0;
         const kind = m.u16(A + 10 + 2 * sl);
-        st.fx.push(['attack', hex32(A) + hex16(hand) + hex16(kind)]);
+        emit(st, ['attack', hex32(A) + hex16(hand) + hex16(kind)]);
         cost(kind === 3 || kind === 6 ? rng.random(4) + 3 : rng.random(3) + 2);
       }
       break;
@@ -174,19 +177,19 @@ export function executeAction(c: Ctx, st: RoundState): void {
       }
       break;
     case 2:
-      st.fx.push(['equip', '']);
+      emit(st, ['equip', '']);
       cost(rng.random(4) + 3);
       m.w16(a4 - 18610, 0x11); m.w16(a4 - 18608, 0xd); m.w16(a4 - 15304, i);
       return;
-    case 3: st.fx.push(['cast', hex32(A)]); cost(st.ret.cast); break;
-    case 4: st.fx.push(['useitem', hex32(A)]); cost(rng.random(3) + 1); break;
-    case 5: st.fx.push(['swap', hex16(i) + hex16(m.u16(A + 10))]); cost(rng.random(4) + 3); break;
-    case 6: st.fx.push(['hide', hex32(A)]); cost(rng.random(3) + 1); break;
-    case 7: st.fx.push(['run', hex32(A)]); cost(rng.random(5) + 5); break;
-    case 8: st.fx.push(['breath', hex32(A)]); cost(st.ret.breath); break;
+    case 3: emit(st, ['cast', hex32(A)]); cost(st.ret.cast); break;
+    case 4: emit(st, ['useitem', hex32(A)]); cost(rng.random(3) + 1); break;
+    case 5: emit(st, ['swap', hex16(i) + hex16(m.u16(A + 10))]); cost(rng.random(4) + 3); break;
+    case 6: emit(st, ['hide', hex32(A)]); cost(rng.random(3) + 1); break;
+    case 7: emit(st, ['run', hex32(A)]); cost(rng.random(5) + 5); break;
+    case 8: emit(st, ['breath', hex32(A)]); cost(st.ret.breath); break;
     default: break;
   }
-  if (g === 0) st.fx.push(['psync', hex16(i) + hex16(0)]);
+  if (g === 0) emit(st, ['psync', hex16(i) + hex16(0)]);
 }
 
 /** The four lingering group clouds (LAB_103C cases): FIRESTORM, POISON GAS, TOXIC VAPORS, ACID CLOUD. */
@@ -194,24 +197,24 @@ function groupCloud(st: RoundState, g: number, k: number, dur: number): void {
   const w = (...a: number[]) => a.map(hex16).join('');
   const mod = dur * 5 + 25;
   if (k === 0) {
-    st.fx.push(['cloud_msg', w(0xc94, 4)]);
-    st.fx.push(['area_dmg', w(g, 0xfff6, 2, 4, dur, 1, mod)]);
+    emit(st, ['cloud_msg', w(0xc94, 4)]);
+    emit(st, ['area_dmg', w(g, 0xfff6, 2, 4, dur, 1, mod)]);
   } else if (k === 1) {
-    st.fx.push(['cloud_msg', w(0xc95, 3)]);
-    st.fx.push(['area_status', w(g, 0xfff6, 0xd95, 6, dur, mod, 1, 4, 5, 0, dur * 10, 2, dur, 0, 0)]);
+    emit(st, ['cloud_msg', w(0xc95, 3)]);
+    emit(st, ['area_status', w(g, 0xfff6, 0xd95, 6, dur, mod, 1, 4, 5, 0, dur * 10, 2, dur, 0, 0)]);
   } else if (k === 2) {
-    st.fx.push(['cloud_msg', w(0xc96, 6)]);
-    st.fx.push(['area_status', w(g, 0xfff6, 0xd98, 5, dur, mod, 2, 3, 8, 0, dur, 4, dur, 0, 0)]);
+    emit(st, ['cloud_msg', w(0xc96, 6)]);
+    emit(st, ['area_status', w(g, 0xfff6, 0xd98, 5, dur, mod, 2, 3, 8, 0, dur, 4, dur, 0, 0)]);
   } else {
-    st.fx.push(['cloud_msg', w(0xc97, 6)]);
-    st.fx.push(['area_dmg', w(g, 0xfff6, 1, 6, dur, 8, mod)]);
+    emit(st, ['cloud_msg', w(0xc97, 6)]);
+    emit(st, ['area_dmg', w(g, 0xfff6, 1, 6, dur, 8, mod)]);
   }
 }
 
 /** LAB_102D (CODE+0x29704): one combat round: ticks 100..1, groups 0..6, members in order. */
-export function runRound(c: Ctx, ret: RoundRet): Effect[] {
+export function runRound(c: Ctx, ret: RoundRet, on?: (e: Effect) => void): Effect[] {
   const { m, rng, a4 } = c;
-  const st: RoundState = { fx: [], ret, stop: false };
+  const st: RoundState = { fx: [], ret, stop: false, on };
   for (let r = 0; r < 2; r++) for (let q = 0; q < 5; q++) m.w16(a4 - 10478 + r * 10 + q * 2, 0xffff);
   m.w16(a4 - 15134, 100);
   for (;;) {

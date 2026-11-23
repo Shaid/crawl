@@ -3,7 +3,9 @@
  * (attack resolver, weapon on-hit effects, SetStatus and kill cleanup, XP pool) over a synthetic party and
  * monster groups held in the game's own memory layout, and drives them with a round loop.
  *
- * What is verified and what is not (see docs/wizardry6/amiga/game-rules.md section 8):
+ * Pass 3: {@link CombatWorld.gameRound} runs the game's own round (verified planner LAB_0C96 + round driver
+ * LAB_102D / executor LAB_0FF9, attacks through the verified resolver). The older {@link CombatWorld.round} stays
+ * as the hypothesis loop. What is verified and what is not (see docs/wizardry6/amiga/game-rules.md section 8):
  *  - verified against the game (harness): every single attack, including its weapon effects, kills and
  *    XP pool credit, on arbitrary states (3,000-vector sweeps, combat.test.ts);
  *  - NOT verified (hyp): the round loop. Order of play, who attacks whom and which action is chosen are
@@ -12,6 +14,8 @@
  */
 import { Mem, resolveAttack } from './combat.ts';
 import type { Effect } from './combat.ts';
+import { planMonsters } from './planner.ts';
+import { runRound } from './round.ts';
 import { W6Rng } from './rules.ts';
 
 export const LAYOUT = { a4: 0x167ffe, memBase: 0x400000, memStride: 0x400, recBase: 0x420000, recStride: 0x400 } as const;
@@ -168,6 +172,76 @@ export class CombatWorld {
       this.attack(a.g, a.i, t.g, t.i, 0, 0);
       this.log.push({ actor: `${a.g}.${a.i}`, target: `${t.g}.${t.i}`, kind: 0, hpBefore: before, hpAfter: this.hp(t.g, t.i), killed: !this.alive(t.g, t.i) });
     }
+  }
+
+  /**
+   * Switch the world to the game's own round: write the fields the verified planner (LAB_0C63) reads that the
+   * hypothesis round never needed. Monsters: `R+211` initiative bonus, `R+213` attack count, `R+128+h` attack slot
+   * valid, `R+83+16h` attack-kind mask (bit 0 = swing). Spell/breath chance bytes stay 0.
+   */
+  enableGameRound(): void {
+    const { a4 } = LAYOUT; const m = this.mem;
+    for (let g = 0; g < 7; g++) {
+      m.w16(a4 - 15266 + 4 * g, LAYOUT.memBase >> 16); m.w16(a4 - 15264 + 4 * g, (LAYOUT.memBase + g * LAYOUT.memStride) & 0xffff);
+      m.w16(a4 - 15294 + 4 * g, LAYOUT.recBase >> 16); m.w16(a4 - 15292 + 4 * g, (LAYOUT.recBase + g * LAYOUT.recStride) & 0xffff);
+    }
+    m.w16(a4 - 15140, this.groupSizes.length);
+    m.w8(a4 - 15305, this.partySize);
+    m.w8(this.mb(0) + 413, this.partySize);
+    this.groupSizes.forEach((n, k) => {
+      const g = k + 1; const R = this.mr(g);
+      m.w8(this.mb(g) + 413, n);
+      const na = Math.max(1, [0, 1, 2, 3].filter((h) => m.u16(R + 0x44 + 16 * h) !== 0 || m.u8(R + 0x44 + 16 * h + 3) !== 0).length);
+      m.w8(R + 213, na); m.w8(R + 211, 0);
+      for (let h = 0; h < 3; h++) { m.w8(R + 128 + h, h < na ? 1 : 0); m.w8(R + h * 16 + 83, 1); }
+      m.w8(R + 128, 1);
+    });
+    m.w16(a4 - 18610, 0xd);
+  }
+
+  /**
+   * One round through the game's own code: the monster planner (LAB_0C96) and order of play / executor
+   * (LAB_102D / LAB_0FF9), with attacks executed inline by the verified resolver. The party's plan is a POLICY
+   * (the game takes it from the UI): each living member swings its first hand at the first living monster.
+   * Spell, breath, hide, run and item actions are not wired here (monsters in this sim never pick them).
+   */
+  gameRound(): Effect[] {
+    const { a4 } = LAYOUT; const m = this.mem; const ctx = { m, rng: this.rng, a4 };
+    m.w16(a4 - 18610, 0xd);
+    // party plan (policy)
+    const tgt = this.groupSizes.map((_, k) => k + 1).find((g) => this.living(g).length > 0);
+    if (tgt === undefined) return [];
+    for (const i of this.living(0)) {
+      const A = this.mb(0) + i * 44; const ti = this.living(tgt)[0];
+      const roll = this.rng.random(10) + 1;
+      for (let k = 0; k < 4; k++) m.w8(A + 24 + k, k === 0 ? roll : 0);
+      m.w8(A + 28, 0); m.w8(A + 29, 0); m.w8(A + 30, 0); m.w8(A + 31, tgt); m.w8(A + 32, ti);
+      m.w16(A + 10, 0); m.w16(A + 12, 0xffff); m.w8(A + 33, 0); m.w8(A + 36, 0);
+    }
+    planMonsters(ctx);
+    const ret = { cast: 0, breath: 0 };
+    return runRound(ctx, ret, (e) => {
+      if (e[0] !== 'attack') return;
+      const A = parseInt(e[1].slice(0, 8), 16); const hand = parseInt(e[1].slice(8, 12), 16); const kind = parseInt(e[1].slice(12, 16), 16);
+      const g = m.u16(a4 - 15138), i = m.s16(a4 - 15136);
+      const t = { g: m.u8(A + 0x1f), i: m.u8(A + 0x20) };
+      const before = this.hp(t.g, t.i);
+      resolveAttack(m, this.rng, { a4, attacker: A, hand, kind, exec: true, itemCastWord: () => 0 });
+      this.log.push({ actor: `${g}.${i}`, target: `${t.g}.${t.i}`, kind, hpBefore: before, hpAfter: this.hp(t.g, t.i), killed: !this.alive(t.g, t.i) });
+    });
+  }
+
+  /** Fight with {@link gameRound} until one side is gone (the round driver ends combat itself by leaving state 0xd). */
+  runGame(maxRounds = 50): { winner: 'party' | 'monsters' | 'none'; rounds: number; xpPool: number; xpEach: number } {
+    let r = 0;
+    for (; r < maxRounds; r++) {
+      if (!this.groupSizes.some((_, k) => this.living(k + 1).length > 0) || this.living(0).length === 0) break;
+      this.gameRound();
+    }
+    const monstersLeft = this.groupSizes.some((_, k) => this.living(k + 1).length > 0);
+    const partyLeft = this.living(0).length;
+    const winner = !monstersLeft && partyLeft > 0 ? 'party' : monstersLeft && partyLeft === 0 ? 'monsters' : 'none';
+    return { winner, rounds: r, xpPool: this.xpPool, xpEach: winner === 'party' ? Math.trunc(this.xpPool / partyLeft) : 0 };
   }
 
   run(maxRounds = 50): { winner: 'party' | 'monsters' | 'none'; rounds: number; xpPool: number; xpEach: number } {
