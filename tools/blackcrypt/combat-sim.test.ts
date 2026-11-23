@@ -299,4 +299,40 @@ describe('combat-sim: executable form of game-rules.md section 9', () => {
       expect(b.a1a1e).toBeLessThanOrEqual(2);
     });
   });
+
+  describe('pass 5: weight, cooldown and vitals are the harnessed rules', () => {
+    const swingTicks = (party: ReturnType<typeof startingParty>, hasteN = 0) => {
+      party.forEach(c => { c.hp = c.maxHp = 30000; });
+      const sim = new CombatSim(cfg({ party, monsters: [monster({ hp: 9000, maxHp: 9000 })], seed: '0102030405ff', facing: 1 }));
+      sim.haste = hasteN;
+      sim.run(1200, fighterSwings);
+      return sim.log.filter(l => l.ev === 'swing').map(l => l.t);
+    };
+    const gaps = (t: number[]) => t.slice(1).map((v, i) => v - t[i]);
+    it('bare hands swing every 5 ticks; a weapon adds weight / 23 on top of the DEX table (never below 5)', () => {
+      const bare = startingParty(tables); bare[0].weapon = { gfx: 0, extra: 0 };
+      expect(Math.min(...gaps(swingTicks(bare)))).toBe(5);
+      const heavy = startingParty(tables); heavy[0].weapon = { gfx: 3, extra: 0 }; heavy[0].weaponWeight = 2300;
+      const light = startingParty(tables); light[0].weapon = { gfx: 3, extra: 0 }; light[0].weaponWeight = 0;
+      const g = (p: typeof heavy) => Math.min(...gaps(swingTicks(p)));
+      const t3 = tables.speedT3[heavy[0].dex];
+      expect(g(light)).toBe(Math.max(5, t3));
+      expect(g(heavy)).toBe(Math.max(5, 100 + t3)); // 2300 / 23 = 100
+    });
+    it('null control: haste shortens the cooldown to (c >> 1) + 1', () => {
+      const p = startingParty(tables); p[0].weapon = { gfx: 3, extra: 0 }; p[0].weaponWeight = 2300;
+      const normal = Math.min(...gaps(swingTicks(p))), hasted = Math.min(...gaps(swingTicks(p, 1)));
+      expect(hasted).toBeLessThan(normal);
+    });
+    it('carried weight costs energy on every step: -1 - (weight >> 11)', () => {
+      const mk = (carried: number) => {
+        const party = startingParty(tables); party.forEach(c => { c.carried = carried; });
+        const sim = new CombatSim(cfg({ party, monsters: [], facing: 1, width: 8 }));
+        const e0 = sim.chars[0].energy; sim.run(2, () => [{ kind: 'move', dir: 'forward' } as const]);
+        return e0 - sim.chars[0].energy;
+      };
+      const free = mk(0), loaded = mk(3 << 11);
+      expect(loaded - free).toBe(6); // two forward steps, 3 extra energy each
+    });
+  });
 });

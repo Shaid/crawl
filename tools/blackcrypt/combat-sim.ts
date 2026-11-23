@@ -6,7 +6,7 @@
  * Evidence labels used in comments:
  *   [H] the piece is a harness-verified port (player melee, monster melee / bolts / hold calls, behaviour VM, activation scan, type-10 switch,
  *       pathfinder, pursue / approach / wander, mover + stacking, XP, level-up, vitals tick, heals / cures / buffs and their expiry events 0x1E-0x25, rays, memorise, recharge, DISMISS / BINDING / REFRESH)
- *   [C] read from code, not executed in the harness (DamageCharacter, AdjustVitals, event ordering, swing cooldown, per-step costs, the hold counter, slot shift on a spent cast)
+ *   [C] read from code, not executed in the harness (DamageCharacter, event ordering, the hold counter, slot shift on a spent cast); AdjustVitals, the swing cooldown (weight term, haste) and the per-step cost are [H] since pass 5
  *   [h] hypothesis / simplification (possession / stone not applied, doors and items absent)
  *
  * Original code. The model: a rectangular map (at most 48 x 48) with blocked squares (modelled as pillars), four party members
@@ -24,6 +24,7 @@ import {
   type AiScripts, type VmMonster, type VmCall,
 } from './rules-monster';
 import { ramBossItem } from './rules-boss';
+import { adjustVitals as adjustVitalsMem, swingCooldown } from './rules-spell9';
 import {
   MoveWorld, addToSquare, removeFromSquare, activationScan, pursue, approach, wander, monsterAct as moveAct, pathfind,
   type ActEnv, type MoveCall,
@@ -55,6 +56,8 @@ export interface SimChar {
   regen: number; prot86: number; sustain: number;
   /** weapon in the hand slot: gfx 0 = bare hand; `extra` is item word +0xC (to-hit / damage bonus), b6c the char to-hit byte +0x6C */
   weapon: { gfx: number; extra: number };
+  /** weight of the weapon (item word +8; the cooldown adds weight / 23) and the carried weight (long +0xA4; the per-step energy cost adds -(weight >> 11)); both default 0 [H, pass 5] */
+  weaponWeight?: number; carried?: number;
   b6c: number;
   /** resting state (A4+0x1A07[slot] == 1) */
   resting: boolean;
@@ -251,16 +254,15 @@ export class CombatSim {
   /** monsters on a square, in chain order */
   monstersAt(x: number, y: number): SimMonster[] { return this.monsters.filter(m => m.alive && m.x === x && m.y === y); }
 
-  /** AdjustVitals (S_1 +0x17EEA) [C]: skip the dead, sustenance halves food loss, clamp, tired penalty on crossing energy 1000. */
+  /** AdjustVitals (S_1 +0x17EEA) [H, pass 5: runs rules-spell9 `adjustVitals`, which is diffed against the real routine]: skip the dead, sustenance, clamps, the tired adjustment (STR, DEX, AC) on crossing energy 1000. */
   adjustVitals(k: number, dE: number, dF: number, dW: number) {
     const c = this.chars[k];
-    if (c.hp <= 0) return;
-    if (c.sustain !== 0) dF = (dF >> 1) + 1;
-    c.energy = Math.max(0, Math.min(10000, c.energy + dE));
-    c.food = Math.max(0, Math.min(5000, c.food + dF));
-    c.water = Math.max(0, Math.min(5000, c.water + dW));
-    if (!c.tired && c.energy < 1000) { c.tired = true; c.str -= 1; c.dex -= 1; }
-    else if (c.tired && c.energy >= 1000) { c.tired = false; c.str += 1; c.dex += 1; }
+    const a = new A4Mem(), o = 0x1758;
+    a.setW(o + 0x4e, c.hp); a.setW(o + 0x56, c.energy); a.setW(o + 0x52, c.food); a.setW(o + 0x54, c.water); a.setB(o + 0x90, c.sustain);
+    a.setB(o + 0x62, c.ac); a.setB(o + 0x64, c.str); a.setB(o + 0x68, c.dex);
+    adjustVitalsMem(a, this.cfg.tables.statBonusT1, 0, dE & 0xffff, dF & 0xffff, dW & 0xffff);
+    c.energy = a.sw(o + 0x56); c.food = a.sw(o + 0x52); c.water = a.sw(o + 0x54);
+    c.ac = a.sb(o + 0x62); c.str = a.b(o + 0x64); c.dex = a.b(o + 0x68); c.tired = c.energy < 1000;
   }
 
   /** DamageCharacter (S_1 +0x17686) [C]: no armour or resistance inside; dmg < hp survives, otherwise the character dies. */
@@ -310,8 +312,12 @@ export class CombatSim {
     const r = meleeAttack({ level: c.level, str: c.str, b6c: c.b6c, monHit: m.b2, monHp: m.hp, info, item: c.weapon.gfx === 0 ? 0 : 1 }, this.cfg.tables, this.rng);
     m.hp = r.monHp;
     this.adjustVitals(k, -4, -2, -1);
-    // cooldown event 0x14 / 0x15 length: max(5, T3[DEX] + weight/23) ticks [C]; the weight term is not modelled (no inventory)
-    c.readyAt = this.tick + Math.max(5, this.cfg.tables.speedT3[Math.max(0, Math.min(30, c.dex))]);
+    // cooldown (event 0x14, every resolved swing) [H, pass 5: swingCooldown + swingTail]: bare hands 5, else max(5, floor(weaponWeight / 23) + T3[DEX]); haste -> (c >> 1) + 1.
+    // A hit also schedules event 0x15 at tick + 5 (haste: min(5, (c >> 1) + 1)); its consumer is not decoded, the sim does not use it.
+    const sa = new A4Mem(); sa.setW(-0x6e7a + 0x14 * 5 + 8, c.weaponWeight ?? 0); sa.setB(0x1758 + 0x68, c.dex);
+    let cd = swingCooldown(sa, this.cfg.tables.speedT3, 0, c.weapon.gfx === 0 ? 0 : 5);
+    if (this.haste !== 0) cd = s16(s16(cd) >> 1) + 1;
+    c.readyAt = this.tick + s16(cd);
     this.bossHold(m);
     this.log.push({ t: this.tick, ev: 'swing', char: k, hit: r.hit, dmg: r.damage, monster: m.id, monHp: m.hp });
     if (m.hp < 1) this.monsterDies(m);
@@ -587,7 +593,7 @@ export class CombatSim {
         const [dx, dy] = DIRS[cmd.dir === 'forward' ? this.facing : (this.facing + 2) & 3];
         if (this.free(this.px + dx, this.py + dy)) {
           this.px += dx; this.py += dy;
-          this.chars.forEach((_, k) => this.adjustVitals(k, -1, -1, -1)); // [C] +0x16CC4 (weight term not modelled)
+          this.chars.forEach((c, k) => this.adjustVitals(k, -1 - ((c.carried ?? 0) >> 11), -1, -1)); // [H, pass 5] +0x16FC6 loop: energy -1 - (carried weight >> 11)
         }
         break;
       }

@@ -64,7 +64,9 @@ static int keep(uint32_t off){ for(int i=0;KEEP[i];i++) if(KEEP[i]==off) return 
 
 /* Patch every absolute JSR/JMP target (4EB9/4EF9 xxxxxxxx) that falls inside
  * S_1 to a bare RTS, except routines we want real. */
+static unsigned short *stub_saved;  /* original word under every RTS patch, so a script can un-stub a routine with `K off` */
 static void stub_externals(size_t s1len){
+  stub_saved=calloc(s1len/2+2,2);
   for(size_t i=0;i+6<=s1len;i+=2){
     uint32_t a=S1_BASE+i;
     unsigned op=r16(a);
@@ -72,7 +74,7 @@ static void stub_externals(size_t s1len){
       uint32_t t=m68k_read_memory_32(a+2);
       if(t>=S1_BASE && t<S1_BASE+s1len){
         uint32_t off=t-S1_BASE;
-        if(!keep(off) && !(off>=0x4000 && off<0x8000) && off<0x28000) w16(t,0x4E75); /* >= 0x28000: C runtime helpers (mul/div) stay real */
+        if(!keep(off) && !(off>=0x4000 && off<0x8000) && off<0x28000){ if(!stub_saved[off/2]) stub_saved[off/2]=r16(t); w16(t,0x4E75); } /* >= 0x28000: C runtime helpers (mul/div) stay real */
       }
     }
   }
@@ -375,6 +377,7 @@ int main(int argc,char**argv){
       /* first pass: apply pokes/hooks */
       do{
         if(!strcmp(t,"S")){ char*h=strtok_r(NULL," \t\r\n",&sp); for(int i=0;i<6;i++){unsigned q; sscanf(h+2*i,"%2x",&q); sd[i]=q;} set_seed(sd); }
+        else if(!strcmp(t,"K")){ uint32_t o=strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); if(stub_saved[o/2]) w16(S1_BASE+o,stub_saved[o/2]); }  /* K off: run this routine for real (undo the RTS stub) */
         else if(!strcmp(t,"H")){ uint32_t o=strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); int r=(int)strtol(strtok_r(NULL," \t\r\n",&sp),0,0); hook_add(o,r); }
         else if(!strcmp(t,"b")||!strcmp(t,"w")||!strcmp(t,"l")){ uint32_t a=strtoul(strtok_r(NULL," \t\r\n",&sp),0,0); long v=strtol(strtok_r(NULL," \t\r\n",&sp),0,0);
           if(t[0]=='b') w8(a,v); else if(t[0]=='w') w16(a,v); else w32(a,(uint32_t)v); }
@@ -393,7 +396,7 @@ int main(int argc,char**argv){
         printf(" %ld",v); }
       printf(" | %d",nlog);
       for(int i=0;i<nlog;i++) printf(" %x,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",logv[i].off,logv[i].w[0],logv[i].w[1],logv[i].w[2],logv[i].w[3],logv[i].w[4],logv[i].w[5],logv[i].w[6],logv[i].w[7],logv[i].d[1],logv[i].d[2],logv[i].d[3]);
-      unsigned char sa[6]; get_seed(sa); printf(" | %02x%02x%02x%02x%02x%02x D0 %d |",sa[0],sa[1],sa[2],sa[3],sa[4],sa[5],(int)(int16_t)m68k_get_reg(NULL,M68K_REG_D0));
+      unsigned char sa[6]; get_seed(sa); printf(" | %02x%02x%02x%02x%02x%02x D0 %d A2 %d A3 %d |",sa[0],sa[1],sa[2],sa[3],sa[4],sa[5],(int)(int16_t)m68k_get_reg(NULL,M68K_REG_D0),(int)(int16_t)m68k_get_reg(NULL,M68K_REG_A2),(int)(int32_t)m68k_get_reg(NULL,M68K_REG_A3));
       for(uint32_t i=0;i<dn;i++) if(before[i]!=mem[dlo+i]) printf(" %x:%x",i,mem[dlo+i]);   /* offset from A4-0x8000 */
       printf("\n");
     }

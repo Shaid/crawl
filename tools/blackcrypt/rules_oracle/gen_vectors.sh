@@ -13,4 +13,5 @@ python3 "$here/make_vectors_move.py" "$cache/bcdft_decompressed.bin" "$cache/bcd
 python3 "$here/make_vectors_spell.py" "$cache/bcdft_decompressed.bin" "$cache/bcdft_s2_data.bin" "$here/generated/vectors_spell.json.gz"
 python3 "$here/make_vectors_events.py" "$cache/bcdft_decompressed.bin" "$cache/bcdft_s2_data.bin" "$here/vectors_events.json.gz"
 python3 "$here/make_vectors_boss.py" "$cache/bcdft_decompressed.bin" "$cache/bcdft_s2_data.bin" "$here/vectors_boss.json.gz"
-echo "generated vectors in $here/generated (events fixture rewritten in place: it is small and committed)"
+python3 "$here/make_vectors_spells9.py" "$cache/bcdft_decompressed.bin" "$cache/bcdft_s2_data.bin" "$here/vectors_spells9.json.gz" 70
+echo "generated vectors in $here/generated (events, boss and spells9 fixtures rewritten in place: they are small and committed)"
