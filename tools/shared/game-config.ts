@@ -42,6 +42,7 @@ import {
   indicesToRGBA,
   readPaletteWords,
 } from './amiga-planar.ts';
+import { buildRulesTables } from '../blackcrypt/rules-tables.ts';
 import { assetDir, manifestEntry, writeJson, writeManifest, writePlatformIndex, syncDataManifest } from './asset-paths.ts';
 
 /** bcdfo portrait tiles: 32×24 @ 6bpp sequential planar, 96 bytes per plane. */
@@ -134,6 +135,17 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
     },
 
     async buildAssets(_cfg, dataDir) {
+      // Game-rules tables (stat/speed/defence tables, class templates, weapon
+      // base table, spell table) from the decompressed bcdft image. Needs
+      // tools/bcdft_decompress to have been run (build/cache/blackcrypt).
+      try {
+        const t = buildRulesTables(resolve(dataDir, '../../../build/cache/blackcrypt'), dataDir);
+        if (t) {
+          writeJson(resolve(assetDir('data', 'blackcrypt', 'amiga'), 'rules-tables.json'), t);
+          console.log('  Extracted rules-tables.json (bcdft S_1/S_2 + bcdfp)');
+        } else console.log('  Skipped rules tables (run tools/bcdft_decompress first)');
+      } catch (e) { console.log('  Skipped rules tables:', e); }
+
       // Character portrait atlas from bcdfo.
       //
       // This previously read `bcdfa` as a run of raw 576-byte tiles from
