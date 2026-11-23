@@ -225,6 +225,9 @@ const ISHAR2_TRIPS: ReadonlyArray<{ selector: number; walk: string; groups: stri
   { selector: 2, walk: 'FLFFFFFFLFLLLFFFLFLLFLLL', groups: ['FMONT', 'MONTAGNE'] },
   { selector: 7, walk: 'FFFFFFFFLFFFFLFFFLFFFLLL', groups: ['FDJCAT', 'FDJ1'] },
   { selector: 8, walk: 'FFFFFFFFLFFFLFFLLFLLFLLL', groups: ['FDJ1'] },
+  // Zach's town (2026-11-23): the VHOUSE2 height residual of 2026-11-23 no longer reproduces
+  { selector: -2, walk: 'FFFFFFLFFLFFRFFFLLFF', groups: ['FVILLE', 'VHOUSE2'] },
+  { selector: 5, walk: 'FFFFFFFFLFFFFLFFFLFFFLLL', groups: ['FVILLE', 'VHOUSE2'] },
 ];
 
 describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar2.dataDir, 'MAIN.DO')))('ishar2 island trips vs the game (alis oracle)', () => {
