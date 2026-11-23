@@ -349,7 +349,8 @@ export function crawlWalk(
       // a use moves nothing; its effect is the tables (compared below) and
       // the entities whose message handlers redraw it
       const cell = (region: number, row: number, col: number) => s8(layers(isharContOf(spec, region))?.[0]?.[row * spec.stride + col] ?? 0);
-      const u = spec.use?.(cur, cell) ?? null;
+      const cellB = (region: number, row: number, col: number) => s8(layers(isharContOf(spec, region))?.[1]?.[row * spec.stride + col] ?? 0);
+      const u = spec.use?.(cur, cell, cellB) ?? null;
       // nothing usable in front: the tables stay as they were
       const pred = u ? u.tables : (cur.tables ?? {});
       const tablesAgree = Object.entries(pred).every(([a, t]) => {
@@ -357,7 +358,7 @@ export function crawlWalk(
         return !!got && t.every((v, i) => (got[i] ?? 0) === v);
       });
       const same = cur.region === actual.region && cur.row === actual.row && cur.col === actual.col && cur.facing === actual.facing;
-      if (u?.message) scene.messageChild(u.message.script, u.message.index, u.message.exit, actual);
+      if (u?.message) scene.messageChild(u.message, actual);
       const leaves = scene.leaves();
       out.push({ predicted: cur, actual, moveAgrees: same, tablesAgree, scripts: scene.scriptNames, leaves, canvas: compositeIsharView(leaves, spec.screen, scene.palette) });
       cur = actual;

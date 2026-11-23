@@ -181,6 +181,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
       { name: 'zone', off: 0x3b33, len: 1, globals: 'byte' },
       // the dungeon door flags GERDEP +0x178b reads (`ISHAR3_DOOR_TABLE`)
       { name: 'doors', off: 0x3544, len: 40, table: true },
+      // the dungeon lever states (PCAVE +0x331, `ISHAR3_LEVER_TABLE`)
+      { name: 'levers', off: 0x357c, len: 40, table: true },
       // everything EAFF and AFFPV read to place the monsters and townspeople
       ...entityDumps(ISHAR3_TITLE),
       // the day/night palette factors MAIN `+0x135b` passes to `cdarkpal` (r, g, b words, 256 = unchanged) and its count switch
@@ -193,6 +195,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     turnRight: [310, 30],
     turnLeft: [263, 30],
     forward: [288, 30],
+    // a dungeon lever in the party's cell (PCAVE form 0, material 64)
+    use: [128, 60],
     viewScreen: { x: 0, y: 13, w: 255, h: 112 },
     // townspeople (affpv spawns them), the Maz thieves and guards, and the
     // monsters MAIN `+0x18d4` loads per location, and the dungeon fireball traps

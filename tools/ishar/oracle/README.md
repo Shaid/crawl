@@ -189,3 +189,6 @@ the click (`0x1506` is the held item's kind, `0x1742` the cursor entity).
 With an item in the hand the arrows do not move the party, so hold it
 only for the click. `crawlWalk` predicts the door and lever tables after
 each `U` with the title's `spec.use` and reports `tablesAgree`.
+Ishar 3 uses the same `U` point for its dungeon levers (a lever in the
+party's own cell, `ishar3FacingLever`); the walk dumps the lever states
+`0x357c` as `levers` next to `doors`.

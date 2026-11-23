@@ -2084,12 +2084,31 @@ the gate between two legs.
     - **Walker.** E pulls the lever the party faces, else opens the locked
       door in front (doors 0..15; the walker has no inventory, so it
       assumes the key), and redraws at once (`ishar1Use`).
-    - **Ishar 2/3.** Ishar 2's SOURIS (`+0x66f`) tests every form mask
-      with an empty hand: material 64 sends 20 (a lever), 65 sends 19 (a
-      door that opens with a plain click), 70 goes to a trap-door path.
-      Ishar 2's PCAVE gives forms 1/2 (material 65) to doors whose entity
-      variable 9 is 1/2 when adjacent, forms 0/3 (64) to levers, and forms
-      4/5 (67/68) to doors 29/30. Not driven yet.
+    - **Ishar 2.** SOURIS (`+0x66f`) tests every form mask with an empty
+      hand: material 64 sends 20 (a lever), 65 sends 19 (a door that opens
+      with a plain click), 70 goes to a trap-door path. PCAVE gives forms
+      1/2 (material 65) to doors whose entity variable 9 is 1/2 when
+      adjacent, forms 0/3 (64) to levers, and forms 4/5 (67/68) to doors
+      29/30. Not driven yet.
+    - **Ishar 3 (driven 2026-11-25).** The dungeon levers work the same
+      way: DJ1/DJ3 (`+0x123d`) draw a lever on a cell whose layer-0 code
+      is 46..49 when the party faces raw -1, 2, 1, -2 respectively (the
+      DJ1 `+0x9e7` arms `+0xea4..+0xfa9`), and start PCAVE with local 60
+      = |layer-1 value| - 10, the lever index; PCAVE gives it form 0
+      (material 64) in the party's own cell. SOURIS's empty-hand click
+      sends 20 and PCAVE `+0x32f` toggles the lever state `0x357c[i]` and
+      the door flag `0x3544[i]` (`ishar3PullLever`; a door's index is its
+      grid-B value - 60). Doors with an index above 24 get a second PCAVE
+      with forms 4/5 (materials 67/68, door 39 the latter): keyholes, not
+      driven. Plain doors get no form, so a click on the door itself does
+      nothing. Message 19 toggles a door (PCAVE `+0x282`: it rises 4 px a
+      frame for 24 frames). Oracle walk from the dungeon trip, poked onto
+      lever 13 at CONT5-3 (8,45) facing raw 2, one `U` then 39 moves and
+      turns: 40/40 moves, 1/1 tables (lever 13 and door 13 set),
+      648/648 placements, 99.977% of masked pixels (the pull frame shows
+      the mouse pointer, 54 px; 41 px over three frames at (9,40..42), not
+      traced). Before the restart passed every `shim*` variable, the pull
+      frame missed both lever sprites (9/11).
 
 20. **Ishar 3 beyond Maz (2026-11-23, driven and measured).**
     - **Trips without a gate cell.** The oracle sends MAIN message 38 (what
@@ -2268,8 +2287,8 @@ the gate between two legs.
 **Not covered yet** (rewritten 2026-11-23; Ishar 3 items 2026-11-24):
 
 - ~~how a click reaches a door's form, and the levers~~ (Ishar 1 solved
-  2026-11-25, item 18); Ishar 2's and Ishar 3's dungeon doors in play
-  (Ishar 2 traced in part, item 18; the Ishar 3 walks poke them open);
+  2026-11-25, item 18; Ishar 3's levers driven, its keyhole doors not;
+  Ishar 2 traced in part, not driven);
 - Ishar 2's island NPCs, the jail and the cliff (item 19);
 - Ishar 3's dungeon region 8 and the dungeon locations past the shut
   doors (23-28), not measured; the VJARDIN bank residual (item 21);

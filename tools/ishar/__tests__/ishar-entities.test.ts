@@ -151,3 +151,24 @@ describe('Ishar 1 locks and levers (SOURIS, FRISE and PCAVE, oracle-driven 2026-
     expect(u?.levers[19]).toBe(1);
   });
 });
+
+describe.skipIf(!existsSync('data/ishar3/amigaaga/CONT5-3.FIC'))('Ishar 3 dungeon levers (DJ1 +0x123d, PCAVE +0x32f)', () => {
+  it('finds the lever in the party\'s cell and toggles its door', async () => {
+    const { ishar3FacingLever, ishar3PullLever, ISHAR3_TITLE: T, ISHAR3_DOOR_TABLE, ISHAR3_LEVER_TABLE } = await import('../../shared/ishar-scene.ts');
+    const f = new Uint8Array(readFileSync('data/ishar3/amigaaga/CONT5-3.FIC'));
+    const n = 57 * 82;
+    const cell = (_r: number, row: number, col: number) => ((f[row * 57 + col]! << 24) >> 24);
+    const cellB = (_r: number, row: number, col: number) => ((f[n + row * 57 + col]! << 24) >> 24);
+    // (8,45) = 47 / -23: lever 13, drawn when the party faces raw 2 (walker facing 1)
+    const at = { region: 7, row: 8, col: 45, facing: 1 as const };
+    expect(ishar3FacingLever(at, cell, cellB)).toBe(13);
+    expect(ishar3FacingLever({ ...at, facing: 0 }, cell, cellB)).toBe(-1);
+    expect(ishar3FacingLever({ ...at, region: 1 }, cell, cellB)).toBe(-1);
+    const p = ishar3PullLever(T.tables![ISHAR3_LEVER_TABLE]!, T.tables![ISHAR3_DOOR_TABLE]!, 13);
+    expect([p.levers[13], p.doors[13]]).toEqual([1, 1]);
+    const q = ishar3PullLever(p.levers, p.doors, 13);
+    expect([q.levers[13], q.doors[13]]).toEqual([0, 0]);
+    // the door at (9,31) holds grid-B 73: index 13
+    expect(cellB(7, 9, 31)).toBe(73);
+  });
+});

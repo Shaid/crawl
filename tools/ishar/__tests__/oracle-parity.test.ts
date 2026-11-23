@@ -402,3 +402,43 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
     }
   }, 300_000);
 });
+
+/**
+ * Ishar 3's dungeon lever (2026-11-25): trip to the dungeon (location 4),
+ * poke the party onto the lever cell CONT5-3 (8,45) (code 47, layer 1 -23:
+ * lever 13) facing raw 2, then `U` clicks the view with an empty hand.
+ * SOURIS sends the lever's PCAVE entity message 20 and PCAVE `+0x32f`
+ * toggles lever 13 and door 13 (`ishar3PullLever`); crawl predicts both
+ * tables and redraws the lever. The walk then goes on through the dungeon.
+ */
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 dungeon lever vs the game (alis oracle)', () => {
+  it('pulls the lever like the game and matches the view', () => {
+    const out = tempDir('ishar3-lever-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const trip = join(out, 'trip.state');
+      const at0 = captureTrip('ishar3', [38], trip, 600, { commands: ['poke 3b33 4'] });
+      const state = join(out, 'poked.state');
+      const pre = captureLegWalk('ishar3', (_c, done) => (done.length ? null : ['R']), join(out, 'pre'), { noNpcs: true, maxLegs: 1, startState: trip, start: at0, legCommands: ['poke 257 8', 'poke 14b6 45', 'poke 14b7 1', 'pokew 16e0 500'], finalState: state });
+      const p = pre.at(-1)!;
+      const at = { region: p.region, row: p.row, col: p.col, facingRaw: p.facingRaw };
+      expect(at).toEqual({ region: 7, row: 8, col: 45, facingRaw: 2 });
+      const actions = [...'ULLFRFFFRFFLFF'] as Array<'F' | 'L' | 'R' | 'U'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length ? null : actions), join(out, 'walk'), { noNpcs: true, startState: state, start: at, maxLegs: 1, legCommands: ['pokew 16e0 500'] });
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 1, p.mem?.zone?.[0], false);
+      expect(steps[0]!.mem!.levers![13]).toBe(1);
+      expect(steps[0]!.mem!.doors![13]).toBe(1);
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, tables: w.tablesAgree ?? true, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, tables: true, matched: r.oracle, crawl: r.oracle });
+        // the pull frame shows the mouse pointer at the click (54 px)
+        expect(r.pixelsMasked - r.pixelsMaskedEqual, `step ${i} pixels`).toBeLessThanOrEqual(60);
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});

@@ -151,7 +151,7 @@ export interface IsharTitleSpec {
    * `message` names the entity whose message handler redraws it
    * (`IsharScene.messageChild`).
    */
-  use?(st: IsharPartyState, cell: (region: number, row: number, col: number) => number): { tables: Record<number, number[]>; message?: { script: string; index: number; exit: boolean } } | null;
+  use?(st: IsharPartyState, cell: (region: number, row: number, col: number) => number, cellB?: (region: number, row: number, col: number) => number): { tables: Record<number, number[]>; message?: IsharUseMessage } | null;
   /**
    * The engine's day/night darkening (`cdarkpal r g b first count`): when
    * any factor is not 256, every `cpalette` scales palette entries
@@ -203,6 +203,14 @@ export interface IsharTitleSpec {
 }
 
 /** A zone add-on: a script name, or one started with entity bytes set. */
+/** The entity a use messages: `script`'s children whose local `local` is `index` (PCAVE: Ishar 1 local 13 = door or -lever, Ishar 3 local 60 = lever); `exit` = the handler ends the entity. */
+export interface IsharUseMessage {
+  script: string;
+  local: number;
+  index: number;
+  exit: boolean;
+}
+
 export type IsharAddOn = string | { readonly name: string; readonly locals: Readonly<Record<number, number>> };
 const addOnName = (a: IsharAddOn): string => (typeof a === 'string' ? a : a.name);
 
@@ -750,7 +758,7 @@ export const ISHAR1_TITLE: IsharTitleSpec = {
     const levers = st.tables?.[0x3b98] ?? this.tables![0x3b98]!;
     const u = ishar1Use(st, cell, doors, levers);
     // PCAVE's handlers redraw it: the lever entity (index -lever) slides its lever, the door entity slides away and exits
-    return u && { tables: { 0x3b64: u.doors, 0x3b98: u.levers }, message: { script: 'PCAVE', index: u.lever !== undefined ? -u.lever : u.door!, exit: u.lever === undefined } };
+    return u && { tables: { 0x3b64: u.doors, 0x3b98: u.levers }, message: { script: 'PCAVE', local: 13, index: u.lever !== undefined ? -u.lever : u.door!, exit: u.lever === undefined } };
   },
   zone: { script: 'GERDEP', entry: 0x1baf, exits: [0x1d34, 0x2278], addr: 0x3eac, prevRegionLocal: 25 },
   addOns(region, zone, st) {
@@ -1123,6 +1131,42 @@ const ISHAR3_FIREBALLS = { 0x3e1a: [0, 63, 63, 63, 13, 16, 17, 18, 19, 20, 21, 3
  * group (vwall, vhouse2, vhouse1, fville, vdec1, vdec2; affpv spawns the
  * townspeople, sville/sville2 draw nothing in the view).
  */
+/** Ishar 3's dungeon lever states (PCAVE `+0x331`, `0x357c` + lever). */
+export const ISHAR3_LEVER_TABLE = 0x357c;
+
+/**
+ * The Ishar 3 dungeon lever the party faces, or -1 (traced 2026-11-25,
+ * driven in the oracle). DJ1/DJ3 draw a lever (`+0x123d`) on a cell whose
+ * layer-0 code is 46..49 when the party faces raw -1, 2, 1, -2 (one per
+ * code; the DJ1 `+0x9e7` switch arms `+0xea4..+0xfa9`), and start PCAVE
+ * with local 60 = |layer-1 value| - 10, the lever index. PCAVE gives it
+ * form 0 (material 64) when it is in the party's own cell, so an
+ * empty-hand click on it (SOURIS) sends message 20. Oracle: CONT5-3
+ * (8,45) = 47 / -23, facing raw 2: lever 13.
+ */
+export function ishar3FacingLever(st: IsharPartyState, cell: (region: number, row: number, col: number) => number, cellB: (region: number, row: number, col: number) => number): number {
+  if (st.region !== 7 && st.region !== 8) return -1;
+  const v = cell(st.region, st.row, st.col);
+  if (v < 46 || v > 49) return -1;
+  if ([-1, 2, 1, -2][v - 46] !== ISHAR3_TITLE.facingRaw[st.facing]) return -1;
+  const i = Math.abs(cellB(st.region, st.row, st.col)) - 10;
+  return i > 0 ? i : -1;
+}
+
+/**
+ * PCAVE's lever handler (message 20, `+0x32f`), ported: the lever state
+ * `0x357c[i]` and the door flag `0x3544[i]` both toggle. A door's index is
+ * its grid-B value - 60 (GERDEP `+0x178b`), so lever i works door i.
+ * Oracle: lever 13 pulled at (8,45): state 1, door 13 open.
+ */
+export function ishar3PullLever(levers: readonly number[], doors: readonly number[], lever: number): { levers: number[]; doors: number[] } {
+  const l = [...levers];
+  const d = [...doors];
+  l[lever] = (l[lever] ?? 0) === 1 ? 0 : 1;
+  d[lever] = d[lever] ? 0 : 1;
+  return { levers: l, doors: d };
+}
+
 export const ISHAR3_TITLE: IsharTitleSpec = {
   game: 'ishar3',
   stride: 57,
@@ -1149,7 +1193,7 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     return { factors: [m(0x3f82), m(0x3f84), m(0x3f86)], first: 1, count: m(0x3da4) === 0 ? 15 : 175 };
   },
   // door flags at a new game (oracle boot memory: doors 70-72 and 80-81 open)
-  tables: { ...ISHAR3_FIREBALLS, [ISHAR3_DOOR_TABLE]: [0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+  tables: { ...ISHAR3_FIREBALLS, [ISHAR3_DOOR_TABLE]: [0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], [ISHAR3_LEVER_TABLE]: new Array(40).fill(0), 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
   sceneScripts: [
     'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2', 'FORET', 'FFORET', 'FJUNGLE', 'JUNGLE', 'FMONT', 'MONTAGNE', 'DJDEC2', 'DJDEC',
     // the location add-ons (`ishar3LocationAddOns`) and PCAVE, the dungeon doors the DJ scripts start
@@ -1228,6 +1272,13 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   // gate (message 38, a trip: `+0xe04`). A monster standing in the party's
   // own cell (`+0xf13`, `ishar3Occupancy`) holds one side of it, like
   // Ishar 2's `+0xc8b`; the party check (`+0xdc2`) is not modelled.
+  use(st, cell, cellB) {
+    if (!cellB) return null;
+    const i = ishar3FacingLever(st, cell, cellB);
+    if (i < 0) return null;
+    const p = ishar3PullLever(st.tables?.[ISHAR3_LEVER_TABLE] ?? this.tables![ISHAR3_LEVER_TABLE]!, st.tables?.[ISHAR3_DOOR_TABLE] ?? this.tables![ISHAR3_DOOR_TABLE]!, i);
+    return { tables: { [ISHAR3_DOOR_TABLE]: p.doors, [ISHAR3_LEVER_TABLE]: p.levers }, message: { script: 'PCAVE', local: 60, index: i, exit: false } };
+  },
   enter(from, to, cell, occupied, cellB) {
     const v = cell(to.region, to.row, to.col);
     if (v < 0 && v !== -2) return null;
@@ -1340,6 +1391,8 @@ interface LoadedScript {
   runner: AlisScriptRunner;
   /** Started by another scene script's `clive` (its handle), not by the region group. */
   handle?: number;
+  /** The variables its parent wrote (`shim*`), which a restart passes again. */
+  passed?: Set<number>;
 }
 
 /** Element `index` (byte or big-endian signed word) of the table at `addr`, if a block of `blocks` holds it. */
@@ -1405,7 +1458,10 @@ export class IsharScene {
       live: (id) => this.live(id),
       writeEntity: (h, off, v) => {
         const c = this.scripts.find((x) => x.handle === h);
-        if (c) c.runner.locals.set(off, v);
+        if (c) {
+          c.runner.locals.set(off, v);
+          (c.passed ??= new Set()).add(off);
+        }
       },
       readEntity: (h, off) => this.scripts.find((x) => x.handle === h)?.runner.locals.get(off) ?? 0,
       readMain: (addr) => globals[addr] ?? 0,
@@ -1663,23 +1719,24 @@ export class IsharScene {
    * A message handler changed an entity without a wake (PCAVE's lever and
    * door handlers, messages 20 and 19). `exit`: the entity ends (the door
    * slides open and `cexit`s, PCAVE `+0x1de..+0x211`). Otherwise restart
-   * it with the variables its parent passed (vram 0..13), the way COLCAVE
+   * it with the variables its parent passed (its `shim*` writes), the way COLCAVE
    * and MCAVE start a new one on the next wake: a fresh start under the new
    * tables draws where the handler's animation ends (the lever down).
-   * Only the children whose local 13 (PCAVE's door or -lever index) is
-   * `index` are touched.
+   * Only the children whose local `local` is `index` are touched (PCAVE:
+   * Ishar 1 local 13 = door or -lever, Ishar 3 local 60 = lever).
    */
-  messageChild(name: string, index: number, exit: boolean, state: IsharPartyState): void {
+  messageChild(m: IsharUseMessage, state: IsharPartyState): void {
+    const { script: name, local, index, exit } = m;
     this.state = state;
     const env = this.env();
-    const hit = (s: LoadedScript) => s.name === name && s.handle !== undefined && ((((s.runner.locals.get(13) ?? 0) & 0xff) ^ 0x80) - 0x80) === index;
+    const hit = (s: LoadedScript) => s.name === name && s.handle !== undefined && ((((s.runner.locals.get(local) ?? 0) & 0xff) ^ 0x80) - 0x80) === index;
     if (exit) this.scripts = this.scripts.filter((s) => !hit(s));
     else
       for (const s of this.scripts) {
         if (!hit(s)) continue;
         const fresh = this.create(name);
         if (!fresh) continue;
-        for (const [k, v] of s.runner.locals) if (k < 14) fresh.runner.locals.set(k, v);
+        for (const k of s.passed ?? []) fresh.runner.locals.set(k, s.runner.locals.get(k) ?? 0);
         s.runner = fresh.runner;
         s.runner.settle(env);
       }

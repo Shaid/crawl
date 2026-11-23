@@ -464,27 +464,33 @@ export class IsharView implements GameView {
   private usedTables: Record<number, number[]> | null = null;
 
   /**
-   * Ishar 1, E: "use" what the party faces, as the game's view click does
-   * (`ishar1Use`): pull the lever in front (an empty-hand click, PCAVE
-   * message 20), else open the locked door in front (doors 0..15, a key
-   * or a picked lock, message 19; the walker keeps no inventory, so it
-   * assumes the key). The scene redraws at once, the way PCAVE's handler
+   * E: "use" what the party faces, as the game's view click does (the
+   * title's `spec.use`). Ishar 1 (`ishar1Use`): pull the lever in front
+   * (an empty-hand click, PCAVE message 20), else open the locked door in
+   * front (doors 0..15, a key or a picked lock, message 19; the walker
+   * keeps no inventory, so it assumes the key). Ishar 3: pull the dungeon
+   * lever in the party's cell (`ishar3FacingLever`), which toggles its door. The scene redraws at once, the way PCAVE's handler
    * slides the lever or the door. Returns true if something changed.
    */
   private use(): boolean {
     const sc = this.data.scene;
-    if (this.id !== 'ishar' || !sc || !sc.spec.use) return false;
+    if (!sc || !sc.spec.use) return false;
     const cellAt = (lv: number, row: number, col: number) => {
       const r = this.gridOf(lv);
       const v = r ? (r.terrain[col * r.width + row] ?? 0) : 0;
       return v >= 128 ? v - 256 : v;
     };
-    const u = sc.spec.use(this.partyState(), cellAt);
+    const cellB = (lv: number, row: number, col: number) => {
+      const l = this.data.storage.get(isharContOf(sc.spec, lv))?.[1];
+      const v = l ? (l[row * sc.spec.stride + col] ?? 0) : 0;
+      return v >= 128 ? v - 256 : v;
+    };
+    const u = sc.spec.use(this.partyState(), cellAt, cellB);
     if (!u) return false;
     this.usedTables = { ...(this.usedTables ?? {}), ...u.tables };
     if (u.message && this.scene) {
       const st = this.partyState();
-      this.scene.messageChild(u.message.script, u.message.index, u.message.exit, st);
+      this.scene.messageChild(u.message, st);
       const leaves = this.scene.leaves();
       this.sceneFrame = { key: `${st.region}:${st.row},${st.col},${st.facing}`, rgba: compositeIsharView(leaves, sc.spec.screen, this.scene.palette), placements: leaves.length };
     }
