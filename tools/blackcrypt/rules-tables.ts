@@ -6,6 +6,7 @@
  * Evidence: docs/blackcrypt/amiga/game-rules.md.
  */
 import { readFileSync, existsSync } from 'node:fs';
+import { extractAiScripts, listScripts, aiOpName } from './rules-monster';
 
 const S1_BASE = 0x80058; // S_1 load address; absolute pointers in S_2 = S1_BASE + S_1 offset
 
@@ -66,6 +67,33 @@ export function extractRulesTables(s1: Uint8Array, s2: Uint8Array, bcdfp: Uint8A
     xp: { rule: 'level L advances while xp > 2^(L+7); threshold doubles per level gained', thresholds: Array.from({ length: 20 }, (_, i) => 2 ** (i + 8)) },
     levelUp: { hpGain: 'rand16(9) + statBonusT1[stat+0x67] + 7 (cur and max)' },
     newCharacter: { level: 1, hp: 20, maxHp: 20, food: 5000, water: 5000, energy: 10000 },
+    // character creation (bcdfp +0x1996 increment / +0x1A46 decrement): each stat in [statsMin, 20], spare pool 25.
+    // Stat slots (creation order = template word order) -> record byte: STR +0x64, INT +0x66, WIS +0x65, DEX +0x68, CON +0x67.
+    creation: { statMax: 20, statNames: ['STR', 'INT', 'WIS', 'DEX', 'CON'], recordSlots: [0x64, 0x66, 0x65, 0x68, 0x67], classIndexOrder: ['FIGHTER', 'CLERIC', 'MAGIC USER', 'DRUID'], itemClassMaskBits: { FIGHTER: 1, CLERIC: 2, 'MAGIC USER': 4, DRUID: 8 } },
+    // monster-side constants (harness: tools/blackcrypt/rules-monster.test.ts)
+    monsterCombat: {
+      melee: 'thr = clamp(AC + 8 - ((m-1)>>1) - speedBits, 2, 20), m = max(1, secondMaxHp/10), speedBits = (byte3 & 0xC) >> 2; hit iff rand8(20)+1 >= thr; dmg = rand16(4m) + m (kind 4)',
+      actGates: 'p(no act) gate1: rand byte < 255/(speedBits+1) (-30 for gfx 0x80B7/0x80B8); gate2: rand byte < 255/(nAvailableModes+1) (-30 for 0x80B8)',
+      xp: 'per living character: rand16(secondMaxHp) + rand16(primaryByte2) + secondWord6',
+      moraleThresholdPercent: [0, 10, 20, 30],
+    },
+    tick: {
+      note: 'periodic block of the tick handler (S_1 +0x08B2) runs when t&15==0 or (resting and t&7==0)',
+      scan: 't&15==0 monster generator scan (+0xB614)', adjust: { every: 16, resting: 8, energy: [0, 125], food: -1, water: -1 },
+      poison: { every: 256, offset: 0x80, resting: 'every 16 (t&15==8)', damage: 'rand16(poison*10)+1', damageType: 5 },
+      disease: { every: 512, offset: 0x100, resting: 'every 32 (t&31==16)', damage: 'disease byte', damageType: 6 },
+      hungerThirst: { every: 128, offset: 0x40, below: 2000, damage: 2, damageType: 4 },
+      regen: 'flag +0x6D: +1 HP when (t&0x200)==0 at the 16-tick cadence', restHeal: 'level*2 per 8 ticks (halved on hazard squares without +0x86)',
+      hazardSquare: 'map flag bit 31 without +0x86: rand16(5)+1 damage type 4 per 16 ticks',
+      itemDecay: 't&63==32: stat-enchanted pack items lose one charge; effect off at zero',
+      wallClockSecondsPerTick: null,
+    },
+    monsterAi: {
+      note: 'behaviour VM at S_1 +0xAAFC; 6-byte cells op,a,w1,w2; script chosen by monster record word +0xE (movement type 0..11); pc = secondary record word +4; pointer table (S_2 +0x114A) is 0x80 low in the extracted image',
+      ...extractAiScripts(s2),
+      ops: Object.fromEntries([...new Set(extractAiScripts(s2).cells.map(c => c[0]))].sort((a, b) => a - b).map(o => [o, aiOpName(o)])),
+      scripts: listScripts(extractAiScripts(s2)),
+    },
     classes, spells,
     weaponBase: decodeWeaponSwitch(s1),
   };

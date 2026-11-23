@@ -63,6 +63,9 @@ describe.skipIf(!have)('rules-tables extractor vs oracle', () => {
     expect(t.statBonusT1).toEqual(V.tables.statBonusT1);
     expect(t.speedT3).toEqual(V.tables.speedT3);
     expect(t.spells[0].name).toBe('POISON CLOUD');
+    expect(t.monsterAi.starts).toEqual(V.aiScripts.starts);
+    expect(t.monsterAi.cells).toEqual(V.aiScripts.cells);
+    expect(t.creation.statNames).toEqual(['STR', 'INT', 'WIS', 'DEX', 'CON']);
     expect(t.classes.map(c => c.name)).toEqual(['FIGHTER', 'CLERIC', 'MAGIC USER', 'DRUID']);
   });
 });
