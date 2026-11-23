@@ -39,7 +39,7 @@ describe.skipIf(!have)('W6 rules-tables extractor (retail data)', () => {
     // the damage spells named by the game
     const byId = (i: number) => tables.spells[i].name;
     expect(byId(0)).toBe('ENERGY BLAST');
-    expect(tables.combat.spellEngines.find((e: { id: number }) => e.id === 2).engine).toBe('damage@0x23758');
+    expect(tables.combat.spellEngines.find((e: { id: number }) => e.id === 2)?.engine).toBe('damage@0x23758');
   });
   it('class minimums: every class needs its namesake attribute', () => {
     expect(tables.classes[0].minAttrs[0]).toBe(12); // FIGHTER STR
