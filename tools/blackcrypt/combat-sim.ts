@@ -23,6 +23,7 @@ import {
   awardXp, hpAtLeastMorale, runBehaviour, vitalsTick, VM_CALLS,
   type AiScripts, type VmMonster, type VmCall,
 } from './rules-monster';
+import { ramBossItem } from './rules-boss';
 import {
   MoveWorld, addToSquare, removeFromSquare, activationScan, pursue, approach, wander, monsterAct as moveAct, pathfind,
   type ActEnv, type MoveCall,
@@ -84,6 +85,8 @@ export interface SimMonster {
   loot: number[];
   /** secondary record: facing S.b0C (default 0), desired facing S.b0D (default 4 = none), last seen party square S.w0 / S.w2 */
   face?: number; want?: number; lastX?: number; lastY?: number;
+  /** secondary record byte +0x0A (cleared by SOULFREEZER when non-zero) */
+  sb0a?: number;
 }
 
 export interface SimEvent { due: number; seq: number; type: number; monster: number; ev?: SpEvent }
@@ -125,6 +128,8 @@ export type SimCmd =
   | { kind: 'memorise'; char: number; row: number }
   /** cast the memorised spell in `slot` of `char`; `pick` = clicked party slot for the single-target spells */
   | { kind: 'cast'; char: number; slot: number; pick?: number }
+  /** use a plot item effect: 'prot' PROTECTOR (0x8D), 'sf' SOULFREEZER (0x8E), 'vx' VORTEX (0x8F); the Ram-boss stage machine (rules-boss.ts) */
+  | { kind: 'plotItem'; fx: 'prot' | 'sf' | 'vx' }
   | { kind: 'rest'; on: boolean }
   | { kind: 'wait' };
 
@@ -285,7 +290,7 @@ export class CombatSim {
       if (!m.alive) continue;
       const P = 1 + 2 * m.id, S = P + 1;
       objs[P] = { kind: 'mon', gfx: m.gfx, b2: m.b2, hp: m.hp, S, next: w.w(P, 0x12) };
-      objs[S] = { kind: 'sec', maxHp: m.maxHp, w6: m.xpBase, pos: m.pos, alert: w.b(S, 0x12) };
+      objs[S] = { kind: 'sec', maxHp: m.maxHp, w6: m.xpBase, pos: m.pos, alert: w.b(S, 0x12), b0A: m.sb0a ?? 0 };
     }
     for (const [id] of w.objs) if (id >= 500) objs[id] = { kind: 'str', b5: w.b(id, 5), wA: w.w(id, 0xa), wC: w.w(id, 0xc), w10: w.w(id, 0x10), b0F: w.b(id, 0xf), next: w.w(id, 0x12) };
     return { cells, objs, px: this.px + OFF, py: this.py + OFF, facing: this.facing, item36: false, b1E5C: 0, chars: this.chars.map(ch => ({ hp: ch.hp, xp: ch.xp })) };
@@ -307,6 +312,7 @@ export class CombatSim {
     this.adjustVitals(k, -4, -2, -1);
     // cooldown event 0x14 / 0x15 length: max(5, T3[DEX] + weight/23) ticks [C]; the weight term is not modelled (no inventory)
     c.readyAt = this.tick + Math.max(5, this.cfg.tables.speedT3[Math.max(0, Math.min(30, c.dex))]);
+    this.bossHold(m);
     this.log.push({ t: this.tick, ev: 'swing', char: k, hit: r.hit, dmg: r.damage, monster: m.id, monHp: m.hp });
     if (m.hp < 1) this.monsterDies(m);
   }
@@ -324,7 +330,7 @@ export class CombatSim {
   private applyRay(k: number, spell: number, w: RayWorld, r: { total: number; hits: { id: number; dmg: number; killed: boolean }[] }) {
     this.chars.forEach((ch, i) => { ch.xp = w.chars[i].xp; });
     const hits = r.hits.map(h => ({ monster: (h.id - 1) >> 1, dmg: h.dmg, killed: h.killed }));
-    for (const h of hits) { const m = this.monsters[h.monster]; m.hp = w.objs[1 + 2 * h.monster].hp!; this.mw.setB(2 + 2 * h.monster, 0x12, w.objs[2 + 2 * h.monster].alert!); }
+    for (const h of hits) { const m = this.monsters[h.monster]; m.hp = w.objs[1 + 2 * h.monster].hp!; this.bossHold(m); this.mw.setB(2 + 2 * h.monster, 0x12, w.objs[2 + 2 * h.monster].alert!); }
     this.log.push({ t: this.tick, ev: 'ray', char: k, spell, total: r.total, hits });
     for (const h of hits) if (h.killed) this.finishKill(this.monsters[h.monster]);
   }
@@ -340,6 +346,11 @@ export class CombatSim {
     if (m.alive) removeFromSquare(this.mw, 1 + 2 * m.id, m.x + OFF, m.y + OFF);
     m.alive = false;
     this.events = this.events.filter(e => e.type !== 1 || e.monster !== m.id);
+  }
+
+  /** +0x7F2E in the monster-death routine [H through castRay's bossStage, C for the melee path]: the boss (gfx 0x80C5) never drops below 49 hp and starts stage 1 */
+  private bossHold(m: SimMonster) {
+    if (m.gfx === 0x80c5 && m.hp < 50) { if (this.a1a1e === 0) this.a1a1e = 1; m.hp = 49; }
   }
 
   /** Monster death (S_1 +0x7ED0) [H awardXp + levelUp]; carried chain drops on the square [C]. */
@@ -393,6 +404,7 @@ export class CombatSim {
   }
 
   private runMonster(m: SimMonster) {
+    if (m.gfx === 0x80c5 && this.a1a1e >= 3) this.a1a1e = 2; // +0xAB5E: the boss's behaviour VM resets stages 3 / 4 to 2 [H via the 68k, boss state C]
     this.loadAll();
     const w = this.mw, P = 1 + 2 * m.id;
     const pos = { x: m.x + OFF, y: m.y + OFF };
@@ -486,6 +498,25 @@ export class CombatSim {
     this.log.push({ t: this.tick, ev: 'cast', char: k, spell, spent });
   }
 
+  /** PROTECTOR / SOULFREEZER / VORTEX [H rules-boss.ts ramBossItem, 900 / 900 against the 68k]: applies the stage change, alert bump, resistance and event calls. */
+  private plotItem(fx: 'prot' | 'sf' | 'vx') {
+    const rw = this.rayWorld();
+    const wall = ((this.mw.cell(this.px + OFF, this.py + OFF) >>> (12 + this.facing)) & 1) === 1;
+    const r = ramBossItem(fx, { stage: this.a1a1e, tick: this.tick, px: this.px + OFF, py: this.py + OFF, facing: this.facing, wall, world: rw, chars: this.chars.map(c => ({ hp: c.hp, res: c.resist & 0xff })) });
+    this.a1a1e = r.stage;
+    this.chars.forEach((c, k) => { c.resist = (r.res[k] << 24) >> 24; });
+    for (const [S, al] of Object.entries(r.alert)) this.mw.setB(+S, 0x12, al);
+    for (const call of r.calls) {
+      if (call.fn === 'cancelType') this.events = this.events.filter(e => e.type !== call.type);
+      else if (call.fn === 'cancelEvents') this.events = this.events.filter(e => !(e.type === 1 && e.monster === ((call.id! - 1) >> 1)));
+      else if (call.fn === 'sched') {
+        if (call.type === 0x25) this.events.push({ due: call.due!, seq: this.seq++, type: 0x25, monster: -1, ev: { type: 0x25, due: call.due!, a1: 0, a2: 0, a3: 0 } });
+        else this.events.push({ due: call.due!, seq: this.seq++, type: 1, monster: (call.id! - 1) >> 1 });
+      }
+    }
+    for (const S of r.clearB0a) this.monsters[(S - 2) >> 1].sb0a = 0;
+  }
+
   /**
    * Buff-expiry handlers, event types 0x1E-0x25 [H applyExpiry, the real handlers of the tick handler's due-event dispatch, 600 / 600 against the 68k]:
    * the sim state is mirrored into the A4 bytes the handler reads, the handler runs, and the changed fields are read back.
@@ -563,6 +594,7 @@ export class CombatSim {
       case 'ray': this.ray(cmd.char, cmd.spell); break;
       case 'memorise': this.memorise(cmd.char, cmd.row); break;
       case 'cast': this.cast(cmd.char, cmd.slot, cmd.pick ?? 0); break;
+      case 'plotItem': this.plotItem(cmd.fx); break;
       case 'rest': this.resting = cmd.on; this.chars.forEach(c => { c.resting = cmd.on; }); break;
       case 'wait': break;
     }

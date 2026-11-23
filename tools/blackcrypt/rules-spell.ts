@@ -111,7 +111,7 @@ export interface RayObj {
   /** monster primary: gfx word (bit 15 set = monster), b2 hit byte, hp (+8), S = secondary index (+0x10) */
   gfx?: number; b2?: number; hp?: number; S?: number;
   /** monster secondary: maxHp (+8), w6 xp base, pos (+0x0B: 0..3 corner, 4 centre), alert (+0x12, incremented by every ray that targets the monster) */
-  maxHp?: number; w6?: number; pos?: number; alert?: number;
+  maxHp?: number; w6?: number; pos?: number; alert?: number; b0A?: number;
   /** structure: b5 type, wA (state word), wC, w10, b0F */
   b5?: number; wA?: number; wC?: number; w10?: number; b0F?: number;
   /** next object on the square (+0x12) */

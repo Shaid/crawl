@@ -256,4 +256,47 @@ describe('combat-sim: executable form of game-rules.md section 9', () => {
       expect(run('0127740bfd56')).not.toBe(a);
     });
   });
+
+  describe('Ram-boss stage machine (rules-boss.ts, 900 / 900 vs the 68k)', () => {
+    const bossSim = (o: Partial<SimConfig> = {}) => {
+      const p = startingParty(tables); p.forEach(c => { c.hp = c.maxHp = 5000; }); p[0].weapon = { gfx: 3, extra: 0 };
+      return new CombatSim(cfg({ party: p, width: 10, initiallyActive: true, monsters: [monster({ x: 2, y: 1, gfx: 0x80c5, hp: 80, maxHp: 400, b2: 1, sb0a: 1 })], ...o }));
+    };
+    const toStage1 = (sim: CombatSim) => { for (let i = 0; i < 400 && sim.a1a1e === 0; i++) { sim.chars[0].readyAt = 0; sim.step1([{ kind: 'attack', char: 0 }]); } };
+    it('boss below 50 hp is held at 49 and starts stage 1', () => {
+      const sim = bossSim(); toStage1(sim);
+      expect(sim.a1a1e).toBe(1);
+      expect(sim.monsters[0].hp).toBe(49);
+      expect(sim.monsters[0].alive).toBe(true);
+    });
+    it('the full sequence PROTECTOR -> SOULFREEZER -> VORTEX reaches stage 4; the null control without PROTECTOR stays at stage 1', () => {
+      const sim = bossSim(); toStage1(sim);
+      sim.step1([{ kind: 'plotItem', fx: 'prot' }]);
+      expect(sim.a1a1e).toBe(2);
+      expect(sim.chars.every(c => c.resist >= 75 || c.resist < 0)).toBe(true);
+      sim.step1([{ kind: 'plotItem', fx: 'sf' }]);
+      expect(sim.a1a1e).toBe(3);
+      expect(sim.monsters[0].sb0a).toBe(0);
+      sim.step1([{ kind: 'plotItem', fx: 'vx' }]);
+      expect(sim.a1a1e).toBe(4);
+      const ctl = bossSim(); toStage1(ctl);
+      ctl.step1([{ kind: 'plotItem', fx: 'sf' }]); ctl.step1([{ kind: 'plotItem', fx: 'vx' }]);
+      expect(ctl.a1a1e).toBe(1);
+    });
+    it('PROTECTOR expiry (event 0x25) puts the stage back to 1 and takes the resistance away; the boss acting at stage >= 3 resets it to 2', () => {
+      const sim = bossSim(); toStage1(sim);
+      sim.step1([{ kind: 'plotItem', fx: 'prot' }]);
+      const r0 = sim.chars[0].resist;
+      sim.run(205);
+      expect(sim.a1a1e).toBe(1);
+      expect(sim.chars[0].resist).toBe(r0 >= 75 ? r0 - 75 : r0);
+      const b = bossSim(); toStage1(b);
+      b.step1([{ kind: 'plotItem', fx: 'prot' }]); b.step1([{ kind: 'plotItem', fx: 'sf' }]);
+      expect(b.a1a1e).toBe(3);
+      b.run(150); // the boss's act event was moved 200 ticks out: still frozen
+      expect(b.a1a1e).toBe(3);
+      b.run(80); // its act event ran (and PROTECTOR's 0x25 expiry fired)
+      expect(b.a1a1e).toBeLessThanOrEqual(2);
+    });
+  });
 });
