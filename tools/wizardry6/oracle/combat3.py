@@ -92,7 +92,7 @@ def ensure_living(c, rng, fx, counts, groups):
 def pack(c, res, extra=None):
     d = {'foot': {str(a): b for a, b in res['foot'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
          'diff': {str(a): b for a, b in res['diff'].items() if not (RNG_ADDR <= a < RNG_ADDR + 6)},
-         'effects': res['effects'], 'rng': res['rng'], 'a4': c.A4}
+         'effects': res['effects'], 'rng': res['rng'], 'a4': c.A4, 'rargs': res['rargs']}
     if extra: d.update(extra)
     return d
 
@@ -299,6 +299,81 @@ def make_spell_vectors(n, seed):
 
 
 MAKERS['spells'] = make_spell_vectors
+
+
+
+# ---------------------------------------------------------------------------
+# spell engines: area damage / status / whole-side wrappers, run for real (SetStatus + kill cleanup included)
+ENGINE_OFF = {'area_dmg': 0x23758, 'area_stat': 0x238ac, 'area_stat2': 0x23aa0, 'grp_drain': 0x23d38, 'grp_all': 0x23f18}
+
+
+class EngineRun(SpellRun):
+    def __init__(self):
+        super().__init__()
+        o = label_offsets()
+        # leaf routines the engines call that are not themselves under test here
+        self._stub(0x2361e, 'e61', log=False)
+        for l in ('LAB_0EE1', 'LAB_0EEE'): self._stub(o[l], l, log=False)
+        # run the engines, ResistScale, the damage engine and SetStatus (with the kill cleanup) for real; keep psync logged
+        self.disabled = {0x2300c, 0x24ea0} | {o[l] for l, (nm, _) in SPELL_ENGINES.items() if nm != 'psync'}
+
+
+def engine_words(rng, eng, counts, ng):
+    gs = [g for g in range(7) if counts[g] > 0 and (g <= ng or g in (0, 6))]
+    g = rng.choice(gs)
+    t = rng.choice([-10, -10, -3, -1, rng.randrange(counts[g]), rng.randrange(counts[g])])
+    res = rng.randrange(0, 14); mod = rng.randrange(-30, 60)
+    dd = lambda: rng.choice([-1, 0, 1, 2, 3, 5, 7])
+    if eng == 'area_dmg':
+        return [g, t, dd(), rng.randrange(1, 9), rng.randrange(1, 5), res, mod]
+    if eng == 'area_stat':
+        kill = rng.randrange(2)
+        return [g, t, 0xd4a, res, rng.choice([1, 2, 3, 4]) if kill else rng.randrange(0, 8), mod, kill, dd(), dd(), rng.choice([0, 3, 14, 0xff]), 6, 14]
+    if eng == 'area_stat2':
+        kill = rng.randrange(2)
+        return [g, t, 0xd50, res, rng.randrange(1, 4), mod, dd(), rng.randrange(1, 9), rng.choice([1, 2, 3, 4]) if kill else rng.randrange(0, 8), kill, dd(), dd(), rng.choice([0, 5, 0xff]), 6, 6]
+    if eng == 'grp_drain':
+        return [rng.choice([0, 1, 2, 5, 6, 7, -1]), dd(), rng.randrange(1, 9), rng.randrange(1, 5), res, mod]
+    if eng == 'grp_all':
+        return [rng.choice([0, 1, 2, 5, 6, 7]), 0xd4a, rng.choice([5, 11, 3, 2, 6]), rng.choice([3, 3, 2, 0]), mod, rng.choice([1, 1, 0]),
+                rng.choice([0, 1, 5, 20, 40]), dd(), dd(), rng.choice([0, 3, 14]), 6, 14][:11]
+    raise KeyError(eng)
+
+
+def make_engine_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = EngineRun(); out = []
+    names = list(ENGINE_OFF)
+    k = 0
+    while len(out) < n:
+        eng = names[k % len(names)]; k += 1
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 4), party=rng.randrange(1, 5))
+        A4 = c.A4
+        if counts[6] == 0: w8(fx, MEM_BASE + 6 * MEM_STRIDE + 413, 2); counts[6] = 2
+        w = engine_words(rng, eng, counts, ng)
+        for g in range(7):
+            base = MEM_BASE + g * MEM_STRIDE
+            for q in range(396, 402): w8(fx, base + q, rng.choice([0, 0, 3, 30, 100, 250]))
+            for i in range(9):
+                o = base + i * 44
+                w8(fx, o + 0x2b, rng.choice([0, 0, 0, 0, 1]))
+                for b in range(14, 24): w8(fx, o + b, rng.choice([0, 0, 0, 5, 40, 250]))
+            for q in range(14): w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + 0x94 + q, rng.choice([0, 20, 50, 80, 100, 130]))
+            w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + 0xdc, rng.randrange(0, 4))
+        w16(fx, A4 - 15306, rng.randrange(1, 7)); fx.writes.append((A4 - 15300, struct.pack('>I', rng.randrange(0, 4000))))
+        for g in (6,):
+            pass
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(ENGINE_OFF[eng], [x & 0xffff if x >= 0 else x & 0xffff for x in w], seed3)
+        except RuntimeError as e:
+            print('skip', eng, w, str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'eng': eng, 'w': w}))
+    return out
+
+
+MAKERS['engines'] = make_engine_vectors
 
 
 if __name__ == '__main__':
