@@ -481,6 +481,7 @@ export function decodeAlisInstr(data: Uint8Array, pc: number, version = 20): Ali
       return fin('cfopen', { name, mode });
     }
     case 0x71: return fin('cfclose', {});
+    case 0x74: return fin('cfreadv', { dest: store(c) }); // reads a word from the open file into a store target (Ishar 3 PARAM's save/reset loaders)
     case 0x75: return fin('cfwritev', { expr: expr(c) });
     case 0x77: case 0x78: { // cfreadb/cfwriteb (v<30 form -- s16 addr, u16 len; v30 -- u32 len)
       if (v30) {

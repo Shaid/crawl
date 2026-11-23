@@ -618,7 +618,7 @@ export class AlisScriptRunner {
         case 'cnearent': case 'cneartyp':
         case 'cnearmat': case 'cviewent': case 'cviewtyp': case 'cviewmat': case 'corient':
         case 'csend': case 'callentity': case 'ctiming': case 'czap': case 'cexplode': case 'cding':
-        case 'cnoise': case 'cinitab': case 'cfopen': case 'cfclose': case 'cfwritev': case 'cfreadb':
+        case 'cnoise': case 'cinitab': case 'cfopen': case 'cfclose': case 'cfreadv': case 'cfwritev': case 'cfreadb':
         case 'cfwriteb': case 'cplot': case 'cdraw': case 'cbox': case 'cboxf': case 'cink': case 'cpmode':
         case 'cpicture': case 'cxyscroll': case 'cmouson': case 'cmousoff': case 'cmouse': case 'cdefmouse':
         case 'csetmouse': case 'capproach': case 'cescape': case 'cvmov':

@@ -358,6 +358,15 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
       });
       expect(people).toBeGreaterThan(40);
       expect(near / oracle).toBeGreaterThan(0.995);
+      // The same walk on crawl's own new-game table (PARAM's INITPV.FIC read, `entities.files`)
+      // instead of the oracle's dumps: what the standalone walker draws.
+      const own = steps.map((s) => ({ ...s, mem: Object.fromEntries(Object.entries(s.mem ?? {}).filter(([k]) => k !== 'ent4012' && k !== 'ent3b60')) }));
+      let ownNear = 0, ownPeople = 0;
+      crawlWalk(data, { ...ORACLE_TITLES.ishar3.start }, own, contLayers('ishar3', data)).forEach((w, i) => {
+        ownNear += comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves).matchedNearX;
+        ownPeople += w.leaves.filter((l) => l.script.startsWith('VPERSO')).length;
+      });
+      expect([ownNear, ownPeople]).toEqual([near, people]);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

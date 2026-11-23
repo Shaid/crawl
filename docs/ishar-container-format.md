@@ -2402,8 +2402,16 @@ the gate between two legs.
   (23, 26 and 27 measured 2026-11-23); the VJARDIN bank residual (item 21);
 - monster movement and combat. The walker draws the NPCs at their EN1
   places; GEREN moves them and spawns the roaming ones;
-- Ishar 3's townspeople table at a new game: its loader is not found, so
-  the walker draws no townspeople;
+- ~~Ishar 3's townspeople table at a new game~~ (found 2026-11-23: PARAM
+  `+0x24a0` reads `INITPV.FIC`, 450 B = 150 rows, 150 cols, 150 kinds,
+  into `0x4012`/`0x40ae`/`0x41e6`; the facings `0x414a` stay 0. The
+  engine-3.0 decoder stopped at PARAM's first `cfreadv` (opcode `0x74`:
+  read a word from the open file into a store target), which is why the
+  loader had not been found; `alis-disasm.ts` now decodes it. With the
+  table loaded by crawl itself, the 30-action Maz walk matches the same
+  709/709 placements (within 12 px) as with the oracle's dumps; zeroed,
+  it was 667/709 with no townspeople. The walker draws them, at their
+  new-game places: they move in play, which crawl does not model);
 - floor objects (AFFOBJ/OBJET);
 - Crystals of Arborea's enemy bands, house interiors and map screen
   (item 22).

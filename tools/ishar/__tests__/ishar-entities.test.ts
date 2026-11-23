@@ -214,3 +214,17 @@ describe.skipIf(!existsSync('data/ishar2/amigaaga/CONT5.FIC'))('Ishar 2 click do
     expect(T.afterMove!(at)).toBeNull();
   });
 });
+
+describe.skipIf(!existsSync('data/ishar3/amigaaga/INITPV.FIC'))('Ishar 3 townspeople at a new game (PARAM +0x24a0)', () => {
+  it('reads INITPV.FIC into the row, col and kind arrays', async () => {
+    const { isharEntityMemory, ISHAR3_TITLE } = await import('../../shared/ishar-scene.ts');
+    const initpv = new Uint8Array(readFileSync('data/ishar3/amigaaga/INITPV.FIC'));
+    expect(initpv.length).toBe(450);
+    const mem = isharEntityMemory(ISHAR3_TITLE, new Uint8Array(readFileSync('data/ishar3/amigaaga/EN1.FIC')), { 'INITPV.FIC': initpv });
+    const b = mem[0x4012]!;
+    expect([...b.subarray(0, 150)]).toEqual([...initpv.subarray(0, 150)]);
+    expect([...b.subarray(0x9c, 0x9c + 150)]).toEqual([...initpv.subarray(150, 300)]);
+    expect([...b.subarray(0x138, 0x138 + 150)].every((v) => v === 0)).toBe(true);
+    expect([...b.subarray(0x1d4, 0x1d4 + 150)]).toEqual([...initpv.subarray(300, 450)]);
+  });
+});

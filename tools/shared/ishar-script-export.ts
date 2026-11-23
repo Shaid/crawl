@@ -86,7 +86,9 @@ export { isharSceneScriptNames };
 export function exportIsharEntityMemory(dataDir: string, game: string, platform: string, spec: IsharTitleSpec): number {
   const p = join(dataDir, 'EN1.FIC');
   if (!spec.entities || !existsSync(p)) return 0;
-  const mem = isharEntityMemory(spec, new Uint8Array(readFileSync(p)));
+  const files: Record<string, Uint8Array> = {};
+  for (const f of spec.entities.files ?? []) if (existsSync(join(dataDir, f.file))) files[f.file] = new Uint8Array(readFileSync(join(dataDir, f.file)));
+  const mem = isharEntityMemory(spec, new Uint8Array(readFileSync(p)), files);
   const blocks: Record<string, number[]> = {};
   for (const [k, v] of Object.entries(mem)) blocks[k] = [...v];
   const outDir = join(assetRoot(game, platform), 'data');

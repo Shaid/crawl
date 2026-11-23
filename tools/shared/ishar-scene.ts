@@ -210,6 +210,8 @@ export interface IsharTitleSpec {
     en1?: ReadonlyArray<readonly [number, number]>;
     /** Other main blocks the entity scripts read and write, zero at a new game (Ishar 1's front-row slots `0x3d54`). */
     scratch?: ReadonlyArray<readonly [number, number]>;
+    /** Other files the game reads into main memory at a new game: `[addr, len]` in file order (Ishar 3 PARAM's `INITPV.FIC`), written over the scratch blocks. */
+    files?: ReadonlyArray<{ readonly file: string; readonly reads: ReadonlyArray<readonly [number, number]> }>;
   };
   /**
    * Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this
@@ -339,7 +341,7 @@ export function isharSceneScriptNames(spec: IsharTitleSpec): string[] {
  * `cfreadb` run, file order) plus the zeroed scratch blocks. Keyed by start
  * address, for `IsharScene.memory`.
  */
-export function isharEntityMemory(spec: IsharTitleSpec, en1: Uint8Array): Record<number, Uint8Array> {
+export function isharEntityMemory(spec: IsharTitleSpec, en1: Uint8Array, files: Readonly<Record<string, Uint8Array>> = {}): Record<number, Uint8Array> {
   const out: Record<number, Uint8Array> = {};
   const e = spec.entities;
   if (!e) return out;
@@ -349,6 +351,18 @@ export function isharEntityMemory(spec: IsharTitleSpec, en1: Uint8Array): Record
     o += len;
   }
   for (const [addr, len] of e.scratch ?? []) out[addr] = new Uint8Array(len);
+  for (const { file, reads } of e.files ?? []) {
+    const data = files[file];
+    if (!data) continue;
+    let p = 0;
+    for (const [addr, len] of reads) {
+      const bytes = data.subarray(p, p + len);
+      p += len;
+      const start = Object.keys(out).map(Number).find((b) => b <= addr && addr + len <= b + out[b]!.length);
+      if (start === undefined) out[addr] = Uint8Array.from(bytes);
+      else out[start]!.set(bytes, addr - start);
+    }
+  }
   return out;
 }
 
@@ -1317,7 +1331,7 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   ],
   // EAFF (Ishar 1's ENCONT, engine 3.0) and AFFPV, the Maz townspeople:
   // 150 people with row `0x4012`, col `0x40ae`, facing `0x414a` and kind
-  // `0x41e6`; AFFPV `+0x75` scans them up to 6 cells ahead and `clive`s
+  // `0x41e6` (PARAM reads them from INITPV.FIC, `files` below); AFFPV `+0x75` scans them up to 6 cells ahead and `clive`s
   // VPERSO1..5 by kind and location (`0x3b33`), passing x, depth and height
   // through `shimw` (vram 0/8/16). Their x adds the engine's shared random
   // number (`ornd`, `+0x2e3`/`+0x2f6`), which crawl cannot reproduce.
@@ -1327,6 +1341,8 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     en1: ISHAR3_EN1_READS,
     // the townspeople and AFFPV's thief flags `0x3b60`; EAFF's 0x32a0/0x330c/0x36a8 (not loaded from EN1)
     scratch: [[0x4012, 618], [0x3b60, 50], [0x32a0, 110], [0x330c, 110], [0x36a8, 3]],
+    // PARAM +0x24a0 loads the townspeople at a new game: rows, cols, kinds (the facings 0x414a stay 0)
+    files: [{ file: 'INITPV.FIC', reads: [[0x4012, 150], [0x40ae, 150], [0x41e6, 150]] }],
   },
   // MAIN +0x4a3c: CONT1-3 / CONT2-3 for the two Maz codes, then one file per
   // region pair (3/4 jungle, 5/6 forest, 7/8 dungeons, 9/10 mountains).

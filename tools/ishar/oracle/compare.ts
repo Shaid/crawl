@@ -82,7 +82,7 @@ export function loadTitleData(game: OracleGame, repoRoot = resolve('.')): TitleD
   return {
     spec,
     load,
-    entityMemory: existsSync(en1) ? isharEntityMemory(spec, new Uint8Array(readFileSync(en1))) : {},
+    entityMemory: existsSync(en1) ? isharEntityMemory(spec, new Uint8Array(readFileSync(en1)), Object.fromEntries((spec.entities?.files ?? []).filter((f) => existsSync(join(dir, f.file))).map((f) => [f.file, new Uint8Array(readFileSync(join(dir, f.file)))]))) : {},
     grids(region, row) {
       return new IsharGridBuffers(spec, layers).update({ region, row, col: 0, facing: 0 });
     },
