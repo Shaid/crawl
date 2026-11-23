@@ -65,3 +65,12 @@ Do not point `--out` under `data/`.
 - `oracle.py`: CLI for frames, moves and arrival.
 - `sweep.py`: full view sweep with the staged mismatch breakdown.
 - `walker-frames.mts`: renders walker frames and draw lists for `sweep.py`.
+
+## Game-rules harness (2026-11-23)
+
+`rules.py` is a second entry point on the same `emu.py` core for the *rules*
+routines (random generator, level-up, CheckLevelUp through the game's own
+`ReadSection`). Window/text callees are replaced by no-ops. `rules.py vectors
+OUT.json` writes the committed `rules-vectors.json` that
+`tools/wizardry6/__tests__/rules.test.ts` diffs `tools/wizardry6/rules.ts`
+against (null controls included). See `docs/wizardry6/amiga/game-rules.md`.
