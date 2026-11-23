@@ -98,10 +98,10 @@ export function extractRulesTables(s1: Uint8Array, s2: Uint8Array, bcdfp: Uint8A
     },
     // item use effects (object word +0xE, dispatch table S_1 +0x12FEA): 0x8D-0x90 resolved this pass (code for the routine, bcdfs item data for the names)
     itemEffects890: {
-      0x8d: { routine: 0x78da, name: 'PROTECTOR', what: 'event 0x25: +75 magic resistance (+0x69) to every living character for 200 ticks' },
-      0x8e: { routine: 0x79c2, name: 'SOULFREEZER', what: 'Ram-boss stage machine on A4+0x1A1E (code, not decoded)' },
-      0x8f: { routine: 0x7b2e, name: 'VORTEX', what: 'Ram-boss stage machine (code, not decoded)' },
-      0x90: { routine: 0x7c40, name: 'FORCEHAMMER', what: 'Ram-boss stage machine (code, not decoded)' },
+      0x8d: { routine: 0x78da, name: 'PROTECTOR', what: 'Ram-boss stage 1 -> 2 (harness): +75 magic resistance (+0x69) to every living character below 75 for 200 ticks (event 0x25 expiry sets the stage back to 1)' },
+      0x8e: { routine: 0x79c2, name: 'SOULFREEZER', what: 'Ram-boss stage 2 -> 3 (harness, rules-boss.ts): face the boss (gfx 0x80C5), freeze it 200 ticks' },
+      0x8f: { routine: 0x7b2e, name: 'VORTEX', what: 'Ram-boss stage 3 -> 4 (harness, rules-boss.ts)' },
+      0x90: { routine: 0x7c40, name: 'FORCEHAMMER', what: 'Ram-boss stage 4 -> 5 (code): removes the boss, ending (game-rules.md 11.3)' },
     },
     classes, spells,
     // the spell book as the memorise / recharge / refresh routines read it (S_2 +0x1F2: 15 page records of 6 bytes = owned word?, head word, next-page word; spell records +0x12 + 8*i)
