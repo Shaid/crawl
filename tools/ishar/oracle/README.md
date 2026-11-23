@@ -165,3 +165,12 @@ Ishar 3 trips: `captureTrip('ishar3', [38], state, 600, { commands:
 ['poke 3b33 8'] })` sends GERDEP's gate message with the location poked
 (8 = the jungle, 6 = the mountains, 13 = the forest; MAIN `+0x41ed` picks
 the destination from region and location). Walk from the result in one leg.
+
+Ishar 3 locations and dungeons (2026-11-24): a guard at Maz (39,32) blocks
+the west of town at a new game, so the district walks poke the party past
+it (`legCommands: ['poke 257 40', 'poke 14b6 31']` on a one-leg L,R walk
+that keeps its `finalState`), then walk from that state. Trip to the
+dungeon with location 4 (`poke 3b33 4`); keep the party alive with
+`pokew 16e0 500` (hp of party slot 0) and open its doors by poking
+`0x3545..0x356b` to 1 (`ISHAR3_DOOR_TABLE`, dumped every step as
+`doors`). Fireball traps are in `npcScripts`.

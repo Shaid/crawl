@@ -45,6 +45,24 @@ describe('Ishar 3 step test (GERDEP +0xe93/+0xf13)', () => {
     expect(ISHAR3_TITLE.enter!(st(5, 6, 8), st(5, 6, 9), flat, occ)).toBeNull();
     expect(ISHAR3_TITLE.enter!(st(5, 6, 8), st(5, 7, 8), flat, occ)).not.toBeNull();
   });
+  it('dungeon doors (GERDEP +0x13b8/+0x178b): CONT5-3 (7,48) holds 43 with door 84, shut at a new game', () => {
+    // 43 = a door on the cell's col-1 edge; the oracle refuses (7,48) -> (7,47) and allows the other ways
+    const cell = (_r: number, row: number, col: number) => (row === 7 && col === 48 ? 43 : 10);
+    const cellB = (_r: number, row: number, col: number) => (row === 7 && col === 48 ? 84 : 0);
+    expect(ISHAR3_TITLE.enter!(st(7, 7, 48), st(7, 7, 47), cell, undefined, cellB)).toBeNull();
+    expect(ISHAR3_TITLE.enter!(st(7, 7, 48), st(7, 7, 49), cell, undefined, cellB)).not.toBeNull();
+    // stepping into it from the west crosses the same edge
+    expect(ISHAR3_TITLE.enter!(st(7, 7, 47), st(7, 7, 48), cell, undefined, cellB)).toBeNull();
+    // the door open (0x3544[24] = 1), or outside the dungeons, it passes
+    const open = { ...st(7, 7, 48), tables: { 0x3544: Array.from({ length: 40 }, (_, i) => (i === 24 ? 1 : 0)) } };
+    expect(ISHAR3_TITLE.enter!(open, st(7, 7, 47), cell, undefined, cellB)).not.toBeNull();
+    expect(ISHAR3_TITLE.enter!(st(1, 7, 48), st(1, 7, 47), cell, undefined, cellB)).not.toBeNull();
+  });
+  it('a dungeon -2 cell is not entered moving col-1 (GERDEP +0x15e8; CONT5-3 (3,44) -> (3,43))', () => {
+    const cell = (_r: number, _row: number, col: number) => (col === 43 ? -2 : 34);
+    expect(ISHAR3_TITLE.enter!(st(7, 3, 44), st(7, 3, 43), cell, undefined, () => 0)).toBeNull();
+    expect(ISHAR3_TITLE.enter!(st(7, 3, 42), st(7, 3, 43), cell, undefined, () => 0)).not.toBeNull();
+  });
 });
 
 const FJUNGLE = 'data/ishar3/amigaaga/FJUNGLE.DO';

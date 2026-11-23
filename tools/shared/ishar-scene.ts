@@ -72,7 +72,7 @@ export interface IsharSceneGroup {
    * its `cpalette` installs. A list names candidates: the first one alive
    * wins (Ishar 2's dungeons, whose backdrop is a zone add-on).
    */
-  paletteFrom?: { script: string | readonly string[]; slot: number | ((readMain: (addr: number) => number) => number) };
+  paletteFrom?: { script: string | readonly string[]; slot: number | ((readMain: (addr: number) => number) => number) | Readonly<Record<string, number>> };
 }
 
 export interface IsharTitleSpec {
@@ -171,9 +171,33 @@ export interface IsharTitleSpec {
     /** Other main blocks the entity scripts read and write, zero at a new game (Ishar 1's front-row slots `0x3d54`). */
     scratch?: ReadonlyArray<readonly [number, number]>;
   };
-  /** Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this zone leaves the current add-ons alone. */
-  addOns?(region: number, zone: number, state: IsharPartyState): readonly string[] | null;
+  /**
+   * Zone add-on scripts MAIN keeps alive for (region, zone); `null` = this
+   * zone leaves the current add-ons alone. An entry with `locals` is started
+   * with those entity bytes set (MAIN's `shimb` after the `clive`, e.g.
+   * Ishar 3's fireball index at offset 77).
+   */
+  addOns?(region: number, zone: number, state: IsharPartyState): readonly IsharAddOn[] | null;
+  /**
+   * How MAIN swaps the add-ons. `'keep'` (Ishar 1/2): scripts in both the
+   * old and the new list stay alive, new ones win equal-depth ties (they go
+   * first). `'restart'` (Ishar 3, MAIN `+0x12d3`): any change of the zone
+   * kills every add-on (type byte 38, `+0x26bf`) and starts the new list in
+   * its `clive` order, in the add-ons' place ahead of the region group.
+   */
+  addOnSwap?: 'keep' | 'restart';
+  /**
+   * `'restart'` only: the region's add-ons follow the region group in the
+   * entity list (equal-depth ties) instead of preceding it.
+   */
+  addOnsAfter?(region: number): boolean;
+  /** Partial palettes a live script installs over the backdrop's (its defined entries win). */
+  paletteOverlays?: ReadonlyArray<{ script: string; slot: number }>;
 }
+
+/** A zone add-on: a script name, or one started with entity bytes set. */
+export type IsharAddOn = string | { readonly name: string; readonly locals: Readonly<Record<number, number>> };
+const addOnName = (a: IsharAddOn): string => (typeof a === 'string' ? a : a.name);
 
 /**
  * Ishar 1. Globals traced in MAIN: row `0x137c`, col `0x137d`, facing
@@ -910,6 +934,61 @@ export const ISHAR2_TITLE: IsharTitleSpec = {
 };
 
 /**
+ * Ishar 3's location add-ons: what MAIN `clive`s for each location code
+ * `0x3b33`, in its order. MAIN's main loop (`+0x12d3`) notices a location
+ * change, kills every entity of type 38 (`+0x26bf`), loads the location's
+ * files (`+0x189a`, the `cload` switch `+0x18d4`) and starts them
+ * (`+0x2060`). That starter is three switches in a row: `+0x2060` (the
+ * district or dungeon scripts), `+0x2524` (7/9/11 add the arcade street,
+ * 26/27 more fireballs and the dungeon decor) and `+0x2677` (SPACE, the
+ * gate, at 4, 6, 21, 26, 30, 35, 40, 45, 50, 55). Locations 21, 26 and 27
+ * start one FIREBALL per entry d of the trap tables (entity byte 77 = d):
+ * 21 and 27 those with `0x3e1a[d]` != 0 and `0x3eb8[d]` = the location
+ * (d = 1..12), 26 d = 1..3 unconditionally. DJDEC2/DJDEC need `0x3d94` = 0
+ * (0 at a new game). Checked against MAIN's bytes in `ishar3-locations.test.ts`.
+ */
+export function ishar3LocationAddOns(location: number, table: (addr: number, i: number) => number, flag3d94 = 0): IsharAddOn[] {
+  const fire = (from: number, to: number, cond: boolean): IsharAddOn[] => {
+    const out: IsharAddOn[] = [];
+    for (let d = from; d <= to; d++) if (!cond || (table(0x3e1a, d) !== 0 && table(0x3eb8, d) === location)) out.push({ name: 'FIREBALL', locals: { 77: d } });
+    return out;
+  };
+  const first: Record<number, () => IsharAddOn[]> = {
+    1: () => ['VRAMPART', 'VARCHE', 'VHOUSE1'],
+    2: () => ['VWALL', 'VHOUSE2', 'VHOUSE1'],
+    3: () => ['VWALL', 'VHOUSE2', 'VHOUSE1'],
+    4: () => ['VHOUSE2', 'VHOUSE1'],
+    5: () => ['VBANK', 'VRAMPART', 'VHOUSE3', 'VARCADE'],
+    6: () => ['VRAMPART', 'VJARDIN'],
+    8: () => ['VTHEATRE', 'VRAMPART', 'VHOUSE3'],
+    9: () => ['VCASINO'],
+    10: () => ['VBIBLI', 'VHOUSE3', 'VARCHE2'],
+    11: () => ['VOBS'],
+    12: () => ['VPALAIS', 'VRAMPART'],
+    13: () => ['VMATTER', 'VWALL', 'VHOUSE1'],
+    21: () => [...fire(1, 12, true), 'DJ3', 'FDJ3', 'AFFCLOCK'],
+    22: () => ['DJ2', 'FDJ2'],
+    23: () => ['DJ2', 'FDJ2', 'BIGSTONE'],
+    24: () => ['FDJLAVE', 'DJLAVE'],
+    26: () => ['DJ4', 'FDJ4'],
+    27: () => ['DJ1', 'FDJ1'],
+    28: () => ['FDJLAVE', 'DJLAVE', { name: 'DRAGON7', locals: { 78: 1 } }],
+  };
+  const out = first[location]?.() ?? [];
+  if (location === 7 || location === 9 || location === 11) out.push('VRAMPART', 'VHOUSE3', 'VARCHE2', 'VARCADE');
+  if (location === 26) out.push(...fire(1, 3, false), ...(flag3d94 === 0 ? ['DJDEC'] : []));
+  if (location === 27) out.push(...fire(1, 12, true), ...(flag3d94 === 0 ? ['DJDEC2', 'DJDEC'] : []));
+  if ([4, 6, 21, 26, 30, 35, 40, 45, 50, 55].includes(location)) out.push('SPACE');
+  return out;
+}
+
+/** Ishar 3's dungeon door flags (one byte per door index - 60; 0 = shut), GERDEP `+0x178b`. */
+export const ISHAR3_DOOR_TABLE = 0x3544;
+
+/** Ishar 3's trap tables at a new game (`0x3e1a` active, `0x3eb8` location, entries 1..12; oracle boot memory). */
+const ISHAR3_FIREBALLS = { 0x3e1a: [0, 63, 63, 63, 13, 16, 17, 18, 19, 20, 21, 3, 52], 0x3eb8: [0, 26, 26, 26, 21, 21, 21, 21, 21, 21, 21, 21, 27] };
+
+/**
  * Ishar 3. Party globals row `0x257`, col `0x14b6`, facing `0x14b7` (raw
  * 1, 2, -1, -2 in "turn right" order: oracle walk, raw 1 = col-1, raw 2 =
  * row+1); grids at `0x260` (CONT layer 0) and `0x14ae` (layer 1), 57 x 82;
@@ -934,7 +1013,8 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   mainGlobals(s) {
     // 0x3f82/0x3f84/0x3f86: the day/night factors (256 = daylight, a new game)
     // 0x3519: the EN1 slot count EAFF scans up to; 0x3b33: the location (2 at the start, `stepMemdumps` zone)
-    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x3518: 1, 0x3519: 110, 0x3b33: 2, 0x3da4: 1, 0x3f82: 256, 0x3f84: 256, 0x3f86: 256 };
+    // (the location 0x3b33 is the zone global, `zone` below)
+    return { 0x257: s.row, 0x14b6: s.col, 0x14b7: this.facingRaw[s.facing], 0x14b9: s.region, 0x3518: 1, 0x3519: 110, 0x3da4: 1, 0x3f82: 256, 0x3f84: 256, 0x3f86: 256 };
   },
   // MAIN +0x135b / +0x136d: `cdarkpal` with the factors in 0x3f82/0x3f84/
   // 0x3f86 on entries 1.., 15 of them when 0x3da4 = 0, else 175. MAIN steps
@@ -943,8 +1023,14 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   darken(m) {
     return { factors: [m(0x3f82), m(0x3f84), m(0x3f86)], first: 1, count: m(0x3da4) === 0 ? 15 : 175 };
   },
-  tables: { 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
-  sceneScripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2', 'FORET', 'FFORET', 'FJUNGLE', 'JUNGLE', 'FMONT', 'MONTAGNE'],
+  // door flags at a new game (oracle boot memory: doors 70-72 and 80-81 open)
+  tables: { ...ISHAR3_FIREBALLS, [ISHAR3_DOOR_TABLE]: [0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], 0x15f8: [0,10,3,3,4,2,1,6,1,0,1,9,9,9,10,10,1,1,0,0,0,0,0,4,0,5,5,5,5,5,5,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,8,8,8,8,8,8,8,8,8,8,7,7,7,8,8,8,8,0,0,1,1,1,1,1,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] },
+  sceneScripts: [
+    'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2', 'FORET', 'FFORET', 'FJUNGLE', 'JUNGLE', 'FMONT', 'MONTAGNE', 'DJDEC2', 'DJDEC',
+    // the location add-ons (`ishar3LocationAddOns`) and PCAVE, the dungeon doors the DJ scripts start
+    'VRAMPART', 'VARCHE', 'VHOUSE1', 'VWALL', 'VHOUSE2', 'VBANK', 'VHOUSE3', 'VARCADE', 'VJARDIN', 'VTHEATRE', 'VCASINO', 'VBIBLI', 'VARCHE2', 'VOBS', 'VPALAIS', 'VMATTER',
+    'DJ1', 'FDJ1', 'DJ2', 'FDJ2', 'DJ3', 'FDJ3', 'DJ4', 'FDJ4', 'DJLAVE', 'FDJLAVE', 'AFFCLOCK', 'BIGSTONE', 'SPACE', 'PCAVE',
+  ],
   // EAFF (Ishar 1's ENCONT, engine 3.0) and AFFPV, the Maz townspeople:
   // 150 people with row `0x4012`, col `0x40ae`, facing `0x414a` and kind
   // `0x41e6`; AFFPV `+0x75` scans them up to 6 cells ahead and `clive`s
@@ -953,7 +1039,7 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   // number (`ornd`, `+0x2e3`/`+0x2f6`), which crawl cannot reproduce.
   entities: {
     persistent: ['EAFF'],
-    scripts: ['VPERSO1', 'VPERSO2', 'VPERSO3', 'VPERSO4', 'VPERSO5', 'MESSAGEU', 'GUARD2', 'ZOLTAR', 'PRINCESS', 'OURS9', 'LOUP9', 'CHAOS5', 'BEE5', 'FLY5', 'OURS5', 'LEO3', 'ZOUAV3', 'REDFI7', 'WIZARD7', 'WITCH7', 'DRAGON7', 'FEE5', 'SPIDER7', 'SNAKE3', 'SLIME7', 'CHAOS7', 'SORCIER7', 'MAGE5', 'VOLEUR1', 'PLASMA7', 'GREEM5', 'SKELET7', 'GEANT9', 'LEZARD1', 'GENERAT9', 'ALSTAR', 'GUARD1', 'MOLTUS'],
+    scripts: ['VPERSO1', 'VPERSO2', 'VPERSO3', 'VPERSO4', 'VPERSO5', 'MESSAGEU', 'GUARD2', 'ZOLTAR', 'PRINCESS', 'OURS9', 'LOUP9', 'CHAOS5', 'BEE5', 'FLY5', 'OURS5', 'LEO3', 'ZOUAV3', 'REDFI7', 'WIZARD7', 'WITCH7', 'DRAGON7', 'FEE5', 'SPIDER7', 'SNAKE3', 'SLIME7', 'CHAOS7', 'SORCIER7', 'MAGE5', 'VOLEUR1', 'PLASMA7', 'GREEM5', 'SKELET7', 'GEANT9', 'LEZARD1', 'GENERAT9', 'ALSTAR', 'GUARD1', 'MOLTUS', 'FIREBALL'],
     en1: ISHAR3_EN1_READS,
     // the townspeople and AFFPV's thief flags `0x3b60`; EAFF's 0x32a0/0x330c/0x36a8 (not loaded from EN1)
     scratch: [[0x4012, 618], [0x3b60, 50], [0x32a0, 110], [0x330c, 110], [0x36a8, 3]],
@@ -964,21 +1050,52 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
     return region <= 2 ? region : Math.floor((region + 1) / 2) + 1;
   },
   sceneGroup(region) {
-    // MAIN +0x16b1 (cswitch2 on the region code) loads the region's scripts:
-    // 1/2 fville, affpv, vdec1, vdec2; 3/4 fjungle, jungle; 5/6 foret,
-    // fforet; 7 pcave, djtrap (+ djdec2, djdec); 8 pcave; 9/10 fmont,
-    // montagne. The location loader (+0x18d4) adds the Maz houses (start
-    // location 2: vwall, vhouse2, vhouse1) and the dungeons' walls.
-    // FVILLE `+0xfc`: `cpalette 5`.
+    // MAIN +0x16b1 (cswitch2 on the region code) loads the region's scripts
+    // and +0x17b0 starts them: 1/2 fville, vdec1, vdec2, affpv; 3/4
+    // fjungle, jungle; 5/6 foret, fforet; 7 djdec2, djdec (when 0x3d94 = 0;
+    // pcave and djtrap are only loaded); 8 nothing; 9/10 fmont, montagne.
+    // The location add-ons (`ishar3LocationAddOns`) add the Maz houses and
+    // the dungeon walls. FVILLE `+0xfc`: `cpalette 5`.
     // AFFPV (the townspeople, after FVILLE in MAIN's load order) draws them through its children.
-    if (region === 1) return { scripts: ['VWALL', 'VHOUSE2', 'VHOUSE1', 'FVILLE', 'AFFPV', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
+    if (region === 1 || region === 2) return { scripts: ['FVILLE', 'AFFPV', 'VDEC1', 'VDEC2'], paletteFrom: { script: 'FVILLE', slot: 5 } };
     // oracle start order after a gate trip (MAIN +0x3e0f): foret, fforet
     if (region === 5 || region === 6) return { scripts: ['FORET', 'FFORET'], paletteFrom: { script: 'FFORET', slot: -1 } };
     // the jungle and the mountains, in MAIN +0x16b1's load order
     if (region === 3 || region === 4) return { scripts: ['FJUNGLE', 'JUNGLE'], paletteFrom: { script: 'FJUNGLE', slot: -1 } };
     if (region === 9 || region === 10) return { scripts: ['FMONT', 'MONTAGNE'], paletteFrom: { script: 'FMONT', slot: -1 } };
+    // the dungeons: the backdrop is the location's FDJ* add-on
+    // (each FDJ* `cpalette`s its own slot: FDJ1 +0x79 7, FDJ2 +0x79 4, FDJ3 +0x65 4, FDJ4 +0x65 3, FDJLAVE +0x6d 0)
+    const dungeon = { script: ['FDJ1', 'FDJ2', 'FDJ3', 'FDJ4', 'FDJLAVE'], slot: { FDJ1: 7, FDJ2: 4, FDJ3: 4, FDJ4: 3, FDJLAVE: 0 } };
+    if (region === 7) return { scripts: ['DJDEC2', 'DJDEC'], paletteFrom: dungeon };
+    if (region === 8) return { scripts: [], paletteFrom: dungeon };
     return null;
   },
+  // GERDEP +0x1d36 (called after each step from +0x1a5e, local 89 = the
+  // grid-B cell stepped onto): in regions 1, 2, 5, 7 and 8 a cell of
+  // -99..-41 sets the location 0x3b33 to |cell| - 40; regions 9 and 10 use
+  // position bands. A new game starts at location 2.
+  zone: {
+    script: 'GERDEP',
+    entry: 0x1d36,
+    exits: [0x1e69],
+    addr: 0x3b33,
+    locals: (st, g) => ({ 89: g.B(st.row, st.col) }),
+    onMoveOnly: true,
+  },
+  initialZone: 2,
+  addOns(_region, location, st) {
+    const table = (addr: number, i: number) => st.tables?.[addr]?.[i] ?? this.tables![addr]![i] ?? 0;
+    return ishar3LocationAddOns(location, table, st.globals?.[0x3d94] ?? 0);
+  },
+  addOnSwap: 'restart',
+  // Entity order (equal-depth ties). In Maz the add-ons precede the group:
+  // at a new game MAIN starts the location (+0x1228) before the region
+  // group (+0x122c), and a location change reuses the killed add-ons'
+  // entity slots. Elsewhere the region group comes first (oracle, the
+  // jungle after a trip: fjungle, jungle, ..., space).
+  addOnsAfter: (region) => region > 2,
+  // SPACE (the gate) `cpalette 28` (+0x56a): entries 240-255, the gate's glow
+  paletteOverlays: [{ script: 'SPACE', slot: 28 }],
   gridBuffers: 'layers',
   // GERDEP's step test (+0xdb8 .. +0x13b7): a negative layer-0 cell refuses
   // the step except -2 (while 0x3b34 = 0, as in every oracle run); -5 in Maz
@@ -986,9 +1103,23 @@ export const ISHAR3_TITLE: IsharTitleSpec = {
   // gate (message 38, a trip: `+0xe04`). A monster standing in the party's
   // own cell (`+0xf13`, `ishar3Occupancy`) holds one side of it, like
   // Ishar 2's `+0xc8b`; the party check (`+0xdc2`) is not modelled.
-  enter(from, to, cell, occupied) {
+  enter(from, to, cell, occupied, cellB) {
     const v = cell(to.region, to.row, to.col);
     if (v < 0 && v !== -2) return null;
+    // GERDEP +0x13b8 / +0x1587: in the dungeons (regions 7/8) the door cell
+    // codes put a door on one edge, as in Ishar 2 (`ishar2DoorSide`); the
+    // door index is the cell's grid-B value and it is shut when the index is
+    // above 60 and 0x3544[index - 60] is 0 (+0x178b; 0x3b34 = 1 lets every door through).
+    if ((from.region === 7 || from.region === 8) && cellB) {
+      const doors = from.tables?.[ISHAR3_DOOR_TABLE] ?? this.tables![ISHAR3_DOOR_TABLE]!;
+      const shut = (idx: number) => idx > 60 && (doors[idx - 60] ?? 0) === 0;
+      // Ishar 2's raw directions 1..4 are Ishar 3's 1, 2, -1, -2
+      const dir2 = to.col === from.col - 1 ? 1 : to.row === from.row + 1 ? 2 : to.col === from.col + 1 ? 3 : 4;
+      if (ishar2DoorSide(cell(from.region, from.row, from.col)) === dir2 && shut(cellB(from.region, from.row, from.col))) return null;
+      if (ishar2DoorSide(v) === [0, 3, 4, 1, 2][dir2] && shut(cellB(to.region, to.row, to.col))) return null;
+      // +0x1587 case -2 (+0x15e8): a -2 cell cannot be entered moving col-1 (oracle: CONT5-3 (3,44) -> (3,43))
+      if (v === -2 && dir2 === 1) return null;
+    }
     // GERDEP +0xe93: in the forest (regions 5/6) a monster on the target refuses it
     if ((from.region === 5 || from.region === 6) && occupied?.(to.region, to.row, to.col)) return null;
     // GERDEP +0xf13: a monster in the party's own cell holds the side its type names
@@ -1248,6 +1379,7 @@ export class IsharScene {
     if (key !== this.groupKey) {
       this.groupKey = key;
       this.addOnKey = '';
+      this.addOnZone = -1;
       // the game-wide entities (ENCONT) outlive the region group
       const persistent = this.npcs ? (this.spec.entities?.persistent ?? []) : [];
       const kept = this.scripts.filter((s) => s.handle === undefined && persistent.includes(s.name));
@@ -1292,9 +1424,17 @@ export class IsharScene {
     const pal = names.map((n) => this.scripts.find((s) => s.name === n)).find((s) => s);
     if (!pal) return;
     const env = this.env();
-    const base = paletteOf(pal.data, typeof slot === 'function' ? slot(env.readMain) : slot);
+    const n = typeof slot === 'function' ? slot(env.readMain) : typeof slot === 'number' ? slot : (slot[pal.name] ?? -1);
+    const base = paletteOf(pal.data, n);
     const dk = base && this.spec.darken?.(env.readMain);
-    this.palette = base && dk && dk.factors.some((f) => f !== 256) ? darkenPalette(base, dk) : base;
+    let p = base && dk && dk.factors.some((f) => f !== 256) ? darkenPalette(base, dk) : base;
+    // partial palettes other live scripts install over it (Ishar 3's SPACE gate colours)
+    for (const o of this.spec.paletteOverlays ?? []) {
+      const live = this.scripts.find((s) => s.name === o.script);
+      const ov = live && paletteOf(live.data, o.slot);
+      if (p && ov) { const q = p; p = { ...q, colors: Array.from({ length: Math.max(q.colors.length, ov.colors.length) }, (_, i) => ov.colors[i] ?? q.colors[i]) }; }
+    }
+    this.palette = p;
   }
 
   /** Run the title's sub-zone routine for the current state (GERDEP, after every step/turn). */
@@ -1323,23 +1463,41 @@ export class IsharScene {
     const st = this.state!;
     const want = this.spec.addOns?.(st.region, this.zone, st);
     if (want === null || want === undefined) return;
-    const restart = !!this.spec.addOnRestartZones?.includes(this.zone) && this.zone !== this.addOnZone;
+    const changed = this.zone !== this.addOnZone;
+    const restart = this.spec.addOnSwap === 'restart' ? changed : !!this.spec.addOnRestartZones?.includes(this.zone) && changed;
     this.addOnZone = this.zone;
-    const key = want.join(',');
+    const key = JSON.stringify(want);
     if (key === this.addOnKey && !restart) return;
+    // Ishar 3's MAIN acts only when the zone (location) changes
+    if (this.spec.addOnSwap === 'restart' && !restart) return;
+    const names = want.map(addOnName);
     const base = [...(this.spec.sceneGroup(st.region)?.scripts ?? []), ...(this.spec.entities?.persistent ?? [])];
-    const keep = this.scripts.filter((s) => s.handle !== undefined || base.includes(s.name) || (want.includes(s.name) && !restart));
+    const keep = this.scripts.filter((s) => s.handle !== undefined || base.includes(s.name) || (names.includes(s.name) && !restart));
     const have = new Set(keep.map((s) => s.name));
     const env = this.env();
-    for (const name of want) {
-      if (have.has(name)) continue;
+    const fresh: LoadedScript[] = [];
+    for (const a of want) {
+      const name = addOnName(a);
+      if (this.spec.addOnSwap !== 'restart' && have.has(name)) continue;
+      // a monster MAIN starts with the location (Ishar 3's dragon) is an NPC
+      if (!this.npcs && this.spec.entities?.scripts.includes(name)) continue;
       const s = this.create(name);
       if (!s) continue;
+      if (typeof a !== 'string') for (const [k, v] of Object.entries(a.locals)) s.runner.locals.set(Number(k), v);
       s.runner.settle(env);
+      fresh.push(s);
       // An add-on wins equal-depth ties against the region group (oracle,
       // CONT5 7..12,24: INCAVE's wall covers FORET's tree root at depth 99;
       // INCAVE got entity slot 13, FORET 12). Unchanged on the CONT1-4 walks.
-      keep.unshift(s);
+      if (this.spec.addOnSwap !== 'restart') keep.unshift(s);
+    }
+    if (this.spec.addOnSwap === 'restart') {
+      // In clive order, ahead of the region group or after it (`addOnsAfter`).
+      const persistent = this.spec.entities?.persistent ?? [];
+      let at = 0;
+      if (this.spec.addOnsAfter?.(st.region)) at = keep.length;
+      else while (at < keep.length && keep[at]!.handle === undefined && persistent.includes(keep[at]!.name)) at++;
+      keep.splice(at, 0, ...fresh);
     }
     this.scripts = keep;
     this.addOnKey = key;

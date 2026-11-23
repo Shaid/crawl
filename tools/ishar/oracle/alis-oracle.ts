@@ -175,6 +175,8 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     bootMemdumps: entityDumps(ISHAR3_TITLE),
     stepMemdumps: [
       { name: 'zone', off: 0x3b33, len: 1, globals: 'byte' },
+      // the dungeon door flags GERDEP +0x178b reads (`ISHAR3_DOOR_TABLE`)
+      { name: 'doors', off: 0x3544, len: 40, table: true },
       // everything EAFF and AFFPV read to place the monsters and townspeople
       ...entityDumps(ISHAR3_TITLE),
       // the day/night palette factors MAIN `+0x135b` passes to `cdarkpal` (r, g, b words, 256 = unchanged) and its count switch
@@ -189,8 +191,9 @@ export const ORACLE_TITLES: Record<OracleGame, OracleTitle> = {
     forward: [288, 30],
     viewScreen: { x: 0, y: 13, w: 255, h: 112 },
     // townspeople (affpv spawns them), the Maz thieves and guards, and the
-    // monsters MAIN `+0x18d4` loads per location
-    npcScripts: ['affpv', 'vperso1', 'vperso2', 'vperso3', 'vperso4', 'vperso5', 'voleur1', 'guard1', 'guard2', 'lezard1', 'moltus', 'witch7', 'chaos7', 'plasma7', 'skelet7', 'spider7', 'dragon7', 'wizard7', 'slime7', 'redfi7', 'sorcier7', 'leo3', 'zouav3', 'snake3', 'ours9', 'loup9', 'geant9', 'bee5', 'ours5', 'fly5', 'greem5', 'chaos5', 'mage5', 'typhus', 'runner'],
+    // monsters MAIN `+0x18d4` loads per location, and the dungeon fireball traps
+    // (MAIN `+0x2338`; they fly at the party and hurt it)
+    npcScripts: ['affpv', 'vperso1', 'vperso2', 'vperso3', 'vperso4', 'vperso5', 'voleur1', 'guard1', 'guard2', 'lezard1', 'moltus', 'witch7', 'chaos7', 'plasma7', 'skelet7', 'spider7', 'dragon7', 'wizard7', 'slime7', 'redfi7', 'sorcier7', 'leo3', 'zouav3', 'snake3', 'ours9', 'loup9', 'geant9', 'bee5', 'ours5', 'fly5', 'greem5', 'chaos5', 'mage5', 'typhus', 'runner', 'fireball'],
     // Ishar 3 paces its intro on the 50 Hz timer, so it runs under the
     // harness's virtual clock (one timer tick per presented frame).
     env: { ALIS_HARNESS_VCLOCK: '1' },

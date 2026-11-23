@@ -1848,7 +1848,10 @@ approximates that by start order.
       13 need CONT1-3, 5-12 CONT4-3 (`+0x45bc`/`+0x460e`).
     - GERDEP rewrites the location as the party walks (watched: 2 -> 1
       at CONT1-3 (44,48)); within CONT1-3 that change starts no new
-      script, the Maz group stays.
+      script, the Maz group stays. **Correction (2026-11-24): wrong.** The
+      oracle's display list at (44,48) shows vwall/vhouse2/vhouse1
+      replaced by vrampart/varche/vhouse1 in the same entity slots: MAIN
+      swaps the location add-ons on every location change (item 21).
     - **Day and night.** MAIN `+0x4dac` sets the phase `0x3da1` from the
       game clock's hour (`0x3c08`; 8..19 day) and the factors
       `0x3f82`/`0x3f84`/`0x3f86` (day 256/256/256, dusk 256/120/152, night
@@ -2116,12 +2119,90 @@ the gate between two legs.
     on the first three frames after the arrival. Before this pass the
     islands had no scene at all (0%).
 
-**Not covered yet** (rewritten 2026-11-23):
+21. **Ishar 3's location add-ons and dungeon doors (2026-11-24, traced and
+    measured).**
+    - **When.** MAIN's main loop (`+0x12d3`) compares the location
+      `0x3b33` with the last one (`0x3dba`). On a change it kills every
+      entity whose type byte (entity offset 52) is 38 (`+0x26bf`), loads the
+      location's files (`+0x189a`: disk check `+0x18a2`, then the `cload`
+      switch `+0x18d4`) and starts them (`+0x2060`). `+0x18d4` only loads;
+      the earlier reading of it as the starter was wrong.
+    - **What.** `+0x2060` is three `cswitch1`s on the location in a row:
+      `+0x2060` (1 vrampart/varche/vhouse1; 2-3 vwall/vhouse2/vhouse1; 4
+      vhouse2/vhouse1; 5 vbank/vrampart/vhouse3/varcade; 6
+      vrampart/vjardin; 8 vtheatre/vrampart/vhouse3; 9 vcasino; 10
+      vbibli/vhouse3/varche2; 11 vobs; 12 vpalais/vrampart; 13
+      vmatter/vwall/vhouse1; 21 fireballs + dj3/fdj3/affclock; 22 dj2/fdj2;
+      23 dj2/fdj2/bigstone; 24 fdjlave/djlave; 26 dj4/fdj4; 27 dj1/fdj1; 28
+      fdjlave/djlave/dragon7), then `+0x2524` (7/9/11 add
+      vrampart/vhouse3/varche2/varcade; 26 three fireballs and djdec; 27
+      fireballs, djdec2, djdec; the decor only while `0x3d94` = 0), then
+      `+0x2677` (SPACE at 4, 6, 21, 26, 30, 35, 40, 45, 50, 55). A
+      FIREBALL is started per trap entry d (entity byte 77 = d) with
+      `0x3e1a[d]` != 0 and `0x3eb8[d]` = the location (21 and 27; 26 takes
+      d = 1..3). New-game tables: 8 traps at 21, 3 at 26, 1 at 27.
+      `ishar3LocationAddOns`, checked against MAIN's bytes in
+      `ishar3-locations.test.ts`.
+    - **The location rule** is GERDEP `+0x1d36` (item 16), now run by the
+      scene after each step (`ISHAR3_TITLE.zone`, local 89 = the grid-B
+      cell stepped onto, new game 2).
+    - **Region groups, corrected.** MAIN `+0x17b0` starts 1/2 fville,
+      vdec1, vdec2, affpv; 7 djdec2 + djdec (while `0x3d94` = 0); 8
+      nothing (`+0x16b1` only loads pcave/djtrap). The dungeon backdrop is
+      the location's FDJ* add-on, each with its own `cpalette` slot (FDJ1
+      7, FDJ2 4, FDJ3 4, FDJ4 3, FDJLAVE 0); a first-palette guess gave
+      63-90% of pixels in location 21.
+    - **CONT file.** MAIN `+0x4a3c` picks the CONT file from `0x3dbb`, not
+      the region code; `0x3dbb` is set from the region on every normal
+      load. The mountain gate's way back lands in region 1 at (55,35), a
+      pocket of CONT1-3 next to CONT2-3's gate cell.
+    - **Dungeon doors** (GERDEP `+0x13b8` current cell, `+0x1587` target,
+      regions 7/8 only): the same edge codes as Ishar 2 (38-45, 54-57,
+      70-77, 84; buttons 1 forward, 2 back, 5 left, 9 right against the
+      raw facing). The door index is the cell's grid-B value; `+0x178b`
+      refuses it when it is above 60 and `0x3544[index - 60]` is 0, unless
+      `0x3b34` = 1. At a new game doors 70-72 and 80-81 are open. Ported
+      in `ISHAR3_TITLE.enter` (`ISHAR3_DOOR_TABLE`); the oracle dumps the
+      table every step.
+    - **SPACE** (the gate glow, at locations 4, 6, 21, 26 and the
+      outdoor 30-55) draws 8-bit bitmaps in palette entries 177-255 and
+      installs its own palette slot 28 over entries 240-255
+      (`ISHAR3_TITLE.paletteOverlays`). Before this pass crawl did not run
+      it; the jungle and mountain walks scored 100% only because its boxes
+      were left out. Entity order: in Maz the add-ons precede the region
+      group (at a new game MAIN starts the location at `+0x1228` before the
+      group at `+0x122c`, and a location change reuses the killed add-ons'
+      slots); after a trip outside Maz the group comes first
+      (`addOnsAfter`).
+    - **Fireballs** are traps that fly at the party (FIREBALL brightens
+      the palette with `cdarkpal 512,...` when one hits). Walks remove them
+      like the NPCs (oracle `npcScripts`, crawl `entities.scripts`).
+
+    | Walk | Actions | Locations | Moves | Placements | Masked pixels |
+    |---|---|---|---|---|---|
+    | Maz from the start to (44,48) | 90 | 2, 1 | 90/90 | 2393/2393 (was 2393/2394) | 99.999% |
+    | Maz west, from (40,31) (poked: a guard blocks (39,32)) | 369 | 5, 7, 8, 12, 11, 10, 9, 1 | 369/369 | 9690/9690 | 100.000% |
+    | Maz south-east, from (60,44) (poked) | 57 | 2, 1, 13 | 57/57 | 1305/1305 | 100.000% |
+    | Back from the mountains, Maz location 6 | 12 | 6 | 12/12 | 88/88 (was 5/17 on one frame) | 99.692% |
+    | Dungeon region 7, from (4,53), doors as at a new game | 17 | 21, 22 | 17/17 | 252/252 | 99.997% |
+    | Dungeon region 7, doors poked open (`0x3544`), hp kept | 81 | 21, 22, 23 | 81/81 | 1228/1228 | 99.995% (34 frames black, see below) |
+
+    Residuals: at location 6 VJARDIN's tree (4-bit bitmap, bank 22)
+    shows palette entries 20-21 in the game where crawl draws 36-37
+    (FVILLE slot 5): one 16-colour bank off, cause not found (no script
+    in the group changes the palette; 0.3% of the pixels). Two pixels per
+    frame differ in location 22. A witch (WITCH7) puts the party to
+    sleep on the way; GERDEP `+0x32f` then covers the view with a black
+    sprite (slot 9, numelem 20) until a member with hp has `0x183e` = 0
+    again. Crawl does not model the party's state, so those frames are
+    left out (the black sprite is GERDEP's, not scenery).
+
+**Not covered yet** (rewritten 2026-11-23; Ishar 3 items 2026-11-24):
 
 - how a click reaches a door's form, and the levers (item 18; the walks poke them open);
 - Ishar 2's island NPCs, the jail and the cliff (item 19);
-- Ishar 3's dungeons (regions 7/8) and Maz's district add-ons beyond the
-  start (item 20);
+- Ishar 3's dungeon region 8 and the dungeon locations past the shut
+  doors (23-28), not measured; the VJARDIN bank residual (item 21);
 - monster movement and combat. The walker draws the NPCs at their EN1
   places; GEREN moves them and spawns the roaming ones;
 - Ishar 3's townspeople table at a new game: its loader is not found, so

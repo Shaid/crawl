@@ -307,3 +307,42 @@ describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.data
     }
   }, 180_000);
 });
+
+/**
+ * Ishar 3: Maz's districts. MAIN swaps the location add-ons
+ * (`ishar3LocationAddOns`) whenever GERDEP `+0x1d36` changes the location
+ * `0x3b33`. A guard blocks the street west of (39,33) at a new game, so the
+ * walk starts with the party poked to (40,31) and walks through locations
+ * 5, 7, 8, 12 and 11 (vbank, vrampart, vhouse3, varcade, vtheatre, vpalais,
+ * vobs, varche2); townspeople and thieves removed.
+ */
+const ISHAR3_DISTRICTS = 'FRFRFFFFFLFFFRFFRFLFRFFLFFLLFFRFFLFRFLFFLFRFFFFFFLFRFFLFFRFFFFFLFFRFFFLFFFRFFFFFRFFFRFFFLFLLFRFFFRFFFFFFFFFLFRFLLFLFFFLF';
+
+describe.skipIf(!oracleAvailable() || !existsSync(join(ORACLE_TITLES.ishar3.dataDir, 'MAIN.DO')))('ishar3 Maz districts vs the game (alis oracle)', () => {
+  it('swaps the location add-ons like the game and matches the view', () => {
+    const out = tempDir('ishar3-districts-test-');
+    try {
+      prepareGameDir('ishar3');
+      if (!existsSync(savestatePath('ishar3'))) bootToSavestate('ishar3', join(out, 'boot'));
+      const state = join(out, 'poked.state');
+      const pre = captureLegWalk('ishar3', (_c, done) => (done.length ? null : ['L', 'R']), join(out, 'pre'), { noNpcs: true, maxLegs: 1, legCommands: ['poke 257 40', 'poke 14b6 31'], finalState: state });
+      const p = pre[pre.length - 1]!;
+      const at = { region: p.region, row: p.row, col: p.col, facingRaw: p.facingRaw };
+      // two legs, each starting at noon (the clock would reach dusk, whose palette the game applies a step late)
+      const actions = [...ISHAR3_DISTRICTS] as Array<'F' | 'L' | 'R'>;
+      const steps = captureLegWalk('ishar3', (_c, done) => (done.length >= actions.length ? null : actions.slice(done.length, done.length + 60)), join(out, 'walk'), { noNpcs: true, startState: state, start: at, maxLegs: 2, legCommands: ['pokew 3c08 12'] });
+      const data = loadTitleData('ishar3');
+      const start = { region: at.region, row: at.row, col: at.col, facing: data.spec.facingRaw.indexOf(at.facingRaw) as 0 | 1 | 2 | 3 };
+      const cw = crawlWalk(data, start, steps, contLayers('ishar3', data), {}, 0, p.mem?.zone?.[0], false);
+      const locations = new Set(steps.map((s) => s.mem?.zone?.[0]));
+      expect([5, 7, 8, 12, 11].every((l) => locations.has(l))).toBe(true);
+      cw.forEach((w, i) => {
+        const r = comparePose('ishar3', steps[i]!.frame, data, w.scripts, w.canvas, w.leaves, false);
+        expect({ i, move: w.moveAgrees, matched: r.matched, crawl: r.crawl }).toEqual({ i, move: true, matched: r.oracle, crawl: r.oracle });
+        expect(r.pixelsMaskedEqual / r.pixelsMasked, `step ${i} pixels`).toBeGreaterThan(0.999);
+      });
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  }, 300_000);
+});
