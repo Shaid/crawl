@@ -4,7 +4,7 @@
  */
 import { BcRng } from './rules';
 import { A4Mem } from './rules-spell';
-import { OBJ, CELL, QN, allocObj, freeObj, unlinkObj, insertObj, adjustVitals, scheduleEvent, cancelEvent } from './rules-spell9';
+import { OBJ, CELL, QN, allocObj, freeObj, unlinkObj, insertObj, adjustVitals, scheduleEvent, cancelEvent, lookupType } from './rules-spell9';
 
 const CHAR = (k: number) => 0x1758 + 0xa8 * k;
 const getL = (a: A4Mem, o: number) => ((a.w(o) << 16) | a.w(o + 2)) >>> 0;
@@ -34,7 +34,7 @@ export interface DeathResult { dead: boolean; held?: string; xp: number[]; level
  *     activation scan `+0xB614` runs (the caller); then every living character gets xp += rand16(secondary maxHp) + rand16(primary byte +2) + secondary word +6 (two draws per
  *     character, slot order), followed by the level-up check (the caller).
  */
-export function monsterDeath(a: A4Mem, rng: BcRng, P: number, x: number, y: number): DeathResult {
+export function monsterDeath(a: A4Mem, rng: BcRng, P: number, x: number, y: number, onLevel?: (k: number) => void, skipXp = false): DeathResult {
   const res: DeathResult = { dead: false, xp: [], levelUps: [], scan: false };
   const S = a.w(OBJ(P) + 0x10), w0 = a.w(OBJ(P));
   if (w0 === 0x80c5 && a.sw(OBJ(P) + 8) < 0x32) { if (a.w(0x1a1e) === 0) a.setW(0x1a1e, 1); a.setW(OBJ(P) + 8, 0x31); }
@@ -48,13 +48,17 @@ export function monsterDeath(a: A4Mem, rng: BcRng, P: number, x: number, y: numb
   freeObj(a, S); freeObj(a, P);
   cancelEventsFor(a, P);
   res.scan = true; res.dead = true;
+  const sw = S, pw = P;
+  void sw; void pw;
   for (let k = 0; k < 4; k++) {
+    if (skipXp) { if (a.sw(CHAR(k) + 0x4e) > 0) { res.levelUps.push(k); onLevel?.(k); } continue; }
     if (a.sw(CHAR(k) + 0x4e) <= 0) { res.xp.push(getL(a, CHAR(k) + 0xa0)); continue; }
     const r1 = rng.rand16(a.w(OBJ(S) + 8)), r2 = rng.rand16(a.b(OBJ(P) + 2));
     const gain = (r1 + r2 + a.w(OBJ(S) + 6)) & 0xffff;
     const xp = (getL(a, CHAR(k) + 0xa0) + gain) >>> 0;
     a.setW(CHAR(k) + 0xa0, xp >>> 16); a.setW(CHAR(k) + 0xa2, xp & 0xffff);
     res.xp.push(xp); res.levelUps.push(k);
+    onLevel?.(k);
   }
   return res;
 }
@@ -195,4 +199,50 @@ export function enterParty(a: A4Mem, x: number, y: number, facing: number, msgDo
     id = a.w(o + 0x12);
   }
   return { code, x: rx, y: ry, facing: rf };
+}
+
+export interface TriggerResult { ran: boolean; executed: number[] }
+/**
+ * TriggerActionsAt (`+0xCF34`, args x, y, structure type byte), HARNESS (rules-pass7.test.ts, family `trig`). Called when the party enters a trap square (enter verdict 6, type 0x1E), by pressure
+ * plates, levers and the other triggers (callers `+0xDD48`, `+0xE012`, `+0x11310`, `+0x114AA`, `+0x11838`, `+0x11910`, `+0x11984`, and from the party move `+0x16314` / `+0x16F9A`).
+ * The structure of that type on the square (first match) must have its state word +0xA == 0 (not already running); types 0x1D and 0x1E flip their word +8 (1 - w). The redraw bytes A4+0x174D /
+ * 0x174C / 0x1749 are cleared. The structure's byte +0xD is the first ACTION RECORD index and byte +0x11 the generation g (the walk uses g + 1). Records are 8 bytes at A4+0x836 + 8 i:
+ * [0] a4, [1] generation, [2] a1, [3] a2, [4] count (0 = skipped, > 0 counts down per use, negative = unlimited), [5] delay, [6] a3, [7] next index. The walk follows [7] from the first index until it
+ * reaches index 0, comes back to the first index, or meets a record whose generation differs. A record with delay 0 is executed NOW by the action executor `+0xC4F6` (opcode switch at `+0xCE9C`:
+ * code only, not harnessed); otherwise event 0x28 is scheduled at tick + delay with a1 = [2], a2 = [3], a3 = [6], a4 = [0]. The longest delay d (> 0) schedules event 0x29 at tick + d (a1 = x,
+ * a2 = y, a3 = the structure type) unless the type is 0x1F, and the structure's +0xA is incremented (the 0x29 consumer decrements it again, section rules-pop.ts: the trigger cannot re-fire while
+ * its own delayed actions are still pending). Finally the structure keeps a cursor: word +0xC = the index the walk stopped at, word +0x10 = the generation (0 when the chain wrapped).
+ */
+export function triggerActions(a: A4Mem, x: number, y: number, type: number, tick: number): TriggerResult {
+  const res: TriggerResult = { ran: false, executed: [] };
+  const id = lookupType(a, x, y, type);
+  if (id === 0 || a.w(OBJ(id) + 0xa) !== 0) return res;
+  res.ran = true;
+  const o = OBJ(id), t = a.b(o + 5);
+  if (t === 0x1d || t === 0x1e) a.setW(o + 8, 1 - a.w(o + 8));
+  let d4 = (a.b(o + 0x11) + 1) & 0xff;
+  const d7 = a.b(o + 0xd);
+  let d2 = d7, d6 = 1, d5 = 0;
+  a.setB(0x174d, 0); a.setB(0x174c, 0); a.setB(0x1749, 0);
+  const R = (i: number) => 0x836 + 8 * i;
+  while (d2 !== 0 && d6 !== 0) {
+    const r = R(d2);
+    if (a.b(r + 1) !== d4) break;
+    if (a.b(r + 4) !== 0) {
+      if (a.sb(r + 4) > 0) a.setB(r + 4, a.b(r + 4) - 1);
+      const d3 = a.b(r + 5);
+      if (d3 === 0) res.executed.push(d2);
+      else {
+        scheduleEvent(a, 0x28, (tick + d3) >>> 0, a.b(r + 2), a.b(r + 3), a.b(r + 6), a.b(r), 0);
+        if (d3 > d5) d5 = d3;
+      }
+    }
+    d2 = a.b(r + 7);
+    if (d2 === d7) d6 = 0;
+  }
+  if (d5 !== 0 && t !== 0x1f) { scheduleEvent(a, 0x29, (tick + d5) >>> 0, x & 0xff, y & 0xff, t, 0, 0); a.setW(o + 0xa, a.w(o + 0xa) + 1); }
+  if (d6 === 0) d4 = 0;
+  else if (d2 !== 0 && !(a.b(R(d2) + 1) > d4)) d4 = 0;
+  a.setW(o + 0xc, d2); a.setW(o + 0x10, d4);
+  return res;
 }

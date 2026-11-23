@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { A4Mem } from './rules-spell';
 import { popDue, type PopHooks } from './rules-pop';
 import { BcRng, type RuleTables } from './rules';
-import { monsterDeath, damageCharacter, vmTeleport, enterParty } from './rules-death';
+import { monsterDeath, damageCharacter, vmTeleport, enterParty, triggerActions } from './rules-death';
 
 const T: RuleTables = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'rules_oracle/vectors.json'), 'utf8')).tables;
 const hex = (r: BcRng) => (r as any).s.map((b: number) => b.toString(16).padStart(2, '0')).join('');
@@ -135,5 +135,25 @@ describe('pass 7: due-event pop loop +0x12BA..+0x1FDA (oracle parity)', () => {
     for (const k of [0, 1, 2, 5, 6, 7, 8]) expect(codes.has(k), 'code ' + k).toBe(true);
     // null control: ignoring the "message finished" gate changes the verdict of stairs / teleporters
     expect(fam('enter').filter((c: any) => runEnter(c, true).length > 0).length).toBeGreaterThan(0);
+  });
+  const runTrig = (c: any, tweak?: (a: A4Mem) => void): string[] => {
+    const a = build(c); const before = new Map(a.m); if (tweak) tweak(a);
+    const tick = ((a.w(0x1750) << 16) | a.w(0x1752)) >>> 0;
+    const r = triggerActions(a, c.x, c.y, c.typ, tick);
+    const log = (c.out.log as number[][]).filter(e => e[0] === 0xc4f6).map(e => e[1] >> 8);
+    const d: string[] = [];
+    if (JSON.stringify(log) !== JSON.stringify(r.executed)) d.push(`executed ${JSON.stringify(log)} vs ${JSON.stringify(r.executed)}`);
+    return d.concat(diffAgainst(c, a, before, uiText));
+  };
+  it(`trig: TriggerActionsAt +0xCF34 (record walk, events 0x28 / 0x29, cursor, immediate executor calls) matches (${fam('trig').length} cases)`, () => {
+    const bad = fam('trig').map((c: any) => runTrig(c)).filter((x: string[]) => x.length);
+    expect(bad.slice(0, 3)).toEqual([]);
+    const live = fam('trig').filter((c: any) => c.out.log.some((e: number[]) => e[0] === 0xc4f6));
+    expect(live.length).toBeGreaterThan(fam('trig').length / 10);
+    // the trigger schedules both consumers the pop loop handles
+    const sched = fam('trig').filter((c: any) => { const a = build(c); const n0 = new Set<number>(); triggerActions(a, c.x, c.y, c.typ, 0); for (let i = 0; i < 150; i++) n0.add(a.b(0x1036 + 12 * i + 4)); return n0.has(0x29) && n0.has(0x28); });
+    expect(sched.length).toBeGreaterThan(5);
+    // null control: starting the walk one generation off finds no records
+    expect(fam('trig').filter((c: any) => runTrig(c, a => { const id = [...Array(16).keys()].find(i => a.b(-0x6e7a + 0x14 + 5) !== undefined && i === 1); void id; a.setB(-0x6e7a + 0x14 + 0x11, (a.b(-0x6e7a + 0x14 + 0x11) + 1) & 0xff); }).length > 0).length).toBeGreaterThan(5);
   });
 });

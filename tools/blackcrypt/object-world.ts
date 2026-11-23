@@ -9,8 +9,9 @@
  * Not here (not verified): traps / glyphs triggering on walk-in, locks and keys, loot drops on death, item use (except 0x8D-0x90), possession / stone application.
  */
 import { BcRng, type RuleTables } from './rules';
-import { A4Mem, applyExpiry } from './rules-spell';
-import { OBJ, CELL, QN, allocObj, freeObj, unlinkObj, lookupType, insertObj, adjustWeight, openDoor, castSpell9, scheduleEvent, activationScan, stepCost, adjustVitals } from './rules-spell9';
+import { A4Mem } from './rules-spell';
+import { popDue } from './rules-pop';
+import { OBJ, CELL, QN, allocObj, unlinkObj, insertObj, adjustWeight, openDoor, castSpell9, scheduleEvent, activationScan, stepCost, adjustVitals } from './rules-spell9';
 
 const CH = (k: number) => 0x1758 + 0xa8 * k;
 export type WorldLog = { tick: number; what: string; [k: string]: unknown };
@@ -70,44 +71,23 @@ export class ObjectWorld {
 
   // ---- events (the real queue)
   schedule(type: number, delay: number, a1 = 0, a2 = 0, a3 = 0, a4 = 0, wd = 0) { scheduleEvent(this.a, type, (this.tick + delay) >>> 0, a1, a2, a3, a4, wd); }
-  /** one tick: counter++, the generator / activation scan every 16 ticks, then every event whose due == tick, in queue order */
+  /** one tick: counter++, the generator / activation scan every 16 ticks, then the due-event pop loop (rules-pop.ts, HARNESS: only events whose due == tick fire, in queue order) */
   step(): void {
     const t = (this.tick + 1) >>> 0; this.setTick(t);
     if ((t & 15) === 0) activationScan(this.a, this.rng, t);
-    for (;;) {
-      const id = this.a.b(0x173f);
-      if (id === 0x96) break;
-      const due = ((this.a.w(QN(id)) << 16) | this.a.w(QN(id) + 2)) >>> 0;
-      if (due > t) break;
-      const ev = { type: this.a.b(QN(id) + 4), a1: this.a.b(QN(id) + 5), a2: this.a.b(QN(id) + 6), a3: this.a.b(QN(id) + 7), wd: this.a.w(QN(id) + 0xa) };
-      // pop: active head = next, node back on the free list (the dispatcher's own pop at +0x1312, code)
-      this.a.setB(0x173f, this.a.b(QN(id) + 9)); this.a.setB(QN(id) + 9, this.a.b(0x173e)); this.a.setB(0x173e, id);
-      this.dispatch(ev);
-    }
+    const wallBefore = new Set<number>();
+    popDue(this.a, {
+      unknown: ev => this.note('event (not simulated here)', { type: ev.type, a1: ev.a1, a2: ev.a2, a3: ev.a3, wd: ev.wd }),
+      applied: ev => {
+        if (ev.type >= 0x1e && ev.type <= 0x25 && ev.type !== 0x22) this.note('expiry', { type: ev.type, a1: ev.a1, a2: ev.a2, a3: ev.a3 });
+        else if (ev.type === 0x22) this.note(this.a.b(0x1748) === 1 ? 'wall expired' : 'wall expiry: nothing there', { x: ev.a1, y: ev.a2 });
+        else if (ev.type === 0x29) this.note('timer 0x29', { x: ev.a1, y: ev.a2, type: ev.a3 });
+        else if (ev.type === 0x15) this.note('hit-ready', { ch: ev.a1, hand: ev.a3 });
+      },
+    });
+    void wallBefore;
   }
-  run(ticks: number, each?: (w: ObjectWorld) => void) { for (let i = 0; i < ticks; i++) { this.step(); if (each) each(this); } }
-  private dispatch(ev: { type: number; a1: number; a2: number; a3: number; wd: number }) {
-    const a = this.a;
-    switch (ev.type) {
-      case 0x1e: case 0x1f: case 0x20: case 0x21: case 0x23: case 0x24: case 0x25:
-        applyExpiry(a, ev); this.note('expiry', { type: ev.type, a1: ev.a1, a2: ev.a2, a3: ev.a3 }); break;     // harness (§11.2)
-      case 0x22: {   // CREATE WALL expiry (code, +0x1D1E): the type-0x10 structure with +0xC == +0xE == 1 on (a1, a2) is unlinked and freed
-        const id = lookupType(a, ev.a1, ev.a2, 0x10);
-        if (id !== 0 && a.w(OBJ(id) + 0xc) === 1 && a.w(OBJ(id) + 0xe) === 1) { unlinkObj(a, id, ev.a1, ev.a2); freeObj(a, id); a.setB(0x1748, 1); this.note('wall expired', { x: ev.a1, y: ev.a2 }); }
-        else this.note('wall expiry: nothing there', { x: ev.a1, y: ev.a2 });
-        break;
-      }
-      case 0x29: {   // (code, +0x1BC2) the structure of type a3 on (a1, a2) has its word +0xA decremented
-        const id = lookupType(a, ev.a1, ev.a2, ev.a3);
-        if (id !== 0) a.setW(OBJ(id) + 0xa, a.w(OBJ(id) + 0xa) - 1);
-        this.note('timer 0x29', { x: ev.a1, y: ev.a2, type: ev.a3 }); break;
-      }
-      case 0x15: {   // hit-ready (code, +0x1616): the character's per-hand word +0x58 + 2 * a3 is cleared; the rest is redraw
-        a.setW(CH(ev.a1) + 0x58 + 2 * ev.a3, 0); this.note('hit-ready', { ch: ev.a1, hand: ev.a3 }); break;
-      }
-      default: this.note('event (not simulated here)', { type: ev.type, a1: ev.a1, a2: ev.a2, a3: ev.a3, wd: ev.wd });
-    }
-  }
+  run(ticks: number, each?: (w: ObjectWorld) => void): void { for (let i = 0; i < ticks; i++) { this.step(); if (each) each(this); } }
 
   // ---- party actions
   /** cast the spell in slot `slot` of the active character through the real dispatcher; events it asks for are scheduled in the queue. `ui` carries the UI answers (target pick, map pick). */

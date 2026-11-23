@@ -103,6 +103,19 @@ export function extractRulesTables(s1: Uint8Array, s2: Uint8Array, bcdfp: Uint8A
       0x8f: { routine: 0x7b2e, name: 'VORTEX', what: 'Ram-boss stage 3 -> 4 (harness, rules-boss.ts)' },
       0x90: { routine: 0x7c40, name: 'FORCEHAMMER', what: 'Ram-boss stage 4 -> 5 (code): removes the boss, ending (game-rules.md 11.3)' },
     },
+    // pass 7: world-rule constants the unified sim (bc-sim.ts) uses; each is read from the data or fixed by a harnessed routine (game-rules.md section 14)
+    worldRules: {
+      // monster-death routine +0x7ED0 (harness): a monster whose behaviour script starts with the header op 0x15 does not die; its pc becomes that header's w2 (movement type -> pc)
+      deathScriptPc: Object.fromEntries(extractAiScripts(s2).starts.map((st, t) => [t, extractAiScripts(s2).cells[st]]).filter(([, c]) => (c as number[])[0] === 0x15).map(([t, c]) => [t, (c as number[])[3]])),
+      // flesh-to-stone statue squares per character (S_2 +0x24C, byte pairs x, y; type-0x2F object remembering the character)
+      statuePositions: Array.from({ length: 4 }, (_, k) => [s2[0x24c + 2 * k], s2[0x24d + 2 * k]]),
+      // hand slots (pack row 0 words at record +0x16 + 2 k): hand 0 = k 3 (+0x1C, busy mask 2), hand 1 = k 2 (+0x1A, mask 1); the pack is 3 rows x 6 words (12-byte rows), equipment 5 words at +0x3A
+      handWords: [0x1c, 0x1a], packRows: 3, packCols: 6, equipmentWordsAt: 0x3a, equipmentWords: 5,
+      // due-event consumers (pop loop +0x12BA, harness): type -> effect
+      events: { 0x01: 'monster act (behaviour VM)', 0x05: 'monster ranged / secondary act (UI timer, owned by the monster chain)', 0x0a: 'damage flash (UI)', 0x0b: 'structure 0x2C animation timer (UI)', 0x14: 'swing-ready: char +0x5F -= a4', 0x15: 'hit-ready: char word +0x58 + 2*a3 = 0', 0x16: 'cast-ready: char +0x60 -= 1, then +0x61 and word +0x5C cleared at zero', 0x1e: 'AC buff expiry', 0x1f: 'stat buff expiry', 0x20: 'compass expiry', 0x21: 'wizard sight expiry', 0x22: 'create-wall expiry', 0x23: 'detect-trap expiry', 0x24: 'haste expiry', 0x25: 'protector expiry', 0x28: 'effect-script slot (UI queue)', 0x29: 'structure timer: +0xA -= 1' },
+      // party square-enter test +0x27BAA verdicts (harness)
+      enterVerdicts: { 0: 'free', 1: 'blocked', 2: 'stairs / pit relocation', 3: 'teleporter (+0x10 == 2 or 3)', 4: 'teleporter (+0x10 == 4, no position change)', 5: 'glyph kind 3', 6: 'trap 0x1E', 7: 'glyph kind 2', 8: 'monster', 9: 'teleporter with message' },
+    },
     classes, spells,
     // the spell book as the memorise / recharge / refresh routines read it (S_2 +0x1F2: 15 page records of 6 bytes = owned word?, head word, next-page word; spell records +0x12 + 8*i)
     spellBook: {
