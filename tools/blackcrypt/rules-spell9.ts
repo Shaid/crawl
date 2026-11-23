@@ -194,6 +194,105 @@ export function forceHammer(a: A4Mem, cancelled: number[]): void {
   a.setW(0x1a1e, 5); a.setW(0x1e88, 3);
 }
 
+
+// ---- pass 6: the event queue in the original layout (+0x5EA schedule, +0x55E cancel, +0x49B4 recast-cancel; HARNESS, rules_oracle/make_vectors_spells10.py)
+/** Event node i: 12 bytes at A4+0x1036 + 12 * i (due long, +4 type, +5 a1, +6 a2, +7 a3, +8 a4, +9 next index, +0xA word). Active list head byte A4+0x173F, free list head byte A4+0x173E, 0x96 = none.
+ * Node 150 (0x96) is NOT a real node: its base is exactly A4+0x173E, so scheduling with an empty free list writes the node fields over the two list heads, the party's y / x words (+0x1740 / +0x1742)
+ * and the cell after them (see scheduleEvent). */
+export const QN = (i: number) => 0x1036 + 12 * i;
+/** +0x5EA (type, due long, a1, a2, a3, a4, word): take the free-list head, insert it after the last active node whose due <= `due` (unsigned; equal due times run in insertion order). No exhaustion check. */
+export function scheduleEvent(a: A4Mem, type: number, due: number, a1: number, a2: number, a3: number, a4: number, wd: number): void {
+  let d3 = 0x96, d2 = a.b(0x173f);
+  while (d2 !== 0x96 && getL(a, QN(d2)) <= due >>> 0) { d3 = d2; d2 = a.b(QN(d2) + 9); }
+  d2 = a.b(0x173e);
+  a.setB(0x173e, a.b(QN(a.b(0x173e)) + 9));
+  if (d3 === 0x96) { a.setB(QN(d2) + 9, a.b(0x173f)); a.setB(0x173f, d2); }
+  else { a.setB(QN(d2) + 9, a.b(QN(d3) + 9)); a.setB(QN(d3) + 9, d2); }
+  a.setB(QN(d2) + 4, type); setL(a, QN(d2), due >>> 0); a.setB(QN(d2) + 5, a1); a.setB(QN(d2) + 6, a2); a.setB(QN(d2) + 7, a3); a.setB(QN(d2) + 8, a4); a.setW(QN(d2) + 0xa, wd);
+}
+/** +0x55E (id): unlink node `id` from the active list and push it on the free list (nothing happens when it is not in the list; id 0x96 behaves as "found" at the end of the list, as in the code). */
+export function cancelEvent(a: A4Mem, id: number): void {
+  let d4 = 0x96, d2 = a.b(0x173f);
+  while (d2 !== 0x96 && d2 !== id) { d4 = d2; d2 = a.b(QN(d2) + 9); }
+  if (d2 !== id) return;
+  if (d4 === 0x96) a.setB(0x173f, a.b(QN(id) + 9)); else a.setB(QN(d4) + 9, a.b(QN(id) + 9));
+  a.setB(QN(id) + 9, a.b(0x173e)); a.setB(0x173e, id);
+}
+/** +0x49B4 (char word, type byte, a2 byte): find the FIRST active node with type, a1 == char (low byte) and a2, cancel it and return its a3 byte (0 when none). The buff spells call this before re-applying
+ * a buff, so a recast reverts the old one (their expiry would otherwise run later) and the old magnitude is returned to the caller. */
+export function recastCancel(a: A4Mem, ch: number, type: number, a2: number): number {
+  let d2 = a.b(0x173f), d4 = 0;
+  while (d2 !== 0x96) {
+    if (a.b(QN(d2) + 4) === type && a.b(QN(d2) + 5) === (ch & 0xff) && a.b(QN(d2) + 6) === a2) { d4 = a.b(QN(d2) + 7); cancelEvent(a, d2); break; }
+    d2 = a.b(QN(d2) + 9);
+  }
+  return d4;
+}
+
+// ---- RAISE DEAD (+0x5CFA) with its revive routine (+0x5C06), TELEPORT (+0x6AF0)
+/** +0x5C06 (character): hp = trunc(signed maxHp / 10) + 1; memorised slots +0x49..+0x4D = 0xFF; the 15 buff counters +0x82.. and +0x91.. cleared; current stats +0x64..+0x6D reloaded from the maxima +0x6E.. and the
+ * 10 bytes +0x78.. cleared; energy raised to at least 1000; AC bytes +0x62 / +0x63 = statBonusT1[DEX] + 6; carried weight long +0xA4 = 0; +0x44 = 0xFF; +0x60, +0x61, +0x5C word, +0x58 / +0x5A words, busy +0x5F cleared. */
+export function revive(a: A4Mem, t1: number[], ch: number): void {
+  const c = CH(ch);
+  a.setW(c + 0x4e, Math.trunc(a.sw(c + 0x50) / 10) + 1);
+  for (let i = 0; i < 5; i++) a.setB(c + 0x49 + i, 0xff);
+  for (let i = 0; i < 15; i++) { a.setB(c + 0x91 + i, 0); a.setB(c + 0x82 + i, 0); }
+  for (let i = 0; i < 10; i++) { a.setB(c + 0x64 + i, a.b(c + 0x6e + i)); a.setB(c + 0x78 + i, 0); }
+  if (a.sw(c + 0x56) < 1000) a.setW(c + 0x56, 1000);
+  const ac = (t1[a.sb(c + 0x68)] + 6) & 0xff; a.setB(c + 0x63, ac); a.setB(c + 0x62, ac);
+  setL(a, c + 0xa4, 0); a.setB(c + 0x44, 0xff); a.setB(c + 0x60, 0); a.setB(c + 0x61, 0); a.setW(c + 0x5c, 0); a.setW(c + 0x58, 0); a.setW(c + 0x5a, 0); a.setB(c + 0x5f, 0);
+}
+/** +0x5CFA: candidates are the four formation slots whose character is alive and holds a corpse item (type 0x26, signed word +0xC < 4) in hand +0x1C, else +0x1A; the candidate tables A4+0x1A0C (word, the dead
+ * character's slot or 0x8000) and A4+0x1A07 (byte 3 / 2 / 0) are written for every slot. None: returns -2. The UI pick (+0x908AA) must name a slot < 4 (else -2); the corpse leaves the hand (weight call with the
+ * FORMATION-SLOT number as character, object freed), the dead character is revived. Returns 2. `pick` is the UI's answer. */
+export function raiseDead(a: A4Mem, t1: number[], pick: number): number {
+  a.setB(0x1a05, 0);
+  const item: number[] = [0, 0, 0, 0], hand: number[] = [0, 0, 0, 0]; let n = 0;
+  for (let s = 0; s < 4; s++) {
+    const c = a.w(0x1e74 + 2 * s);
+    let found = false;
+    if (a.sw(CH(c) + 0x4e) > 0) {
+      for (const [off, h] of [[0x1c, 3], [0x1a, 2]] as const) {
+        const it = a.w(CH(c) + off); item[s] = it;
+        if (it !== 0 && a.b(OBJ(it) + 5) === 0x26 && a.sw(OBJ(it) + 0xc) < 4) {
+          hand[s] = h; a.setW(0x1a0c + 2 * s, a.w(OBJ(it) + 0xc)); a.setB(0x1a07 + s, 3); n++; found = true; break;
+        }
+      }
+    }
+    if (!found) { a.setW(0x1a0c + 2 * s, 0x8000); a.setB(0x1a07 + s, 0); item[s] = 0; }
+  }
+  if (n === 0) return -2;
+  a.setB(-0x5556, 0); a.setB(0x1a05, 0);   // prompt set-up before the UI pick (it also copies the text pointer at A4-0x7170 into the long at A4+0x1A00: UI, not modelled; the test masks those 4 bytes)
+  if (pick >= 4) return -2;
+  const d7 = a.w(0x1e74 + 2 * pick), d6 = a.w(OBJ(item[pick]) + 0xc);
+  a.setW(CH(d7) + 0x16 + 2 * hand[pick], 0);
+  adjustWeight(a, pick, 0, item[pick]);
+  freeObj(a, item[pick]);
+  revive(a, t1, d6);
+  return 2;
+}
+/** +0x6AF0 TELEPORT: needs Wizard Sight (word A4+0x1E2A != 0) and a map pick (+0x3B94: high byte = x, low byte = y; 0 = cancelled); the target square must carry (cell & 0x0FF00000) == 0x00F00000 and no blocking object:
+ * a monster, a door (type 0x11), or a type 0x10 / 0x12 / 0x17 / 0x1F / 0x2F structure whose word +0xA is 0. Success moves the party and returns 2 (the redraw / activation scan / minimap follow: UI); else -2. */
+export function teleport(a: A4Mem, map: number, ui: (what: string) => void = () => {}): number {
+  if (a.w(0x1e2a) === 0) return -2;
+  if (map === 0) return -2;
+  const y = map & 0xff, x = (map >> 8) & 0xff;
+  if (((getL(a, CELL(x, y)) & 0x0ff00000) >>> 0) !== 0x00f00000) return -2;
+  let blocked = false, id = getL(a, CELL(x, y)) & 0xfff;
+  while (id !== 0 && !blocked) {
+    if (a.w(OBJ(id)) & 0x8000) blocked = true;
+    else {
+      const t = a.b(OBJ(id) + 5);
+      if (t === 0x11) blocked = true;
+      else if ((t === 0x10 || t === 0x12 || t === 0x17 || t === 0x1f || t === 0x2f) && a.w(OBJ(id) + 0xa) === 0) blocked = true;
+    }
+    id = a.w(OBJ(id) + 0x12);
+  }
+  if (blocked) return -2;
+  a.setW(0x1742, x); a.setW(0x1740, y); ui('scan');
+  return 2;
+}
+
 // ---- the nine spells
 export interface Sp9Out { spent?: number; failed?: number; events: { type: number; due: number; a1: number; a2: number; a3: number }[]; ret: number }
 
@@ -285,7 +384,7 @@ export function readRune(a: A4Mem): number {
 }
 
 /** The dispatcher around them (+0x7044): slot -> spell id (0xFF = empty slot, nothing happens), then the result convention: ret > 0 -> +0x4876(ret - 1) (spend), ret < 0 -> +0x4960(-1 - ret) (fail). */
-export function castSpell9(a: A4Mem, rng: BcRng, t: RuleTables, slot: number, tick: number): Sp9Out {
+export function castSpell9(a: A4Mem, rng: BcRng, t: RuleTables, slot: number, tick: number, ui: { pick?: number; map?: number } = {}): Sp9Out {
   const out: Sp9Out = { events: [], ret: 0 };
   a.setB(0x1e70, slot);
   const act = a.w(0x1a14);
@@ -303,10 +402,109 @@ export function castSpell9(a: A4Mem, rng: BcRng, t: RuleTables, slot: number, ti
     case 26: ret = readRune(a); break;
     case 22: case 24: ret = dispel(a, d4, 2); break;
     case 21: ret = dispel(a, d4, 3); break;
+    case 4: ret = raiseDead(a, t.statBonusT1, ui.pick ?? 0xffff); break;
+    case 18: ret = teleport(a, ui.map ?? 0); break;
     case 44: ret = createWall(a, d4, d3, tick, (type, due, a1, a2, a3) => out.events.push({ type, due, a1, a2, a3 })); break;
     default: throw new Error('castSpell9: spell ' + spell + ' not covered here');
   }
   out.ret = s16(ret);
   if (out.ret > 0) out.spent = out.ret - 1; else if (out.ret < 0) out.failed = -1 - out.ret;
   return out;
+}
+
+// ---- pass 6: the activation scan with its generator half (+0xB614) and the monster spawn routine (+0xBAA6, called with a null reuse id and no recursion, as the scan calls it); HARNESS
+/** +0x8458 (x, y, type word): occupancy mask of the sub-squares of the monsters on a square: bit (secondary byte +0xB) for every monster; 0x1F when a monster of a different type word is on the square, or one of the same type sits in the centre (4). */
+export function occupancy(a: A4Mem, x: number, y: number, type: number): number {
+  let d3 = 0, id = getL(a, CELL(x, y)) & 0xfff;
+  while (id !== 0) {
+    if (a.w(OBJ(id)) & 0x8000) {
+      const sec = a.w(OBJ(id) + 0x10);
+      d3 = (d3 | (1 << a.b(OBJ(sec) + 0xb))) & 0xff;
+      if (a.w(OBJ(id)) !== type || a.b(OBJ(sec) + 0xb) === 4) d3 = 0x1f;   // a monster of a DIFFERENT type fills the square; the same type only when it holds the centre
+    }
+    id = a.w(OBJ(id) + 0x12);
+  }
+  return d3;
+}
+const copyObj = (a: A4Mem, from: number, to: number) => { for (let i = 0; i < 0x14; i++) a.setB(OBJ(to) + i, a.b(OBJ(from) + i)); };
+/** +0xBAA6 (template column, x, y, 0, 0): copy the template monster at map row 0 / column `tpl` (primary + secondary record, 20 bytes each) into two fresh objects, choose its sub-square (secondary +0xB: 4 = centre for
+ * a big monster (byte +6 bit 3), else a random free one of 0..3 via rand16(count)), put it at the head of the square (x, y), and duplicate its carried-item chain (word +0xA, one fresh object per template item,
+ * chain order reversed). Returns the new monster id, or 0 (both objects freed again, primary first) when the square has no room. */
+export function spawnMonster(a: A4Mem, rng: BcRng, tpl: number, x: number, y: number): number {
+  const head = getL(a, CELL(x, y)) & 0xfff;
+  const tp = getL(a, CELL(tpl, 0)) & 0xfff, ts = a.w(OBJ(tp) + 0x10);
+  const d2 = allocObj(a), d5 = allocObj(a);
+  copyObj(a, tp, d2); a.setW(OBJ(d2) + 0x10, d5); copyObj(a, ts, d5);
+  const occ = occupancy(a, x, y, a.w(OBJ(d2)));
+  if (a.b(OBJ(d2) + 6) & 8) {
+    if (occ !== 0) { freeObj(a, d2); freeObj(a, d5); return 0; }
+    a.setB(OBJ(d5) + 0xb, 4);
+  } else {
+    if (occ >= 0xf) { freeObj(a, d2); freeObj(a, d5); return 0; }
+    const free: number[] = [];
+    for (let i = 0; i < 4; i++) if (!(occ & (1 << i))) free.push(i);
+    a.setB(OBJ(d5) + 0xb, free[rng.rand16(free.length)]);
+  }
+  a.setW(OBJ(d2) + 0x12, head);
+  setL(a, CELL(x, y), (((getL(a, CELL(x, y)) ^ head) >>> 0) + d2) >>> 0);
+  let d3 = a.w(OBJ(d2) + 0xa);
+  a.setW(OBJ(d2) + 0xa, 0);
+  while (d3 !== 0) {
+    const d4 = allocObj(a);
+    copyObj(a, d3, d4);
+    a.setW(OBJ(d4) + 0x12, a.w(OBJ(d2) + 0xa));
+    a.setW(OBJ(d2) + 0xa, d4);
+    d3 = a.w(OBJ(d3) + 0x12);
+  }
+  return d2;
+}
+/** +0xB614, the activation scan, run after every party move: the 7 x 7 squares around the party (x, y in 1..62). Every monster found there that has not been activated yet (secondary byte +0x13 == 0) is activated:
+ * with the global behaviour bytes A4+0x1E91 < 5 and A4+0x1E91 / +0x1E8F != 3 the secondary gets mode +0xE = A4+0x1E91 and the party position as its target (words +0 / +2) and a monster-move event (type 1, a1 = x, a2 = y,
+ * word = monster id) is scheduled at tick + rand16(6) + 1; otherwise (and not already "state 1" in word +0xE) it gets +0x11 = primary byte +0xF, +0x12 = 0x96, +4 = 1, primary +0xE = 10 and the same event. Monster type
+ * 0x804F first forces both global bytes to 2. Type-0x2E structures (GENERATORS) in the area are listed at A4+0x1DAC (x, y byte pairs). When any exist, one is picked with rand16(count); it spawns only when
+ * its remaining count (word +0xC) > 0, its cooldown byte +7 is 0 (otherwise the cooldown drops by 1), its limit (word +0xE, unsigned) >= the number of monsters seen in the area, and the square is NOT visible
+ * to the party (+0x8388 sets A4+0x1748; the harness hooks that out, so only the not-visible path is exercised): cooldown = rand16(30) + 30, remaining count -= 1, spawnMonster(template column = generator
+ * word +0x10, generator x, y), then the new monster is activated like the others (mode / target / event) when the behaviour bytes allow. */
+export function activationScan(a: A4Mem, rng: BcRng, tick: number): void {
+  let nMon = 0, nGen = 0, a3 = 0x384;
+  const px = a.w(0x1742), py = a.w(0x1740);
+  const wake = (id: number, x: number, y: number, full: boolean) => {
+    const sec = a.w(OBJ(id) + 0x10);
+    const ev = () => scheduleEvent(a, 1, (tick + rng.rand16(6) + 1) >>> 0, x & 0xff, y & 0xff, 0, 0, id);
+    if (!full) {   // generator-spawned monster: only the first branch (behaviour bytes permitting)
+      if (a.b(0x1e91) < 5 && a.b(0x1e8f) !== 3) { a.setB(OBJ(sec) + 0xe, a.b(0x1e91)); a.setW(OBJ(sec), px); a.setW(OBJ(sec) + 2, py); ev(); a.setB(OBJ(sec) + 0x13, 1); }
+      return;
+    }
+    if (a.b(OBJ(sec) + 0x13) !== 0) return;
+    if (a.w(OBJ(id)) === 0x804f) { a.setB(0x1e8f, 2); a.setB(0x1e91, 2); }
+    if (a.b(0x1e91) < 5 && a.b(0x1e8f) !== 3) {
+      a.setB(OBJ(sec) + 0xe, a.b(0x1e91)); a.setW(OBJ(sec), px); a.setW(OBJ(sec) + 2, py); ev(); a.setB(OBJ(sec) + 0x13, 1);
+    } else {
+      if (a.w(OBJ(id) + 0xe) === 1) return;
+      a.setB(OBJ(sec) + 0x11, a.b(OBJ(id) + 0xf)); a.setB(OBJ(sec) + 0x12, 0x96); a.setW(OBJ(sec) + 4, 1); a.setW(OBJ(id) + 0xe, 10); a.setB(OBJ(sec) + 0x13, 1); ev();
+    }
+  };
+  for (let d5 = -3; d5 < 4; d5++) for (let d4 = -3; d4 < 4; d4++) {
+    const x = s16(px + d4), y = s16(py + d5);
+    if (x <= 0 || y <= 0 || x >= 63 || y >= 63) continue;
+    let id = getL(a, CELL(x, y)) & 0xfff;
+    while (id !== 0) {
+      if (a.w(OBJ(id)) & 0x8000) { nMon++; wake(id, x, y, true); }
+      else if (a.b(OBJ(id) + 5) === 0x2e) { a.setB(0x1a28 + a3, x); a.setB(0x1a28 + a3 + 1, y); a3 += 2; nGen++; }
+      id = a.w(OBJ(id) + 0x12);
+    }
+  }
+  if (nGen === 0) return;
+  const k = rng.rand16(nGen);
+  a3 = 0x384 + 2 * k;
+  const gx = a.sb(0x1a28 + a3), gy = a.sb(0x1a28 + a3 + 1);
+  const gen = lookupType(a, gx, gy, 0x2e);
+  if (gen === 0 || a.sw(OBJ(gen) + 0xc) <= 0) return;
+  if (a.b(OBJ(gen) + 7) !== 0) { a.setB(OBJ(gen) + 7, a.b(OBJ(gen) + 7) - 1); return; }
+  if (a.w(OBJ(gen) + 0xe) < nMon) return;
+  // the visibility test (+0x8388 sets A4+0x1748 when the square is seen) is hooked to a no-op in the harness: only the not-visible path is exercised; A4+0x1748 is saved, cleared and restored around it
+  a.setB(OBJ(gen) + 7, rng.rand16(30) + 30);
+  a.setW(OBJ(gen) + 0xc, a.w(OBJ(gen) + 0xc) - 1);
+  const m = spawnMonster(a, rng, a.w(OBJ(gen) + 0x10), gx, gy);
+  wake(m, gx, gy, false);
 }
