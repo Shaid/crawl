@@ -1979,9 +1979,28 @@ the gate between two legs.
     - **Ishar 3.** ALSTAR (EAFF) is one cell farther in the game, on 2
       frames.
 
+18. **Doors in play, partly traced (2026-11-23).**
+    - **Opening a door.** PCAVE's interrupt handler (`+0x20`) switches on
+      the message. Message 19 runs `+0x1c4`: set the door's `0x3b64` flag,
+      play the sound, slide the door.
+    - **Levers.** Message 20 runs the lever switch `+0x213`, which writes
+      `0x3b64` and `0x3b98` per lever.
+    - **Which doors can be clicked.** A door gets its click form
+      (`cforme`, `+0xb0`) only when it is in the adjacent cell and its index
+      is below 24 or above 40.
+    - **Door 40** (`+0x120`) needs item -24 in inventory column 11 of a
+      living member. PCAVE then starts MESSAGEI with message 18; without
+      the item it sends 17.
+    - **The view hit test** is FRISE's `cftstset` at `+0x3113`, which steps
+      a pointer entity's depth by 2 until a form answers.
+    - **Not driven yet.** Clicking door 11 in the oracle did nothing (no
+      wake, flag unchanged), so how a click reaches the form is still open.
+    - **Walker.** The E key opens a clickable door the party faces, which
+      is the effect of `+0x1c4`.
+
 **Not covered yet** (rewritten 2026-11-23):
 
-- how doors and levers are worked in play (the walks poke them open);
+- how a click reaches a door's form, and the levers (item 18; the walks poke them open);
 - Ishar 2 outside its start group (`ishar2-scene-groups`);
 - Ishar 3 beyond Maz and the forest (item 16: the jungle, dungeon and
   mountain groups are decoded but not measured);

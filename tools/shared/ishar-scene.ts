@@ -441,6 +441,50 @@ export function ishar1DoorShut(
   return g >= 82 && g <= 85 && shut(to.row, to.col);
 }
 
+/**
+ * The PARAM door (or gate) the party faces inside a cave, or -1: a door on
+ * the facing edge of the party's own cell, a door on the near edge of the
+ * cell in front, or a gate (82..85) in front (the edge rule of
+ * `ishar1DoorShut`).
+ */
+export function ishar1FacingDoor(st: IsharPartyState, cell: (region: number, row: number, col: number) => number): number {
+  if (st.region < 10) return -1;
+  const raw = ISHAR1_TITLE.facingRaw[st.facing];
+  // facing -> step and the edge it crosses (N, S, W, E = 0..3)
+  const [dr, dc, edge] = raw === 4 ? [-1, 0, 0] : raw === 2 ? [1, 0, 1] : raw === 1 ? [0, -1, 2] : [0, 1, 3];
+  const index = (row: number, col: number) => {
+    for (let i = 0; i < ISHAR1_DOOR_ROWS.length; i++) if (ISHAR1_DOOR_ROWS[i] === row && ISHAR1_DOOR_COLS[i] === col) return i;
+    return -1;
+  };
+  const door = (v: number, e: number) => v >= 50 && v <= 69 && (v - 50) % 4 === e;
+  if (door(cell(st.region, st.row, st.col), edge)) {
+    const i = index(st.row, st.col);
+    if (i >= 0) return i;
+  }
+  const fr = st.row + dr;
+  const fc = st.col + dc;
+  const w = cell(st.region, fr, fc);
+  if (door(w, edge ^ 1) || (w >= 82 && w <= 85)) return index(fr, fc);
+  return -1;
+}
+
+/**
+ * Whether the party can open PARAM door `index` by clicking it (PCAVE):
+ * PCAVE gives a door a click form (`cforme`, `+0xb0`) only when it is in
+ * the adjacent cell and its index is below 24 or above 40. Message 19 to
+ * that entity (PCAVE's interrupt handler `+0x20` -> `+0x1c4`) sets the
+ * door's PARAM flag `0x3b64` and plays the door sound. Doors 24..40 have
+ * no click form: the levers drive them (message 20, `+0x213`, a switch
+ * per lever that writes `0x3b64`/`0x3b98`). Door 40 is checked at
+ * `+0x120` instead: facing it from the adjacent cell (|x| < 20), PCAVE
+ * looks for item -24 in inventory column 11 (`0x1568`) of a living party
+ * member (hp `0x1542`) and starts MESSAGEI (id 14) with message 18 when
+ * one holds it, 17 when none does.
+ */
+export function ishar1DoorClickable(index: number): boolean {
+  return index >= 0 && (index < 24 || index > 40);
+}
+
 /** PARAM's door table (new game; static in every oracle run): row and column of 41 doors and gates. */
 export const ISHAR1_DOOR_ROWS: readonly number[] = [49, 27, 29, 30, 25, 20, 40, 42, 0, 31, 20, 16, 33, 22, 23, 19, 29, 37, 51, 38, 44, 33, 27, 25, 34, 34, 36, 36, 38, 38, 40, 40, 35, 37, 39, 41, 40, 40, 45, 45, 50];
 export const ISHAR1_DOOR_COLS: readonly number[] = [58, 14, 24, 33, 38, 42, 28, 34, 0, 51, 53, 24, 20, 35, 25, 28, 58, 50, 27, 23, 13, 31, 32, 31, 11, 13, 11, 13, 11, 13, 11, 13, 12, 12, 12, 12, 29, 27, 40, 42, 54];

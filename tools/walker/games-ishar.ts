@@ -121,7 +121,7 @@ import { renderIsharLocationFrame, type RegionGridSource, type FirstPersonFrame 
 import { renderIshar2LocationFrame } from '../shared/ishar2-firstperson.ts';
 import { renderIshar3LocationFrame } from '../shared/ishar3-firstperson.ts';
 import { resolveIsharOwnPalette, type IsharPalette } from '../shared/ishar-palette.ts';
-import { compositeIsharView, IsharGridBuffers, IsharScene, isharSceneScriptNames, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
+import { compositeIsharView, IsharGridBuffers, IsharScene, isharSceneScriptNames, ishar1DoorClickable, ishar1FacingDoor, ishar1MonsterTableFromMemory, ishar1Occupancy, ISHAR1_PORTALS, ISHAR2_TRAVEL, ISHAR1_TITLE, ISHAR2_TITLE, ISHAR3_TITLE, type IsharPartyState, type IsharTitleSpec } from '../shared/ishar-scene.ts';
 
 type IsharGameId = 'ishar' | 'ishar2' | 'ishar3';
 
@@ -415,6 +415,7 @@ export class IsharView implements GameView {
   private toggleKeyWasDown = false;
   private cycleKeyWasDown = false;
   private travelKeyWasDown = false;
+  private useKeyWasDown = false;
   private travelIndex = 0;
   private locationIndex = 0;
   private fpCache: { key: string; frame: ReturnType<typeof renderIsharLocationFrame> } | null = null;
@@ -453,7 +454,34 @@ export class IsharView implements GameView {
 
   /** The party state in the game's terms: pose.x = storage row, pose.y = storage column, region code = CONT number (+10 in a cave or town). */
   private partyState(pose: Pose = this.pose_): IsharPartyState {
-    return { region: pose.level, row: pose.x, col: pose.y, facing: (pose.facing & 3) as 0 | 1 | 2 | 3 };
+    const st: IsharPartyState = { region: pose.level, row: pose.x, col: pose.y, facing: (pose.facing & 3) as 0 | 1 | 2 | 3 };
+    return this.doorOpen ? { ...st, tables: { 0x3b64: this.doorOpen } } : st;
+  }
+
+  /** Ishar 1's PARAM door flags (`0x3b64`) as the party has opened them (new game: the spec's table). */
+  private doorOpen: number[] | null = null;
+
+  /**
+   * Ishar 1, E: open the cave door the party faces, as clicking it does in
+   * the game (`ishar1DoorClickable`: PCAVE's click form and its message-19
+   * handler, which sets the door's PARAM flag). Levers and door 40 are not
+   * modelled. Returns true if a door opened.
+   */
+  private useDoor(): boolean {
+    const sc = this.data.scene;
+    if (this.id !== 'ishar' || !sc) return false;
+    const cellAt = (lv: number, row: number, col: number) => {
+      const r = this.gridOf(lv);
+      const v = r ? (r.terrain[col * r.width + row] ?? 0) : 0;
+      return v >= 128 ? v - 256 : v;
+    };
+    const i = ishar1FacingDoor(this.partyState(), cellAt);
+    if (!ishar1DoorClickable(i)) return false;
+    const open = [...(this.doorOpen ?? (sc.spec.tables?.[0x3b64] ?? []))];
+    if (open[i]) return false;
+    open[i] = 1;
+    this.doorOpen = open;
+    return true;
   }
 
   /**
@@ -572,6 +600,15 @@ export class IsharView implements GameView {
       }
     }
     this.travelKeyWasDown = travelDown;
+
+    const useDown = keys.isDown('KeyE');
+    // (the door shows open from the next step or turn, when the scene wakes;
+    // the game animates it at once)
+    if (useDown && !this.useKeyWasDown && this.useDoor()) {
+      this.useKeyWasDown = useDown;
+      return this.pose_;
+    }
+    this.useKeyWasDown = useDown;
 
     if (this.stepCooldown > 0) return null;
 

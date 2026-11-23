@@ -85,3 +85,25 @@ describe.skipIf(!existsSync(`${D}/ENCONT.DO`) || !existsSync(`${D}/EN1.FIC`))('I
     expect(off.leaves().some((l) => l.script === 'BORMIN')).toBe(false);
   });
 });
+
+describe.skipIf(!existsSync(`${D}/CONT5.FIC`))('Ishar 1 cave doors (the walker E key)', () => {
+  it('finds the door the party faces, from either side, and opening it lets the party through', async () => {
+    const { ishar1FacingDoor, ishar1DoorClickable, ISHAR1_TITLE: T } = await import('../../shared/ishar-scene.ts');
+    const g = new Uint8Array(readFileSync(`${D}/CONT5.FIC`));
+    const cell = (_r: number, row: number, col: number) => ((g[row * 90 + col]! << 24) >> 24);
+    // CONT5 (16,24) = 51: a door on its south edge, PARAM entry 11 (oracle: shut, refuses the step south)
+    const inside = { region: 15, row: 16, col: 24, facing: 1 as const };
+    expect(ishar1FacingDoor(inside, cell)).toBe(11);
+    expect(ishar1FacingDoor({ ...inside, row: 17, facing: 3 }, cell)).toBe(11);
+    expect(ishar1FacingDoor({ ...inside, facing: 0 }, cell)).toBe(-1);
+    expect(ishar1FacingDoor({ ...inside, region: 5 }, cell)).toBe(-1);
+    expect(ishar1DoorClickable(11)).toBe(true);
+    expect(ishar1DoorClickable(30)).toBe(false); // a lever door
+    const shut = T.tables![0x3b64]!;
+    const open = [...shut];
+    open[11] = 1;
+    const south = { ...inside, row: 17 };
+    expect(T.enter!({ ...inside, tables: { 0x3b64: shut } }, south, cell)).toBeNull();
+    expect(T.enter!({ ...inside, tables: { 0x3b64: open } }, south, cell)).toEqual(south);
+  });
+});
