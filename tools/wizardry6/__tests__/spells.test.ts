@@ -29,7 +29,7 @@ describe.skipIf(V.length === 0)('spell effect dispatcher LAB_0F06', () => {
   }, 120_000);
   it('covers every ported spell id', () => {
     const ids = new Set(V.map((v) => v.spell));
-    const want = Array.from({ length: 82 }, (_, i) => i).filter((i) => ![45, 59, 71].includes(i));
+    const want = Array.from({ length: 82 }, (_, i) => i);
     expect(want.filter((i) => !ids.has(i))).toEqual([]);
   });
   it('null control: another seed disagrees on the dice spells', () => {

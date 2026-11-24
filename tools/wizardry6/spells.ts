@@ -9,8 +9,8 @@
  * game's own call log, then checked on every vector); the rest write state directly and are cases below.
  * Engines are calls through {@link Engines}; the area/status engines themselves are in engines.ts.
  *
- * Not ported (recorded as open): ids 45 CREATE LIFE, 59 ILLUSION, 71 CONJURATION (they call the summon
- * routine LAB_0EEE); ids 39, 46, 52, 56, 60, 62, 73, 77 have no combat effect (the game's case is empty).
+ * Summons (ids 45 CREATE LIFE, 59 ILLUSION, 71 CONJURATION) pick their six candidate monster ids and call the
+ * summon routine LAB_0EEE (encounter.ts `summon`) through the engine hook; ids 39, 46, 52, 56, 60, 62, 73, 77 have no combat effect (the game's case is empty).
  */
 import { type Mem, s16, dice69, skillUse } from './combat.ts';
 import { type Ctx, grpBase, member, groupCount } from './planner.ts';
@@ -24,7 +24,7 @@ export interface Engines { call(name: string, words: number[]): number }
 
 /** The ids with no combat effect (empty case in the game's switch). */
 export const NO_EFFECT: ReadonlySet<number> = new Set([39, 46, 52, 56, 60, 62, 73, 77]);
-/** Ids that call the summon routine LAB_0EEE and are not ported. */
+/** Ids that call the summon routine LAB_0EEE. */
 export const SUMMON: ReadonlySet<number> = new Set([45, 59, 71]);
 
 /** LAB_0EBA (CODE+0x23ff0): add a buff/debuff amount to a counter. mode 0 buff (>= amount), 1 debuff (<= -amount). */
@@ -91,7 +91,44 @@ export function castEffect(c: Ctx, A: number, spell: number, power: number, eng:
   const half = tdiv(s16(power - 1), 2) + 1;
 
   if (NO_EFFECT.has(spell) || spell < 0 || spell >= 82) return;
-  if (SUMMON.has(spell)) throw new Error(`spell ${spell} (summon routine LAB_0EEE) is not ported`);
+  if (SUMMON.has(spell)) {
+    const party = agf() === 0 || agf() === 6;
+    const lvlf = (): number => s16(m.u16(a4 - 18340));
+    const rep = (id: number) => [id, id, id, id, id, id];
+    let ids = rep(0), n = 0;
+    if (spell === 45) {
+      if (party) { ids = [0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9]; n = power; }
+      else {
+        const lvl = lvlf();
+        if (lvl === 10) { ids = rep(0xd6); n = power; }
+        else if (lvl === 11) { ids = [0xd6, 0xd6, 0xd7, 0xd7, 0xd8, 0xd8]; n = power; }
+        else if (lvl === 12) { ids = [0xd6, 0xd6, 0xd6, 0xd7, 0xd7, 0xd9]; n = power; }
+      }
+    } else if (spell === 59) {
+      if (party) { ids = [0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf]; n = power; }
+      else {
+        const lvl = lvlf();
+        if (lvl === 9) { ids = [0xda, 0xda, 0xdb, 0xdb, 0xdb, 0xde]; n = power; }
+        else if (lvl >= 10 && lvl <= 12) { ids = [0xdb, 0xdb, 0xdb, 0xde, 0xde, 0xdf]; n = power; }
+      }
+    } else if (party) {
+      if (rng.random(2) === 0) ids = [0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd];
+      else ids = [0xce, 0xcf, 0xd0, 0xd1, 0xd2, 0xd3];
+      n = power;
+    } else {
+      const own = m.u8(GB(agf()) + 410);
+      if (own === 0x96 || own === 0x99) { ids = rep(0xd3); n = 1; }
+      else {
+        const lvl = lvlf();
+        if (lvl === 9) { ids = [0xc8, 0xcf, 0xca, 0xd0, 0xcb, 0xd1]; n = power; }
+        else if (lvl === 10) { ids = [0xc9, 0xc9, 0xd0, 0xd0, 0xd0, 0xd0]; n = power; }
+        else if (lvl === 11) { ids = [0xca, 0xca, 0xd0, 0xcb, 0xcb, 0xd2]; n = power; }
+        else if (lvl === 12) { ids = [0xc8, 0xc9, 0xce, 0xd0, 0xd1, 0xd1]; n = power; }
+      }
+    }
+    eng.call('summon', [...ids, n]);
+    return;
+  }
   switch (spell) {
     case 3: case 16: case 21: case 23: {
       const k = spell === 3 ? 396 : spell === 16 ? 397 : spell === 21 ? 398 : 399;

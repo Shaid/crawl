@@ -231,9 +231,9 @@ MAKERS['round'] = make_round_vectors
 SPELL_ENGINES = {'LAB_0E6C': ('area_dmg', 7), 'LAB_0E7C': ('area_stat', 12), 'LAB_0E90': ('area_stat2', 15),
                  'LAB_0EB5': ('grp_all', 11), 'LAB_0EA8': ('grp_drain', 6), 'LAB_0EC0': ('grp_weak', 5),
                  'LAB_0ED3': ('grp_pm', 4), 'LAB_0E4F': ('spelldmg', 7), 'LAB_0E3A': ('resscale', 4),
-                 'LAB_0DFE': ('psync', 2)}
-SPELL_UI = ['LAB_0EE1', 'LAB_0EEE', 'LAB_0E27', 'LAB_0DC8', 'LAB_0E21']
-SPELL_SKIP = {45, 59, 71}                     # summon routine LAB_0EEE: not ported
+                 'LAB_0DFE': ('psync', 2), 'LAB_0EEE': ('summon', 7)}
+SPELL_UI = ['LAB_0EE1', 'LAB_0E27', 'LAB_0DC8', 'LAB_0E21']
+SPELL_SKIP = set()                            # the summon routine LAB_0EEE is logged like an engine
 
 
 class SpellRun(Combat):
@@ -454,6 +454,248 @@ def make_remove_vectors(n, seed):
 
 
 MAKERS['remove'] = make_remove_vectors
+
+
+# ---------------------------------------------------------------------------
+# hide LAB_0FC5 (CODE+0x282aa) and run LAB_0FD2 (CODE+0x2846c), run for real; only the presentation is stubbed
+FLEE = {'hide': 0x282aa, 'run': 0x2846c}
+
+
+def make_flee_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    k = 0
+    while len(out) < n:
+        which = ['hide', 'run'][k % 2]; k += 1
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 6), party=rng.randrange(1, 5))
+        ag = rng.choice([0, 0, 0, 1, 2]); ag = ag if ag <= ng else 1
+        ai = rng.randrange(counts[ag])
+        A = MEM_BASE + ag * MEM_STRIDE + ai * 44
+        w16(fx, A4 - 15138, ag); w16(fx, A4 - 15136, ai)
+        w16(fx, A4 - 15306, counts[0])
+        w16(fx, A, rng.randrange(0, 60))
+        w16(fx, A4 - 15128, rng.choice([0, 0, 0, 1, 2]))
+        for g in range(7):
+            base = MEM_BASE + g * MEM_STRIDE
+            w8(fx, base + 43, 0)
+            for q in (122, 135, 137): w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + q, rng.randrange(0, 30))
+        for i in range(6):
+            r = A4 - 17922 + i * 0x1b0
+            w16(fx, r + 36, rng.randrange(1, 25))
+            for q in (324, 301, 325): w8(fx, r + q, rng.choice([0, 5, 20, 50, 80, 100]))
+            w8(fx, r + 36 + 308 - 308 + 0, 0) if False else None
+        w8(fx, A + 43, rng.choice([0, 0, 0, 1, 2]))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(FLEE[which], [(A, 4)], seed3)
+        except RuntimeError as e:
+            print('skip', which, str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'what': which, 'A': A}))
+    return out
+
+
+MAKERS['flee'] = make_flee_vectors
+
+
+# ---------------------------------------------------------------------------
+# encounter start LAB_0A31 (CODE+0x17fde): clear groups, add group 1 (+ companion chain), party structs, evasion
+ENC_START = 0x17fde
+
+
+class EncounterRun(Combat):
+    """The encounter builder runs for real. Replaced: the monster picture routines (LAB_097E, LAB_0979), the formation
+    slot picker LAB_098A (its result is logged and replayed by the port), and the C-runtime memset / memcpy / strcpy,
+    which the oracle would otherwise stub away. LoadRecord (CODE+0x9fc) runs for real; the bytes it delivers are
+    captured at its return so the port can replay them."""
+    def __init__(self):
+        super().__init__()
+        o = label_offsets()
+        self.retvals = {}
+        self.loads = []
+        self.pend = {}
+        self._stub(o['LAB_097E'], 'pic_slot', log=4)
+        self._stub(o['LAB_0979'], 'pic_mon', log=2)
+        self._stub(o['LAB_098A'], 'formation', log=2)
+        self._stub(0x1ede0 - 0x1ede0 + o['LAB_0E21'], 'e21', log=False)
+        for nm in ('LAB_0DC8', 'LAB_0DBA', 'LAB_0DC6', 'LAB_0DC9'):
+            if nm in o: self._stub(o[nm], nm, log=False)
+        j = self.jt
+        self._custom(j[-32130], self._memset)
+        self._custom(j[-32088], self._memcpy)
+        self.uc.hook_add(UC_HOOK_CODE, self._load_enter, begin=CODE_BASE + 0x9fc, end=CODE_BASE + 0x9fc)
+
+    def _custom(self, off, fn):
+        def hook(uc, a, size, ud):
+            if off in self.disabled: return
+            sp = uc.reg_read(UC_M68K_REG_A7)
+            fn(sp)
+            uc.reg_write(UC_M68K_REG_D0, 0)
+            uc.reg_write(UC_M68K_REG_A7, sp + 4)
+            uc.reg_write(UC_M68K_REG_PC, self.r32(sp))
+        self.uc.hook_add(UC_HOOK_CODE, hook, begin=CODE_BASE + off, end=CODE_BASE + off)
+
+    def _poke(self, addr, data):
+        for k, b in enumerate(data):
+            a = addr + k
+            if self.tracking and a not in self.written: self.written[a] = self.uc.mem_read(a, 1)[0]
+        self.uc.mem_write(addr, bytes(data))
+
+    def _memset(self, sp):          # memset(ptr long, n word, v word)
+        ptr, n, v = self.r32(sp + 4), self.r16(sp + 8), self.r16(sp + 10)
+        self._poke(ptr, bytes([v & 0xff]) * n)
+
+    def _memcpy(self, sp):          # movmem(src long, dst long, n word)
+        src, dst, n = self.r32(sp + 4), self.r32(sp + 8), self.r16(sp + 12)
+        self.rd_note(src, n)
+        self._poke(dst, bytes(self.uc.mem_read(src, n)))
+
+    def rd_note(self, addr, n):
+        if not self.tracking: return
+        for a in range(addr, addr + n):
+            if a not in self.written and a not in self.foot: self.foot[a] = self.uc.mem_read(a, 1)[0]
+
+    def _load_enter(self, uc, a, size, ud):
+        sp = uc.reg_read(UC_M68K_REG_A7)
+        ret = self.r32(sp)
+        sec, dest, rid = self.r16(sp + 4), self.r32(sp + 6), self.r16(sp + 10)
+        self.pend.setdefault(ret, []).append((sec, dest, rid))
+        if ret not in getattr(self, '_rethooks', set()):
+            self._rethooks = getattr(self, '_rethooks', set()) | {ret}
+            def rh(uc2, a2, s2, ud2, ret=ret):
+                if not self.pend.get(ret): return
+                sec_, dest_, rid_ = self.pend[ret].pop(0)
+                if self.tracking and sec_ == 4:
+                    self.loads.append([rid_, dest_, bytes(uc2.mem_read(dest_, 222)).hex()])
+                    for q in range(dest_, dest_ + 222):
+                        if q not in self.written: self.written[q] = 0
+            self.uc.hook_add(UC_HOOK_CODE, rh, begin=ret, end=ret)
+
+
+def make_encounter_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = EncounterRun(); out = []
+    A4 = c.A4
+    ids = list(range(0, 250))
+    while len(out) < n:
+        fx = C.Fixture(c, rng).build(0, 0, 0, 0, 0, 0, ng=7)
+        party = rng.randrange(1, 7)
+        w16(fx, A4 - 15306, party); w8(fx, A4 - 15305, party)
+        mid = rng.choice(ids)
+        w16(fx, A4 - 15102, mid)
+        w16(fx, A4 - 15100, rng.choice([0, 1, 1]))
+        w16(fx, A4 - 15128, rng.choice([0, 0, 1]))
+        w16(fx, A4 - 18340, rng.randrange(1, 14))
+        w16(fx, A4 - 18122, rng.choice([0, 0, 40]))
+        w8(fx, A4 - 18119, rng.randrange(0, 50))
+        for i in range(6):
+            r = A4 - 17922 + i * 0x1b0
+            for q in (24, 26, 28, 30): w16(fx, r + q, rng.randrange(1, 300))
+            w16(fx, r + 36, rng.randrange(1, 25))
+            w8(fx, r + 417, rng.choice([0, 0, 0, 1, 2, 3])); w8(fx, r + 420, rng.randrange(0, 50))
+            for q in range(290, 300): w8(fx, r + q, rng.choice([0, 0, 0, 5]))
+            for q in (301, 331): w8(fx, r + q, rng.choice([0, 10, 30, 60, 90, 100]))
+            w8(fx, r + 331 + 0, rng.choice([0, 10, 30, 60, 90, 100, 255]))
+        # group memory starts with junk so the clear is observable
+        for g in range(7):
+            for q in range(0, 0x1a0, 7): w8(fx, MEM_BASE + g * MEM_STRIDE + q, rng.randrange(0, 256))
+            w8(fx, MEM_BASE + g * MEM_STRIDE + 413, rng.randrange(0, 10))
+        c.apply(fx.writes)
+        c.retvals = {'formation': rng.randrange(0, 7)}
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        c.loads = []; c.pend = {}
+        try:
+            res = c.run_call(ENC_START, [], seed3)
+        except RuntimeError as e:
+            print('skip', mid, str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'mid': mid, 'loads': c.loads, 'ret': dict(c.retvals)}))
+    return out
+
+
+MAKERS['encounter'] = make_encounter_vectors
+
+
+# ---------------------------------------------------------------------------
+# breath LAB_0FB1 (CODE+0x27b26): twelve breath types, run for real with the area engines
+BREATH = 0x27b26
+
+
+def make_breath_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = EngineRun(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 4), party=rng.randrange(1, 5))
+        if counts[6] == 0: w8(fx, MEM_BASE + 6 * MEM_STRIDE + 413, 2); counts[6] = 2
+        ag = rng.choice([1, 1, 2, 0, 6]); ag = ag if (ag <= ng or ag in (0, 6)) else 1
+        ai = rng.randrange(counts[ag])
+        tg = rng.choice([0, 0, 1, 2, 6]); tg = tg if (tg <= ng or tg in (0, 6)) else 0
+        ti = rng.randrange(counts[tg])
+        ensure_living(c, rng, fx, counts, {tg})
+        A = MEM_BASE + ag * MEM_STRIDE + ai * 44
+        w8(fx, A + 31, tg); w8(fx, A + 32, ti)
+        w16(fx, A + 10, rng.randrange(0, 14))
+        w16(fx, A + 2, rng.choice([5, 20, 40, 90, 150, 700, 3000])); w16(fx, A + 8, rng.randrange(1, 120)); w16(fx, A + 6, rng.randrange(0, 120))
+        w8(fx, A + 14, rng.choice([0, 0, 3]))
+        w16(fx, A4 - 15138, ag); w16(fx, A4 - 15136, ai)
+        for g in range(7):
+            base = MEM_BASE + g * MEM_STRIDE
+            for q in range(396, 402): w8(fx, base + q, rng.choice([0, 0, 3, 30, 100, 250]))
+            for i in range(9):
+                o = base + i * 44
+                w8(fx, o + 0x2b, rng.choice([0, 0, 0, 0, 1]))
+                for b in range(14, 24): w8(fx, o + b, rng.choice([0, 0, 0, 5, 40, 250]))
+            for q in range(14): w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + 0x94 + q, rng.choice([0, 20, 50, 80, 100, 130]))
+            w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + 210, rng.choice([0, 0, 3, 6]))
+            w8(fx, REC_MON_BASE + g * REC_MON_STRIDE + 0xdc, rng.randrange(0, 4))
+        w16(fx, A4 - 15306, rng.randrange(1, 7)); fx.writes.append((A4 - 15300, struct.pack('>I', rng.randrange(0, 4000))))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(BREATH, [(A, 4)], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'A': A, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['breath'] = make_breath_vectors
+
+
+# ---------------------------------------------------------------------------
+# summon LAB_0EEE (CODE+0x24940): add a group (monster side) or the ally group 6 (party side), for real
+SUMMON = 0x24940
+
+
+def make_summon_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = EncounterRun(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        fx = C.Fixture(c, rng).build(0, 0, 0, 0, 0, 0, ng=7)
+        ag = rng.choice([0, 6, 1, 2, 3])
+        ng = rng.randrange(0, 6)
+        w16(fx, A4 - 15138, ag); w16(fx, A4 - 15140, ng)
+        w16(fx, A4 - 15306, rng.randrange(1, 7)); w8(fx, A4 - 15305, rng.randrange(1, 7))
+        for g in range(7):
+            for q in range(0, 0x1a0, 5): w8(fx, MEM_BASE + g * MEM_STRIDE + q, rng.randrange(0, 256))
+            w8(fx, MEM_BASE + g * MEM_STRIDE + 413, rng.choice([0, 0, 1, 3]))
+        ids = [rng.choice([rng.randrange(200, 224), rng.randrange(0, 250)]) for _ in range(6)]
+        nn = rng.choice([0, 1, 2, 3, 4, 5, 6, 7])
+        c.apply(fx.writes)
+        c.retvals = {}
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        c.loads = []; c.pend = {}
+        try:
+            res = c.run_call(SUMMON, ids + [nn], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'ids': ids, 'n': nn, 'loads': c.loads}))
+    return out
+
+
+MAKERS['summon'] = make_summon_vectors
 
 
 if __name__ == '__main__':

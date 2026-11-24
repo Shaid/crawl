@@ -18,6 +18,9 @@ import { planMonsters } from './planner.ts';
 import { runRound } from './round.ts';
 import { W6Rng } from './rules.ts';
 import { castAction, loadSpellTable } from './spellrun.ts';
+import { hide, run as runAway } from './flee.ts';
+import { breath } from './breath.ts';
+import { startEncounter, type EncounterIO } from './encounter.ts';
 
 export const LAYOUT = { a4: 0x167ffe, memBase: 0x400000, memStride: 0x400, recBase: 0x420000, recStride: 0x400 } as const;
 
@@ -78,9 +81,17 @@ export class CombatWorld {
   readonly mem = new Mem({}, true);
   readonly rng: W6Rng;
   readonly partySize: number;
-  readonly groupSizes: number[];
+  groupSizes: number[];
   log: RoundLog[] = [];
+  /** encounter start results: the groups the evasion check disengaged (hyp: they take no part) */
+  evaded: number[] = [];
+  /** monster ids per group as created by {@link CombatWorld.fromEncounter} */
+  groupIds: number[] = [];
+  /** monster loader for summons (set by {@link CombatWorld.fromEncounter}) */
+  io?: EncounterIO;
   casts: CastLog[] = [];
+  breaths: { actor: string; type: number; target: string; cost: number }[] = [];
+  flee: { actor: string; act: string; ok: boolean }[] = [];
   /** engine side effects (party panel syncs) of every cast */
   castFx: Effect[] = [];
   /** party policy, called once per living member per round */
@@ -202,12 +213,47 @@ export class CombatWorld {
    * hypothesis round never needed. Monsters: `R+211` initiative bonus, `R+213` attack count, `R+128+h` attack slot
    * valid, `R+83+16h` attack-kind mask (bit 0 = swing). Spell/breath chance bytes stay 0.
    */
-  enableGameRound(): void {
+  private setupPointers(): void {
     const { a4 } = LAYOUT; const m = this.mem;
     for (let g = 0; g < 7; g++) {
       m.w16(a4 - 15266 + 4 * g, LAYOUT.memBase >> 16); m.w16(a4 - 15264 + 4 * g, (LAYOUT.memBase + g * LAYOUT.memStride) & 0xffff);
       m.w16(a4 - 15294 + 4 * g, LAYOUT.recBase >> 16); m.w16(a4 - 15292 + 4 * g, (LAYOUT.recBase + g * LAYOUT.recStride) & 0xffff);
     }
+  }
+
+  /**
+   * Build the monster side from the game's own encounter start (LAB_0A31, harness-verified) and the real monster
+   * records of scenario.dbs (section 4, 250 x 222 bytes at 0x154e8): group 1 is monster `id`, companion groups follow by
+   * the record's own chances. `level` is the dungeon level (-18340), `scripted` the map-event flag (-15100). The party
+   * structs come from the party records the constructor wrote. Formation slots and monster pictures are presentation
+   * and are not modelled (every member keeps cell 0xff).
+   */
+  static fromEncounter(party: PartySpec[], id: number, seed: [number, number, number], opts: { scenario: Uint8Array; level: number; scripted?: boolean }): CombatWorld {
+    const w = new CombatWorld(party, [], seed);
+    const { a4 } = LAYOUT; const m = w.mem;
+    w.setupPointers();
+    m.w8(a4 - 15305, party.length);
+    m.w16(a4 - 15102, id); m.w16(a4 - 15100, opts.scripted ? 1 : 0); m.w16(a4 - 18340, opts.level);
+    const rec = (i: number) => opts.scenario.subarray(0x154e8 + i * 222, 0x154e8 + (i + 1) * 222);
+    const ids: number[] = [];
+    const io: EncounterIO = {
+      loadMonster: (mid, dest) => { ids.push(mid); rec(mid).forEach((b, k) => m.w8(dest + k, b)); },
+      formation: () => 0, picture: () => undefined,
+    };
+    w.io = io;
+    startEncounter({ m, rng: w.rng, a4 }, io);
+    const ng = m.s16(a4 - 15140);
+    w.groupSizes = Array.from({ length: ng }, (_, k) => m.u8(w.mb(k + 1) + 413));
+    w.groupIds = ids;
+    w.evaded = Array.from({ length: ng }, (_, k) => k + 1).filter((g) => m.u8(w.mb(g) + 412) === 0);
+    m.w16(a4 - 18610, 0xd);
+    loadSpellTable({ m, rng: w.rng, a4 });
+    return w;
+  }
+
+  enableGameRound(): void {
+    const { a4 } = LAYOUT; const m = this.mem;
+    this.setupPointers();
     m.w16(a4 - 15140, this.groupSizes.length);
     m.w8(a4 - 15305, this.partySize);
     m.w8(this.mb(0) + 413, this.partySize);
@@ -257,9 +303,22 @@ export class CombatWorld {
         const A = parseInt(e[1], 16);
         const g = m.u16(a4 - 15138), i = m.s16(a4 - 15136);
         const w = m.s16(A + 10);
-        ret.cast = castAction(ctx, A, this.castFx);
+        ret.cast = castAction(ctx, A, this.castFx, this.io);
         const t = `${m.u8(A + 31)}.${m.u8(A + 32)}`;
         this.casts.push({ actor: `${g}.${i}`, spell: w & 0xff, power: w >> 8, target: t, fizzled: m.s16(a4 - 10482) === 1, backfired: m.s16(a4 - 10484) === 1, cost: ret.cast });
+        return;
+      }
+      if (e[0] === 'breath') {
+        const A = parseInt(e[1], 16);
+        const g = m.u16(a4 - 15138), i = m.s16(a4 - 15136);
+        ret.breath = breath(ctx, A, this.castFx);
+        this.breaths.push({ actor: `${g}.${i}`, type: m.s16(A + 10), target: `${m.u8(A + 31)}`, cost: ret.breath });
+        return;
+      }
+      if (e[0] === 'hide' || e[0] === 'run') {
+        const A = parseInt(e[1], 16);
+        const ok = (e[0] === 'hide' ? hide : runAway)(ctx, A);
+        this.flee.push({ actor: `${m.u16(a4 - 15138)}.${m.s16(a4 - 15136)}`, act: e[0], ok });
         return;
       }
       if (e[0] !== 'attack') return;
@@ -272,12 +331,19 @@ export class CombatWorld {
     });
   }
 
+  /** End-of-round check LAB_0A03 (CODE+0x17814, code): any party member flagged 2 (a successful run) ends the fight with game state 0x17. */
+  hasFled(): boolean {
+    for (let i = 0; i < this.partySize; i++) if (this.mem.u8(this.mb(0) + i * 44 + 43) === 2) return true;
+    return false;
+  }
+
   /** Fight with {@link gameRound} until one side is gone (the round driver ends combat itself by leaving state 0xd). */
-  runGame(maxRounds = 50): { winner: 'party' | 'monsters' | 'none'; rounds: number; xpPool: number; xpEach: number } {
+  runGame(maxRounds = 50): { winner: 'party' | 'monsters' | 'fled' | 'none'; rounds: number; xpPool: number; xpEach: number } {
     let r = 0;
     for (; r < maxRounds; r++) {
       if (!this.groupSizes.some((_, k) => this.living(k + 1).length > 0) || this.living(0).length === 0) break;
       this.gameRound();
+      if (this.hasFled()) return { winner: 'fled', rounds: r + 1, xpPool: this.xpPool, xpEach: 0 };
     }
     const monstersLeft = this.groupSizes.some((_, k) => this.living(k + 1).length > 0);
     const partyLeft = this.living(0).length;
