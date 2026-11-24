@@ -17,6 +17,7 @@ import type { Effect } from './combat.ts';
 import { planMonsters } from './planner.ts';
 import { runRound } from './round.ts';
 import { W6Rng } from './rules.ts';
+import { castAction, loadSpellTable } from './spellrun.ts';
 
 export const LAYOUT = { a4: 0x167ffe, memBase: 0x400000, memStride: 0x400, recBase: 0x420000, recStride: 0x400 } as const;
 
@@ -40,7 +41,15 @@ export interface PartySpec {
   skills?: Record<number, number>;
   /** carried weight / capacity */
   weight?: number; capacity?: number;
+  /** caster data: class id (record +415), spell points per realm [cur, max] x 6 (record +40 + 4*realm), luck (+307) */
+  cls?: number; sp?: [number, number][]; luck?: number;
 }
+
+/** What a party member does this round (the game reads it from the menus; the sim takes a policy). */
+export type PartyPlan =
+  | { act: 'attack'; tg?: number; ti?: number }
+  | { act: 'cast'; spell: number; power: number; tg: number; ti: number }
+  | { act: 'run' } | { act: 'hide' };
 
 export interface MonsterSpec {
   hp: number;
@@ -56,8 +65,13 @@ export interface MonsterSpec {
   xp: number;
   /** resist percentages, record +0x94 + index */
   resist?: Record<number, number>;
+  /** spell ids the planner may pick (record +138..), chance percent per turn (+168), breath chance (+170) */
+  spells?: number[]; spellChance?: number; breathChance?: number;
+  /** record +208 monster type (0x14/0x15 undead..., 3/4/5/13 are un-silenceable) */
+  type?: number;
 }
 
+export interface CastLog { actor: string; spell: number; power: number; target: string; fizzled: boolean; backfired: boolean; cost: number }
 export interface RoundLog { actor: string; target: string; kind: number; hpBefore: number; hpAfter: number; killed: boolean }
 
 export class CombatWorld {
@@ -66,6 +80,11 @@ export class CombatWorld {
   readonly partySize: number;
   readonly groupSizes: number[];
   log: RoundLog[] = [];
+  casts: CastLog[] = [];
+  /** engine side effects (party panel syncs) of every cast */
+  castFx: Effect[] = [];
+  /** party policy, called once per living member per round */
+  partyPolicy?: (w: CombatWorld, i: number) => PartyPlan;
 
   constructor(party: PartySpec[], groups: MonsterSpec[][], seed: [number, number, number]) {
     this.rng = new W6Rng(seed);
@@ -103,6 +122,8 @@ export class CombatWorld {
     m.w16(r + 32, p.weight ?? 0); m.w16(r + 34, p.capacity ?? 300); m.w16(r + 36, p.level);
     for (const [k, v] of Object.entries(p.skills ?? {})) m.w8(r + 308 + Number(k), v);
     m.w8(r + 272, 0xff); m.w8(r + 273, 0xff);
+    m.w8(r + 415, p.cls ?? 0); m.w8(r + 307, p.luck ?? 10);
+    (p.sp ?? []).forEach(([cur, max], k) => { m.w16(r + 40 + 4 * k, cur); m.w16(r + 42 + 4 * k, max); });
     if (p.weapon) {
       m.w8(r + 272, 0);
       m.w16(r + 64, 1); m.w8(r + 68, 1); m.w8(r + 69, p.weapon.subtype ?? 1);
@@ -126,6 +147,8 @@ export class CombatWorld {
       m.w32(R + 0x40, s.xp);
       for (let j = 0; j < 8; j++) { m.w8(R + 0xae + j, j === 4 ? 100 : 0); m.w8(R + 0xb6 + j, j === 4 ? 100 : 0); }
       for (const [k, v] of Object.entries(s.resist ?? {})) m.w8(R + 0x94 + Number(k), v);
+      { const sl = s.spells ?? []; for (let k = 0; k < 11; k++) m.w8(R + 138 + k, sl.length ? sl[Math.min(k, sl.length - 1)] : 0); }
+      m.w8(R + 168, s.spellChance ?? 0); m.w8(R + 170, s.breathChance ?? 0); m.w8(R + 208, s.type ?? 0);
     }
   }
 
@@ -197,6 +220,7 @@ export class CombatWorld {
       m.w8(R + 128, 1);
     });
     m.w16(a4 - 18610, 0xd);
+    loadSpellTable({ m, rng: this.rng, a4 });
   }
 
   /**
@@ -208,19 +232,36 @@ export class CombatWorld {
   gameRound(): Effect[] {
     const { a4 } = LAYOUT; const m = this.mem; const ctx = { m, rng: this.rng, a4 };
     m.w16(a4 - 18610, 0xd);
-    // party plan (policy)
+    // party plan (policy): the game reads it from the menus; default = swing at the first living monster
     const tgt = this.groupSizes.map((_, k) => k + 1).find((g) => this.living(g).length > 0);
     if (tgt === undefined) return [];
     for (const i of this.living(0)) {
-      const A = this.mb(0) + i * 44; const ti = this.living(tgt)[0];
+      const A = this.mb(0) + i * 44;
+      const plan: PartyPlan = this.partyPolicy ? this.partyPolicy(this, i) : { act: 'attack' };
       const roll = this.rng.random(10) + 1;
       for (let k = 0; k < 4; k++) m.w8(A + 24 + k, k === 0 ? roll : 0);
-      m.w8(A + 28, 0); m.w8(A + 29, 0); m.w8(A + 30, 0); m.w8(A + 31, tgt); m.w8(A + 32, ti);
-      m.w16(A + 10, 0); m.w16(A + 12, 0xffff); m.w8(A + 33, 0); m.w8(A + 36, 0);
+      m.w8(A + 28, 0); m.w8(A + 29, 0); m.w16(A + 12, 0xffff); m.w8(A + 33, 0); m.w8(A + 36, 0);
+      if (plan.act === 'cast') {
+        m.w8(A + 30, 3); m.w16(A + 10, plan.power * 256 + plan.spell); m.w8(A + 31, plan.tg); m.w8(A + 32, plan.ti);
+      } else if (plan.act === 'run' || plan.act === 'hide') {
+        m.w8(A + 30, plan.act === 'run' ? 7 : 6); m.w16(A + 10, 0); m.w8(A + 31, 0); m.w8(A + 32, i);
+      } else {
+        const g2 = plan.tg ?? tgt; const ti = plan.ti ?? this.living(g2)[0] ?? 0;
+        m.w8(A + 30, 0); m.w8(A + 31, g2); m.w8(A + 32, ti); m.w16(A + 10, 0);
+      }
     }
     planMonsters(ctx);
     const ret = { cast: 0, breath: 0 };
     return runRound(ctx, ret, (e) => {
+      if (e[0] === 'cast') {
+        const A = parseInt(e[1], 16);
+        const g = m.u16(a4 - 15138), i = m.s16(a4 - 15136);
+        const w = m.s16(A + 10);
+        ret.cast = castAction(ctx, A, this.castFx);
+        const t = `${m.u8(A + 31)}.${m.u8(A + 32)}`;
+        this.casts.push({ actor: `${g}.${i}`, spell: w & 0xff, power: w >> 8, target: t, fizzled: m.s16(a4 - 10482) === 1, backfired: m.s16(a4 - 10484) === 1, cost: ret.cast });
+        return;
+      }
       if (e[0] !== 'attack') return;
       const A = parseInt(e[1].slice(0, 8), 16); const hand = parseInt(e[1].slice(8, 12), 16); const kind = parseInt(e[1].slice(12, 16), 16);
       const g = m.u16(a4 - 15138), i = m.s16(a4 - 15136);

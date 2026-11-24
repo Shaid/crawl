@@ -9,8 +9,9 @@
  * Words are the stack arguments in call order ({@link Engine} names follow the dispatcher log). A negative
  * target index means "area": min(|n|, group size) consecutive members starting at a random one.
  */
-import { applyStatus, s16, setStatus, spellDamage, type Effect } from './combat.ts';
-import { type Ctx, grpBase, groupCount, member } from './planner.ts';
+import { applyStatus, resistScale, s16, setStatus, spellDamage, type Effect } from './combat.ts';
+import { buffCounter } from './spells.ts';
+import { type Ctx, grpBase, groupCount, member, recBase } from './planner.ts';
 
 const tdiv = (a: number, b: number): number => Math.trunc(a / b);
 const hex16 = (v: number): string => (v & 0xffff).toString(16).padStart(4, '0');
@@ -39,7 +40,7 @@ export function shield(c: Ctx, g: number, elem: number, val: number): number {
 const sync = (fx: Effect[], g: number, idx: number): void => { if (g === 0) fx.push(['psync', hex16(idx) + hex16(0)]); };
 
 /** Run LAB_0E4F for one target and execute the SetStatus it asks for on a kill. Returns the damage. */
-function damageOne(c: Ctx, fx: Effect[], g: number, t: number, d1: number, sides: number, d2: number, res: number, mod: number): number {
+export function damageOne(c: Ctx, fx: Effect[], g: number, t: number, d1: number, sides: number, d2: number, res: number, mod: number): number {
   const r = spellDamage(c.m, c.rng, c.a4, g, t, d1, sides, d2, res, mod);
   for (const [name, hex] of r.fx) {
     if (name === 'set_status') setStatus(c.m, c.rng, c.a4, hexWords(hex));
@@ -141,5 +142,80 @@ export function groupAll(c: Ctx, w0: number[], fx: Effect[]): void {
   } else {
     groupMembers(c, [0, ...rest], fx);
     if (groupCount(c, 6) > 0) groupMembers(c, [6, ...rest], fx);
+  }
+}
+
+const s8 = (v: number): number => ((v & 0xff) ^ 0x80) - 0x80;
+
+/**
+ * LAB_0EC0 (CODE+0x24054) WEAKEN / SLOW on a group: [g, t, mod, mag, mode]. Negative t = area (min(|t|, count)
+ * consecutive members from a random start). Per living, un-blinked target: `v = ResistScale(mag, resist 3, mod)`;
+ * it lands if `v > 0` and `Random(100) > rec[+151] - mod`. mode 1 (WEAKEN): buffers `+40/+39` move by
+ * `(v-1)/2+1`, word0 falls by v (min 1). Otherwise (SLOW): the speed byte `+41` is debuffed by `3v`, the four
+ * attack times halve, and the lowest `min(3, |+41|/10)` attack slots clear.
+ */
+export function groupWeak(c: Ctx, w0: number[], fx: Effect[]): void {
+  const { m, rng } = c;
+  const [g, t, mod, mag, mode] = w0.map(s16);
+  const cnt = groupCount(c, g);
+  let n = Math.abs(t);
+  if (n > cnt) n = cnt;
+  const start = rng.random(cnt - n);
+  for (let i = start; i < start + n; i++) {
+    const M = member(c, g, i);
+    if (m.u8(M + 34) >= 3 || m.u8(M + 43) !== 0) continue;
+    const v = resistScale(m, rng, c.a4, g, mag, 3, mod);
+    if (v <= 0) continue;
+    if (rng.random(100) <= m.u8(recBase(c, g) + 151) - mod) continue;
+    if (mode === 1) {
+      const h = tdiv(v - 1, 2) + 1;
+      m.w8(M + 40, buffCounter(h, s8(m.u8(M + 40)), 1));
+      m.w8(M + 39, buffCounter(h, s8(m.u8(M + 39)), 0));
+      let w = s16(m.u16(M) - v);
+      if (w < 1) w = 1;
+      m.w16(M, w);
+    } else {
+      m.w8(M + 41, buffCounter(v * 3, s8(m.u8(M + 41)), 1));
+      for (let k = 0; k < 4; k++) m.w8(M + 24 + k, m.u8(M + 24 + k) >> 1);
+      if (s8(m.u8(M + 41)) < 0) {
+        let q = Math.min(3, tdiv(Math.abs(s8(m.u8(M + 41))), 10));
+        while (q > 0) { m.w8(M + 24 + 4 - q, 0); q--; }
+      }
+    }
+    sync(fx, g, i);
+  }
+}
+
+/**
+ * LAB_0ED3 (CODE+0x244ae) PRISMIC MISSILE: [g, t, a, mod]. Same area walk; a target that fails `Random(100) >
+ * rec[+150] - mod` is spared, otherwise `Random(10)` picks one of ten colour effects: 0 damage 4d7 x a (res 12),
+ * 1 status slot 4 (res 2), 2 slot 2 (res 9), 3 slot 3 (res 4), 4 slot 5 (res 8), 5 death vs res 11 (state 3),
+ * 6 damage (res 0), 7 slot 7 (res 10), 8 death vs res 11 (state 2), 9 damage 4d7 (res 1).
+ */
+export function groupPrismic(c: Ctx, w0: number[], fx: Effect[]): void {
+  const { m, rng } = c;
+  const [g, t, a, mod] = w0.map(s16);
+  const cnt = groupCount(c, g);
+  let n = Math.abs(t);
+  if (n > cnt) n = cnt;
+  const start = rng.random(cnt - n);
+  for (let i = start; i < start + n; i++) {
+    if (rng.random(100) > m.u8(recBase(c, g) + 150) - mod) {
+      const k = rng.random(10);
+      const dmg = (d1: number, sides: number, d2: number, res: number) => { damageOne(c, fx, g, i, d1, sides, d2, res, mod); };
+      const st = (w: number[]) => areaStatus(c, [g, i, ...w], fx);
+      switch (k) {
+        case 0: dmg(4, 7, a, 12); break;
+        case 1: st([0xd94, 2, 4, mod, 0, 2 * a, 4, a, 0, 0]); break;
+        case 2: st([0xd92, 9, 2, mod, 0, a, 2, 0, 0, 0]); break;
+        case 3: st([0xd93, 4, 3, mod, 0, 2 * a, 1, a, 0, 0]); break;
+        case 4: st([0xd98, 5, 8, mod, 0, a, 4, a, 0, 0]); break;
+        case 5: st([0xda1, 11, 3, mod - 25, 1, 0, 0, 0, 14, 6]); break;
+        case 6: dmg(2 * a, 4, 2 * a, 0); break;
+        case 7: st([0xd97, 10, 7, mod, 0, a, 2, a, 0, 0]); break;
+        case 8: st([0xd9d, 11, 2, mod - 25, 1, 0, 0, 0, 14, 6]); break;
+        default: dmg(4, 7, a, 1); break;
+      }
+    }
   }
 }

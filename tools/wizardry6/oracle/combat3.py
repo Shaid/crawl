@@ -304,7 +304,8 @@ MAKERS['spells'] = make_spell_vectors
 
 # ---------------------------------------------------------------------------
 # spell engines: area damage / status / whole-side wrappers, run for real (SetStatus + kill cleanup included)
-ENGINE_OFF = {'area_dmg': 0x23758, 'area_stat': 0x238ac, 'area_stat2': 0x23aa0, 'grp_drain': 0x23d38, 'grp_all': 0x23f18}
+ENGINE_OFF = {'area_dmg': 0x23758, 'area_stat': 0x238ac, 'area_stat2': 0x23aa0, 'grp_drain': 0x23d38, 'grp_all': 0x23f18,
+              'grp_weak': 0x24054, 'grp_pm': 0x244ae}
 
 
 class EngineRun(SpellRun):
@@ -337,6 +338,10 @@ def engine_words(rng, eng, counts, ng):
     if eng == 'grp_all':
         return [rng.choice([0, 1, 2, 5, 6, 7]), 0xd4a, rng.choice([5, 11, 3, 2, 6]), rng.choice([3, 3, 2, 0]), mod, rng.choice([1, 1, 0]),
                 rng.choice([0, 1, 5, 20, 40]), dd(), dd(), rng.choice([0, 3, 14]), 6, 14][:11]
+    if eng == 'grp_weak':
+        return [g, t, mod, rng.choice([1, 2, 3, 5, 7, 12]), rng.randrange(2)]
+    if eng == 'grp_pm':
+        return [g, t, rng.randrange(1, 7), mod]
     raise KeyError(eng)
 
 

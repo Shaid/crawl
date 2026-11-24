@@ -5,14 +5,14 @@
  * oracle/engine-vectors.json (W6_ENGINE_VECTORS for a larger set).
  */
 import { describe, expect, it } from 'vitest';
-import { areaDamage, areaStatus, areaStatus2, groupAll, groupDrain } from '../engines.ts';
+import { areaDamage, areaStatus, areaStatus2, groupAll, groupDrain, groupPrismic, groupWeak } from '../engines.ts';
 import type { Effect } from '../combat.ts';
 import { loadVectors, mismatches } from './vec-util.ts';
 
 const V = loadVectors('W6_ENGINE_VECTORS', 'engine-vectors.json');
 
 const ENG: Record<string, (c: any, w: number[], fx: Effect[]) => void> = {
-  area_dmg: areaDamage, area_stat: areaStatus, area_stat2: areaStatus2, grp_drain: groupDrain, grp_all: groupAll,
+  area_dmg: areaDamage, area_stat: areaStatus, area_stat2: areaStatus2, grp_drain: groupDrain, grp_all: groupAll, grp_weak: groupWeak, grp_pm: groupPrismic,
 };
 const body = (v: any, mem: any, rng: any) => {
   const fx: Effect[] = [];
@@ -26,7 +26,7 @@ describe.skipIf(V.length === 0)('spell engines (area damage / status / group wra
     expect(mismatches(V, body, undefined, check)).toBe(0);
   }, 120_000);
   it('covers every engine', () => {
-    expect(new Set(V.map((v) => v.eng)).size).toBe(5);
+    expect(new Set(V.map((v) => v.eng)).size).toBe(7);
   });
   it('null control: another seed disagrees', () => {
     expect(mismatches(V, body, (_v, _m, r) => { r.s[1] = (r.s[1] + 1) % 30000 || 1; }, check)).toBeGreaterThan(V.length / 4);
