@@ -20,7 +20,12 @@ This repo hosts two first-person dungeon-crawler RE projects:
   tables via `tools/wizardry6/rules-tables.ts` (wired into `buildAssets`) as
   `public/assets/wizardry6/amiga/data/{rules-tables,messages-full}.json`. Use
   `messages-full.json`, not `messages.json` (the old decoder is wrong, see game-rules §0.2).
-  Combat resolution is still open (TODO `w6-combat-resolution`).
+  Combat is now largely solved: the attack resolver, weapon effects, status, spell engines,
+  cast gate, round planner and driver, and item removal are harness-verified against the game
+  (`tools/wizardry6/oracle/combat*.py`, `combat.ts`, `planner.ts`, `round.ts`, `spells.ts`,
+  `engines.ts`, `combat-sim.ts`; spec in game-rules §7-§8). Still open: casting wired into the sim,
+  flee/hide/morale and monster AI, encounter generation, skills and world rules
+  (TODO `w6-combat-spells-run`, `w6-encounter-start`).
 - **Might & Magic II** (`data/mm2/amiga/`, `docs/mm2/`, `tools/mm2/`,
   `public/assets/mm2/amiga/`) — integrated 2026-08-12 as a **port from a
   finished ground-truth RE** (Vairn/MM2, https://github.com/Vairn/MM2): crawl's
