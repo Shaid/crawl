@@ -23,9 +23,10 @@ This repo hosts two first-person dungeon-crawler RE projects:
   Combat is now largely solved: the attack resolver, weapon effects, status, spell engines,
   cast gate, round planner and driver, and item removal are harness-verified against the game
   (`tools/wizardry6/oracle/combat*.py`, `combat.ts`, `planner.ts`, `round.ts`, `spells.ts`,
-  `engines.ts`, `combat-sim.ts`; spec in game-rules §7-§8). Still open: casting wired into the sim,
-  flee/hide/morale and monster AI, encounter generation, skills and world rules
-  (TODO `w6-combat-spells-run`, `w6-encounter-start`).
+  `engines.ts`, `combat-sim.ts`; spec in game-rules §7-§9). Casts, summons, hide/run, breath and encounter start are
+  verified and wired into the sim. Still open: monster call-for-help/morale, use/swap/equip
+  actions, surprise, loot award, skills and world rules (TODO `w6-combat-ai-items`,
+  `w6-world-rules`).
 - **Might & Magic II** (`data/mm2/amiga/`, `docs/mm2/`, `tools/mm2/`,
   `public/assets/mm2/amiga/`) — integrated 2026-08-12 as a **port from a
   finished ground-truth RE** (Vairn/MM2, https://github.com/Vairn/MM2): crawl's

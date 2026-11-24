@@ -319,5 +319,51 @@ For fights in which the party attacks and monsters melee: yes. Keep state in the
 ### 8.7 Rerun
 `W6_PLANNER_VECTORS`, `W6_ROUND_VECTORS`, `W6_SPELL_VECTORS`, `W6_ENGINE_VECTORS`, `W6_CAST_VECTORS`, `W6_REMOVE_VECTORS` point the tests at large sets generated with `combat3.py ... --n 3000`.
 
+## 9. Combat, pass 4 (2026-11-24): casts in the sim, summons, hide/run, breath, encounter start
+
+Method as before: the routine runs under Unicorn on synthetic state, the TypeScript port runs on exactly the bytes the game read (any other read throws), and writes, logged calls and RNG state are diffed. Every check has a null control.
+
+### 9.1 Status
+
+| System | Port | Grade | Parity |
+|---|---|---|---|
+| Casting in the round (`castSpell` + `castEffect` through `gameRound`, cost charged after `ret.cast`) | `spellrun.ts`, `combat-sim.ts` | harness parts + sim tests | 9 sim tests (damage, status, group buffs, fizzle, anti-magic, silence, SP exhaustion) |
+| Group weaken/slow `LAB_0EC0`, prismic missile `LAB_0ED3` | `engines.ts` | **harness** | 2,800 vectors, 0 mismatches (committed subset 140 over 7 engines) |
+| Summon `LAB_0EEE` (CODE+0x24940) behind spells 45, 59, 71 | `encounter.ts` `summon`, `spells.ts` | **harness** | 2,500 vectors, 0 mismatches; spell dispatcher 3,000 vectors incl. 45/59/71, 0 mismatches |
+| Hide and run (`hide`, `run`) | `flee.ts` | **harness** | flee vectors, 0 mismatches (committed subset 60) |
+| Breath (twelve types) | `breath.ts` | **harness** | breath vectors, 0 mismatches (subset 42) |
+| Encounter start `LAB_0A31` (CODE+0x17fde): group clear, add-group, companion chain, party structs, evasion | `encounter.ts` | **harness** | encounter vectors, 0 mismatches (subset 14); loader, formation and picture are replayed from the game's logged results |
+
+### 9.2 Rules recovered
+
+* **Companion chain** (**harness**): group g gets a companion only if `g < min(5, (level+1)/2 + 1 (+1 if scripted))`. Candidates k = 0, 1 try monster id `rec[164+k]` with percent `rec[166+k]`; the first success wins.
+* **Group size**: dice in the record at `+0x74`, clamped 1..9. Member HP dice `+0x78`, stamina dice `+0x7c`. Treasure id is record `+162`, XP is `+0x40`.
+* **Evasion** (LAB_09D0, **harness** for the arithmetic, name **hyp**): `skill23 - 3*level` compared unsigned; a group that fails is left unengaged (`+412 = 0`).
+* **Hide** (**harness**): party member chance `P+36 + P+324 + 50 - sum over monster groups (count + rec[122] + rec[135])`; monster chance `word0*5 + 50 - sum over the first three party members (P+36 + P+301)`. Success sets member `+43 = 1` (party members also train skill 16).
+* **Run** (**harness**): chance `word0 + 90 - sum (rec[122]*count + 2*(rec[137] - rec_ag[137]))`; zero when the "cannot flee" flag `-15128` is 1. Success sets `+43 = 2`; when all of the party has fled game state is 0x17 (the sim reports `winner: fled`).
+* **Breath** (**harness**): strength K = number of doublings of 25 against the breather's HP scaled by stamina/max, clamped 1..6; magnitude 4K. Twelve types map to the area damage / status / status2 engines. Types 10-12 are silence gated.
+* **Summons** (**harness**): six candidate ids and the power n. The run counter grows while n stays above 0 and Random(3) is 0 (max 3); the candidate is `ids[n]` (ids[0] when n >= 6). Party side summons use the single ally group 6 and are refused while it is occupied; monster side adds a group (max five). Candidate lists: 45 party 0xd4..0xd9, monster by dungeon level 10/11/12; 59 party 0xda..0xdf, monster levels 9..12; 71 party random half (0xc8..0xcd or 0xce..0xd3), monster levels 9..12, or a single 0xd3 when the summoner is monster 0x96 or 0x99. Other levels call the routine with all zero arguments (a no-op).
+* **XP pool and treasure**: unchanged from section 2.1 (pool from each kill, divided by living characters; treasure record per section 2.2).
+
+### 9.3 The simulator
+
+`CombatWorld.fromEncounter(party, id, seed, {scenario, level, scripted})` runs the verified encounter start on real `scenario.dbs` monster records. `gameRound` handles party plans attack/cast/run/hide, monster casts and breath, and summons (through `EncounterIO`). `encounter-playthrough.test.ts` (skips without the data file) pins a fixed-seed timeline: encounter generation, party casts, monster casts and breath, a party run.
+
+### 9.4 Not verified or not found
+
+* Monster AI beyond the planner: the "call for help" action (message 3512 near CODE+0x19542 inside LAB_0AB5) and monster flee/morale were **not** located or harnessed (open).
+* The use-item (`LAB_0F8A`, CODE+0x275f0), swap (`LAB_0FDB/0FDA`), equip (`LAB_0FC4`) action callees and the party-order sort in `LAB_0A03`: not ported; the sim treats them as no-ops.
+* Surprise determination and where the encounter id comes from (a map script operand): open. Loot award beyond the XP pool and treasure record: not harnessed.
+* World rules (rest and healing, food and time, chest traps and disarm, searching, thief skills, per-turn status ticks, cloud decay): **not started** this pass; the section 4 status stands.
+* The evasion check semantics and the formation slots are presentation or **hyp**.
+
+### 9.5 Can the combat core be built from the spec?
+
+For a fight the player starts and drives through attack, cast, hide, run and ammo use: yes. Every routine on that path has a verified port, and the sim composes them on real monster records. The remake still needs: monster AI extras (call for help, morale/flee), the item swap/equip/use actions (inventory UI semantics), surprise and the encounter-table source, and loot distribution. Until then use the sim's attack/cast/breath choices as the monster policy.
+
+### 9.6 Rerun
+
+Large vector sets are not committed. Generate with `tools/wizardry6/oracle/combat3.py <maker> out.json --n N --seed S` for makers `summon`, `flee`, `encounter`, `breath`, `engine`, `spells`, then run the tests with `W6_SUMMON_VECTORS`, `W6_FLEE_VECTORS`, `W6_ENCOUNTER_VECTORS`, `W6_BREATH_VECTORS`, `W6_ENGINE_VECTORS`, `W6_SPELL_VECTORS` set to the file. Encounter sets are large (about 40 KB per vector); generate in the background.
+
 ## 6. Hypotheses to treat with care
 Anything marked **hyp** above (and in section 7: member `+4`, the names of `+0x22` states and `+0x1e` stances, the simulator round loop). In particular: `-10456(A4)` flag, byte meanings of treasure tail bytes 36-38, `+321` skill mapping in 2.4, record `+162` as treasure id, and the group/member struct field names in 2.3.
