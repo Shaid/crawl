@@ -68,7 +68,7 @@ describe('town services run from the game bytes (x86 port): food, general store,
   for (const [name, entry] of Object.entries(TOWN_ENTRY)) {
     const run = (m: any, v: any) => { const x = runTown(m, v.code, entry, v.args.keys, undefined, v.regs); return { ax: x.ax, bx: x.bx, cx: x.cx, dx: x.dx, si: x.si, di: x.di, bp: x.bp, calls: x.calls }; };
     it(`${name}: strict reads, writes, UI call log, registers`, () => mustMatch(name, run, 30));
-    it.skipIf(['poption', 'getinfo', 'loadnext'].includes(name))(`${name}: null control (key script shifted by one / ADC without carry-in)`, () => {
+    it.skipIf(['poption', 'getinfo', 'loadnext', 'gatgold'].includes(name))(`${name}: null control (key script shifted by one / ADC without carry-in)`, () => {
       const n = nullBad(name, (m, v) => { const x = runTown(m, v.code, entry, [0x4e, ...v.args.keys], undefined, v.regs); return { calls: x.calls }; });
       const n2 = nullBad(name, (m, v) => { const x = runTown(m, v.code, entry, v.args.keys, 'noCarryIn', v.regs); return { calls: x.calls }; });
       expect(n + n2).toBeGreaterThan(0);
@@ -90,7 +90,15 @@ describe('class-gate null controls (the replayed flows really depend on the clas
   }
 });
 
-describe('getinfo / loadnext input null controls', () => {
+describe('getinfo / loadnext / gatgold input null controls', () => {
+  it('gatgold: a wrong gold byte read changes the pooled sum', () => {
+    const n = nullBad('gatgold', (m: any, v: any) => {
+      const r8 = (a: number) => (a >= 0x3cfa && (a - 0x3cfa) % 0x7f === 0x39 ? m.r8(a) ^ 1 : m.r8(a));
+      const wm: any = { r8, r16: (a: number) => r8(a) | (r8(a + 1) << 8), w8: (a: number, x: number) => m.w8(a, x), w16: (a: number, x: number) => m.w16(a, x) };
+      const x = runTown(wm, v.code, TOWN_ENTRY.gatgold, v.args.keys, undefined, v.regs); return { calls: x.calls };
+    });
+    expect(n).toBeGreaterThan(0);
+  });
   it('getinfo: a wrong item id changes the item record', () => {
     const n = nullBad('getinfo', (m: any, v: any) => { const x = runTown(m, v.code, TOWN_ENTRY.getinfo, v.args.keys, undefined, { ...v.regs, ax: (v.regs.ax + 1) & 255 }); return { calls: x.calls }; });
     expect(n).toBeGreaterThan(0);

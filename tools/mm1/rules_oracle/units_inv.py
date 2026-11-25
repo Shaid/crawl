@@ -95,3 +95,20 @@ def _loadnext_regs(e, r):
 _mk_scr('getinfo', 0x46cb, _getinfo_regs)
 _mk_scr('statue', 0x276c, _statue_regs, lambda r: [r.choice([0x1b, 0x0d, 0x20, 0x41])] * 3)
 _mk_scr('loadnext', 0x509d, _loadnext_regs)
+
+def _gat_stubs(e, keys):
+    w = scr_stubs(e, keys); e.stubs.pop(0x7636, None); return w
+_scr_stubs_orig = scr_stubs
+@unit('gatgold')
+def _(n, rnd):
+    """gather-gold command CODE+0x7636 (sum of the party's 24-bit gold into the current member), run whole"""
+    e = Emu(); Rc = Rec(e); out = []
+    for _i in range(n):
+        seed = rnd.getrandbits(32); box = {}
+        def setup(e):
+            r2 = random.Random(seed); inv_state(e, r2); box['w'] = _gat_stubs(e, [0x1b] * 3); e.scratch.clear()
+            for i in range(e.rb(NPARTY)):
+                a = e.rw(PARTYTAB + 2 * i); e.wbytes(a + 0x39, [r2.choice([0, r2.getrandbits(8)]), r2.choice([0, r2.getrandbits(8)]), r2.choice([0, 0, 1, 255])])
+        v = run_vec(Rc, e, 0x7636, setup, regs_fn=lambda: {})
+        v['args'] = {'keys': []}; out.append(v)
+    return out

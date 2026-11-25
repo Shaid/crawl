@@ -41,6 +41,7 @@ cited by offset; ScummVM's (GPL) MM1 engine was **not** used as a source.
 | Inventory commands equip 0x7A67 / remove / trade / discard, combat option line `poption` 0xBE00 (class and alignment masks, equip slots) | `x86.ts` replay, section 6.2 | harness (3000 / 1500 / 1500 / 600 / 600 vectors; class-byte null controls) |
 | Terminal screens' own code: `getinfo` 0x46CB, `statue` 0x276C, `loadnext` chain 0x509D | `x86.ts` replay, section 6.3 | harness (600 / 600 / 800 vectors; input null controls) |
 | Maze layer bits 0x02 anti-magic / 0x08 no-rest / 0x20 dark | existing ports + `maze-bits.test.ts`, section 6.4 | harness (null controls) |
+| Thief skill census, `gatgold` 0x7636 | census + `x86.ts` replay, section 6.5 | harness (400) / code |
 | Still open: thievery/skills beyond lock/bash/search, class-specific rules beyond the inventory in section 5, internals of the terminal screens (`statue` 0x276C, `loadnext` chain, `encounter` 0x2F87 wrapper, `getinfo` 0x46CB, `gatgold` 0x7636), handlers' unreached 14 % | **open** | `mm1-rules-world`, `mm1-ovr-code` |
 
 ### Build guide (what a remake takes from this)
@@ -220,3 +221,8 @@ The page-1 cell byte, loaded to `DS:3C10` by `draw` (section 5.1), is read by 18
 | `0x20` | **dark cell** | cell loader `draw` (0xF78 / 0x11D8) | dark view unless the light counter DS:3C9C is non-zero (then it is decremented), section 5.1 |
 
 Grade: harness. The behaviour was already inside the harness-verified ports (`world.ts` QCast / Rest, `spells.ts` ComCast / MonsterAbility, `ovr.ts` cellLoad); `__tests__/maze-bits.test.ts` adds the census and null controls (flip the bit as the port sees it: the run must differ on some vector of `qcast`, `cast`, `rest` / `okrest`, `cellload`). > **Correction (2026-11-26):** `data-structure.md` listed `0x02` and `0x08` as "unidentified"; they are the anti-magic and no-rest flags above. (The remake cell fields in `tools/mm1/map.ts` are unchanged; add `noMagic` / `noRest` there if a remake wants them.)
+
+### 6.5 Thief skills census and `gatgold` 0x7636 (`mm1-rules-world`, closed)
+
+- **There is exactly one thief skill, the byte at character +0x6C** (set to 1 at creation by `create` 0x587C, to 0x32 for the Robber branch 0x58BF, +2 on every level-up at 0x1BD7, section 3). A census of every `MM.EXE` access to offset 0x6C through the character pointer finds three readers: pick lock `unlock` 0x4B5E (`random(100) + 4*getod(0x31)` against it, section 4), the chest disarm 0x382B (section 6.1) and nothing else. There is **no** separate trap-finding, stealth, or search skill: `search` 0x4A28 reads no skill byte, and `+0x6D` is only cleared for the whole party (CODE+0x8C33) and never read. (code-read census; the two reading routines are harness-verified.)
+- **gatgold** (CODE+0x7636, the gold-gather command): sums each member's 24-bit gold (+0x39..+0x3B) into three byte accumulators (DS:3C86..3C88, the high byte saturating at 0xFF) and stores it into the current member's record, clearing the others. Run whole (400 vectors, x86 replay; null control: a perturbed gold byte read). Part of the older pooled `gather` 0x74BC family of section 3.

@@ -111,7 +111,7 @@ export function screenKey(m: Mem, al: number, bl: number, bp: number): { screen:
 // ---- town service flows (food 0x1DF3, blacks 0x2196, temple 0x1F2D, tavern 0x2544, training 0x1B08): same stub set as units_shops.py ----
 export const TOWN_ENTRY = { trapfx: 0x3d65, blacks: 0x2196, food: 0x1df3, temple: 0x1f2d, tavern: 0x2544, training: 0x1b08, chest: 0x3740, chesttrap: 0x3749,
   equip: 0x7a67, remove: 0x7e7b, trade: 0x8027, discard: 0x7428, poption: 0xbe00,
-  getinfo: 0x46cb, statue: 0x276c, loadnext: 0x509d } as const;
+  getinfo: 0x46cb, statue: 0x276c, loadnext: 0x509d, gatgold: 0x7636 } as const;
 export function townStubs(keys: number[]): Map<number, StubDef> {
   const s = new Map<number, StubDef>();
   const put = (off: number, name: string, args?: (m: M) => number[]) => s.set(off, { name, args });
@@ -125,13 +125,14 @@ export function townStubs(keys: number[]): Map<number, StubDef> {
   return s;
 }
 /** extra leaves of the terminal-screen units (getinfo / statue / loadnext): these run for real inside the older town flows, so they are stubbed only here */
-const SCR_ENTRIES: number[] = [0x46cb, 0x276c, 0x509d];
+const SCR_ENTRIES: number[] = [0x46cb, 0x276c, 0x509d, 0x7636];
 export function runTown(mem: Mem, code: Record<string, string>, entry: number, keys: number[], wrong?: 'noCarryIn', regs?: Record<string, number>): X86 {
   const stubs = townStubs(keys);
   if (SCR_ENTRIES.includes(entry)) {
     for (const [o, n] of [[0x246b, 'clear7'], [0x1c, 'ovloader'], [0x128c, 'getshape'], [0x42ca, 'clrp2'], [0x4200, 'pcomand'], [0x418f, 'pnames2'], [0xf45, 'draw']] as [number, string][]) stubs.set(o, { name: n });
     stubs.set(0x142, { name: 'readmaze', args: m => [m.r16(0x138)] });
   }
+  if (entry === 0x7636) stubs.delete(0x7636);   // the unit runs gatgold itself
   const m = new X86({ mem, code: codeMap(code), stubs, wrong });
   if (regs) Object.assign(m, Object.fromEntries(Object.entries(regs).filter(([k]) => ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp'].includes(k))));
   m.run(entry);
