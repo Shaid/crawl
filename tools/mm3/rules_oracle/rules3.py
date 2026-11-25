@@ -23,8 +23,9 @@ def logged(e, addr, name, nargs, ret=0, words=True):
 UI_QUIET = {'bfda': R(0xBFDA), 'bf7e': R(0xBF7E), 'bfae': R(0xBFAE), 'c038': R(0xC038), 'be2a': R(0xBE2A), 'c11e': R(0xC11E),
             'd1ae': R(0xD1AE), '188a': R(0x188A), '1b50': R(0x1B50), '945e': R(0x945E), '13c10': R(0x13C10), '81a8': R(0x81A8),
             'bef6': R(0xBEF6), '7940': R(0x7940), 'c934': R(0xC934), 'c166': R(0xC166)}
-def install_ui(e, anim=0):
-    for n, a in UI_QUIET.items(): quiet(e, a, n)
+def install_ui(e, anim=0, skip=()):
+    for n, a in UI_QUIET.items():
+        if n not in skip: quiet(e, a, n)
     quiet(e, R(0x5EB2), '5eb2', ret=anim)
     e.keys = []
     def keyfn(e2, sp):

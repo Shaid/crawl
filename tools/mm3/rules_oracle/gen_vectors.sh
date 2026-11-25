@@ -23,3 +23,9 @@ for spec in cast:6000:150 engine:600:60 spellhit:3000:300 wipecheck:3000:40 roun
   $PY rules3.py $unit generated/$unit.json --n $n
   $PY rules3.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
 done
+# pass 4 units (rules4.py): rest, item prices, training hall (eligibility + level-up block), trap damage, thievery, per-step tick
+for spec in rest:3000:50 itemprice:3000:80 itemprice2:1500:30 trainelig:2000:20 levelup:2500:40 trapdmg:3000:80 thievery:3000:30 steptick:200:10 "$@"; do
+  IFS=: read unit n sub <<<"$spec"
+  $PY rules4.py $unit generated/$unit.json --n $n
+  $PY rules4.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
+done

@@ -14,7 +14,7 @@ from emu import Emu, DATA_BASE, DATA_LEN, A4V, HEAP
 class Rec:
     def __init__(self, e: Emu):
         self.e = e
-    def run(self, addr, args=(), setup=None, ret_bits=16, max_insn=2_000_000):
+    def run(self, addr, args=(), setup=None, ret_bits=16, max_insn=2_000_000, regs=None, stops=()):
         e = self.e
         uc = e.uc
         e.log.clear()
@@ -39,7 +39,7 @@ class Rec:
         h3 = uc.hook_add(UC_HOOK_MEM_READ, rd, begin=HEAP, end=HEAP + 0x100000)
         h4 = uc.hook_add(UC_HOOK_MEM_WRITE, wr, begin=HEAP, end=HEAP + 0x100000)
         try:
-            d0 = e.call(addr, args, max_insn=max_insn)
+            d0 = e.call(addr, args, max_insn=max_insn, regs=regs() if callable(regs) else regs, stops=stops)
         finally:
             e.on_write = None
             for h in (h1, h2, h3, h4): uc.hook_del(h)
@@ -52,4 +52,5 @@ class Rec:
             'wset': sorted(a for a in written if fin[a] == wpre[a]),
             'ret': d0 & mask,
             'calls': [[n, list(a)] for n, a in e.log],
+            **({'stop': e.stop_pc} if stops else {}),
         }

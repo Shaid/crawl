@@ -135,7 +135,7 @@ class Emu:
             uc.reg_write(UC_M68K_REG_A7, sp + 4)
         self.uc.hook_add(UC_HOOK_CODE, hook, begin=addr, end=addr)
 
-    def call(self, addr, args=(), max_insn=5_000_000):
+    def call(self, addr, args=(), max_insn=5_000_000, regs=None, stops=()):
         """C call at absolute addr; args = ints (16-bit) or (value, 4) tuples; D0 returned."""
         uc = self.uc
         sp = STACK_TOP
@@ -149,12 +149,19 @@ class Emu:
         uc.reg_write(UC_M68K_REG_A5, 0)
         for r in (UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2):
             uc.reg_write(r, 0)
+        for name, v in (regs or {}).items(): uc.reg_write(getattr(__import__('unicorn.m68k_const', fromlist=['x']), 'UC_M68K_REG_' + name), v & 0xffffffff)
+        self.stop_pc = None
+        hs = []
+        def stopper(u, a, size, d): self.stop_pc = a; u.emu_stop()
+        for st in stops: hs.append(uc.hook_add(UC_HOOK_CODE, stopper, begin=st, end=st))
         try:
             uc.emu_start(addr, RET_MAGIC + 0x100, count=max_insn)
         except UcError as ex:
             pc = uc.reg_read(UC_M68K_REG_PC)
             raise RuntimeError(f'{ex} pc={pc:#x}')
+        for h in hs: uc.hook_del(h)
         pc = uc.reg_read(UC_M68K_REG_PC)
+        if self.stop_pc is not None: return uc.reg_read(UC_M68K_REG_D0)
         if pc not in (RET_MAGIC, RET_MAGIC + 2):
             raise RuntimeError(f'did not return: pc={pc:#x} (insn cap?)')
         return uc.reg_read(UC_M68K_REG_D0)
