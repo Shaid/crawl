@@ -17,7 +17,10 @@ import type { Effect } from './combat.ts';
 import { planMonsters } from './planner.ts';
 import { runRound } from './round.ts';
 import { W6Rng } from './rules.ts';
-import { castAction, loadSpellTable } from './spellrun.ts';
+import { castAction, loadSpellTable, makeEngines } from './spellrun.ts';
+import { castEffect } from './spells.ts';
+import { removeItem } from './inventory.ts';
+import { postCombat, swapParty, useItem, type ItemRec } from './itemuse.ts';
 import { hide, run as runAway } from './flee.ts';
 import { breath } from './breath.ts';
 import { startEncounter, type EncounterIO } from './encounter.ts';
@@ -52,7 +55,11 @@ export interface PartySpec {
 export type PartyPlan =
   | { act: 'attack'; tg?: number; ti?: number }
   | { act: 'cast'; spell: number; power: number; tg: number; ti: number }
-  | { act: 'run' } | { act: 'hide' };
+  | { act: 'run' } | { act: 'hide' }
+  /** use the item in inventory slot `slot` (its effect word names a spell; harness-verified LAB_0F8A) */
+  | { act: 'useitem'; slot: number; tg?: number; ti?: number }
+  /** move this member to position `to` (LAB_0FDB, takes effect when the action fires) */
+  | { act: 'swap'; to: number };
 
 export interface MonsterSpec {
   hp: number;
@@ -96,6 +103,10 @@ export class CombatWorld {
   castFx: Effect[] = [];
   /** party policy, called once per living member per round */
   partyPolicy?: (w: CombatWorld, i: number) => PartyPlan;
+  /** scenario item records (section 1, 74 bytes at 0x380 + id*74): needed by use-item; absent = every item inert */
+  itemRec: (id: number) => ItemRec = () => ({ w28: 0, b60: 0, b69: 0 });
+  /** item uses and swaps taken, in order */
+  actions: { actor: string; act: string; fx: Effect[] }[] = [];
 
   constructor(party: PartySpec[], groups: MonsterSpec[][], seed: [number, number, number]) {
     this.rng = new W6Rng(seed);
@@ -230,6 +241,8 @@ export class CombatWorld {
    */
   static fromEncounter(party: PartySpec[], id: number, seed: [number, number, number], opts: { scenario: Uint8Array; level: number; scripted?: boolean }): CombatWorld {
     const w = new CombatWorld(party, [], seed);
+    const sc = opts.scenario;
+    w.itemRec = (iid) => ({ w28: (sc[0x380 + iid * 74 + 28] << 8) | sc[0x380 + iid * 74 + 29], b60: sc[0x380 + iid * 74 + 60], b69: sc[0x380 + iid * 74 + 69] });
     const { a4 } = LAYOUT; const m = w.mem;
     w.setupPointers();
     m.w8(a4 - 15305, party.length);
@@ -289,6 +302,10 @@ export class CombatWorld {
       m.w8(A + 28, 0); m.w8(A + 29, 0); m.w16(A + 12, 0xffff); m.w8(A + 33, 0); m.w8(A + 36, 0);
       if (plan.act === 'cast') {
         m.w8(A + 30, 3); m.w16(A + 10, plan.power * 256 + plan.spell); m.w8(A + 31, plan.tg); m.w8(A + 32, plan.ti);
+      } else if (plan.act === 'useitem') {
+        m.w8(A + 30, 4); m.w16(A + 10, plan.slot); m.w8(A + 31, plan.tg ?? 0); m.w8(A + 32, plan.ti ?? i);
+      } else if (plan.act === 'swap') {
+        m.w8(A + 30, 5); m.w16(A + 10, plan.to); m.w8(A + 31, 0); m.w8(A + 32, i);
       } else if (plan.act === 'run' || plan.act === 'hide') {
         m.w8(A + 30, plan.act === 'run' ? 7 : 6); m.w16(A + 10, 0); m.w8(A + 31, 0); m.w8(A + 32, i);
       } else {
@@ -315,6 +332,24 @@ export class CombatWorld {
         this.breaths.push({ actor: `${g}.${i}`, type: m.s16(A + 10), target: `${m.u8(A + 31)}`, cost: ret.breath });
         return;
       }
+      if (e[0] === 'useitem') {
+        const A = parseInt(e[1], 16);
+        const fx: Effect[] = [];
+        useItem(ctx, A, this.itemRec, fx);
+        const eng = makeEngines(ctx, this.castFx, this.io);
+        for (const f of fx) {
+          if (f[0] === 'use_ammo') removeItem(ctx, parseInt(f[1], 16), this.castFx);
+          else if (f[0] === 'spell_effect') castEffect(ctx, parseInt(f[1].slice(0, 8), 16), parseInt(f[1].slice(8, 12), 16), parseInt(f[1].slice(12, 16), 16), eng);
+        }
+        this.actions.push({ actor: `${m.u16(a4 - 15138)}.${m.s16(a4 - 15136)}`, act: 'useitem', fx });
+        return;
+      }
+      if (e[0] === 'swap') {
+        const fx: Effect[] = [];
+        swapParty(ctx, parseInt(e[1].slice(0, 4), 16), parseInt(e[1].slice(4, 8), 16), fx);
+        this.actions.push({ actor: `0.${parseInt(e[1].slice(0, 4), 16)}`, act: 'swap', fx });
+        return;
+      }
       if (e[0] === 'hide' || e[0] === 'run') {
         const A = parseInt(e[1], 16);
         const ok = (e[0] === 'hide' ? hide : runAway)(ctx, A);
@@ -331,10 +366,11 @@ export class CombatWorld {
     });
   }
 
-  /** End-of-round check LAB_0A03 (CODE+0x17814, code): any party member flagged 2 (a successful run) ends the fight with game state 0x17. */
+  /** End-of-fight check LAB_0A03 (CODE+0x17814, harness-verified as postCombat): sorts the party by condition; a flagged-2 member (a successful run) gives game state 0x17, everyone down gives 8. */
   hasFled(): boolean {
-    for (let i = 0; i < this.partySize; i++) if (this.mem.u8(this.mb(0) + i * 44 + 43) === 2) return true;
-    return false;
+    const { a4 } = LAYOUT;
+    postCombat({ m: this.mem, rng: this.rng, a4 }, []);
+    return this.mem.u16(a4 - 18608) === 0x17;
   }
 
   /** Fight with {@link gameRound} until one side is gone (the round driver ends combat itself by leaving state 0xd). */
