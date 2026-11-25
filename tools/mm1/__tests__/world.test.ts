@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { mustMatch, nullBad } from './check.ts';
-import { QCast, Surprise, type WorldWrong } from '../world.ts';
+import { QCast, Surprise, Rest, type WorldWrong } from '../world.ts';
 import { UseItem } from '../spells.ts';
 import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
@@ -47,6 +47,18 @@ describe('encounter greeting CODE+0x3206 (surprise, attack / retreat / bribe / s
   it('null controls', () => {
     for (const w of ['surprNoGoldWipe', 'surprRunNoParty', 'surprAlignNoClamp'] as const) {
       const n = nullBad('surprise', (m, v) => { const r = new Surprise(m, v.args, w).run(); return { stop: r.stop, calls: r.calls }; });
+      expect(n, w).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('resting CODE+0x6EE5 / 0x6F98', () => {
+  const run = (entry: 'rest' | 'okrest') => (m: any, v: any) => { const r = new Rest(m, v.args).run(entry); return { stop: r.stop, calls: r.calls }; };
+  it('rest (prompt, ambush roll, healing, aging, food, spell points)', () => mustMatch('rest', run('rest'), 100));
+  it('okrest', () => mustMatch('okrest', run('okrest'), 100));
+  it('null controls', () => {
+    for (const w of ['restNoHalve', 'restNoAge', 'restNoLevelCut', 'restKeepStatus'] as const) {
+      const n = nullBad('okrest', (m, v) => { const r = new Rest(m, v.args, w).run('okrest'); return { stop: r.stop, calls: r.calls }; });
       expect(n, w).toBeGreaterThan(0);
     }
   });

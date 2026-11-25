@@ -750,38 +750,43 @@ export class QCast extends Caster {
   }
 }
 
+/** `ph2` (CODE+0x40E1) as a UI model: logs the call and moves the text cursor (row DS:3BC3, column DS:3BC4) past the string at DS:3BD4 */
+export function ph2Model(m: Mem, calls: Call[]) {
+  calls.push(['ph2', [m.r16(BDW_TEXT), m.r8(0x3bc3), m.r8(0x3bc4)]]);
+  let p = m.r16(BDW_TEXT), x = m.r8(0x3bc4), y = m.r8(0x3bc3);
+  if (x >= 0x28) { x = 0x27; y = u8(y - 1); }
+  for (;;) {
+    const c = m.r8(p);
+    if (c === 0) break;
+    p++;
+    if (c === 0x0d) { x = 0; y = u8(y + 1); continue; }
+    x++;
+    if (x >= 0x28) { x = 0; y = u8(y + 1); }
+  }
+  m.w8(0x3bc4, x); m.w8(0x3bc3, y);
+}
+
 export type SurpriseWrong = 'surprNoGoldWipe' | 'surprRunNoParty' | 'surprAlignNoClamp';
 
 /** The encounter greeting CODE+0x3206..0x3740 (after the group is built): who surprised whom, then the Attack / Retreat / Bribe / Surrender menu.
  *  `ph2` (CODE+0x40E1) is modelled as its effect on the text cursor only (DS:3BC3 row, 3BC4 column); exhausted scripted keys cycle N, A. */
-export class Surprise extends Caster {
-  w: SurpriseWrong | undefined;
-  constructor(m: Mem, keys: number[], w?: SurpriseWrong) { super(m, keys); this.w = w; }
+/** a caster whose exhausted key script cycles through `tail` instead of answering ESC (menus without an ESC exit) */
+export class TailCaster extends Caster {
+  protected tail: number[] = [0x1b];
   private tailI = 0;
+  private qi = 0;
   wait(): number {
-    const k = this.keysLeft() ? this.nextKey() : [0x4e, 0x41][this.tailI++ % 2];
+    const k = this.qi < this.keys.length ? this.keys[this.qi++] : this.tail[this.tailI++ % this.tail.length];
     this.ui('wait_', [k]);
     return k;
   }
-  private qi = 0;
-  private keysLeft() { return this.qi < this.keys.length; }
-  private nextKey() { return this.keys[this.qi++]; }
+}
+
+export class Surprise extends TailCaster {
+  w: SurpriseWrong | undefined;
+  constructor(m: Mem, keys: number[], w?: SurpriseWrong) { super(m, keys); this.w = w; this.tail = [0x4e, 0x41]; }
   private stop(a: number): never { throw new Exit(a); }
-  private ph2() {
-    const m = this.m;
-    this.calls.push(['ph2', [m.r16(BDW_TEXT), m.r8(0x3bc3), m.r8(0x3bc4)]]);
-    let p = m.r16(BDW_TEXT), x = m.r8(0x3bc4), y = m.r8(0x3bc3);
-    if (x >= 0x28) { x = 0x27; y = u8(y - 1); }
-    for (;;) {
-      const c = m.r8(p);
-      if (c === 0) break;
-      p++;
-      if (c === 0x0d) { x = 0; y = u8(y + 1); continue; }
-      x++;
-      if (x >= 0x28) { x = 0; y = u8(y + 1); }
-    }
-    m.w8(0x3bc4, x); m.w8(0x3bc3, y);
-  }
+  private ph2() { ph2Model(this.m, this.calls); }
   private msg(row: number, col: number, text: number) { const m = this.m; m.w8(0x3bc3, row); m.w8(0x3bc4, col); this.text(text); this.ph2(); }
   run(): { stop: number; calls: Call[] } {
     try { this.main(); } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
@@ -977,5 +982,142 @@ export class Surprise extends Caster {
       const bp = u8(bl << 1);
       m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
     } while (bl < m.r8(NPARTY));
+  }
+}
+
+export type RestWrong = 'restNoHalve' | 'restNoAge' | 'restNoLevelCut' | 'restKeepStatus';
+
+/** Resting: `rest` CODE+0x6EE5 (prompt, ambush roll) and `okrest` CODE+0x6F98 (per-member recovery, aging, food, spell points) */
+export class Rest extends TailCaster {
+  w: RestWrong | undefined;
+  constructor(m: Mem, keys: number[], w?: RestWrong) { super(m, keys); this.w = w; this.tail = [0x59]; }
+  private stop(a: number): never { throw new Exit(a); }
+  private clr() { this.ui('clrbtm2'); }
+  private ph2() { ph2Model(this.m, this.calls); }
+  run(entry: 'rest' | 'okrest' = 'rest'): { stop: number; calls: Call[] } {
+    try { if (entry === 'rest') this.rest(); else this.okrest(); } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
+    throw new Error('rest fell through');
+  }
+  private rest(): never {
+    const m = this.m;
+    this.clr();
+    if (m.r8(0x3c10) & 8) {
+      this.ui('noises', [2]); this.text(0x28af); m.w8(0x3bc4, 2); m.w8(0x3bc3, 0x15); this.ph2();
+      m.w8(0x3bb8, this.wait()); this.clr(); return this.stop(0x4cdc);
+    }
+    this.text(0x28cf); m.w8(0x3bc4, 0); m.w8(0x3bc3, 0x15); this.ph2();
+    for (;;) {
+      const k = this.wait();
+      if (k === 0x4e) { this.clr(); return this.stop(0x4cd6); }
+      if (k === 0x59) break;
+    }
+    const n = this.getod(0x2c);
+    if (n === 0 || random(m, n) !== n) return this.okrest();
+    this.clr();
+    const pick = random(m, m.r8(NPARTY));
+    m.w8(0x3bba, pick);
+    for (let bl = 0; bl < m.r8(NPARTY); bl++) {
+      const bp = u8(bl << 1);
+      m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
+      const c = m.r16(CHARP), al = m.r8(c + 0x3f);
+      if (!(al & 0x80) && bl !== m.r8(0x3bba)) m.w8(c + 0x3f, al | 1);
+    }
+    return this.stop(0x45fd);
+  }
+  private okrest(): never {
+    const m = this.m;
+    for (let bl = 0; bl < 0x12; bl++) m.w8(0x3c95 + bl, 0);
+    let bl = 0, bp = 0;
+    do {
+      m.w8(0x3bba, bl); m.w8(0x3bb9, bp);
+      m.w8(CHARP, m.r8(PARTYTAB + bp)); bp = u8(bp + 1);
+      m.w8(CHARP + 1, m.r8(PARTYTAB + bp));
+      this.member();
+      bl = u8(m.r8(0x3bba) + 1);
+      bp = u8(u8((m.r16(0x3bb9) & 0xff) + 1) + 1);
+    } while (bl < m.r8(NPARTY));
+    this.clr();
+    this.text(0x28e0); m.w8(0x3bc4, 0); m.w8(0x3bc3, 0x15); this.ph2();
+    this.ui('pnames');
+    m.w8(0x3bb8, this.wait()); this.clr();
+    return this.stop(0x4cdc);
+  }
+  private dec(c: number, off: number) {
+    const m = this.m;
+    const v = u8(m.r8(c + off) - 1);
+    m.w8(c + off, v);
+    if (v === 0) this.stop(0x7100);          // the game spins forever here (jmp $)
+  }
+  /** CODE+0x7016: one member rests */
+  private member() {
+    const m = this.m;
+    const c = m.r16(CHARP);
+    if (m.r8(c + 0x3f) & 0x80) return;
+    this.maxSp();
+    resetSts(m); resetAc(m); resetRes(m);
+    if (this.w !== 'restKeepStatus') m.w8(c + 0x3f, m.r8(c + 0x3f) & 0x98);
+    if (m.r8(c + 0x33) === 0 && m.r8(c + 0x34) === 0) m.w8(c + 0x33, 1);
+    if (this.w !== 'restNoAge') {
+      const d = m.r8(c + 0x26) + 1;
+      m.w8(c + 0x26, d);
+      if (d > 0xff) { const y = m.r8(c + 0x25) + 1; m.w8(c + 0x25, y); if (y > 0xff) m.w8(c + 0x25, 0xff); }
+    }
+    const roll = u8(random(m, 0x46) + 0x50);
+    if (roll < m.r8(c + 0x25)) { m.w8(c + 0x3f, 0xc0); return; }
+    const age = (): number => m.r8(c + 0x25);
+    if (age() >= 0x3c) {
+      this.dec(c, 0x18); this.dec(c, 0x1c); this.dec(c, 0x1e);
+      if (age() >= 0x46) {
+        this.dec(c, 0x18); this.dec(c, 0x1c); this.dec(c, 0x1e);
+        if (age() >= 0x50) { this.dec(c, 0x18); this.dec(c, 0x18); }
+      }
+    }
+    // food and recovery
+    const food = m.r8(c + 0x3e);
+    if (food === 0) return;
+    m.w8(c + 0x3e, u8(food - 1));
+    if (!(m.r8(c + 0x3f) & 0x10)) { m.w8(c + 0x37, m.r8(c + 0x35)); m.w8(c + 0x38, m.r8(c + 0x36)); }
+    else if (this.w !== 'restNoHalve') {
+      const hi = m.r8(c + 0x38); m.w8(c + 0x38, hi >> 1);
+      m.w8(c + 0x37, ((hi & 1) << 7) | (m.r8(c + 0x37) >> 1));
+    }
+    if (m.r8(c + 0x3f) & 8) return;
+    m.w8(c + 0x33, m.r8(c + 0x37)); m.w8(c + 0x34, m.r8(c + 0x38));
+    m.w8(c + 0x2b, m.r8(c + 0x2d)); m.w8(c + 0x2c, m.r8(c + 0x2e));
+  }
+  /** CODE+0x71CD: maximum spell points = (bracket of INT or PER) x (level, or level-6 for the non-casting classes) */
+  private maxSp() {
+    const m = this.m;
+    const c = m.r16(CHARP);
+    m.w8(0x3c69, m.r8(c + 0x16)); m.w8(0x3c6a, m.r8(c + 0x1a)); m.w8(0x3c6b, m.r8(c + 0x24));
+    m.w8(0x3c6c, 3); m.w8(0x3c6d, 0); m.w8(0x3c6e, 0);
+    if (m.r8(c + 0x30) !== 0) {
+      const cls = m.r8(c + 0x14);
+      let stat: number | undefined;
+      if (cls === 4) stat = m.r8(0x3c6a);
+      else if (cls === 5) stat = m.r8(0x3c69);
+      else {
+        const lv = m.r8(0x3c6b);
+        if (lv >= 7) {
+          m.w8(0x3c6b, u8(lv - (this.w === 'restNoLevelCut' ? 0 : 6)));
+          stat = m.r8(c + 0x14) === 2 ? m.r8(0x3c6a) : m.r8(0x3c69);
+        }
+      }
+      if (stat !== undefined) {
+        const T: [number, number][] = [[0x28, 10], [0x23, 9], [0x1e, 8], [0x1b, 7], [0x18, 6], [0x15, 5], [0x13, 4], [0x11, 3], [0xf, 2], [0xd, 1]];
+        const hit = T.find(([lim]) => stat! >= lim);
+        let d = 0;
+        if (hit) d = hit[1]; else if (stat < 5) d = -3; else if (stat < 7) d = -2; else if (stat < 9) d = -1;
+        for (let i = 0; i < Math.abs(d); i++) m.w8(0x3c6c, m.r8(0x3c6c) + (d > 0 ? 1 : -1));
+        let bl = m.r8(0x3c6b);
+        do {
+          const s = m.r8(0x3c6c) + m.r8(0x3c6d);
+          m.w8(0x3c6d, s);
+          m.w8(0x3c6e, m.r8(0x3c6e) + (s > 0xff ? 1 : 0));
+          bl = u8(bl - 1);
+        } while (bl !== 0);
+      }
+    }
+    m.w8(c + 0x2d, m.r8(0x3c6d)); m.w8(c + 0x2e, m.r8(0x3c6e));
   }
 }

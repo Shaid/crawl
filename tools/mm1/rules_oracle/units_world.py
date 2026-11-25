@@ -251,3 +251,49 @@ def _(n, rnd):
         k = (d['out']['stop'], tuple(c[0] for c in d['calls'])[:9], d['args'][:2] and d['args'][0])
         if k not in seen: seen.add(k); d['keep'] = True
     return res
+
+RUI = [('ph2', 0x40e1, puts_model, lambda e: [e.rw(0x3bd4), e.rb(0x3bc3), e.rb(0x3bc4)]), uistub('clrbtm2', 0x43a8), uistub('pnames', 0x4118),
+       ('noises', 0x1ab3, None, lambda e: [e.regs()['ax'] & 255])]
+RSTOPS = (0x7100, 0x4cdc, 0x4cd6, 0x45fd)
+
+def rest_state(e, r):
+    a, np_ = qworld(e, r)
+    for i in range(np_):
+        ra = e.rw(PARTYTAB + 2 * i)
+        e.wb(ra + 0x3f, r.choice([0, 0, 0, 0x01, 0x10, 0x08, 0x18, 0x40, 0x80, 0xc0, 0xe0, 0xff, 0x04, 0x20, r.getrandbits(8)]))
+        e.wb(ra + 0x25, r.choice([18, 25, 40, 59, 60, 70, 80, 90, 100, 120, 200, 255, r.getrandbits(8)]))
+        e.wb(ra + 0x26, r.choice([0, 1, 254, 255, r.getrandbits(8)]))
+        e.wb(ra + 0x3e, r.choice([0, 0, 1, 5, 20, r.getrandbits(8)]))
+        for off in (0x16, 0x18, 0x1a, 0x1c, 0x1e, 0x20, 0x22): e.wb(ra + off, r.choice([1, 2, 3, 8, 12, 16, 20, 25, 30, 40, 50, r.getrandbits(8)]))
+        e.wb(ra + 0x30, r.choice([0, 1, 3, 7, r.getrandbits(8)])); e.wb(ra + 0x24, r.choice([1, 3, 6, 7, 8, 12, 20, 40, 100, r.getrandbits(8)]))
+        e.wb(ra + 0x14, r.choice([1, 2, 3, 4, 5, 6, r.getrandbits(8)]))
+        e.ww(ra + 0x33, r.choice([0, 0, 5, 100, r.getrandbits(16)]))
+    e.wb(0xc940 + 0x2c, r.choice([0, 1, 1, 2, 3, 5, 20, 100, r.getrandbits(8)]))
+    e.wb(0x3c10, r.choice([0, 0, 0, 8, 1, 9, r.getrandbits(8)]))
+    return a
+
+@unit('rest')
+def _(n, rnd):
+    """CODE+0x6EE5 rest (Y/N prompt, ambush roll) -> okrest 0x6F98 (healing, aging, food, spell-point recalculation 0x71CD)"""
+    def mk(e, r):
+        rest_state(e, r)
+        return [r.choice([0x59, 0x59, 0x59, 0x59, 0x4e, 0x58])] + ([0x59] if r.random() < 0.5 else [])
+    res = run_keys(n, rnd, mk, 0x6ee5, RSTOPS, stubs=RUI, tail=[0x59])
+    seen = set()
+    for d in res:
+        k = (d['out']['stop'], len(d['calls']))
+        if k not in seen: seen.add(k); d['keep'] = True
+    return res
+
+@unit('okrest')
+def _(n, rnd):
+    """CODE+0x6F98 okrest directly (the healing / aging / food branches are the interesting part)"""
+    def mk(e, r):
+        rest_state(e, r)
+        return [0x20]
+    res = run_keys(n, rnd, mk, 0x6f98, RSTOPS, stubs=RUI)
+    seen = set()
+    for d in res:
+        k = (d['out']['stop'], len(d['fin']) // 40)
+        if k not in seen: seen.add(k); d['keep'] = True
+    return res
