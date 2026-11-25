@@ -237,3 +237,10 @@ A two-phase routine (about 5.5 KB, up to `OV4+0xE16E`): phase 1 jump table `OV4+
 - the ranged-attack list `A4+0x1F4E` is read only by the volley;
 - a surprise decision would have to read something before the volley's first monster turn; the volley reads the list, `DmgT`, the picture class and the party order only.
 Together with the static census (no other code references the slot arrays) this closes the *absent* items for the pipeline as exercised: **monster-side surprise, flee/morale, monster spells and call-for-help are absent from every harnessed path and from every code reference to the slot arrays** (still not a proof for code that reaches the arrays through a computed pointer, which this compiler does not emit for these globals). Door **bash**: unchanged (absent; no string or second roll). Re-run: `python3 tools/mm3/rules_oracle/audit_monster_reads.py`.
+
+### 20.5 What stays open, and the smallest next step
+- **Starting gold/gems/food:** blocked on a file the corpus does not contain (20.2). Smallest step: one fresh-game snapshot of `A4-0x1308/-0x1304/-0x1318`.
+- **Event stat engine `OV4+0xCB20`** (20.3): ~190 field handlers in two jump tables (`0xD02E`, `0xD766`); a harness is straightforward (stub nothing but the prompt `0xC678` and the UI) but the TS port is a 190-case table; it adds field arithmetic only. Smallest step: harness the engine for the pool ids first (gold, gems, food, HP, conditions) and port those cases.
+- **Party step terrain gate** (`OV4+0x7300..0x7A00`, 20.1): the gate uses the harnessed `partySkill`; the rest of the step (walk test `0x3DA`, the 12-way terrain jump table at `0x7966`) is not harnessed. Smallest step: harness the step function entry with the walk test stubbed per terrain code.
+- **Arena `OV5+0x27C8`**: a file picker and menu (`%s.mon`), UI. **Event monster-reset** (`OV4+0xAA9A..0xAB50`): a handler inside the unharnessed square-action processor `0x9B86`; mid-function entry is the way (as MM2's Hall).
+- **Spells 24 and 37:** display screens (19.7); not rules.
