@@ -740,12 +740,22 @@ async function main() {
       : null; // null = the loader's data-derived entrance tile
   await loadGame(startGame, startLevel, initialPose);
 
+  // `?play=1` (Black Crypt): the remake engine (tools/blackcrypt/remake) drives pose and rules; the view only renders.
+  let play: { update(dtMs: number): Pose | null } | null = null;
+  if (startGame === 'blackcrypt' && new URLSearchParams(window.location.search).get('play') === '1') {
+    const { attachBlackCryptPlay } = await import('../blackcrypt/remake/browser.ts');
+    play = await attachBlackCryptPlay(
+      { getView: () => view, loadMap: (level, pose) => loadGame('blackcrypt', level, pose), setStatus },
+      startLevel,
+    );
+  }
+
   let lastTime = performance.now();
   function frame(now: number) {
     const dtMs = now - lastTime;
     lastTime = now;
 
-    const newPose = view.update(dtMs, keys);
+    const newPose = play ? play.update(dtMs) : view.update(dtMs, keys);
     const moveMsg = view.takeMessage?.();
     if (moveMsg) setStatus(moveMsg);
     const levelChange = view.takeLevelChange?.();
