@@ -216,3 +216,65 @@ CODE+0x12C6E: the prompt is `A-Attk  B-Bribe  H-Hide  R-Run` (in-game strings). 
 
 CODE+0x12A22 `fight()`. Setup: group sizes (10.1), slot init (10.1), the acting character `A4-1272 = rand(1, partySize) - 1`. **Each round**: clear all acted flags; for each monster `i < min(count,10)` with any status bit besides bit 0: `status = status & ((rand(1, recordIndex) & 0xFE) ^ 0xFE)` — a status bit survives a round only while the matching bit of a `rand(1, recordIndex)` roll is clear, so statuses wear off faster on higher-tier monsters, and bit 0 never survives. **Actor selection**: the unacted monster with the highest initiative `A4-1294[i]` (first wins ties, must be > 0) and the unacted party member with the highest `+0x6E` (first wins ties, must be > 0); the **party acts when its initiative is >= the best monster's** (ties go to the party), else the monster acts; when neither exists the round ends. After every action the battle-over test (CODE+0x13282: no monsters, empty party, `A4-1315` set, or no member with condition `<= 0x10`) runs; at the end of the round it runs again and a new round starts if it is clear. Order within a round is therefore deterministic from stats; the only randomness is the status decay. The real action routines (party CODE+0x119C2, monster CODE+0x1064C) are **stubs** in the vectors: a stub models only the acted flag (the monster action also sets `A4-1309`) plus one scripted effect (flag, kill, status, initiative edit); everything an action does beyond that is open (monster turn: see section 11, party commands: `mm2-rules-spell-effects`). After the loop: no monsters -> the XP/treasure end (CODE+0x12430, 4.7); else if `A4-24140` (a member ran) or `A4-1315` -> `retreat` (10.2).
 - **A member runs** CODE+0x116B0 (harness: 2,000): `rand(1,100) < A4-22029` -> `A4-24140 = 1`, party size -1, the last member (slot and acted flag) moves into the runner's slot, `A4-24141` clamped, acting character reset.
+
+## 11. Monster side: turn, targeting, special attacks, damage and death (pass 2)
+
+Ports: `tools/mm2/rules3.ts`; vectors `mondeath, mondamage, questkill, resolve, tgtranged, tgtmelee, monturn, setcond, monspecial2`; tests in `rules2.test.ts` (same method as section 10: UI is stubbed, never the rules).
+
+### 11.1 The monster's turn — CODE+0x1064C (harness: 2,000; the leaf actions are logged stubs)
+
+`slot = A4-1271`; its acted flag is set, the record is unpacked, then:
+1. `status & 0x30` (asleep 0x10 / held 0x20): the monster does nothing.
+2. `status >= 0x80`: applies the lingering party effect `A4-1313` (tables `A4-28454` u16[] / `A4-28446` u8[]), no attack. (`partyEffect`, CODE+0x10894, open.)
+3. `status & 0x40`: does nothing (message).
+4. **Flee** (unless `A4-1314`): `fleeThr = u8[4]@A4-28442[record oabil bits 5-6 (A4-4534)]`; if `fleeThr < partyHalfLevel (A4-28610)` and `rand(1,100) <= 50` the monster **leaves the fight** (removed from the slot table, no XP/loot, 11.4).
+5. Otherwise the **ability gate** (4.5: needs uses > 0, status bit 6 clear, `rand(1,100) <= pabil chance`; spends one use) decides: **gate fails** -> if `slot < A4-1316` (inside the melee group) a **melee attack** (target pick 11.2, roll 4.1); else if the record's sabil bit 6 (`A4-4526`) and `rand(1,100) <= 80` a **ranged attack** (target pick 11.2, roll 4.1 with `A4-24114 = 1`); else it **advances** (CODE+0x10118: may call reinforcements — once per battle (`A4-24139`) a monster of the same kind as slot 10 with the reinforcement bit (`A4-4513`) and `10 < count < 110` adds `count - 10` more). **Gate passes** -> the record's group verb `v = A4-4540` (0..31; names in the game's own table at `A4-28246`: sprays poison, sprays acid, casts a curse, breathes fire/lightning/cold/energy/gas/acid, explodes, gazes, drains magic, drains spell level, vaporizes valuables, juggles party, energy blast, sleep, lightning bolts, fireballs, fingers of death, disintegrate, super shock, dancing sword, incinerate, and invokes power, implosion, inferno, pain, silence, frenzies, paralyze): `v < 0x0F`, `0x1D` or `>= 0x1F` cast through the spell dispatcher (CODE+0x1FB4E, open); other `v` run CODE+0x1042C (`special`, open) when `status & 2`, else the spell dispatcher too.
+
+### 11.2 Who a monster hits (harness: 2,000 each)
+
+- **Melee target** CODE+0x103BA: rotates the acting-character pointer `A4-1272` through the front rank `A4-24141` (the number of exposed members, set by 10.1), growing the rank by one (cap party size) each time the walk has gone round it, until it lands on a member with neither the unconscious (0x40) nor dead (0x80) bit.
+- **Ranged/spell target** CODE+0x10332: `rand(1, partySize) - 1`, then the next living member scanning forward. **Quirk (code bug, reproduced):** when the scan wraps past the last slot the dead/alive test still uses the *stale pointer* of the slot that was one past the end, so slot 0 can be returned while dead (and after a wrap the loop re-enters with `r = 0`). It also resets `A4-1272` to 0 whenever it is >= party size.
+
+### 11.3 Special attack effects — CODE+0x0FD8C and CODE+0x1F27E (harness: 3,000 + 4,000)
+
+After a melee hit (not ranged, not when `A4-1270`, target not dead): hit chance `tier + u8[16]@A4-28422[tier] >= d100` (`tier = recordIndex >> 4`, byte add); sabil bit 5 (`A4-4536`) gives the target a luck save (4.4) that cancels it; effect id `A4-4537` (record sabil low 5 bits) `>= 0x20` does nothing, `0x1F` becomes `rand(1,30)`. A target already unconscious or dead widens the front rank. The effect then goes through `set_condition` (also the target of spell effects on party members); **all 30 effects are harness-verified**:
+
+| id | message | rule |
+|---|---|---|
+| 1 | lost gold | roster index < 24 only; save +0x1E; `+0x66` (u32) -= 0x10000 / 0x100 / 1 by magnitude |
+| 2 | lost gems | save +0x1E; `+0x5C` -= 0x100 or 1 |
+| 3 | is poisoned | save +0x1C; cond \|= 0x08 |
+| 4 | is diseased | save +0x1C; cond \|= 0x04 |
+| 5 | falls asleep | save +0x1B; cond \|= 0x10 |
+| 6 | is cursed | save +0x16; cond \|= 0x01 |
+| 7 | is silenced | save +0x16; cond \|= 0x02 |
+| 8 | is paralyzed | save +0x1C; cond \|= 0x20 |
+| 9 | collapses | save +0x1C; cond \|= 0x40 (unconscious) |
+| 10 / 11 / 12 | dies / turns to stone / is eradicated | no save; cond = 0x81 / 0x82 / 0xFF |
+| 13 | lost item | save +0x1E; first non-empty backpack slot cleared, the rest shift down (three 6-byte arrays at `+0x3A`, `+0x40`, `+0x46`) |
+| 14 | lost backpack | save +0x1E; all 6 slots cleared |
+| 15 / 16 | lost food / all food | save +0x1E; `+0x25` halved / zeroed |
+| 17 / 18 | lost all gold / gems | as 1 / 2, zeroed |
+| 19 | lost valuables | food, gems, gold (three separate saves) |
+| 20 / 21 | is aged | `+0x21` += 1 / 5, cap 200, no save |
+| 22 / 23 | lost statistics | working stats (`+0x6B..+0x71`, via table `A4-26232`) -= 2 / halved; an underflow kills |
+| 24 | lost statistics | one random base stat `+0x10..+0x15` -= 1 (dies at 0) |
+| 25 / 26 | lost level | working level `+0x71` -= 2 / half |
+| 27 | lost experience | `+0x62` -= rand(1,80)+20 (floor 0) |
+| 28 | items scrambled | save +0x1E; each backpack item id below 0xD0 is replaced by `rand(1,0xCF)` |
+| 29 | lost spell points | save +0x1A; `+0x58` = 0 |
+| 30 | is assassinated | save +0x1E; HP (`+0x5E`) = 0 and cond \|= 0x40 |
+
+A save succeeds (the effect takes) when `d100 >= resist byte`, so a *high* byte protects; byte 0 always takes. The condition bit meanings (0x01 cursed, 0x02 silenced, 0x04 diseased, 0x08 poisoned, 0x10 asleep, 0x20 paralyzed, 0x40 unconscious, 0x80+ dead/stone/eradicated) come from the game's own message strings paired with the harness-verified masks; rest (5.5) clears 0x02/0x10/0x20/0x40 and keeps 0x01/0x04/0x08.
+
+### 11.4 Applying damage to monsters and death (harness: 2,000 each)
+
+- **Party hit applied** CODE+0x11040: immune (no damage) if the monster's record byte `0x19` field `A4-4528` is non-zero and `A4-4528 - 1 == attacker sex byte (+0x0C)` (field 1 = male attackers have no effect, 2 = female, 3 = none), or the mres bit 2 `A4-4516` is set; otherwise a non-zero total goes to damage.
+- **Damage** CODE+0x10EAC: status byte wiped unless `> 0x80`, then bit 4 cleared and bit 0 set; `hp > damage` -> `hp -= damage`, else the monster **dies at damage >= hp** and `A4-3852` becomes 0xFFFF.
+- **Death** CODE+0x10E5E: quest bookkeeping (CODE+0x10C66: a party member whose `+0x78` equals the victim's record index and whose `+0x7C` bit 0 is set gets `+0x7C` bit 1 set; hyp: quest target), kill reward (4.6), removal CODE+0x10CCE (count -1, melee group clamped, per-slot arrays shift down), and for slot 10 (the aggregate of queued monsters) the XP of all `count - 9` queued monsters is awarded at once and the count reset to 10.
+
+> **Correction (2026-11-25):** section 3.1 / the record decode: the speed byte `0x14` high nibble + 1 (`A4-4538`) is the monster's **ability uses per battle** (copied to `A4-1283[slot]` at battle start, spent by the gate in 4.5), not an unidentified field.
+
+> **Correction (2026-11-25):** the surprise odds in section 7 ("`rand(1,100) <= 0x28` and `<= A4-24142` -> surprise 2, `>= 0x5A` -> 3, hyp") are now harness-verified (10.2) with the missing pieces: `A4-24142` is the party average of character byte `+0x1E`, 2 means *the party* surprises, 3 means the monsters surprise (suppressed by `A4-31142`).
+
+> **Correction (2026-11-25):** the "monster call-for-help/morale" gap: MM2 does have a morale check (11.1 step 4) and a once-per-battle reinforcement call (11.1 step 5).

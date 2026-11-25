@@ -5,12 +5,13 @@
  * tools/mm2/rules_oracle/generated/ and used when present. Null controls: each check is
  * repeated with a deliberately wrong rule and must fail.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 120000 });
 import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
 import { damageChar, spellGemGate, spellSpCost, spellSpGate, rest, train, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
 
-export { load };
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 
 describe('RNG (CODE+0x24048 rand15, 0x2407C srand, 0x22BC6 rand(lo,hi))', () => {

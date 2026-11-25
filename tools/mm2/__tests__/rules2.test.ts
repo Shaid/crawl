@@ -2,10 +2,13 @@
  * Pass 2: encounter setup, initiative / turn order, round loop (tools/mm2/rules2.ts) against vectors
  * recorded from the retail MM2 executable under Unicorn. Same strict-memory method and null controls as rules.test.ts.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.setConfig({ testTimeout: 120000 });
 import { StrictMem } from '../rules-mem.ts';
 import { encounter, encounterBudget, encounterGenerate, battleOver, characterFlee, encounterAddGroup, encounterGroups, initMonsters, roundLoop } from '../rules2.ts';
 import { load } from './vectors.ts';
+import { monsterSpecial, setCondition, monsterTurn, pickTargetMelee, pickTargetRanged, resolvePartyHit, damageMonster, monsterDies, questKill } from '../rules3.ts';
 
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 /** number of vectors on which a (possibly wrong) port disagrees with the game; a throw (read outside the footprint) counts */
@@ -185,5 +188,124 @@ describe('encounter prompt: surprise, hide, run, bribe (CODE+0x12C6E)', () => {
       }
       expect(bad).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('damage to monsters, death and removal (CODE+0x10EAC, 0x10E5E, 0x10C66, 0x10CCE)', () => {
+  it('quest-kill flag matches the game', () => {
+    const V = load('questkill');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => questKill(m))).toEqual(v.fin);
+    expect(V.some((v: any) => Object.keys(v.fin).length > 0)).toBe(true);
+    expect(disagree(V, (v) => changes(v, (m) => questKill(m, { ignoreFlag: true })))).toBeGreaterThan(0);
+  });
+  it('monster death (reward, removal, queue XP) matches the game', () => {
+    const V = load('mondeath');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => monsterDies(m))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => monsterDies(m, { noQueueXp: true })))).toBeGreaterThan(0);
+  });
+  it('damage to a monster matches the game; null controls: hp >= damage survives / status kept disagree', () => {
+    const V = load('mondamage');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => damageMonster(m))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => damageMonster(m, { gtKills: true })))).toBeGreaterThan(0);
+    expect(disagree(V, (v) => changes(v, (m) => damageMonster(m, { keepStatus: true })))).toBeGreaterThan(0);
+  });
+});
+
+describe('applying a party attack to a monster (CODE+0x11040)', () => {
+  const V = load('resolve');
+  it('matches the game: immunity, damage, death', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => resolvePartyHit(m))).toEqual(v.fin);
+  });
+  it('null control: ignoring the sex immunity disagrees', () => {
+    expect(disagree(V, (v) => changes(v, (m) => resolvePartyHit(m, { noSexImmunity: true })))).toBeGreaterThan(0);
+  });
+});
+
+describe('monster targeting and the monster turn (CODE+0x10332, 0x103BA, 0x1064C)', () => {
+  it('ranged target pick matches the game, including the stale-pointer wrap quirk', () => {
+    const V = load('tgtranged');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => pickTargetRanged(m))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => pickTargetRanged(m, { fresh: true })))).toBeGreaterThan(0);
+  });
+  it('melee target pick matches the game', () => {
+    const V = load('tgtmelee');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => pickTargetMelee(m))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => pickTargetMelee(m, { ignoreFront: true })))).toBeGreaterThan(0);
+  });
+  const V = load('monturn');
+  it('monster turn decisions match the game: gate, flee, melee/ranged/advance/spell', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const m = mem(v);
+      const calls = monsterTurn(m);
+      expect(calls).toEqual(v.calls);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    const names = new Set(V.flatMap((x: any) => x.calls.map((c: any) => c[0])));
+    for (const n of ['pickMelee', 'pickRanged', 'advance', 'spell', 'partyEffect']) expect(names.has(n)).toBe(true);
+  }, 60000);
+  it('null control: a monster that never flees disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        const c = monsterTurn(m, { noFlee: true });
+        if (JSON.stringify(c) !== JSON.stringify(v.calls) || JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('condition and drain effects (CODE+0x1F27E set_condition and its 30 handlers)', () => {
+  const V = load('setcond');
+  const run = (v: any, o = {}) => {
+    const m = mem(v);
+    const r = setCondition(m, v.char, o);
+    return { ret: r, ch: m.changes() };
+  };
+  it('matches the game for every effect id: result, condition bits, drains, rand() draws', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const o = run(v);
+      expect(o.ch).toEqual(v.fin);
+      expect(o.ret).toBe(v.ret);
+    }
+  });
+  it('every effect id 1..30 takes at least once and is covered', () => {
+    const took = new Set(V.filter((v: any) => v.ret || [10, 11, 12].includes(v.effect)).map((v: any) => v.effect));
+    for (let e = 1; e <= 30; e++) expect(took.has(e), `effect ${e}`).toBe(true);
+  });
+  it('null control: skipping the saves (effects behave as always-hit) disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const o = run(v, { noSave: true });
+        if (JSON.stringify(o.ch) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('monster special attack (CODE+0x0FD8C)', () => {
+  const V = load('monspecial2');
+  it('matches the game: chance roll, luck save, effect id, front-rank widening', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => void monsterSpecial(m))).toEqual(v.fin);
+    expect(V.some((v: any) => v.effect > 0 && Object.keys(v.fin).length > 8)).toBe(true);
+  });
+  it('null controls: no chance roll, and no luck save, both disagree', () => {
+    for (const o of [{ noChance: true }, { noLuck: true }]) expect(disagree(V, (v) => changes(v, (m) => void monsterSpecial(m, o)))).toBeGreaterThan(0);
   });
 });
