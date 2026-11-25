@@ -32,6 +32,7 @@ import type {
 import { type CellPlanes } from '../wizardry6/evaluate-cell.ts';
 import { buildViewItems, canStepDir } from '../wizardry6/view-model.ts';
 import { arrive, tryMove, W6TriggerState, type W6LevelLinks, type MoveResult } from '../wizardry6/movement.ts';
+import { LiveEntityLevel, type LiveSource } from '../blackcrypt/remake/live-scene.ts';
 
 /**
  * A data-derived "map entrance" start pose — the best available signal for
@@ -161,6 +162,15 @@ export interface BlackCryptViewOptions {
   onInteract?: (msg: string) => void;
 }
 
+/** What the remake shell plugs into the view (`?play=1`): live entity lists for the package's prop pass and extra draw items (monsters, effects). */
+export interface BlackCryptLive {
+  source: LiveSource;
+  /** extra items for the current pose (monsters, effects); called when the live scene is refreshed */
+  overlay(pose: Pose, base: DrawItem[]): DrawItem[];
+  /** a click on a hotspot while live: the shell turns it into an engine command instead of patching the static record */
+  onHotspot?(hotspot: { code: number }, entity: import('@seer-project/dungeon').EntityRecord | null, handle: string | null): void;
+}
+
 /** Type-nibble bit for a "water" square (`bcdfs` on-disk type byte `0x8F`; `docs/blackcrypt/amiga/data-structure.md` "bcdfs — Map / Dungeon Format" § "Square format"). */
 const WATER_TYPE_BIT = 0x8;
 /** Level 3 is explicitly exempted from the water re-tint by `S_1 +0x02D46` itself (`CMPI.W #$3,$1E5C(A4) / BEQ`), even though it has 5 water-typed squares of its own. */
@@ -222,6 +232,10 @@ export class BlackCryptView implements GameView {
   private lastMirrorRawItems: DrawItem[] | null = null;
   private lastMirrorToggleApplied = false;
   private lastMirrorItems: DrawItem[] = [];
+  private readonly liveLevel: LiveEntityLevel;
+  private live: BlackCryptLive | null = null;
+  private liveVersion = 0;
+  private liveCache: { base: DrawItem[]; version: number; out: DrawItem[] } | null = null;
 
   constructor(opts: BlackCryptViewOptions) {
     this.unit = opts.unit;
@@ -246,12 +260,14 @@ export class BlackCryptView implements GameView {
     automapState.onEnterCell(opts.startPose.level, opts.startPose.x, opts.startPose.y);
     this.automap = { level, bank: opts.automapBank, state: automapState, width: worldWidth, height: worldHeight };
 
-    this.walker = new Walker(level, opts.slots, opts.semantics, opts.banks, opts.startPose, opts.bindings, {
+    this.liveLevel = new LiveEntityLevel(level);
+    this.walker = new Walker(this.liveLevel, opts.slots, opts.semantics, opts.banks, opts.startPose, opts.bindings, {
       // noclip flips the movement gate; the closure reads a mutable flag so
       // the toggle doesn't need to rebuild the Walker.
       canStep: (pose, dir) => this.noclip.on || bcCanStep(level, opts.semantics, pose, dir),
     });
     this.walker.onInteract = (hotspot, entity, handle) => {
+      if (this.live) { this.live.onHotspot?.(hotspot, entity, handle); return; }
       if (entity && handle) {
         const before = { open: (entity.raw?.[0x0f] ?? 0) & 1 ? true : false };
         this.walker.setEntityState(handle, { open: !before.open });
@@ -274,6 +290,25 @@ export class BlackCryptView implements GameView {
     return this.walker.pose;
   }
   get items(): DrawItem[] {
+    const base = this.baseItems();
+    if (!this.live) return base;
+    if (this.liveCache && this.liveCache.base === base && this.liveCache.version === this.liveVersion) return this.liveCache.out;
+    const out = [...base, ...this.live.overlay(this.walker.pose, base)];
+    this.liveCache = { base, version: this.liveVersion, out };
+    return out;
+  }
+  /** plug the live scene in (or out with `null`); the next `items` read rebuilds from the engine's squares */
+  setLive(live: BlackCryptLive | null): void {
+    this.live = live;
+    this.liveLevel.source = live ? live.source : null;
+    this.refreshLive();
+  }
+  /** the engine state changed (a tick ran): rebuild the view list and the overlay on the next read */
+  refreshLive(): void {
+    this.liveVersion++;
+    this.walker.setPose(this.walker.pose);
+  }
+  private baseItems(): DrawItem[] {
     const raw = this.walker.items;
     if (!this.mirrorToggle || this.mirrorOverrides.size === 0) return raw;
     if (raw === this.lastMirrorRawItems && this.lastMirrorToggleApplied === this.mirrorToggle) {

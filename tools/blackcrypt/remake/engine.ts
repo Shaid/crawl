@@ -95,7 +95,19 @@ export interface BcView {
   /** what is on the square ahead */
   ahead: { x: number; y: number; wall: boolean; monsters: { id: number; gfx: number; hp: number }[]; structures: { id: number; type: number; state: number }[]; items: { id: number; gfx: number }[] };
   light: number; resting: boolean; gameOver: boolean; cursor: number;
+  /** the squares in sight, depth 0 (own square) to 3 and lateral -1 (left) .. 1 (right) of the facing, in the walker's `project()` convention, each with its live contents */
+  scene: BcSceneCell[];
 }
+/** one square of the live scene: structures carry the open bit of the door word (+0x0E bit 0) */
+export interface BcSceneCell {
+  depth: number; lateral: number; x: number; y: number;
+  monsters: { id: number; gfx: number; hp: number }[];
+  structures: { id: number; type: number; state: number; open: boolean }[];
+  items: { id: number; gfx: number }[];
+}
+/** a live object of a square as its 20-byte on-disk record (the walker's entity record is built from these bytes) */
+export interface BcEntity { id: number; monster: boolean; raw: number[] }
+export const SCENE_DEPTH = 3;
 
 const DIRS: [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 
@@ -165,7 +177,27 @@ export const BcEngine = {
       return { name: st.names[k], cls: a.w(o), level: a.b(o + 0x5e), xp: ((a.w(o + 0xa0) << 16) | a.w(o + 0xa2)) >>> 0, hp: a.sw(o + 0x4e), maxHp: a.sw(o + 0x50), food: a.sw(o + 0x52), water: a.sw(o + 0x54), energy: a.sw(o + 0x56),
         alive: a.sw(o + 0x4e) > 0, spells: [0, 1, 2, 3, 4].map(i => a.b(o + 0x49 + i)).filter(v => v !== 0xff), hands: [a.w(o + 0x1c), a.w(o + 0x1a)] as [number, number], pack: Array.from({ length: 18 }, (_, i) => a.w(o + 0x16 + 2 * i)) };
     });
-    return { tick: st.sim.tick, map: st.map, pose: { map: st.map, x, y, facing: f }, party, ahead, light: a.w(0x1754), resting: a.w(0x1746) !== 0, gameOver: st.sim.gameOver, cursor: a.w(0x1a22) };
+    const scene: BcSceneCell[] = [];
+    const [rx, ry] = DIRS[(f + 1) & 3];
+    for (let depth = 0; depth <= SCENE_DEPTH; depth++) for (const lateral of [-1, 0, 1]) {
+      const cx = x + dx * depth + rx * lateral, cy = y + dy * depth + ry * lateral;
+      const cell: BcSceneCell = { depth, lateral, x: cx, y: cy, monsters: [], structures: [], items: [] };
+      for (const e of BcEngine.entitiesAt(st, cx, cy)) {
+        const g = (e.raw[0] << 8) | e.raw[1], t = e.raw[5];
+        if (e.monster) cell.monsters.push({ id: e.id, gfx: g, hp: a.sw(OBJ(e.id) + 8) });
+        else if (t >= 0x10 && t !== 0x15) cell.structures.push({ id: e.id, type: t, state: (e.raw[0xe] << 8) | e.raw[0xf], open: (e.raw[0xf] & 1) !== 0 });
+        else cell.items.push({ id: e.id, gfx: g });
+      }
+      scene.push(cell);
+    }
+    return { tick: st.sim.tick, map: st.map, pose: { map: st.map, x, y, facing: f }, party, ahead, light: a.w(0x1754), resting: a.w(0x1746) !== 0, gameOver: st.sim.gameOver, cursor: a.w(0x1a22), scene };
+  },
+
+  /** every object on a square (monsters, structures, floor items) as raw records, chain order; empty off the map */
+  entitiesAt(st: BcState, x: number, y: number): BcEntity[] {
+    if (x < 0 || y < 0 || x >= 64 || y >= 64) return [];
+    const a = st.sim.a;
+    return st.sim.chain(x, y).map(id => ({ id, monster: (a.w(OBJ(id)) & 0x8000) !== 0, raw: Array.from({ length: 20 }, (_, i) => a.b(OBJ(id) + i)) }));
   },
 
   save(st: BcState): Uint8Array {
