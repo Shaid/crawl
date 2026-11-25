@@ -9,6 +9,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const V = JSON.parse(readFileSync(resolve(here, '../rules_oracle/vectors.json'), 'utf8'));
 export const rules: BcRulesData = { tables: V.tables, weaponBase: V.weaponBase, scripts: V.aiScripts };
 
+/** the spell book tables (committed 0.5 KB fixture `rules_oracle/spellbook.json`): rules with the book wired */
+const SB = JSON.parse(readFileSync(resolve(here, '../rules_oracle/spellbook.json'), 'utf8'));
+export const rulesBook: BcRulesData = { ...rules, spells: { pageHead: SB.pageHead, pageNext: SB.pageNext, next: SB.next, level: SB.level } };
+
 const rec = (f: { w0?: number; b5?: number; b7?: number; w8?: number; wA?: number; wC?: number; wE?: number; w10?: number; b0d?: number }) => {
   const r = new Uint8Array(20);
   const sw = (o: number, v: number) => { r[o] = v >> 8; r[o + 1] = v & 0xff; };
@@ -61,3 +65,4 @@ export class MapBuilder {
   build(index = 1): BcMap { return { index, cells: this.cells, present: this.present, chains: this.chains }; }
 }
 export const world = (maps: BcMap[]): BcWorld => ({ rules, maps, kit: null });
+export const worldBook = (maps: BcMap[]): BcWorld => ({ rules: rulesBook, maps, kit: null });

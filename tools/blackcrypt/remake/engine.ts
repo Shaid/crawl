@@ -11,6 +11,9 @@ import { OBJ, CELL, QN, activationScan, scheduleEvent } from '../rules-spell9';
 import { parseBcdfs, entrancePose, isMonster, type BcMap } from './bcdfs';
 import { loadMapInto } from './world-load';
 import type { Engine, FileSet, Detection, CoverageRow } from '../../remake/engine';
+import { CLASS_TEMPLATES, CLASS_FIRST_PAGE, defaultParty, checkDraft, portraitIndex, type CharDraft } from './chargen';
+
+export type { CharDraft };
 
 export type { Cmd as BcCmd };
 export type BcEvent = { tick: number; what: string; [k: string]: unknown };
@@ -37,6 +40,8 @@ export class BcState {
   map = 1;
   seed: number;
   names = CLASS_NAMES.slice();
+  /** absolute portrait index (0..35, bcdfo) per character */
+  portraits = [0, 9, 18, 27];
   world: BcWorld;
   constructor(world: BcWorld, seed: number) { this.world = world; this.seed = seed; }
 }
@@ -46,8 +51,18 @@ function makeSim(world: BcWorld, seed: number): BcSim {
 }
 
 /** the new-game party (docs 1.3) plus the 20-record starting kit when available. Hyp: kit item ids 1..20 in the table's order, 5 per character, in pack row 0 */
-function newParty(sim: BcSim, world: BcWorld) {
-  startingParty(world.rules.tables).forEach((c, k) => sim.setChar(k, c));
+function newParty(sim: BcSim, world: BcWorld, drafts: CharDraft[]) {
+  startingParty(world.rules.tables).forEach((c, k) => {
+    const d = drafts[k], t = world.rules.tables;
+    const [str, int, wis, dex, con] = d.stats;
+    // armour = T1[DEX] + 6 + 2 (game-rules 8.8); the name is also written at rec+2 so a save carries it (code, 12 characters + NUL)
+    sim.setChar(k, { ...c, str, int, wis, dex, con, ac: t.statBonusT1[dex] + 6 + 2 });
+    const o = CH(k); for (let i = 0; i < 13; i++) sim.a.setB(o + 2 + i, i < d.name.length ? d.name.charCodeAt(i) : 0);
+    // class-dependent bytes +0x46 = first book page, copied to +0x47, +0x48 = 1 (code; meaning hyp)
+    sim.a.setB(o + 0x46, CLASS_FIRST_PAGE[k]); sim.a.setB(o + 0x47, CLASS_FIRST_PAGE[k]); sim.a.setB(o + 0x48, 1);
+  });
+  // only page 0 of each of the three books starts owned (game-rules A.1, code): pages 0, 5, 10
+  if (sim.book) sim.book.owned = sim.book.pageHead.map((_h, p) => (CLASS_FIRST_PAGE.includes(p as 0 | 5 | 10) ? 1 : 0));
   if (!world.kit) return;
   const slotWords = [0x16, 0x18, 0x1e, 0x20, 0x22];
   world.kit.forEach((rec, i) => {
@@ -91,10 +106,12 @@ function changeMap(st: BcState, map: number) {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 export interface BcView {
   tick: number; map: number; pose: { map: number; x: number; y: number; facing: number };
-  party: { name: string; cls: number; level: number; xp: number; hp: number; maxHp: number; food: number; water: number; energy: number; alive: boolean; spells: number[]; hands: [number, number]; pack: number[] }[];
+  party: { name: string; portrait: number; /** the book page open (+0x47) */ page: number; cls: number; level: number; xp: number; hp: number; maxHp: number; food: number; water: number; energy: number; alive: boolean; spells: number[]; hands: [number, number]; pack: number[] }[];
   /** what is on the square ahead */
   ahead: { x: number; y: number; wall: boolean; monsters: { id: number; gfx: number; hp: number }[]; structures: { id: number; type: number; state: number }[]; items: { id: number; gfx: number }[] };
   light: number; resting: boolean; gameOver: boolean; cursor: number;
+  /** the spell book: null when the engine was loaded without the book tables */
+  book: { pages: { page: number; owned: boolean; spells: { id: number; level: number; timer: number }[] }[] } | null;
   /** the squares in sight, depth 0 (own square) to 3 and lateral -1 (left) .. 1 (right) of the facing, in the walker's `project()` convention, each with its live contents */
   scene: BcSceneCell[];
 }
@@ -140,11 +157,17 @@ export const BcEngine = {
   /** the contract's `load(files, variant)` with the rules bound */
   withRules(rules: BcRulesData) { return { ...BcEngine, load: (f: FileSet, v: string) => BcEngine.load(f, v, rules) }; },
 
-  newGame(world: BcWorld, seed: number, opts: { map?: number; pose?: { x: number; y: number; facing: number } } = {}): BcState {
+  /** `party`: the four created characters in class order (Fighter, Cleric, Magic User, Druid); default = the class templates. An invalid draft throws with every reason. */
+  newGame(world: BcWorld, seed: number, opts: { map?: number; pose?: { x: number; y: number; facing: number }; party?: CharDraft[] } = {}): BcState {
     const st = new BcState(world, seed);
     st.sim = makeSim(world, seed);
     const map = opts.map ?? 1;
-    newParty(st.sim, world);
+    const drafts = opts.party ?? defaultParty();
+    if (drafts.length !== 4) throw new Error(`a party is four characters, got ${drafts.length}`);
+    const problems = drafts.flatMap((d, k) => checkDraft(k, d).map(m => `${CLASS_TEMPLATES[k].name}: ${m}`));
+    if (problems.length) throw new Error(`invalid party: ${problems.join('; ')}`);
+    st.names = drafts.map(d => d.name); st.portraits = drafts.map((d, k) => portraitIndex(k, d));
+    newParty(st.sim, world, drafts);
     enterMap(st, map, kitReserved(world));
     const p = opts.pose ?? entrancePose(world.maps[map - 1]);
     st.sim.party(p.x, p.y, p.facing);
@@ -174,7 +197,7 @@ export const BcEngine = {
     }
     const party = [0, 1, 2, 3].map(k => {
       const o = CH(k);
-      return { name: st.names[k], cls: a.w(o), level: a.b(o + 0x5e), xp: ((a.w(o + 0xa0) << 16) | a.w(o + 0xa2)) >>> 0, hp: a.sw(o + 0x4e), maxHp: a.sw(o + 0x50), food: a.sw(o + 0x52), water: a.sw(o + 0x54), energy: a.sw(o + 0x56),
+      return { name: st.names[k], portrait: st.portraits[k], page: a.b(o + 0x47), cls: a.w(o), level: a.b(o + 0x5e), xp: ((a.w(o + 0xa0) << 16) | a.w(o + 0xa2)) >>> 0, hp: a.sw(o + 0x4e), maxHp: a.sw(o + 0x50), food: a.sw(o + 0x52), water: a.sw(o + 0x54), energy: a.sw(o + 0x56),
         alive: a.sw(o + 0x4e) > 0, spells: [0, 1, 2, 3, 4].map(i => a.b(o + 0x49 + i)).filter(v => v !== 0xff), hands: [a.w(o + 0x1c), a.w(o + 0x1a)] as [number, number], pack: Array.from({ length: 18 }, (_, i) => a.w(o + 0x16 + 2 * i)) };
     });
     const scene: BcSceneCell[] = [];
@@ -190,7 +213,27 @@ export const BcEngine = {
       }
       scene.push(cell);
     }
-    return { tick: st.sim.tick, map: st.map, pose: { map: st.map, x, y, facing: f }, party, ahead, light: a.w(0x1754), resting: a.w(0x1746) !== 0, gameOver: st.sim.gameOver, cursor: a.w(0x1a22), scene };
+    const bk = st.sim.book;
+    const book = bk ? { pages: bk.pageHead.map((head, page) => { const spells: { id: number; level: number; timer: number }[] = []; for (let id = head, g = 0; id !== 0xff && g < 8; id = bk.next[id], g++) spells.push({ id, level: bk.level[id], timer: bk.timers[id] }); return { page, owned: !!bk.owned[page], spells }; }) } : null;
+    return { tick: st.sim.tick, map: st.map, pose: { map: st.map, x, y, facing: f }, party, ahead, light: a.w(0x1754), resting: a.w(0x1746) !== 0, gameOver: st.sim.gameOver, cursor: a.w(0x1a22), book, scene };
+  },
+
+  /**
+   * Turn character `ch`'s open page (+0x47) to `page`: only an owned page, and only inside the character's own book (pages 0-4 / 5-9 / 10-14). Not harness-verified (the book UI
+   * click paths are code-read only, game-rules A.1); returns whether the page was opened.
+   */
+  openPage(st: BcState, ch: number, page: number): boolean {
+    const bk = st.sim.book; if (!bk || page < 0 || page >= bk.pageHead.length || !bk.owned[page]) return false;
+    if (Math.floor(page / 5) !== Math.floor(CLASS_FIRST_PAGE[ch] / 5)) return false;
+    st.sim.a.setB(CH(ch) + 0x47, page); return true;
+  },
+  /**
+   * A page item read in the book (+0x0F3A0, code): the page's owned flag is set. **Stub:** which character may read it (item word +0xE), the page-chain order and whether the item is consumed
+   * are not modelled; the caller decides. Returns false when there is no book or the page is already owned.
+   */
+  learnPage(st: BcState, page: number): boolean {
+    const bk = st.sim.book; if (!bk || page < 0 || page >= bk.owned.length || bk.owned[page]) return false;
+    bk.owned[page] = 1; return true;
   },
 
   /** every object on a square (monsters, structures, floor items) as raw records, chain order; empty off the map */
@@ -203,7 +246,7 @@ export const BcEngine = {
   save(st: BcState): Uint8Array {
     const keys = [...st.sim.a.m.keys()].sort((p, q) => p - q);
     const rng = (st.sim.rng as unknown as { s: number[] }).s;
-    const doc = { v: 1, engine: 'blackcrypt', seed: st.seed, map: st.map, names: st.names, gameOver: st.sim.gameOver, monsterIds: st.sim.monsterIds, nextFixed: (st.sim as unknown as { nextFixed: number }).nextFixed,
+    const doc = { v: 1, engine: 'blackcrypt', seed: st.seed, map: st.map, names: st.names, portraits: st.portraits, gameOver: st.sim.gameOver, monsterIds: st.sim.monsterIds, nextFixed: (st.sim as unknown as { nextFixed: number }).nextFixed,
       rng, book: st.sim.book, a4: { k: keys, b: keys.map(k => st.sim.a.m.get(k)!) } };
     return new TextEncoder().encode(JSON.stringify(doc));
   },
@@ -211,7 +254,7 @@ export const BcEngine = {
     const d = JSON.parse(new TextDecoder().decode(bytes));
     if (d.engine !== 'blackcrypt' || d.v !== 1) throw new Error('not a Black Crypt save');
     const st = new BcState(world, d.seed);
-    st.sim = makeSim(world, d.seed); st.map = d.map; st.names = d.names;
+    st.sim = makeSim(world, d.seed); st.map = d.map; st.names = d.names; st.portraits = d.portraits ?? [0, 9, 18, 27];
     st.sim.a.m = new Map<number, number>(d.a4.k.map((k: number, i: number) => [k, d.a4.b[i]]));
     (st.sim.rng as unknown as { s: number[] }).s = d.rng;
     st.sim.gameOver = d.gameOver; st.sim.monsterIds = d.monsterIds; (st.sim as unknown as { nextFixed: number }).nextFixed = d.nextFixed; st.sim.book = d.book;
@@ -226,7 +269,8 @@ export const BcEngine = {
       { area: 'vitals, hunger, weight, light counter', grade: 'harness' }, { area: 'map load from bcdfs', grade: 'code', note: 'records verbatim; runtime ids are sequential (hyp)' },
       { area: 'stairs / map change', grade: 'stub', note: 'characters, carried items, buffs and clock kept; +0x16C62 itself is open' },
       { area: 'starting kit and party', grade: 'hyp', note: 'bcdfp 0x585C records, ids 1-20; start pose = first corridor square' }, { area: 'rest, LIGHT, held-party click whitelist', grade: 'code' },
-      { area: 'spell book memorise / recharge', grade: 'stub', note: 'needs cfg.spells; not wired into the new-game state' },
+      { area: 'spell book memorise / recharge', grade: 'harness', note: 'memoriseClick / rechargeTick; needs rules.spells (BcEngine.withRules); initial owned pages 0 / 5 / 10 code, page items (learnPage) stub' },
+      { area: 'character creation', grade: 'code', note: 'names, stats (min..20, pool 25), portraits; templates game-rules 1.3; whether the screen demands a spent pool is hyp; no creation UI' },
     ];
   },
 };
