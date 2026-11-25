@@ -43,7 +43,7 @@ def gen_monturn(n, rnd):
         flag = rnd.choice([0, 1, 1])
         def setup(e):
             pn = party(e, rnd)
-            sb(e, -0x33a9, flag)
+            sb(e, -0x33a9, flag); sb(e, -0x3307, 0); sb(e, -0x104a, rnd.choice([0, 2, 3, 5]))
             sb(e, 0x1f73, rnd.randint(1, 10)); sb(e, -0x1ba, rnd.randint(0, 10)); sb(e, -0x1b9, rnd.randint(0, 10))
             k = rnd.randint(0, 2)
             sb(e, -0x3309, pn + k)
@@ -165,6 +165,32 @@ def gen_spellsp(n, rnd):
     return out
 B.UNITS['spellsp'] = gen_spellsp
 B.UNITS['castpay'] = gen_castpay; B.UNITS['castrefund'] = gen_castrefund; B.UNITS['castblock'] = gen_castblock; B.UNITS['spellprice'] = gen_spellprice
+F_THR = OV_BASE[4] + 0xB7EC; F_SHORT = R(0x88CA); F_PAY2 = R(0x8964)
+def _trainchar(e, rnd):
+    fill_char(e, rnd, CH)
+    e.w8(CH + 0x23, rnd.choice([0, 1, 2, 3, 5, 11, 12, 13, 20, rnd.randint(0, 255)]))
+    e.w8(CH + 0x13, rnd.randint(0, 9))
+    e.w32(CH + 0x12c, rnd.choice([0, rnd.getrandbits(16), rnd.getrandbits(24), rnd.getrandbits(32)]))
+def gen_levelthr(n, rnd):
+    e = Emu(); Rc = Rec(e); out = []
+    for _ in range(n): out.append({'char': CH, 'args': [], **Rc.run(F_THR, ((CH, 4),), lambda e: _trainchar(e, rnd), ret_bits=32)})
+    return out
+def gen_shortfall(n, rnd):
+    e = Emu(); Rc = Rec(e); out = []
+    for _ in range(n): out.append({'char': CH, 'args': [], **Rc.run(F_SHORT, ((CH, 4),), lambda e: _trainchar(e, rnd), ret_bits=32)})
+    return out
+def gen_pay(n, rnd):
+    e = Emu(); Rc = Rec(e); out = []
+    e.stub(OV_BASE[4] + 0xB6F8, 'short', argfn=lambda e, sp: [e.r16(sp), e.r16(sp + 2), e.r16(sp + 4)])
+    for _ in range(n):
+        kind = rnd.choice([0, 0, 1, 1, 2, 3]); bank = rnd.choice([0, 1])
+        cost = rnd.choice([rnd.randint(0, 100), rnd.randint(0, 10000), rnd.getrandbits(32)])
+        def setup(e):
+            for d in (-0x1308, -0x1310, -0x1304, -0x130c): sl(e, d, rnd.choice([cost, cost - 1 if cost else 0, cost + 1, rnd.getrandbits(rnd.choice([8, 16, 32]))]) & 0xffffffff)
+            sw(e, -0x1318, rnd.choice([cost & 0xffff, rnd.randint(0, 500), rnd.getrandbits(16)]))
+        out.append({'args': [kind, cost, bank], **Rc.run(F_PAY2, (kind, (cost, 4), bank), setup)})
+    return out
+B.UNITS['levelthr'] = gen_levelthr; B.UNITS['shortfall'] = gen_shortfall; B.UNITS['pay'] = gen_pay
 UNITS = B.UNITS
 if __name__ == '__main__':
     B.main()

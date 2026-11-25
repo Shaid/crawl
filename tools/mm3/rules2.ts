@@ -5,7 +5,7 @@
  * `R+` = root CODE hunk, `OVn+` = overlay segment n; A4 = DATA + 0x7FFE.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { type Call, CHAR0, CHAR_SIZE, PARTY_MODE, TARGET, armourClass, charLevel, getStat, randRange, simpleCheck, worstCondition, elementDamage, xpSplit, c7ac } from './rules.ts';
+import { type Call, CHAR0, CHAR_SIZE, PARTY_MODE, TARGET, armourClass, charLevel, getStat, randRange, simpleCheck, worstCondition, elementDamage, xpSplit, c7ac, xpNextLevel } from './rules.ts';
 
 const s16 = (v: number) => ((v & 0xffff) << 16) >> 16;
 const u16 = (v: number) => v & 0xffff;
@@ -381,3 +381,33 @@ export function spellPrice(m: Mem, spell: number, shift: number): number {
   const sh = s16(shift) & 63;
   return (sh >= 32 ? 0 : base << sh) >>> 0;
 }
+
+// ---- training hall: experience and gold ----
+/** OV4+0xB7EC: experience needed to advance from the character's level L (+0x23): classTab[class] << (L-1) for L < 12, else (L-11)*0xFA000 + (classTab << 10). The total-XP-equivalent held by the record is R+0x88FC (xpNextLevel). */
+export function levelThreshold(m: Mem, c: number): number {
+  const L = m.r8(c + 0x23);
+  let d5: number, d4: number;
+  if (L < 12) { d5 = 0; d4 = L - 1; } else { d5 = L - 11; d4 = 10; }
+  const tab = s16(m.r16(g(-0x3fca) + 2 * m.r8(c + 0x13)));
+  const sh = d4 & 63;
+  return (Math.imul(d5, 0xfa000) + (sh >= 32 ? 0 : tab << sh)) >>> 0;
+}
+/** R+0x88CA: experience still missing for the next level = max(0, threshold - total), 0 when the character may be trained. */
+export function xpShortfall(m: Mem, c: number): number {
+  const d4 = (levelThreshold(m, c) - xpNextLevel(m, c)) | 0;
+  return d4 >= 1 ? d4 >>> 0 : 0;
+}
+/** R+0x8964(kind, cost, bank): pay `cost` from a pool: kind 0 gold (party A4-0x1308, bank A4-0x1310), 1 gems (party A4-0x1304, bank A4-0x130C), 2 food (u16 A4-0x1318, no bank flag). Returns 1 paid / 0 short (a message call is logged). Training cost is 10 * level^2 gold. */
+export function pay(m: Mem, kind: number, cost: number, bank: number): { ok: number; calls: Call[] } {
+  const pool = kind === 0 ? (bank ? -0x1310 : -0x1308) : kind === 1 ? (bank ? -0x130c : -0x1304) : null;
+  if (kind > 2 || kind < 0) return { ok: 1, calls: [] };
+  if (pool === null) {
+    if (m.r16(g(-0x1318)) < cost >>> 0) return { ok: 0, calls: [['short', [2, 0, 0]]] };
+    m.w16(g(-0x1318), m.r16(g(-0x1318)) - cost);
+    return { ok: 1, calls: [] };
+  }
+  if (m.r32(g(pool)) < cost >>> 0) return { ok: 0, calls: [['short', [kind, bank, 0]]] };
+  m.w32(g(pool), (m.r32(g(pool)) - cost) >>> 0);
+  return { ok: 1, calls: [] };
+}
+export const trainingCost = (level: number) => (10 * level * level) >>> 0;

@@ -21,3 +21,7 @@ npx vitest run tools/mm3
 
 Vectors contain no retail data except the executable's own constant tables and synthetic characters/monster slots.
 Do not commit `.venv/` or `generated/` (ignored here).
+
+Pass 2 (`rules2.py`, same recorder): monster turn / turn order / damage to a monster / item generator / spell cast gate / training. `rules2.py UNIT OUT.json --n N`;
+`xrefpc.py SEG HEX` lists PC-relative call sites of an overlay or root routine (the jump-table xrefs are `xref.py`). Tables are exported by
+`npx tsx tools/mm3/rules-tables.ts` into `public/assets/mm3/amiga/data/rules-tables.json` (gitignored).

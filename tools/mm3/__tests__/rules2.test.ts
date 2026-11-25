@@ -75,3 +75,12 @@ describe('spell cast gate (OV8+0x534 pay, OV8+0x5AA refund, OV4+0xB840 blocked, 
   it('price OV4+0xF13E', () => exact('spellprice', (m, v) => R.spellPrice(m, v.args[0], v.args[1]) as any, { ret: true, bits: 32 }));
   it('null control: ignoring the gem cost', () => differs('castpay', (m, v) => R.castPay(m, v.char, v.args[0], { noGems: true }) as any, { ret: true }));
 });
+
+describe('training hall (OV4+0xB7EC threshold, R+0x88CA shortfall, R+0x8964 payment)', () => {
+  it('level threshold', () => exact('levelthr', (m, v) => R.levelThreshold(m, v.char) as any, { ret: true, bits: 32 }));
+  it('xp shortfall', () => exact('shortfall', (m, v) => R.xpShortfall(m, v.char) as any, { ret: true, bits: 32 }));
+  it('payment from gold / gems / food', () => exact('pay', (m, v) => { const r = R.pay(m, v.args[0], v.args[1], v.args[2]); return r.calls; }));
+  it('payment return value', () => { for (const v of load('pay')) { const m = mem(v); expect(R.pay(m, v.args[0], v.args[1], v.args[2]).ok).toBe(v.ret & 0xffff); } });
+  it('training cost is 10 * level^2 (R+0x8964 argument at OV5+0x1F02)', () => { expect(R.trainingCost(1)).toBe(10); expect(R.trainingCost(10)).toBe(1000); });
+  it('null control: shortfall without the level-12 linear term', () => differs('levelthr', (m, v) => { const L = m.r8(v.char + 0x23); return (L >= 12 ? R.levelThreshold(m, v.char) - (L - 11) * 0xfa000 : R.levelThreshold(m, v.char)) as any; }, { ret: true, bits: 32 }));
+});
