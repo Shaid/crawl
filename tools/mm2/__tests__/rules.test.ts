@@ -6,19 +6,11 @@
  * repeated with a deliberately wrong rule and must fail.
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
-import { resolve } from 'node:path';
+import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
 import { damageChar, spellGemGate, spellSpCost, spellSpGate, rest, train, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
 
-const DIR = resolve('tools/mm2/rules_oracle');
-export function load(name: string): any[] {
-  const full = resolve(DIR, 'generated', `${name}.json`);
-  if (existsSync(full)) return JSON.parse(readFileSync(full, 'utf8'));
-  const gz = resolve(DIR, 'vectors', `${name}.json.gz`);
-  return JSON.parse(gunzipSync(readFileSync(gz)).toString('utf8'));
-}
+export { load };
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 
 describe('RNG (CODE+0x24048 rand15, 0x2407C srand, 0x22BC6 rand(lo,hi))', () => {

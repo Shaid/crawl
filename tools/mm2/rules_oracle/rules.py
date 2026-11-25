@@ -365,7 +365,234 @@ def gen_spellcost(n, rnd):
         out.append({'kind': 'cost', 'char': a, 'rec': rec, 'keep': True, **v})
     return out
 
-UNITS = {'spellcost': gen_spellcost, 'rest': gen_rest, 'train': gen_train, 'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
+
+# ---------------------------------------------------------------- pass 2: initiative / encounter
+def synth_monsters(e, rnd, big=False):
+    """synthetic monsters.dat (256 random 26-byte records) at HEAP; pointer at A4-30658"""
+    e.uc.mem_write(HEAP, bytes(rnd.getrandbits(8) for _ in range(256 * 26)))
+    sl(e, P_MONBUF, HEAP)
+
+def gen_encgroup(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed)
+            sb(e, -1316, rnd.choice([0, 0, 0, 0, 1, 5, rnd.getrandbits(8)]))
+            sb(e, -31202, rnd.choice([0, 0, 1, 2]))
+            sw(e, -31066, rnd.randint(0, 8)); sb(e, -31065, rnd.choice([0, rnd.randint(1, 8), rnd.randint(1, 8), rnd.getrandbits(8)]))
+            sb(e, -31083, rnd.choice([0, 0, 2, 3, 0x80]))
+            sb(e, -30654, rnd.choice([0, rnd.randint(1, 10), rnd.randint(1, 14), rnd.getrandbits(8)]))
+            sb(e, -24141, rnd.getrandbits(8))
+        out.append({'seed': seed, **R.run(0x11D0C, (), setup)})
+    return out
+
+def gen_moninit(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        def setup(e):
+            synth_monsters(e, rnd)
+            sb(e, -30654, rnd.choice([0, rnd.randint(1, 10), rnd.randint(1, 10), rnd.randint(11, 14), rnd.getrandbits(8)]))
+            for k in range(11): sb(e, -4574 + k, rnd.getrandbits(8))
+            for k in range(11):                                   # poison the per-slot arrays
+                sb(e, -1283 + k, rnd.getrandbits(8)); sb(e, -1294 + k, rnd.getrandbits(8)); sb(e, -1305 + k, rnd.getrandbits(8)); sw(e, -1338 + 2 * k, rnd.getrandbits(16))
+        out.append(R.run(0x11C82, (), setup, max_insn=400000))
+    return out
+
+def gen_battleover(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        def setup(e):
+            idxs = setup_party(e, rnd, rnd.choice([None, None, 1, 2, 4, 6]))
+            sw(e, -31066, rnd.choice([len(idxs), len(idxs), len(idxs), 0]))
+            sb(e, -30654, rnd.choice([0, 1, 3, 11, rnd.getrandbits(8)])); sb(e, -1315, rnd.choice([0, 0, 0, 1]))
+            for r in idxs: e.w8(g(-10814) + r * 130 + 38, rnd.choice([0, 0, 0x04, 0x10, 0x11, 0x40, 0x80, 0x81, rnd.getrandbits(8)]))
+        out.append(R.run(0x13282, (), setup))
+    return out
+
+def gen_encpick(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed); synth_monsters(e, rnd)
+            sb(e, -31150, rnd.randint(0, 3)); sb(e, -28610, rnd.choice([rnd.randint(0, 30), rnd.getrandbits(8)]))
+            lo = rnd.randint(1, 16); hi = lo + rnd.randint(0, 15) if rnd.random() < .8 else rnd.randint(0, 20)
+            sb(e, -22030, lo); sb(e, -22031, hi)
+            sb(e, -30654, rnd.choice([0, 0, rnd.randint(0, 10), rnd.randint(0, 12), rnd.getrandbits(8)]))
+            sb(e, -4574, rnd.getrandbits(8))
+            for k in range(11): sb(e, -4574 + k, rnd.getrandbits(8))
+        out.append({'seed': seed, **R.run(0x11F0A, (), setup, max_insn=400000)})
+    return out
+
+def gen_charflee(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    e.stub(0x12848, 'ui12848', nargs=0)
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed)
+            idxs = setup_party(e, rnd, rnd.choice([None, 1, 2, 6, 8]))
+            sb(e, -22029, rnd.choice([0, 1, rnd.randint(2, 100), rnd.randint(2, 100), rnd.getrandbits(8)]))
+            sb(e, -1269, rnd.choice([rnd.randint(0, len(idxs) - 1), rnd.randint(0, len(idxs) - 1), rnd.randint(0, 9)]))
+            for k in range(8): sb(e, -24128 + k, rnd.randint(0, 2))
+            sb(e, -24141, rnd.randint(0, 9)); sb(e, -24140, rnd.randint(0, 1)); sb(e, -1272, rnd.randint(0, 8))
+        out.append({'seed': seed, **R.run(0x116B0, (), setup)})
+    return out
+
+def gen_round(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    st = {'script': [], 'i': 0, 'cur': None}
+    def pick(kind):
+        def argfn(e):
+            idx = e.r8(g(-1269 if kind == 'pact' else -1271))
+            eff = st['script'][st['i']] if st['i'] < len(st['script']) else [1, 0, 0]
+            st['i'] += 1; st['cur'] = eff
+            return [idx] + eff
+        def fn(e, sp):
+            kp = kind == 'pact'
+            idx = e.r8(g(-1269 if kp else -1271))
+            base = g(-24128 if kp else -24138)
+            e.w8(base + idx, e.r8(base + idx) + 1)
+            if not kp: e.w8(g(-1309), idx)
+            c, a, b = st['cur']
+            if c == 1: e.w8(g(-1315), 1)
+            elif c == 2: e.w8(g(-30654), 0)
+            elif c == 3:
+                for k in range(e.r16(g(-31066))):
+                    w = e.r16(g(-31082) + 2 * k)
+                    e.w8(g(-10814) + w * 130 + 38, 0x81)
+            elif c == 4: e.w8(g(-1294) + a, 0)
+            elif c == 5: e.w8(g(-1305) + a, e.r8(g(-1305) + a) | b)
+            elif c == 6:
+                w = e.r16(g(-31082) + 2 * a); e.w8(g(-10814) + w * 130 + 110, b)
+            return None
+        e.stub(0x119C2 if kind == 'pact' else 0x1064C, kind, argfn=argfn, nargs=0, fn=fn)
+    pick('pact'); pick('mact')
+    for off, nm in ((0x135BE, 'ui135be'), (0x129CC, 'ui129cc'), (0x12848, 'ui12848'), (0x12430, 'xp'), (0x11646, 'retreat')): e.stub(off, nm, nargs=0)
+    e.stub(0x03266, 'ui3266', nargs=3)
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        size = rnd.choice([1, 2, 3, 4, 5, 6]); nmon = rnd.choice([1, 2, 3, 4, 6, 10, 11, 13])
+        script = []
+        for _ in range(rnd.randint(1, 14)):
+            c = rnd.choice([0, 0, 0, 0, 4, 4, 5, 5, 6, 1, 2, 3])
+            script.append([c, rnd.randint(0, 10) if c != 6 else rnd.randint(0, size - 1), rnd.getrandbits(8)])
+        st['script'] = script; st['i'] = 0
+        def setup(e):
+            sl(e, SEED, seed); synth_monsters(e, rnd)
+            idxs = setup_party(e, rnd, size)
+            for r in idxs:
+                a = g(-10814) + r * 130
+                e.w8(a + 110, rnd.choice([rnd.randint(0, 6), rnd.randint(0, 30), rnd.getrandbits(8)]))
+                e.w8(a + 38, rnd.choice([0, 0, 0, 0, 0x10, 0x40, 0x81]))
+            sb(e, -31065, size)
+            sb(e, -30654, nmon)
+            for k in range(11): sb(e, -4574 + k, rnd.getrandbits(8))
+            sb(e, -1316, rnd.choice([0, 0, 3])); sb(e, -31202, rnd.choice([0, 1])); sb(e, -31083, rnd.choice([0, 0, 2, 3]))
+            sb(e, -1315, 0); sb(e, -24140, rnd.choice([0, 0, 1]))
+            for k in range(10): sb(e, -24138 + k, rnd.randint(0, 1))
+            for k in range(8): sb(e, -24128 + k, rnd.randint(0, 1))
+            sb(e, -24141, rnd.randint(0, 6))
+        v = R.run(0x12A22, (), setup, max_insn=3_000_000)
+        out.append({'seed': seed, 'script': script, 'used': st['i'], **v})
+    return out
+
+def enc_setup(e, rnd, seed):
+    sl(e, SEED, seed); synth_monsters(e, rnd)
+    sb(e, -31150, rnd.randint(0, 3)); sb(e, -28610, rnd.choice([rnd.randint(0, 30), rnd.getrandbits(8)]))
+    lo = rnd.randint(1, 16); hi = lo + rnd.randint(0, 15) if rnd.random() < .8 else rnd.randint(0, 20)
+    sb(e, -22030, lo); sb(e, -22031, hi)
+    sb(e, -22032, rnd.choice([rnd.randint(1, 12), rnd.randint(1, 40), rnd.getrandbits(8)]))
+    sb(e, -30654, rnd.choice([0, 0, rnd.randint(0, 10), rnd.randint(0, 12), rnd.getrandbits(8)]))
+    for k in range(11): sb(e, -4574 + k, rnd.getrandbits(8))
+    sl(e, -28618, rnd.choice([rnd.randint(0, 40), rnd.randint(0, 400), rnd.randint(0, 5000), rnd.getrandbits(32)]))
+    sb(e, -28609, rnd.getrandbits(8))
+    for k in range(14): sb(e, -4562 + k, rnd.getrandbits(8))
+
+def gen_encbudget(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        out.append({'seed': seed, **R.run(0x12072, (), lambda e: enc_setup(e, rnd, seed))})
+    return out
+
+def gen_encgen(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        out.append({'seed': seed, **R.run(0x1213E, (), lambda e: enc_setup(e, rnd, seed), max_insn=4_000_000)})
+    return out
+
+def gen_driver(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    st = {'keys': [], 'nums': [], 'pays': []}
+    quiet_ui = [0x03266, 0x0316E, 0x042DC, 0x04032, 0x04088, 0x0425A, 0x05070, 0x054F2, 0x06798, 0x05080, 0x06DA6, 0x044E0]
+    for off in quiet_ui: e.stub(off, 'ui%x' % off, nargs=0, quiet=True)
+    # runtime-library UI/printing entry points reached through the jump table
+    for off in (0x21624, 0x21B9A, 0x2206E, 0x22076, 0x22108, 0x218EA, 0x22480, 0x22376, 0x21C1E, 0x22958): e.stub(off, 'ui%x' % off, nargs=0, quiet=True)
+    e.stub(0x12A22, 'battle', nargs=0)
+    e.stub(0x11646, 'retreat', nargs=0)
+    SUBMENU_RET = 0x12FCA
+    def key_arg(e):
+        k = st['keys'].pop(0) if st['keys'] else None
+        if k is None: k = 0x1b if abs(e.last_ret_pre - (0x100000 + SUBMENU_RET)) <= 8 else 0x41
+        st['cur'] = k; return [k]
+    def keyfn(e, sp): return st['cur']
+    def getkey_arg(e):
+        sp = e.uc.reg_read(__import__('unicorn.m68k_const', fromlist=['x']).UC_M68K_REG_A7)
+        e.last_ret_pre = e.r32(sp)
+        return key_arg(e)
+    e.stub(0x097A2, 'key', argfn=getkey_arg, fn=keyfn)
+    def num_arg(e):
+        v = st['nums'].pop(0) if st['nums'] else 0
+        st['curn'] = v; return [v]
+    e.stub(0x03EE0, 'num', argfn=num_arg, fn=lambda e, sp: st['curn'])
+    for off, nm in ((0x06C66, 'payFood'), (0x06ACE, 'payGold'), (0x06B9A, 'payGems')):
+        def mk(nm):
+            def argfn(e):
+                sp = e.uc.reg_read(__import__('unicorn.m68k_const', fromlist=['x']).UC_M68K_REG_A7)
+                a = e.r32(sp + 4) if nm == 'payGold' else e.r16(sp + 4)
+                st['curp'] = st['pays'].pop(0) if st['pays'] else 0
+                return [a, st['curp']]
+            return argfn
+        e.stub(off, nm, argfn=mk(nm), fn=lambda e, sp: st['curp'])
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        size = rnd.randint(1, 6)
+        keys = []
+        if rnd.random() < .7: keys.append(0x20)
+        for _ in range(rnd.randint(1, 6)):
+            keys.append(rnd.choice([0x41, 0x61, 0x42, 0x62, 0x42, 0x48, 0x68, 0x52, 0x72, 0x53, 0x1b, 0x31, 0x32, 0x33, 0x58, 0x31, 0x32, 0x33]))
+            if keys[-1] in (0x42, 0x62): keys.append(rnd.choice([0x31, 0x32, 0x33, 0x1b]))
+        nums = [rnd.choice([0, 1, 255, rnd.randint(1, 255), rnd.randint(1, 9999), rnd.randint(1, 60), 0x0A0B, 0x3C3C]) for _ in range(4)]
+        pays = [rnd.randint(0, 1) for _ in range(4)]
+        st['keys'], st['nums'], st['pays'] = list(keys), list(nums), list(pays)
+        def setup(e):
+            enc_setup(e, rnd, seed)
+            idxs = setup_party(e, rnd, size); sb(e, -31065, size)
+            for r in idxs:
+                a = g(-10814) + r * 130
+                e.w8(a + 30, rnd.choice([0, rnd.randint(0, 60), rnd.randint(0, 100), rnd.getrandbits(8)])); e.w8(a + 38, rnd.choice([0, 0, 0x10, 0x40, 0x81]))
+                e.w8(a + 113, rnd.randint(1, 30)); e.w16(a + 116, rnd.randint(0, 200))
+            sb(e, -31083, rnd.choice([0, 0, 0, 2, 3, 0x80, 0x82, 0x83]))
+            sb(e, -31142, rnd.choice([0, 0, 1]))
+            sb(e, -22025, rnd.choice([rnd.randint(0, 100), rnd.getrandbits(8)])); sb(e, -22029, rnd.choice([rnd.randint(0, 100), rnd.getrandbits(8)]))
+            sb(e, -21960, rnd.randint(0, 3)); sb(e, -31154, rnd.getrandbits(8))
+            nz = rnd.choice([0, 1, 2, 3, 5, 10])
+            for k in range(11): sb(e, -4574 + k, rnd.randint(1, 255) if k < nz or (k == 10 and rnd.random() < .5) else 0)
+            sb(e, -30654, rnd.choice([0, rnd.randint(0, 5), rnd.randint(11, 40)]))
+            if bias:
+                sb(e, -4574, rnd.randint(1, 60)); sb(e, -22025, rnd.randint(0, 40))
+                rec = HEAP + rnd.randint(1, 60) * 26 + 16
+                for q in range(1, 61): e.uc.mem_write(HEAP + q * 26 + 16, bytes([rnd.choice([0xE0, 0xE0, 0x80, 0x40, 0x20, 0xA0, 0xC0, 0x00])]))
+        bias = rnd.random() < .6
+        v = R.run(0x12C6E, (), setup, max_insn=3_000_000)
+        keep = any(c[0] in ('payFood', 'payGold', 'payGems') for c in v['calls']) or any(c[0] == 'retreat' for c in v['calls'])
+        out.append({'seed': seed, 'keys': keys, 'nums': nums, 'pays': pays, **({'keep': True} if keep and rnd.random() < .08 else {}), **v})
+    return out
+
+UNITS = {'driver': gen_driver, 'encbudget': gen_encbudget, 'encgen': gen_encgen, 'charflee': gen_charflee, 'round': gen_round, 'encgroup': gen_encgroup, 'moninit': gen_moninit, 'battleover': gen_battleover, 'encpick': gen_encpick, 'spellcost': gen_spellcost, 'rest': gen_rest, 'train': gen_train, 'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
 
 def main():
     a = sys.argv[1:]

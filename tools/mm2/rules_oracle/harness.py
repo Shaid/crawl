@@ -29,6 +29,11 @@ class Rec:
                 if a not in written:
                     written.add(a)
                     wpre[a] = u.mem_read(a, 1)[0]
+        def note(a, n):
+            for x in range(a, a + n):
+                if x not in written:
+                    written.add(x); wpre[x] = uc.mem_read(x, 1)[0]
+        e.on_write = note
         h1 = uc.hook_add(UC_HOOK_MEM_READ, rd, begin=DATA_BASE, end=DATA_BASE + WIN - 1)
         h2 = uc.hook_add(UC_HOOK_MEM_WRITE, wr, begin=DATA_BASE, end=DATA_BASE + WIN - 1)
         h3 = uc.hook_add(UC_HOOK_MEM_READ, rd, begin=HEAP, end=HEAP + 0x100000)
@@ -36,6 +41,7 @@ class Rec:
         try:
             d0 = e.call(off, args, max_insn=max_insn)
         finally:
+            e.on_write = None
             for h in (h1, h2, h3, h4): uc.hook_del(h)
         fin = {a: uc.mem_read(a, 1)[0] for a in written}
         mask = (1 << ret_bits) - 1

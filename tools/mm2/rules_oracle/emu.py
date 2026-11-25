@@ -78,9 +78,16 @@ class Emu:
     def r8(self, a): return self.uc.mem_read(a, 1)[0]
     def r16(self, a): return struct.unpack('>H', self.uc.mem_read(a, 2))[0]
     def r32(self, a): return struct.unpack('>I', self.uc.mem_read(a, 4))[0]
-    def w8(self, a, v): self.uc.mem_write(a, bytes([v & 0xff]))
-    def w16(self, a, v): self.uc.mem_write(a, struct.pack('>H', v & 0xffff))
-    def w32(self, a, v): self.uc.mem_write(a, struct.pack('>I', v & 0xffffffff))
+    on_write = None   # set by harness.Rec during a recorded call: stub side effects are then part of the write footprint
+    def w8(self, a, v):
+        if self.on_write: self.on_write(a, 1)
+        self.uc.mem_write(a, bytes([v & 0xff]))
+    def w16(self, a, v):
+        if self.on_write: self.on_write(a, 2)
+        self.uc.mem_write(a, struct.pack('>H', v & 0xffff))
+    def w32(self, a, v):
+        if self.on_write: self.on_write(a, 4)
+        self.uc.mem_write(a, struct.pack('>I', v & 0xffffffff))
     def g(self, disp): return (A4V + disp) & 0xffffffff     # A4-relative address
     def code(self, off): return CODE_BASE + off
     def reset(self):
@@ -89,13 +96,14 @@ class Emu:
     def alloc(self, n):
         a = (self.heap + 15) & ~15; self.heap = a + n; return a
 
-    def stub(self, off, name, ret=0, fn=None, nargs=6, argfn=None):
+    def stub(self, off, name, ret=0, fn=None, nargs=6, argfn=None, quiet=False):
         """Replace the routine at CODE+off with a logging no-op (caller pops args)."""
         addr = CODE_BASE + off
         def hook(uc, a, size, ud):
             sp = uc.reg_read(UC_M68K_REG_A7)
             args = argfn(self) if argfn else [self.r16(sp + 4 + 2 * i) for i in range(nargs)]
-            self.log.append((name, tuple(args)))
+            self.last_ret = self.r32(sp)
+            if not quiet: self.log.append((name, tuple(args)))
             r = ret
             if fn:
                 x = fn(self, sp + 4)
@@ -112,8 +120,8 @@ class Emu:
         items = [(a, 2) if not isinstance(a, tuple) else a for a in args]
         for v, s in reversed(items):
             sp -= s
-            (self.w16 if s == 2 else self.w32)(sp, v)
-        sp -= 4; self.w32(sp, RET_MAGIC)
+            uc.mem_write(sp, struct.pack('>H' if s == 2 else '>I', v & (0xffff if s == 2 else 0xffffffff)))
+        sp -= 4; uc.mem_write(sp, struct.pack('>I', RET_MAGIC))
         uc.reg_write(UC_M68K_REG_A7, sp)
         uc.reg_write(UC_M68K_REG_A4, A4V)
         uc.reg_write(UC_M68K_REG_A5, 0)

@@ -18,3 +18,4 @@ __pycache__/
 
 # Wizardry 6 Unicorn oracle venv (tools/wizardry6/oracle/README.md)
 tools/wizardry6/oracle/.venv/
+tools/mm2/rules_oracle/.venv/
