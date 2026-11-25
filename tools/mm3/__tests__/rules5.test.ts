@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { load } from './vectors.ts';
 import { StrictMem, A4V } from '../rules-mem.ts';
 import * as R from '../rules5.ts';
+import * as R2 from '../rules2.ts';
 
 vi.setConfig({ testTimeout: 240000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -111,7 +112,7 @@ describe('OV7 item command: shop flows', () => {
   });
   it('covers each operation and outcome; null controls differ', () => {
     const V = load('shopop');
-    for (const op of ['sell', 'repair', 'identify', 'buy', 'recharge', 'discard']) expect(V.some((v: any) => v.args[0] === op)).toBe(true);
+    for (const op of ['sell', 'repair', 'identify', 'buy', 'recharge', 'discard', 'duplicate']) expect(V.some((v: any) => v.args[0] === op)).toBe(true);
     const has = (op: string, f: (v: any) => boolean) => V.some((v: any) => v.args[0] === op && f(v));
     expect(has('sell', (v) => v.calls.some((c: any) => c[0] === 'remove'))).toBe(true);
     expect(has('buy', (v) => v.calls.some((c: any) => c[0] === 'short'))).toBe(true);
@@ -121,5 +122,56 @@ describe('OV7 item command: shop flows', () => {
     differs('shopop', run({ noSellFlag: true }));
     differs('shopop', run({ noCap: true }));
     differs('shopop', run({ noBrokenBit: true }));
+  });
+});
+
+describe('damage to a monster OV4+0x136E2 composed with the real item generator R+0xB83A', () => {
+  // pass 2 stubbed the generator with a fixed pattern; here the game's own generator runs (RNG draws, item bytes) and the port calls generateItem
+  const run = (o: { skipGen?: boolean } = {}): Run => (m, v) => {
+    const c = R2.monsterDamage(m, v.char ?? A4V - 0xc78, v.args[0], v.args[1], (ty, b) => { if (!o.skipGen) R2.generateItem(m, ty, b, 0); });
+    return { calls: c.filter((x: any) => x[0] !== 'loot') };
+  };
+  it('matches the game: loot roll, generator RNG order, the six item bytes, reward list', () => {
+    expect(exact('mondmgfull', run(), { min: 20 })).toBeGreaterThan(20);
+  });
+  it('covers generated items; null control (generator skipped) differs', () => {
+    const V = load('mondmgfull');
+    expect(V.filter((v: any) => v.fin[String(A4V - 0x2f8 + 0xdc)] !== undefined || v.wpre[String(A4V - 0x2f8 + 0xdc)] !== undefined).length).toBeGreaterThan(5);
+    differs('mondmgfull', run({ skipGen: true }));
+  });
+});
+
+describe('OV7 Enchant Item entry 0x4A7E', () => {
+  const run = (o: R.EnchantOpts = {}): Run => (m, v) => ({ calls: R.enchantItem(m, A4V - 0xc78 + 0x130 * v.args[0], v.args[2], v.a5, o) });
+  it('matches the game: eligibility, grade roll, the real item generator, id restored', () => {
+    expect(exact('enchant', run(), { min: 20 })).toBeGreaterThan(20);
+  });
+  it('covers success and refusal; null control (no cap) differs', () => {
+    const V = load('enchant');
+    expect(V.some((v: any) => v.calls.length === 1 && v.calls[0][0] === 'cue')).toBe(true);
+    expect(V.some((v: any) => v.calls.length === 3)).toBe(true);
+    differs('enchant', run({ noCap: true }));
+  });
+});
+
+describe('weapon breaking R+0x122DE', () => {
+  it('matches the game: ids below 0x1E that are equipped get the broken bit', () => {
+    expect(exact('breakweapons', (m) => { R.breakWeapons(m, A4V - 0xc78); return { calls: [] }; }, { min: 20 })).toBeGreaterThan(20);
+    differs('breakweapons', (m) => { R.breakWeapons(m, A4V - 0xc78, { allIds: true }); return { calls: [] }; });
+  });
+});
+describe('encounter-start volley R+0xC5FA', () => {
+  const run = (o: R.VolleyOpts = {}): Run => (m, v) => ({ calls: R.encounterVolley(m, { resource: [...v.res] }, o) });
+  it('matches the game: picture class and cache, cue, party order reset, one turn per listed monster, wipe test, mode 5 -> 1', () => {
+    expect(exact('volley', run(), { min: 20 })).toBeGreaterThan(20);
+  });
+  it('covers the picture, cache and mode switch; null controls differ', () => {
+    const V = load('volley');
+    expect(V.some((v: any) => v.calls.some((c: any) => c[0] === 'free'))).toBe(true);
+    expect(V.some((v: any) => v.calls.some((c: any) => c[0] === 'resource'))).toBe(true);
+    expect(V.some((v: any) => v.fin[String(A4V - 0x104a)] === 1)).toBe(true);
+    differs('volley', run({ noWipeTest: true }));
+    differs('volley', run({ noModeRestore: true }));
+    differs('volley', run({ alwaysIdentity: true }));
   });
 });

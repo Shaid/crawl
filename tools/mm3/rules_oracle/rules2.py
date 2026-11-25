@@ -76,12 +76,12 @@ B.UNITS['initiative'] = gen_initiative
 F_MDMG = OV_BASE[4] + 0x136E2
 def loot_pattern(e, t, buf):
     for k, off in enumerate((0x90, 0xa3, 0xb6, 0xc9, 0xdc, 0xef)): e.w8(buf + off, (t * 7 + k * 13 + 1) & 0xff)
-def gen_mondmg(n, rnd):
+def gen_mondmg(n, rnd, loot=True):
     e = Emu(); Rc = Rec(e); out = []
     e.stub(B.F_UI971C, 'ui971c', argfn=lambda e, sp: [e.r16(sp)])
     e.stub(R(0x122DE), 'call122DE', argfn=lambda e, sp: [e.r32(sp)])
     e.stub(OV_BASE[4], 'ov4_0', argfn=lambda e, sp: [])
-    e.stub(R(0xB83A), 'loot', argfn=lambda e, sp: [e.r8(sp), e.r32(sp + 2), e.r16(sp + 6)], fn=lambda e, sp: loot_pattern(e, e.r8(sp), e.r32(sp + 2)))
+    if loot: e.stub(R(0xB83A), 'loot', argfn=lambda e, sp: [e.r8(sp), e.r32(sp + 2), e.r16(sp + 6)], fn=lambda e, sp: loot_pattern(e, e.r8(sp), e.r32(sp + 2)))
     for _ in range(n):
         mode = rnd.choice([0, 0, 0, 2, 3, 1, 4, 5, 6, rnd.randint(0, 9)])
         dmg = rnd.choice([0, rnd.randint(1, 20), rnd.randint(1, 120), rnd.randint(1, 600)])

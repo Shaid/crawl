@@ -135,7 +135,7 @@ keepwrap('event', lambda v: (tuple(c[0] for c in v['calls'])[:5], v['ret'], str(
 
 # ---------------------------------------------------------------- OV7 item command: shop flows entered mid-function (sell, repair, identify, buy, recharge, discard)
 from rules4 import item_slot, OV7 as _OV7
-SHOP_ENTRY = {'sell': 0x4506, 'repair': 0x45c4, 'identify': 0x462a, 'buy': 0x46ea, 'recharge': 0x47f6, 'discard': 0x4408}
+SHOP_ENTRY = {'sell': 0x4506, 'repair': 0x45c4, 'identify': 0x462a, 'buy': 0x46ea, 'recharge': 0x47f6, 'discard': 0x4408, 'duplicate': 0x48a8}
 SHOP_STOPS = (_OV7(0x4B7E), _OV7(0x3FFC))
 SPRINTF_N = {0x858: 5, 0x4d10: 4, 0x4d95: 4, 0x4d5b: 4}
 def gen_shop(n, rnd):
@@ -168,6 +168,12 @@ def gen_shop(n, rnd):
             if rnd.random() < 0.15: e.w8(a + 0xdc + slot, 0)
             if rnd.random() < 0.6 and op in ('sell', 'repair', 'identify', 'buy'): e.w8(a + 0xdc + slot, rnd.randint(1, 0x49) if rnd.random() < 0.9 else rnd.choice([0x4b, 0x52, 0x46, 0x47, 0x80]))
             if op == 'repair' and rnd.random() < 0.7: e.w8(a + 0x90 + slot, e.r8(a + 0x90 + slot) | 0x80)
+            if op == 'duplicate':
+                e.w8(a + 0xdc + slot, rnd.choice([rnd.randint(1, 0x4a), rnd.randint(1, 0x48), rnd.randint(1, 0x20)]))
+                e.w8(a + 0xed, rnd.choice([0, 0, 0, 0, rnd.getrandbits(8)]))
+                e.w8(a + 0xc9 + slot, rnd.choice([0, 0, 0, rnd.choice([9, 10, 17, 18, 25, 26, 33, 34, 39, 40, 45, 46, 50, 51, 56, 57, 61, 62, 71, 72]), rnd.randint(0, 80)]))
+                e.w8(a + 0xa3 + slot, rnd.choice([0, 0, rnd.choice([7, 8, 14, 15, 19, 20, 24, 25, 32, 33, 36]), rnd.randint(0, 40)]))
+                e.w8(a + 0xb6 + slot, rnd.choice([0, 1, 5, 0x11, 0x12, rnd.randint(0, 0x20)])); e.w8(a + 0xef + slot, rnd.choice([0, 1, 0x37, 0x38, rnd.randint(0, 0x60)]))
             e.w8(b + 0xed, rnd.choice([0, 0, 0, 1, rnd.getrandbits(8)])); e.w8(a + 0x2f, rnd.choice([0, 0, 1]))
             for off in (0xa1, 0xb4, 0xc7, 0xda, 0x100): e.w8(b + off, rnd.getrandbits(8))
             sl(e, 0x3270, b)
@@ -185,7 +191,89 @@ def gen_shop(n, rnd):
     return out
 def SHOP_ENTRY_ADDR(op): return _OV7(SHOP_ENTRY[op])
 B.UNITS['shopop'] = gen_shop
+
+# ---------------------------------------------------------------- OV7 item command, Enchant Item entry (0x4A7E): regenerates the item through the real generator
+def gen_enchant(n, rnd):
+    e = Emu(); Rc = Rec(e); out = []
+    install_ui(e, skip=('13c10', 'bef6', '81a8'))
+    e.stub(R(0x13C10), 'sprintf', argfn=lambda e2, sp: [ptr(e2, e2.r32(sp)), ptr(e2, e2.r32(sp + 4)), ptr(e2, e2.r32(sp + 8))])
+    e.stub(R(0xBEF6), 'msg', argfn=lambda e2, sp: [ptr(e2, e2.r32(sp))])
+    for _ in range(n):
+        info = {}
+        ci = rnd.randrange(8); a = CH + 0x130 * ci; bi = rnd.randrange(8); b = CH + 0x130 * bi
+        slot = rnd.randrange(18)
+        def setup(e):
+            e.heap = 0x600000
+            sl(e, SEED, rnd.getrandbits(32)); fill_char(e, rnd, a)
+            if bi != ci: fill_char(e, rnd, b)
+            e.w8(a + 0xdc + slot, rnd.choice([0, rnd.randint(1, 0x47), rnd.randint(1, 0x47), rnd.randint(0x48, 0x60)]))
+            for off in (0xa3, 0xb6, 0xc9, 0xef): e.w8(a + off + slot, rnd.choice([0, 0, 0, 0, 0, rnd.randint(0, 9)]))
+            e.w8(a + 0x23, 0) if False else None
+            e.w8(b + 0x23, rnd.choice([0, 1, 9, 10, 19, 20, 35, 60, rnd.randint(0, 255)])); e.w8(b + 0x24, rnd.choice([0, 0, 5]))
+            sl(e, 0x3270, b)
+            base = e.alloc(0x60); info['a5'] = base + 0x30
+            for k in range(0x60): e.w8(base + k, rnd.getrandbits(8))
+        def regs(): return {'A3': a, 'D5': slot, 'A5': info['a5']}
+        v = Rc.run(_OV7(0x4A7E), (), setup, regs=regs, stops=SHOP_STOPS)
+        out.append({'args': [ci, bi, slot], **info, **v})
+    return out
+B.UNITS['enchant'] = gen_enchant
+keepwrap('enchant', lambda v: (tuple(c[0] for c in v['calls']),))
 keepwrap('shopop', lambda v: (v['args'][0], tuple(c[0] for c in v['calls']), v.get('stop')))
+
+# ---------------------------------------------------------------- damage to a monster OV4+0x136E2 with the REAL item generator R+0xB83A (pass 2 stubbed it)
+import rules2 as _r2
+B.UNITS['mondmgfull'] = lambda n, rnd: _r2.gen_mondmg(n, rnd, loot=False)
+keepwrap('mondmgfull', lambda v: (v['args'][1], any(c[0] == 'loot' for c in v['calls']) or str(0x709b + 0x207ffe) in v['fin']))
+
+# ---------------------------------------------------------------- encounter-start volley R+0xC5FA, weapon breaking R+0x122DE
+F_VOLLEY, F_BREAK = R(0xC5FA), R(0x122DE)
+def gen_volley(n, rnd):
+    e = Emu(); Rc = Rec(e); out = []
+    e.res = []
+    e.stub(R(0x13C10), 'sprintf', argfn=lambda e2, sp: [ptr(e2, e2.r32(sp)), ptr(e2, e2.r32(sp + 4)), e2.r32(sp + 8)])
+    e.stub(R(0x81A8), 'free', argfn=lambda e2, sp: [ptr(e2, e2.r32(sp))])
+    e.stub(R(0x5EB2), 'resource', fn=lambda e2, sp: e2.res.pop(0) if e2.res else 0, argfn=lambda e2, sp: [ptr(e2, e2.r32(sp))])
+    e.stub(R(0x971C), 'cue', argfn=lambda e2, sp: [e2.r16(sp)])
+    def redraw(e2, sp): e2.w32(g(0xdca), 0)
+    e.stub(OV4(0), 'redraw', fn=redraw, argfn=lambda e2, sp: [])
+    e.stub(R(0xA1DC), 'monturn', argfn=lambda e2, sp: [e2.r16(sp)])
+    while len(out) < n:
+        info = {}
+        def setup(e):
+            pn = party(e, rnd, rnd.randint(1, 8)); sb(e, -0x1672, pn)
+            lst = [rnd.choice([0xff, 0xff, 0xff, rnd.randint(0, 89)]) for _ in range(36)]
+            if all(x == 0xff for x in lst): lst[rnd.randrange(36)] = rnd.randint(0, 89)
+            for i, v in enumerate(lst): sb(e, 0x1f4e + i, v)
+            d5 = None
+            for v in lst:
+                if v == 0xff: continue
+                d5 = e.r8(g(-0x53c8) + e.r8(g(-0x5d42) + v))
+                if d5 != 0xc: break
+            sw(e, 0x21f8, rnd.choice([d5, d5, rnd.getrandbits(16), 0xc]))
+            sb(e, -0x104a, rnd.choice([0, 1, 2, 5, 5, 5]))
+            sl(e, 0xdca, rnd.choice([0, 0, 0x600100])); sl(e, 0xc22, rnd.getrandbits(32)); sl(e, -0x1676, rnd.getrandbits(32))
+            sw(e, -0x351a, rnd.choice([0, 0, 1])); sb(e, -0x33a9, rnd.getrandbits(8)); sb(e, -0x33aa, rnd.getrandbits(8)); sb(e, -0x3307, rnd.choice([0, 1]))
+            e.res[:] = [rnd.choice([0, 0x600200, rnd.getrandbits(24)])]; info['res'] = list(e.res)
+            for k in range(8):
+                a = CH + 0x130 * k
+                for off in range(0x113, 0x123): e.w8(a + off, 0 if rnd.random() < 0.7 else rnd.choice([1, 2, 8, 8, 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf]))
+        v = Rc.run(F_VOLLEY, (), setup, regs={'D5': 0})
+        out.append({'args': [], **info, **v})
+    return out
+B.UNITS['volley'] = gen_volley
+keepwrap('volley', lambda v: (tuple(c[0] for c in v['calls'] if c[0] not in ('monturn',)), str(0x207ffe - 0x104a) in v['fin']))
+def gen_break(n, rnd):
+    e = Emu(); Rc = Rec(e); out = []
+    for _ in range(n):
+        def setup(e):
+            fill_char(e, rnd, CH)
+            for i in range(18):
+                e.w8(CH + 0xdc + i, rnd.choice([0, rnd.randint(1, 0x1d), rnd.randint(0x1e, 0x50), 0x1d, 0x1e]))
+                e.w8(CH + 0x7d + i, rnd.choice([0, 0, 1, 2, rnd.getrandbits(8)]))
+        out.append({'args': [], **Rc.run(F_BREAK, ((CH, 4),), setup)})
+    return out
+B.UNITS['breakweapons'] = gen_break
 
 UNITS = B.UNITS
 if __name__ == '__main__':

@@ -30,7 +30,7 @@ for spec in rest:3000:50 itemprice:3000:80 itemprice2:1500:30 trainelig:2000:20 
   $PY rules4.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
 done
 # pass 5 units (rules5.py): character creation (class requirements, roll, record build), map event / lock executor, OV7 shop flows
-for spec in classreq:1500:20 rollstats:1500:20 cbuild:1500:40 event:2500:60 shopop:3000:60 "$@"; do
+for spec in classreq:1500:20 rollstats:1500:20 cbuild:1500:40 event:2500:60 shopop:3000:60 mondmgfull:3000:40 enchant:2000:40 volley:2500:50 breakweapons:1000:30 "$@"; do
   IFS=: read unit n sub <<<"$spec"
   $PY rules5.py $unit generated/$unit.json --n $n
   $PY rules5.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
