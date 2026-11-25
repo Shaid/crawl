@@ -4,7 +4,7 @@
  * (tools/mm2/rules_oracle/); see docs/mm2/amiga/game-rules.md section 11. Conventions as in rules.ts.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { charPtr, killReward, luckSave, monsterUsesAbility, randRange, unpackMonster } from './rules.ts';
+import { charPtr, killReward, luckSave, monsterUsesAbility, randRange, statBonus, unpackMonster } from './rules.ts';
 
 type Calls = [string, number[]][];
 
@@ -431,4 +431,224 @@ export function monsterSpecial(m: Mem, o: { noChance?: boolean; noLuck?: boolean
   if (e === 0x1f) e = randRange(m, 1, 30) & 0xff;
   m.w8(g(-4537), e);
   return setCondition(m, ch);
+}
+
+/* ----------------------------------------------------------- spell gates */
+
+/**
+ * CODE+0x78A8 spell combat gate: byte0 bits 6-7 of the spells.dat record: 0 = anywhere; 1 = combat only (A4-31154 == 2, else
+ * message 3); 2 = outside combat only (else message 2); 3 = never. Returns 1 to allow.
+ */
+export function spellCombatGate(m: Mem, rec: number, o: { swap?: boolean } = {}): { ok: number; calls: Calls } {
+  const k = (m.r8(rec) >> 6) & 3;
+  if (k === 0) return { ok: 1, calls: [] };
+  if (k === 3) return { ok: 0, calls: [] };
+  const inCombat = m.r8(g(-31154)) === 2;
+  if (k === 1) {
+    if (o.swap ? !inCombat : inCombat) return { ok: 1, calls: [] };
+    return { ok: 0, calls: [['msg', [3]]] };
+  }
+  if (k === 2) {
+    if (o.swap ? inCombat : !inCombat) return { ok: 1, calls: [] };
+    return { ok: 0, calls: [['msg', [2]]] };
+  }
+  return { ok: 0, calls: [] };
+}
+
+/** CODE+0x2BCC: the map's 16x16 bit map (u8[32] at A4-22010, row = y, bit by x & 7) at the party position (A4-31217 = x, A4-31216 = y). */
+export function mapFlagAt(m: Mem): number {
+  const row = m.r8(g(-22010) + m.r8(g(-31216)) * 2 + (m.r8(g(-31217)) > 7 ? 1 : 0));
+  return row & m.r8(g(-30142) + (m.r8(g(-31217)) & 7)) ? 1 : 0;
+}
+
+/**
+ * CODE+0x790E spell location gate: records with byte1 >= 0x80 are allowed when A4-31202 == 1 (hyp: overland), else only when the
+ * map flag bit at the party's square (mapFlagAt) is clear (message 4 otherwise).
+ */
+export function spellLocationGate(m: Mem, rec: number, o: { ignoreMap?: boolean } = {}): { ok: number; calls: Calls } {
+  if (m.r8(rec + 1) < 0x80) return { ok: 1, calls: [] };
+  if (m.r8(g(-31202)) === 1) return { ok: 1, calls: [] };
+  if (o.ignoreMap || !mapFlagAt(m)) return { ok: 1, calls: [] };
+  return { ok: 0, calls: [['msg', [4]]] };
+}
+
+/* ------------------------------------------------------------ equipment */
+
+export const ITEM_TABLE = -16126; // 256 x 20-byte items.dat records (A4-16126), loaded by the overlay
+const itemByte = (m: Mem, id: number, off: number) => m.r8(g(ITEM_TABLE) + id * 20 + off);
+/** CODE+0x4552 saturating byte add / CODE+0x452C floor-at-zero byte subtract */
+const satAdd = (m: Mem, p: number, n: number) => m.w8(p, m.r8(p) > 255 - (n & 0xff) ? 0xff : m.r8(p) + (n & 0xff));
+const floorSub = (m: Mem, p: number, n: number) => m.w8(p, m.r8(p) >= (n & 0xff) ? m.r8(p) - (n & 0xff) : 0);
+
+/** item id classes (CODE+0xF5F4..0xF6B4): melee weapons 1..0x5B, ranged weapons 0x5C..0x72, armour 0x73..0x9F */
+export const isMelee = (id: number) => id >= 1 && id <= 0x5b;
+export const isRanged = (id: number) => id >= 0x5c && id <= 0x72;
+export const isArmour = (id: number) => id >= 0x73 && id <= 0x9f;
+
+/**
+ * CODE+0x067E6 recalc_ac(): for every party member, AC (+0x24) = clamp(stat_bonus(+0x13) [negative counted as 0] + armour
+ * accumulator +0x1F, 0..255). `+0x13` is the working-stat source the stat table calls speed.
+ */
+export function recalcAc(m: Mem, o: { noClamp?: boolean } = {}): void {
+  for (let i = 0; i < s16(m.r16(g(-31066))); i++) {
+    const ch = charPtr(m, i);
+    let b = statBonus(m, m.r8(ch + 19));
+    if (b >= 0xf0) b = 0;
+    const sum = b + m.r8(ch + 31);
+    if (sum > 255) m.w8(ch + 36, o.noClamp ? sum : 255);
+    else if (sum <= 0) m.w8(ch + 36, 0);
+    else m.w8(ch + 36, sum);
+  }
+}
+
+/** CODE+0xF110 / 0xF1C0: remove / apply the equipped item's stat bonus (item byte +0x0E: hi nibble stat index, lo nibble amount; enchant = ch[0x34+slot] & 0x3F is added to it). */
+function itemStatBonus(m: Mem, ch: number, slot: number, apply: boolean): void {
+  const id = m.r8(ch + 40 + slot);
+  let b = itemByte(m, id, 14);
+  let ench = m.r8(ch + 52 + slot) & 0x3f;
+  const type = b >> 4;
+  b &= 0x0f;
+  if (b !== 0) {
+    ench = (ench + b) & 0xff;
+    const p = ch + 0x10 + type;
+    const w = type <= 5 ? ch + 0x6b + type : 0;
+    (apply ? satAdd : floorSub)(m, p, ench);
+    if (w) (apply ? satAdd : floorSub)(m, w, ench);
+  }
+  recalcAc(m);
+}
+
+/**
+ * CODE+0xF36C equip_item(ch, slot): the item id is ch[0x28+slot], its enchant ch[0x34+slot] & 0x3F. A melee weapon (id 1..0x5B) sets
+ * the melee die +0x4C = items.dat damage byte (+0x10) and +0x4D = enchant; a ranged weapon (0x5C..0x72) sets +0x4E / +0x4F; armour
+ * (0x73..0x9F) adds enchant and the record's +0x10 byte to the AC accumulator +0x1F (cap 255). Then the stat bonus is applied and AC recalculated.
+ * CODE+0xF270 unequip_item reverses it (weapon bytes cleared, accumulator floors at 0).
+ */
+export function equipItem(m: Mem, ch: number, slot: number, o: { noArmour?: boolean } = {}): void {
+  const id = m.r8(ch + 40 + slot);
+  const ench = m.r8(ch + 52 + slot) & 0x3f;
+  const base = itemByte(m, id, 16);
+  if (isMelee(id)) {
+    m.w8(ch + 76, base);
+    m.w8(ch + 77, ench);
+  }
+  if (isRanged(id)) {
+    m.w8(ch + 78, base);
+    m.w8(ch + 79, ench);
+  }
+  if (isArmour(id) && !o.noArmour) {
+    satAdd(m, ch + 31, ench);
+    satAdd(m, ch + 31, base);
+  }
+  itemStatBonus(m, ch, slot, true);
+}
+export function unequipItem(m: Mem, ch: number, slot: number): void {
+  const id = m.r8(ch + 40 + slot);
+  const ench = m.r8(ch + 52 + slot) & 0x3f;
+  const base = itemByte(m, id, 16);
+  if (isMelee(id)) {
+    m.w8(ch + 76, 0);
+    m.w8(ch + 77, 0);
+  }
+  if (isRanged(id)) {
+    m.w8(ch + 78, 0);
+    m.w8(ch + 79, 0);
+  }
+  if (isArmour(id)) {
+    floorSub(m, ch + 31, ench);
+    floorSub(m, ch + 31, base);
+  }
+  itemStatBonus(m, ch, slot, false);
+}
+
+/* ------------------------------------------------------------- treasure */
+
+/**
+ * CODE+0x12206 loot_item(idx): rolls one treasure item. The loot tier A4-24105 is first capped at 2; d100 picks the first
+ * row k of the u8[7] threshold table A4-28118 with d <= thr[k]; the item id = row base (u8@A4-28108[k*4]) + rand(1, u8@A4-28108[k*4 + tier + 1]).
+ * Stored at A4-16156[idx]. Slot flags A4-16153[idx] hold the charges byte (items with bonus byte != 0xF0 and a tier index
+ * A4-24104 >= 2: rand(1,7), replaced by rand(1,tierIndex) for 2..12 or rand(1,21)+11 for 13; values < 5 give none; otherwise
+ * d100 < 41 sets 0x80, < 71 sets 0x40, else 0xC0), and A4-16150[idx] the item's use power (u8@A4-28111[tier]) when its record byte +0x0F is non-zero.
+ */
+export function lootItem(m: Mem, idx: number, o: { noCap?: boolean } = {}): void {
+  let ch = 0;
+  let uses = 0;
+  if (m.r8(g(-24105)) > 2 && !o.noCap) m.w8(g(-24105), 2);
+  let d = randRange(m, 1, 100) & 0xff;
+  let k = 0;
+  do {
+    if (d <= m.r8(g(-28118) + k)) break;
+    k++;
+  } while (k < 7);
+  let item = m.r8(g(-28108) + k * 4);
+  item = (item + (randRange(m, 1, m.r8(g(-28108) + k * 4 + m.r8(g(-24105)) + 1)) & 0xff)) & 0xff;
+  const rec = g(ITEM_TABLE) + item * 20;
+  m.w8(g(-16156) + idx, item);
+  if (m.r8(rec + 15) !== 0) uses = m.r8(g(-28111) + m.r8(g(-24105)));
+  if (m.r8(rec + 14) !== 0xf0 && m.r8(g(-24104)) >= 2) {
+    ch = randRange(m, 1, 7) & 0xff;
+    const ti = m.r8(g(-24104));
+    if (ti >= 2 && ti <= 12) ch = randRange(m, 1, ti) & 0xff;
+    if (ti === 13) ch = (randRange(m, 1, 21) + 11) & 0xff;
+    if (ch >= 5) {
+      d = randRange(m, 1, 100) & 0xff;
+      if (d < 0x29) ch |= 0x80;
+      else if (d < 0x47) ch |= 0x40;
+      else ch |= 0xc0;
+    }
+  }
+  m.w8(g(-16153) + idx, ch);
+  m.w8(g(-16150) + idx, uses);
+}
+
+/** CODE+0x123B0 treasure(): d100 < 11 -> 3 items, < 46 -> 2, < 91 -> 1, else none; each lowers the loot tier (A4-24105) by one while it is above 0 (the item is rolled at tier 0 once it runs out). */
+export function treasure(m: Mem, o: { noTierCost?: boolean } = {}): void {
+  const r = randRange(m, 1, 100) & 0xff;
+  const n = r < 0x0b ? 3 : r < 0x2e ? 2 : r < 0x5b ? 1 : 0;
+  if (!n) return;
+  let i = 0;
+  do {
+    if (m.r8(g(-24105)) !== 0 && !o.noTierCost) m.w8(g(-24105), m.r8(g(-24105)) - 1);
+    lootItem(m, i);
+    i++;
+  } while (i < n);
+}
+
+/* ------------------------------------------------------- Hall of Training */
+
+const mulu32 = (a: number, b: number) => Math.imul(a, b) >>> 0;
+
+/**
+ * CODE+0x20796 xp_needed(ch): experience needed to reach level L = +0x20 + 1 (cap 255). Paladin, Archer, Sorcerer and Ninja
+ * (class 1, 2, 4, 6) use the second row of the table `u32[2][9]` at A4-25998 (levels 2..10); beyond level 10 the cost grows by
+ * 0x2EE00 per level for 11..13, 0x5DC00 for 14..15, then 0xBB800 per level (16..20, capped at 5 steps), 0x177000 (21..30, 10 steps),
+ * 0x2EE000 (31..50, 20 steps), 0x190000 (51..75, 25 steps) and 0x5DC000 per level above 75.
+ */
+export function xpNeeded(m: Mem, ch: number): number {
+  let L = m.r8(ch + 32);
+  if (L !== 0xff) L++;
+  const cls = m.r8(ch + 15);
+  const w = cls === 1 || cls === 2 || cls === 4 || cls === 6 ? 1 : 0;
+  const idx = Math.min(L, 10);
+  let x = m.r32(g(-25998) + w * 0x24 + ((idx - 2) & 0xffff) * 4);
+  if (L >= 0x0b) x = (x + 0x2ee00) >>> 0;
+  if (L >= 0x0c) x = (x + 0x2ee00) >>> 0;
+  if (L >= 0x0d) x = (x + 0x2ee00) >>> 0;
+  if (L >= 0x0e) x = (x + 0x5dc00) >>> 0;
+  if (L >= 0x0f) x = (x + 0x5dc00) >>> 0;
+  if (L >= 0x10) x = (x + mulu32(Math.min(L - 15, 5), 0xbb800)) >>> 0;
+  if (L >= 0x15) x = (x + mulu32(Math.min(L - 20, 10), 0x177000)) >>> 0;
+  if (L >= 0x1f) x = (x + mulu32(Math.min(L - 30, 20), 0x2ee000)) >>> 0;
+  if (L >= 0x33) x = (x + mulu32(Math.min(L - 50, 25), 0x190000)) >>> 0;
+  if (L >= 0x4c) x = (x + mulu32(L - 75, 0x5dc000)) >>> 0;
+  return x;
+}
+
+/** CODE+0x2073A training_cost(ch, slot): 0 for a roster index >= 24 (hirelings), else `hallMul[hall A4-31218] * (level+1) * 50` gold (16-bit; the retail hall table never wraps) (hallMul = u16[10] at A4-25838). */
+export function trainingCost(m: Mem, ch: number, slot: number, o: { noPlusOne?: boolean } = {}): number {
+  if (s16(m.r16(g(-31082) + 2 * slot)) >= 0x18) return 0;
+  let L = m.r8(ch + 32);
+  if (L !== 0xff && !o.noPlusOne) L++;
+  const a = mulu32(m.r16(g(-25838) + 2 * m.r8(g(-31218))), L);
+  return mulu32(a & 0xffff, 50) & 0xffff;
 }

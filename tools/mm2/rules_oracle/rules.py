@@ -756,7 +756,107 @@ def gen_monspecial2(n, rnd):
         out.append({'seed': seed, 'effect': eff, 'char': a, **v})
     return out
 
-UNITS = {'monspecial2': gen_monspecial2, 'setcond': gen_setcond, 'tgtranged': gen_tgtranged, 'tgtmelee': gen_tgtmelee, 'monturn': gen_monturn, 'resolve': gen_resolve, 'mondeath': gen_mondeath, 'mondamage': gen_mondamage, 'questkill': gen_questkill, 'driver': gen_driver, 'encbudget': gen_encbudget, 'encgen': gen_encgen, 'charflee': gen_charflee, 'round': gen_round, 'encgroup': gen_encgroup, 'moninit': gen_moninit, 'battleover': gen_battleover, 'encpick': gen_encpick, 'spellcost': gen_spellcost, 'rest': gen_rest, 'train': gen_train, 'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
+def gen_spellgate(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    e.stub(LAB_03F1, 'msg', nargs=1)
+    for i in range(n):
+        idx = rnd.randint(0, 95); rec = g(-11006) + 2 * idx
+        kind = rnd.choice(['cc', 'loc'])
+        def setup(e):
+            e.w8(rec, rnd.getrandbits(8)); e.w8(rec + 1, rnd.getrandbits(8))
+            sb(e, -31154, rnd.choice([2, 2, 0, 1, rnd.getrandbits(8)])); sb(e, -31202, rnd.choice([0, 1, 1, 2, rnd.getrandbits(8)]))
+            sb(e, -31217, rnd.getrandbits(8)); sb(e, -31216, rnd.randint(0, 15))
+            for k in range(32): sb(e, -22010 + k, rnd.choice([0, 0xff, rnd.getrandbits(8)]))
+        v = R.run(0x78A8 if kind == 'cc' else 0x790E, ((rec, 4),), setup)
+        out.append({'kind': kind, 'rec': rec, **v})
+    return out
+
+def equip_state(e, rnd):
+    e.uc.mem_write(g(-16126), bytes(rnd.getrandbits(8) for _ in range(256 * 20)))
+    size = rnd.randint(1, 6)
+    idxs = setup_party(e, rnd, size); sb(e, -31065, size)
+    for r in idxs:
+        a = g(-10814) + r * 130
+        for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+        for k in range(6): e.w8(a + 40 + k, rnd.choice([rnd.randint(0, 255), rnd.randint(1, 0x9f), rnd.randint(0x42, 0x9f)]))
+        e.w8(a + 31, rnd.choice([rnd.randint(0, 40), rnd.randint(200, 255), rnd.getrandbits(8)]))
+        e.w8(a + 19, rnd.choice([rnd.randint(1, 140), rnd.getrandbits(8)]))
+    return idxs
+
+def gen_equip(n, rnd, kind='equip'):
+    e = Emu(); R = Rec(e); out = []
+    off = 0xF36C if kind == 'equip' else 0xF270
+    for i in range(n):
+        ridx = rnd.randint(0, 47); a = g(-10814) + ridx * 130; slot = rnd.randint(0, 5)
+        def setup(e):
+            idxs = equip_state(e, rnd)
+            sw(e, -31082, ridx)    # slot 0 = the equipping character
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            for k in range(6): e.w8(a + 40 + k, rnd.choice([rnd.randint(0, 255), rnd.randint(1, 0x9f), rnd.randint(0x42, 0x9f)]))
+            e.w8(a + 31, rnd.choice([rnd.randint(0, 40), rnd.randint(200, 255), rnd.getrandbits(8)])); e.w8(a + 19, rnd.randint(1, 140))
+            if rnd.random() < .4:
+                it = e.r8(a + 40 + slot)
+                e.uc.mem_write(g(-16126) + it * 20 + 14, bytes([rnd.choice([0x00, 0x11, 0x23, 0x35, 0x5f, 0x91, 0xff, rnd.getrandbits(8)])]))
+        v = R.run(off, ((a, 4), slot), setup)
+        out.append({'kind': kind, 'char': a, 'slot': slot, **v})
+    return out
+
+def gen_unequip(n, rnd): return gen_equip(n, rnd, 'unequip')
+
+def gen_ac(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        def setup(e): equip_state(e, rnd)
+        out.append(R.run(0x67E6, (), setup))
+    return out
+
+def loot_state(e, rnd, seed):
+    sl(e, SEED, seed)
+    e.uc.mem_write(g(-16126), bytes(rnd.getrandbits(8) for _ in range(256 * 20)))
+    if rnd.random() < .5:   # make charge/bonus bytes hit the interesting values
+        for k in range(256): e.uc.mem_write(g(-16126) + k * 20 + 14, bytes([rnd.choice([0, 0xF0, rnd.getrandbits(8)])]))
+    sb(e, -24105, rnd.choice([0, 1, 2, 3, 5, rnd.getrandbits(8)])); sb(e, -24104, rnd.choice([0, 1, 2, 5, 12, 13, 14, rnd.getrandbits(8)]))
+
+def gen_lootitem(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32); idx = rnd.randint(0, 3)
+        out.append({'seed': seed, 'idx': idx, **R.run(0x12206, (idx,), lambda e: loot_state(e, rnd, seed))})
+    return out
+
+def gen_treasure(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        out.append({'seed': seed, **R.run(0x123B0, (), lambda e: loot_state(e, rnd, seed))})
+    return out
+
+def gen_xpneed(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        a = g(-10814) + rnd.randint(0, 47) * 130
+        lvl = rnd.choice([rnd.randint(1, 20), rnd.randint(1, 100), rnd.randint(1, 255), 254, 255])
+        def setup(e):
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            e.w8(a + 32, lvl); e.w8(a + 15, rnd.randint(0, 7))
+        v = R.run(0x20796, ((a, 4),), setup, ret_bits=32)
+        out.append({'char': a, **v})
+    return out
+
+def gen_traincost(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        ridx = rnd.randint(0, 47); a = g(-10814) + ridx * 130; slot = rnd.randint(0, 5)
+        def setup(e):
+            setup_party(e, rnd, 6)
+            sw(e, -31082 + 2 * slot, ridx)
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            sb(e, -31218, rnd.randint(0, 9)); e.w8(a + 32, rnd.choice([rnd.randint(0, 40), rnd.randint(200, 255)]))
+        v = R.run(0x2073A, ((a, 4), slot), setup)
+        out.append({'char': a, 'slot': slot, **v})
+    return out
+
+UNITS = {'xpneed': gen_xpneed, 'traincost': gen_traincost, 'lootitem': gen_lootitem, 'treasure': gen_treasure, 'equip': gen_equip, 'unequip': gen_unequip, 'ac': gen_ac, 'spellgate': gen_spellgate, 'monspecial2': gen_monspecial2, 'setcond': gen_setcond, 'tgtranged': gen_tgtranged, 'tgtmelee': gen_tgtmelee, 'monturn': gen_monturn, 'resolve': gen_resolve, 'mondeath': gen_mondeath, 'mondamage': gen_mondamage, 'questkill': gen_questkill, 'driver': gen_driver, 'encbudget': gen_encbudget, 'encgen': gen_encgen, 'charflee': gen_charflee, 'round': gen_round, 'encgroup': gen_encgroup, 'moninit': gen_moninit, 'battleover': gen_battleover, 'encpick': gen_encpick, 'spellcost': gen_spellcost, 'rest': gen_rest, 'train': gen_train, 'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
 
 def main():
     a = sys.argv[1:]

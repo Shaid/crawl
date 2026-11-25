@@ -34,11 +34,14 @@
  *   +$27   1B  endurance (current)
  *   +$28..+$33   equipped: 6 ids, 6 charges, 6 flags (structure-of-arrays)
  *   +$3A..+$45   backpack: 6 ids, 6 charges, 6 flags (structure-of-arrays)
- *   +$4C..+$57  12B  spell book bitmask (sorc + cleric levels)
- *   +$58  u16le SP max, +$5A u16le SP current, +$5C u16le gems,
- *   +$5E  u16le HP max, +$60 u16le HP temp, +$62 u32le XP, +$66 u32le gold
- *   +$6A..+$73   base alignment/stats/level/spell-level/endurance
- *   +$74  u16le HP current, +$76 u16le temp/score
+ *   +$4C..+$4F  4B   derived weapon bytes (melee die, melee enchant, ranged die, ranged enchant), rewritten on equip
+ *   +$51..+$56  6B   spell book bitmask (48 spells of the character's school)       (+$50 and +$57: not traced)
+ *   +$58  u16le SP current, +$5A u16le SP max, +$5C u16le gems,
+ *   +$5E  u16le HP current, +$60 u16le base max HP, +$62 u32le XP, +$66 u32le gold
+ *   +$6A..+$73   working copies of alignment/stats/level/spell-level/endurance (re-synced from +$10.. by rest)
+ *   +$74  u16le effective max HP (= +$60, halved by condition bit 3), +$76 u16le temp/score
+ * (HP/SP labels corrected 2026-11-25 from the game's own code: docs/mm2/amiga/game-rules.md section 8;
+ *  the on-disk byte layout is unchanged, only the field names moved.)
  *   +$78   1B  script/work flag
  *   +$79   1B  class-quest / guild mask
  *   +$7A..+$81  10B  padding/unknown (mostly zero)
@@ -97,11 +100,15 @@ export interface RosterCharacter {
   equipped: { ids: number[]; charges: number[]; flags: number[] };
   backpack: { ids: number[]; charges: number[]; flags: number[] };
   spellBook: number[];
-  spMax: number;
+  /** u16 at +$58 (the value spells spend). */
   spCurrent: number;
+  /** u16 at +$5A (what rest restores `spCurrent` to). */
+  spMax: number;
   gems: number;
-  hpMax: number;
-  hpTemp: number;
+  /** u16 at +$5E (damage subtracts from this). */
+  hpCurrent: number;
+  /** u16 at +$60: base maximum HP (rest copies it into {@link hpMax}). */
+  hpBase: number;
   experience: number;
   gold: number;
   baseAlignment: number;
@@ -109,7 +116,8 @@ export interface RosterCharacter {
   level: number;
   secondaryLevel: number;
   baseEndurance: number;
-  hpCurrent: number;
+  /** u16 at +$74: effective maximum HP (the base, halved while condition bit 3 is set). */
+  hpMax: number;
   tempWord: number;
   scriptFlag: number;
   classQuestMask: number;
@@ -180,11 +188,11 @@ export function decodeRoster(data: Uint8Array): RosterFile {
         flags: [...d.subarray(bpBase + 12, bpBase + 18)],
       },
       spellBook: [...d.subarray(0x4c, 0x58)],
-      spMax: u16le(d, 0x58),
-      spCurrent: u16le(d, 0x5a),
+      spCurrent: u16le(d, 0x58),
+      spMax: u16le(d, 0x5a),
       gems: u16le(d, 0x5c),
-      hpMax: u16le(d, 0x5e),
-      hpTemp: u16le(d, 0x60),
+      hpCurrent: u16le(d, 0x5e),
+      hpBase: u16le(d, 0x60),
       experience: u32le(d, 0x62),
       gold: u32le(d, 0x66),
       baseAlignment: d[0x6a],
@@ -199,7 +207,7 @@ export function decodeRoster(data: Uint8Array): RosterFile {
       level: d[0x71],
       secondaryLevel: d[0x72],
       baseEndurance: d[0x73],
-      hpCurrent: u16le(d, 0x74),
+      hpMax: u16le(d, 0x74),
       tempWord: u16le(d, 0x76),
       scriptFlag: d[0x78],
       classQuestMask: d[0x79],
@@ -262,11 +270,11 @@ export function encodeRoster(roster: RosterFile): Uint8Array {
       out[off + o] = v & 0xff;
       out[off + o + 1] = (v >> 8) & 0xff;
     };
-    w(0x58, c.spMax);
-    w(0x5a, c.spCurrent);
+    w(0x58, c.spCurrent);
+    w(0x5a, c.spMax);
     w(0x5c, c.gems);
-    w(0x5e, c.hpMax);
-    w(0x60, c.hpTemp);
+    w(0x5e, c.hpCurrent);
+    w(0x60, c.hpBase);
     const l = (o: number, v: number) => {
       out[off + o] = v & 0xff;
       out[off + o + 1] = (v >> 8) & 0xff;
@@ -285,7 +293,7 @@ export function encodeRoster(roster: RosterFile): Uint8Array {
     out[off + 0x71] = c.level;
     out[off + 0x72] = c.secondaryLevel;
     out[off + 0x73] = c.baseEndurance;
-    w(0x74, c.hpCurrent);
+    w(0x74, c.hpMax);
     w(0x76, c.tempWord);
     out[off + 0x78] = c.scriptFlag;
     out[off + 0x79] = c.classQuestMask;
@@ -315,3 +323,8 @@ export function conditionName(code: number): string {
   if ((code & 0x80) !== 0) return 'Dead/Stone/Eradicated';
   return ROSTER_CONDITIONS[code] ?? `Unknown (${code})`;
 }
+
+/** The 6-byte spell book bitmask at +$51..+$56 (bit n&7 of byte n>>3 for spell n of the character's school, 0..47) out of {@link RosterCharacter.spellBook}. */
+export const spellBookBits = (c: { spellBook: number[] }): number[] => c.spellBook.slice(5, 11);
+/** The derived weapon bytes at +$4C..+$4F. */
+export const weaponBytes = (c: { spellBook: number[] }) => ({ meleeDie: c.spellBook[0], meleeEnchant: c.spellBook[1], rangedDie: c.spellBook[2], rangedEnchant: c.spellBook[3] });

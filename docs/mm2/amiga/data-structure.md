@@ -237,11 +237,12 @@ The editor's round-trip container views the global blob as slots 48–63
 | `$22` | unknown (still not ASM-mapped) |
 | `$23` | **working spell-level / caster flag** — ASM-confirmed mirror of `$72` (secondary/spell level) |
 | `$28`..`$4B` | **structure-of-arrays** item slots: 6 ids, 6 charges, 6 flags (equipped `$28/$2E/$34`, backpack `$3A/$40/$46`) |
-| `$4C`..`$57` | spellbook bitmask |
-| `$58`..`$61` | u16le SP max / SP cur / gems / HP max / HP temp |
+| `$4C`..`$4F` | derived weapon bytes (melee die, melee enchant, ranged die, ranged enchant), rewritten by equip (game-rules §12.1) |
+| `$51`..`$56` | spell book bitmask, 6 bytes = 48 spells of the character's school (`$50`, `$57` not traced) — **corrected 2026-11-25**: earlier read `$4C`..`$57` |
+| `$58`..`$61` | u16le **SP current** / **SP max** / gems / **HP current** / **base max HP** — **corrected 2026-11-25** (earlier: SP max / SP cur / gems / HP max / HP temp; the game's code subtracts damage from `$5E` and rest restores from `$60`/`$5A`; see game-rules §8) |
 | `$62`..`$69` | u32le XP / gold |
-| `$6A`..`$73` | base alignment/stats/level/spell-level/endurance |
-| `$74` | u16le HP current |
+| `$6A`..`$73` | working copies of alignment/stats/level/spell-level/endurance (stat sync, game-rules §5.2; drains hit these) |
+| `$74` | u16le effective max HP (= `$60`, halved by condition bit 3) — earlier labelled "HP current" |
 | `$79` | class-quest / guild mask (has the `$7E`-OR bug documented in Vairn) |
 
 Enums: race 0..4 = Human/Elf/Dwarf/Gnome/Half-Orc; class 0..7 =

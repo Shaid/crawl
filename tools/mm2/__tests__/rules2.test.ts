@@ -8,7 +8,7 @@ vi.setConfig({ testTimeout: 120000 });
 import { StrictMem } from '../rules-mem.ts';
 import { encounter, encounterBudget, encounterGenerate, battleOver, characterFlee, encounterAddGroup, encounterGroups, initMonsters, roundLoop } from '../rules2.ts';
 import { load } from './vectors.ts';
-import { monsterSpecial, setCondition, monsterTurn, pickTargetMelee, pickTargetRanged, resolvePartyHit, damageMonster, monsterDies, questKill } from '../rules3.ts';
+import { xpNeeded, trainingCost, lootItem, treasure, equipItem, unequipItem, recalcAc, spellCombatGate, spellLocationGate, monsterSpecial, setCondition, monsterTurn, pickTargetMelee, pickTargetRanged, resolvePartyHit, damageMonster, monsterDies, questKill } from '../rules3.ts';
 
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 /** number of vectors on which a (possibly wrong) port disagrees with the game; a throw (read outside the footprint) counts */
@@ -307,5 +307,86 @@ describe('monster special attack (CODE+0x0FD8C)', () => {
   });
   it('null controls: no chance roll, and no luck save, both disagree', () => {
     for (const o of [{ noChance: true }, { noLuck: true }]) expect(disagree(V, (v) => changes(v, (m) => void monsterSpecial(m, o)))).toBeGreaterThan(0);
+  });
+});
+
+describe('spell gates (CODE+0x78A8 combat class, 0x790E location)', () => {
+  const V = load('spellgate');
+  const run = (v: any, o = {}) => {
+    const m = mem(v);
+    const r = v.kind === 'cc' ? spellCombatGate(m, v.rec, o) : spellLocationGate(m, v.rec, o);
+    return { ok: r.ok, calls: r.calls, ch: m.changes() };
+  };
+  it('matches the game: return value and the message shown', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const o = run(v);
+      expect(o.ok).toBe(v.ret);
+      expect(o.calls).toEqual(v.calls);
+    }
+    expect(V.filter((v: any) => v.ret === 0).length).toBeGreaterThan(5);
+  });
+  it('null controls: swapped combat classes, and ignoring the map bit, both disagree', () => {
+    for (const o of [{ swap: true }, { ignoreMap: true }]) {
+      let bad = 0;
+      for (const v of V) {
+        try {
+          const r = run(v, o);
+          if (r.ok !== v.ret || JSON.stringify(r.calls) !== JSON.stringify(v.calls)) bad++;
+        } catch {
+          bad++;
+        }
+      }
+      expect(bad).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('equipment: weapon bytes, armour accumulator, AC (CODE+0xF36C, 0xF270, 0x67E6)', () => {
+  it('AC recalculation matches the game', () => {
+    const V = load('ac');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => recalcAc(m))).toEqual(v.fin);
+  });
+  it('equip matches the game (weapon die/enchant, armour accumulator, stat bonus, AC); null control: no armour', () => {
+    const V = load('equip');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => equipItem(m, v.char, v.slot))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => equipItem(m, v.char, v.slot, { noArmour: true })))).toBeGreaterThan(0);
+  });
+  it('unequip matches the game', () => {
+    const V = load('unequip');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => unequipItem(m, v.char, v.slot))).toEqual(v.fin);
+  });
+});
+
+describe('treasure (CODE+0x12206 loot item, 0x123B0 treasure roll)', () => {
+  it('one loot item matches the game: item id, charges, use power, every draw', () => {
+    const V = load('lootitem');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => lootItem(m, v.idx))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => lootItem(m, v.idx, { noCap: true })))).toBeGreaterThan(0);
+  });
+  it('the treasure roll matches the game: count, tier cost', () => {
+    const V = load('treasure');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(changes(v, (m) => treasure(m))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => treasure(m, { noTierCost: true })))).toBeGreaterThan(0);
+  });
+});
+
+describe('Hall of Training: XP needed and cost (CODE+0x20796, 0x2073A)', () => {
+  it('xp needed for the next level matches the game for levels 1..255 and every class', () => {
+    const V = load('xpneed');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(xpNeeded(mem(v), v.char)).toBe(v.ret >>> 0);
+    expect(V.some((x: any) => x.ret > 0x10000000)).toBe(true);
+  });
+  it('training cost matches the game; null control: not adding the +1 level disagrees', () => {
+    const V = load('traincost');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) expect(trainingCost(mem(v), v.char, v.slot)).toBe(v.ret);
+    expect(V.some((x: any) => trainingCost(mem(x), x.char, x.slot, { noPlusOne: true }) !== x.ret)).toBe(true);
   });
 });

@@ -45,10 +45,10 @@ describe('roster.dat vs the real fixture', () => {
     expect(c.food).toBe(10);
     expect(c.condition).toBe(0);
     expect(c.endurance).toBe(19);
-    expect(c.spMax).toBe(0);
-    expect(c.hpMax).toBe(16);
-    expect(c.hpTemp).toBe(16);
+    expect(c.spCurrent).toBe(0);
     expect(c.hpCurrent).toBe(16);
+    expect(c.hpBase).toBe(16);
+    expect(c.hpMax).toBe(16);
     expect(c.experience).toBe(0);
     expect(c.gold).toBe(200);
     expect(c.baseAlignment).toBe(1);

@@ -1,6 +1,6 @@
 # Might & Magic II (Amiga) — Game Rules
 
-Logic foundation for a browser remake's rules core, derived from the game's own 68000 code: the retail `mm2` executable (`data/mm2/amiga/data/mm2`, 181,524 B). No other port and no third-party reference code was used for any rule below; `docs/mm2/amiga/data-structure.md` (format work ported from Vairn/MM2) is used only for field *meanings*, and where the code disagrees with it this document says so (section 8). Written 2026-11-25, pass 1.
+Logic foundation for a browser remake's rules core, derived from the game's own 68000 code: the retail `mm2` executable (`data/mm2/amiga/data/mm2`, 181,524 B). No other port and no third-party reference code was used for any rule below; `docs/mm2/amiga/data-structure.md` (format work ported from Vairn/MM2) is used only for field *meanings*, and where the code disagrees with it this document says so (section 8). Written 2026-11-25; pass 2 (encounters, turn order, monster side, equipment, treasure, training, gates) the same day.
 
 **Method.** Single real routines run in a Unicorn 68000 core (`tools/mm2/rules_oracle/`, no OS/disk/chipset emulation; UI, text and key-wait callees are replaced by logging stubs) on synthetic state. Per call the harness records every byte the routine read before writing (the input footprint), every byte it wrote, the return value and each logged stub call. `tools/mm2/rules.ts` is a TypeScript port written from the disassembly; `tools/mm2/__tests__/rules.test.ts` runs it against a *strict* sparse memory seeded with only that footprint, so a port that reads state the game did not read, writes a different byte, draws the RNG in a different order or returns a different value fails. Every check has a **null control**: a deliberately wrong variant of the port must disagree with the vectors on at least one case.
 
@@ -17,6 +17,35 @@ Logic foundation for a browser remake's rules core, derived from the game's own 
 
 Reproduce: `tools/mm2/rules_oracle/gen_vectors.sh` (needs a venv with `unicorn`; full vector sets go to the gitignored `tools/mm2/rules_oracle/generated/`, small committed subsets to `tools/mm2/rules_oracle/vectors/`); `npx vitest run tools/mm2/__tests__/rules.test.ts` uses the full sets when present and the committed subsets otherwise.
 
+## MM2 rules status (build guide, updated 2026-11-25, pass 2)
+
+What a remake rules core can take **as is** (each unit: a real routine run in Unicorn, diffed against a TypeScript port with strict read/write-footprint parity, null control; sections cited; vector counts are full sets, ~1,000+ committed subsets in `tools/mm2/rules_oracle/vectors/`):
+
+| Area | Verified (harness) | Where |
+|---|---|---|
+| RNG, `rand(lo,hi)` | LCG, hi+1 overshoot | 2 |
+| Monster record | unpack (all 256 retail + synthetic), ability uses, initiative | 3.1, 10 |
+| Encounter | group sizes, reinforcement pick, budget, generation loop | 10.1 |
+| Encounter prompt | surprise roll, Hide, Run, Bribe (Food/Gold/Gems) odds | 10.2 |
+| Turn order / round | actor selection, ties, status decay, battle-over test, a member running | 10.3 |
+| Monster turn | flee/morale, ability gate, melee vs ranged vs advance vs spell decision, melee and ranged target pick | 11.1-11.2, 4.1, 4.5 |
+| Monster hits party | hit roll, damage, saves, death, all **30** special/condition effects | 4.1, 4.3, 11.3 |
+| Party hits monster | attack roll, crits, immunity, damage, death, removal, queue XP, quest flag, kill reward, XP award | 4.2, 4.6, 4.7, 11.4 |
+| Characters | stat bonus/sync, luck save, spell level/SP, training HP, **XP needed per level, training cost**, rest | 5, 12.2 |
+| Equipment | equip/unequip (weapon bytes, AC accumulator, stat bonus), AC recalculation | 12.1 |
+| Treasure | treasure count, item roll, charges, use power | 12.3 |
+| Spells (gates only) | SP cost, gem gate, SP gate, combat-class gate, location gate | 6, 12.4 |
+
+**Open (not derived; smallest next step):**
+- `mm2-rules-spell-effects` — the **effects** of the 96 spells and the monster spell dispatcher CODE+0x1FB4E / group verbs (sprays, breaths, bolts...), the party cast handlers (~CODE+0x1AB0C), `partyEffect` CODE+0x10894, `advance` CODE+0x10118, `special` CODE+0x1042C. The `spells.dat`/`items.dat` loader (overlay hunk) was **not** needed: the harness writes the table bytes where the loader would and the verified routines only read them; extending the harness to load the overlay is still needed for the loader itself.
+- `mm2-rules-equipment` (remainder) — item *use* (items.dat `+0x0F` effect), curses/class restriction enforcement at equip, shop rules.
+- `mm2-rules-world` — traps, door bash/unlock (CODE+0x9C2A / 0x20D6E), food consumption outside rest, skills, passability.
+- `mm2-rules-chargen` — character creation (overlay code).
+- Pieces still stubbed inside verified units: the party action routine CODE+0x119C2 (command menu: attack, cast, use, run), bribe payment CODE+0x6C66 / 0x6ACE / 0x6B9A, `retreat` CODE+0x11646's map move; the meaning of per-map bytes `A4-22025` / `-22029` / `-22030..-22032` (hyp: map header fields, set by the map loader).
+- Party-attack target prompt (target 0xFF) and ranged/melee mode selection are UI.
+
+Corrections made in pass 2 are in sections 8 and 11 (`> **Correction (date):**`).
+
 ## 1. Status summary
 
 | Area | Harness-verified (grade) | Open |
@@ -27,7 +56,7 @@ Reproduce: `tools/mm2/rules_oracle/gen_vectors.sh` (needs a venv with `unicorn`;
 | Spells | SP cost, gem gate, SP gate, spell-level learning, monster spell damage dice (harness) | the per-spell effect handlers (monster dispatcher CODE+0x1FB4E and the party handlers), combat/outdoor gate, spell book contents, spell list vs `tools/mm2/spells.ts` |
 | World | rest (harness) | traps, doors/unlock/bash, food consumption outside rest, skills (Mountaineering, Pathfinder...), overland passability, overlay code |
 
-Vector counts (full sets): rng 4,008, monunpack 856 (256 retail + 600 synthetic records), bonus 256, luck 3,000, dmgchar 3,000, melee 3,000, pmelee 3,000, monspecial 2,000, killreward 2,000, partystrength 1,000, mspelldmg 2,000, sync 100, spelllevel 3,000, xpaward 1,500, train 3,000, rest 2,000, spellcost 3,006 — 36,726 vectors; the committed subsets hold ~1,000.
+Vector counts (full sets): rng 4,008, monunpack 856 (256 retail + 600 synthetic records), bonus 256, luck 3,000, dmgchar 3,000, melee 3,000, pmelee 3,000, monspecial 2,000, killreward 2,000, partystrength 1,000, mspelldmg 2,000, sync 100, spelllevel 3,000, xpaward 1,500, train 3,000, rest 2,000, spellcost 3,006 — 36,726 vectors; the committed subsets hold ~1,000. **Pass 2 adds 63500** (sections 10-12: encgroup 3,000, moninit 1,500, battleover 1,500, encpick 3,000, encbudget 2,000, encgen 1,500, charflee 2,000, round 2,000, driver 2,000, mondeath/mondamage/questkill/resolve/tgtranged/tgtmelee/monturn 2,000 each, setcond 4,000, monspecial2 3,000, spellgate 3,000, equip/unequip/ac/lootitem/treasure/xpneed/traincost 3,000 each), 100226 in total.
 
 ## 2. Foundations (harness)
 
@@ -175,9 +204,9 @@ Combat round skeleton (confirmed pieces): `unpack_monster` -> monster attack rol
 
 > **Correction (2026-11-25):** `tools/mm2/monsters.ts` `decodeMonsterStat` (AC/damage/initiative) caps every value at 250; the game truncates AC x10 to a byte and caps damage/initiative at 250 only when the base value is > 25 (3.1). Identical on all retail records.
 
-> **Correction (2026-11-25):** the roster/in-memory record carries working copies at `+0x6B..+0x73` that combat reads (stat sync 5.2), and the weapon bytes the attack roll uses are `+0x4C..+0x4F` — inside the range data-structure.md labels "spellbook bitmask `$4C..$57`". The spell book written by 5.3 lands at `+0x51..`, so those four weapon bytes overlap the first bytes of that range as documented; one of the two readings is wrong (hyp: the weapon bytes are derived equipment values, recomputed when equipment changes; the spell book then starts at `+0x51` rather than `+0x4C`). Open (section 9).
+> **Correction (2026-11-25):** the roster/in-memory record carries working copies at `+0x6B..+0x73` that combat reads (stat sync 5.2), and the weapon bytes the attack roll uses are `+0x4C..+0x4F` — inside the range data-structure.md labels "spellbook bitmask `$4C..$57`". The spell book written by 5.3 lands at `+0x51..`, so those four weapon bytes overlap the first bytes of that range as documented; one of the two readings is wrong (hyp: the weapon bytes are derived equipment values, recomputed when equipment changes; the spell book then starts at `+0x51` rather than `+0x4C`). **Resolved in pass 2 (12.1): confirmed (harness).**
 
-## 9. Open (TODO ids in `docs/mm2/TODO.md`)
+## 9. Open (TODO ids in `docs/mm2/TODO.md`) — pass 1 list, superseded by the status block at the top
 
 - `mm2-rules-initiative` — turn order (`A4-1294[slot]`, party initiative) and the round loop (CODE+0x12A22, 0x12C6E); flee/surprise odds.
 - `mm2-rules-monster-special` — monster special attacks and status effects: CODE+0xFD8C (`monster_special`, sabil effect roll with `u8[16]` at `A4-28422`), CODE+0x1F27E (set condition), the group-ability handlers; condition-bit meanings beyond 0x10/0x40/0x80.
@@ -278,3 +307,27 @@ A save succeeds (the effect takes) when `d100 >= resist byte`, so a *high* byte 
 > **Correction (2026-11-25):** the surprise odds in section 7 ("`rand(1,100) <= 0x28` and `<= A4-24142` -> surprise 2, `>= 0x5A` -> 3, hyp") are now harness-verified (10.2) with the missing pieces: `A4-24142` is the party average of character byte `+0x1E`, 2 means *the party* surprises, 3 means the monsters surprise (suppressed by `A4-31142`).
 
 > **Correction (2026-11-25):** the "monster call-for-help/morale" gap: MM2 does have a morale check (11.1 step 4) and a once-per-battle reinforcement call (11.1 step 5).
+
+## 12. Equipment, treasure, training, spell gates (pass 2)
+
+### 12.1 Equipment (harness: equip 3,000 / unequip 3,000 / AC 3,000; items synthetic)
+
+Character item layout (`+0x28..+0x4B`, three 6-byte arrays per group): **equipped** ids `+0x28`, `+0x2E` (second array), enchant/flags `+0x34` (`& 0x3F` = enchant); **backpack** ids `+0x3A`, `+0x40`, `+0x46`. The items.dat record table is `A4-16126` (256 x 20 B: `+0x0E` bonus byte = stat index (high nibble) and amount (low nibble), `+0x0F` use power, `+0x10` damage / armour value). **Item classes by id**: 1..0x5B melee weapons, 0x5C..0x72 ranged weapons, 0x73..0x9F armour.
+- CODE+0xF36C `equip_item(ch, slot)`: melee weapon -> `+0x4C` = record `+0x10`, `+0x4D` = enchant; ranged -> `+0x4E` / `+0x4F`; armour -> the AC accumulator `+0x1F` gains enchant and record `+0x10` (saturating at 255); then the item's stat bonus (record `+0x0E`: stat `+0x10 + type` and its working copy `+0x6B + type` for type <= 5, by `enchant + amount`, saturating) and the AC recalculation. CODE+0xF270 `unequip_item` clears the weapon bytes, subtracts the armour (floor 0) and removes the stat bonus (CODE+0xF110).
+- CODE+0x67E6 `recalc_ac`: for every member **AC (`+0x24`) = clamp(stat_bonus(`+0x13`, a negative counted as 0) + `+0x1F`, 0..255)**. A positive-is-good byte (4.1).
+
+> **Correction (2026-11-25):** the overlap question in section 8 is resolved: `+0x4C..+0x4F` are the derived weapon bytes (rewritten at equip); the spell book is **6 bytes at `+0x51..+0x56`** (48 spells; section 5.3 writes `+0x51 + (n>>3)`, `n < 48`), so data-structure.md's "`$4C..$57` spellbook" was too wide. `+0x50` and `+0x57` are not traced.
+
+### 12.2 Hall of Training
+
+- **XP needed** CODE+0x20796 (harness: 3,000): for the next level `L = level + 1` (cap 255), Paladin/Archer/Sorcerer/Ninja use the second row of `u32[2][9]` at `A4-25998` (levels 2..10), the others the first; above level 10 the requirement grows by 0x2EE00 per level (11-13), 0x5DC00 (14-15), 0xBB800 per level for 16-20, 0x177000 for 21-30, 0x2EE000 for 31-50, 0x190000 for 51-75 and 0x5DC000 per level above 75 (the table is cumulative). Training is allowed when `+0x62 (XP) >= XP needed` (CODE+0x20988, **code**).
+- **Cost** CODE+0x2073A (harness: 3,000): 0 for roster index >= 24 (hirelings), else `hallMul[hall A4-31218] * (level+1) * 50` gold; then `train` (5.4) charges it and grants the level.
+
+### 12.3 Treasure (harness: loot item 3,000, treasure 3,000; items synthetic)
+
+CODE+0x123B0: `d = rand(1,100)`: `< 11` -> 3 items, `< 46` -> 2, `< 91` -> 1, else none. Each item lowers the loot tier `A4-24105` (set by the kill reward, 4.6) by one while it is above 0, then CODE+0x12206 rolls it: tier capped at 2; `d100` picks the first row of the `u8[7]` thresholds at `A4-28118`; item id = row base `u8@A4-28108[k*4]` + `rand(1, u8@A4-28108[k*4 + tier + 1])`. Charges: items whose bonus byte is not 0xF0, with the kill tier index `A4-24104 >= 2`, roll `rand(1,7)` (replaced by `rand(1, tierIndex)` for 2..12, `rand(1,21)+11` for 13); a result `>= 5` gets flag bits (`d100 < 41` -> 0x80, `< 71` -> 0x40, else 0xC0). Use power: `u8@A4-28111[tier]` when the record's `+0x0F` is non-zero. Results land in `A4-16156[i]` (ids), `A4-16153[i]` (charges/flags), `A4-16150[i]` (use power), where the chest/treasure UI picks them up (**open**).
+
+### 12.4 Spell gates (harness: 3,000)
+
+- CODE+0x78A8: spells.dat byte0 bits 6-7 = 0 anywhere, 1 combat only (`A4-31154 == 2` is "in combat"; set by the round loop), 2 non-combat only, 3 never (messages 3 / 2).
+- CODE+0x790E: byte1 >= 0x80 spells are allowed when `A4-31202 == 1` (hyp: overland), otherwise only when the map's 16x16 bit map at `A4-22010` (bit `x & 7` of byte `y*2 + (x > 7)`, party position `A4-31217`/`A4-31216`) is clear (message 4 otherwise). The flagged spells are the outdoor family (Eagle Eye, Fly, Walk on Water, the Transmutations, Nature's Gate, Sand Storm, Meteor Shower, Star Burst, Moon Ray), so `tools/mm2/spells.ts`'s "outdoor-only" label for byte1 bit 7 is right in spirit but the rule is a per-square map flag, not an absolute ban.
