@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { mustMatch, nullBad } from './check.ts';
-import { ComCast, type Wrong } from '../spells.ts';
+import { ComCast, MonsterAbility, type Wrong } from '../spells.ts';
 import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
 
@@ -24,6 +24,13 @@ describe('combat cast CODE+0xC7C7', () => {
     const variants: Wrong[] = ['sorcListBase', 'spCostIgnoresLevel', 'noMonsterResist', 'noSaveHalving', 'noKindQuarter', 'healNoCap', 'gemNoBorrow', 'skipPartyHit'];
     for (const w of variants) {
       const n = nullBad('cast', (m, v) => { const r = new ComCast(m, v.args, w).run(); return { stop: r.stop, calls: r.calls }; });
+      expect(n, w).toBeGreaterThan(0);
+    }
+  });
+  it('monster special abilities CODE+0xAF49 (32 handlers, chance, uses, damage/status engines)', () => mustMatch('ability', (m) => new MonsterAbility(m, []).run(), 100));
+  it('ability null controls', () => {
+    for (const w of ['abilityNoChance', 'abilityCarry'] as Wrong[]) {
+      const n = nullBad('ability', (m) => { const r = new MonsterAbility(m, [], w).run(); return { stop: r.stop, calls: r.calls }; });
       expect(n, w).toBeGreaterThan(0);
     }
   });

@@ -179,3 +179,42 @@ def _(n, rnd):
         for i in range(15): e.ww(0x3c58 + 2 * i, MONBASE + MONSLOT * i)
         return [], {}
     return run_n(n, rnd, mk, 0x9a76, stub=UPK, stops=(0x9b9d, 0x9ec9, 0x9fc1, 0x9f1a))
+
+ABIL_UI = UPK + [uistub('noises', 0x1ab3), ('dosound', 0x1ad6, None, lambda e: [e.regs()['ax']]), uistub('pdec', 0x4030)]
+@unit('ability')
+def _(n, rnd):
+    """CODE+0xAF49: a monster's special action (ability id +0x1C, use chance +0x1D, uses left +0x1E low nibble); 32 handlers via DS:33CF
+    (stop 0x9E94 = turn consumed, plain return = no ability, melee follows)"""
+    def mk(e, r):
+        pc(e, r)
+        mon_setup(e, r)
+        party_fx(e, r)
+        k = r.randint(0, 14)
+        a = MONBASE + MONSLOT * k
+        e.ww(0x3cb4, a); e.ww(0x38b2, k)
+        e.wb(a + 0x1c, r.choice([r.randint(1, 32)] * 6 + [0, 0x80, 33, 200, r.getrandbits(8)]))
+        e.wb(a + 0x1d, r.choice([100, 100, 99, 50, 0, r.getrandbits(8)]))
+        e.wb(a + 0x1e, r.choice([0x01, 0x02, 0x0f, 0x05, 0x81, 0x30, 0x40, r.getrandbits(8)]))
+        e.wb(0x3879 + k, r.choice([0, 0, 0, 0, 1, 2, 4, 8, 0x10, 0xff, r.getrandbits(8)]))
+        e.wb(0x3c29 + k, r.choice([0, 1, 3, 5, 8, 10, r.getrandbits(8)]))
+        e.wb(0x3888 + k, r.choice([0, 1, 20, 100, 250, r.getrandbits(8)]))
+        e.wb(0x3c10, r.choice([0, 0, 0, 0, 2, r.getrandbits(8)]))
+        for off in range(0x3c9d, 0x3ca7): e.wb(off, r.choice([0, 0, 0, 1, 5, r.getrandbits(8)]))
+        e.wb(0x3ca6, r.choice([0, 1, 254, 255, r.getrandbits(8)]))
+        for off in (0x3c95, 0x3c96, 0x3c97, 0x3c98, 0x3c99, 0x3c9a, 0x3c9b): e.wb(off, r.choice([0, 0, 0, 5, 20, 60, 130, r.randint(0, 255)]))
+        e.wb(0x3ca1, r.choice([0, 0, 0, 1]))
+        e.ww(0x132, 0xc940)
+        for i in range(0x40): e.wb(0xc940 + i, r.randint(0, 255))
+        e.wb(0x3581, 0)
+        e.wb(0x3bdc, r.choice([0, 0, 3])); e.wb(0x3bdd, r.choice([0, 0, 20, 21]))
+        return [], {}
+    res = run_n(n, rnd, mk, 0xaf49, stub=ABIL_UI, stops=(0x9e94,))
+    seen = {}
+    for d in res:       # keep one vector per ability id, and a few where the level-sum loop carries (ids 3 and 13: 6 / 8 per level)
+        I, W = d['init'], d['wpre']
+        g = lambda k: I.get(str(k), W.get(str(k)))
+        if g(0x3cb4) is None: continue
+        mp = g(0x3cb4) | (g(0x3cb5) << 8); ab = g(mp + 0x1c); lv = g(0x3c29 + g(0x38b2)) if g(0x38b2) is not None else None
+        if ab is not None and d['out']['stop'] == 0x9e94 and ab not in seen: seen[ab] = 1; d['keep'] = True
+        if ab in (3, 13) and lv and lv * (6 if ab == 3 else 8) > 300 and seen.get(('c', ab), 0) < 6: seen[('c', ab)] = seen.get(('c', ab), 0) + 1; d['keep'] = True
+    return res

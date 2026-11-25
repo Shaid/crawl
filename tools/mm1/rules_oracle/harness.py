@@ -36,13 +36,20 @@ class Rec:
                 k = key(a)
                 if k is not None and k not in written:
                     written.add(k); wpre[k] = u.mem_read(a, 1)[0]
+        orb, orw = e.rb, e.rw
+        def note(o, n):
+            for a in range(o, o + n):
+                if a not in written and a not in init and 0 <= a < TRACK_END: init[a] = orb(a)
+        def rb2(o): note(o, 1); return orb(o)
+        def rw2(o): note(o, 2); return orw(o)
+        e.rb, e.rw = rb2, rw2   # reads made by stub argument lambdas count as reads of the call
         h1 = uc.hook_add(UC_HOOK_MEM_READ, rd)
         h2 = uc.hook_add(UC_HOOK_MEM_WRITE, wr)
         rin = {k: (regs or {}).get(k, 0) & 0xffff for k in ('ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp')}
         try:
             out = e.call(ip, rin, stop=stop, stops=stops, max_insn=max_insn)
         finally:
-            uc.hook_del(h1); uc.hook_del(h2)
+            uc.hook_del(h1); uc.hook_del(h2); e.rb, e.rw = orb, orw
         def cur(k): return uc.mem_read((DS_BASE + k) if k < 0x10000 else (CS_BASE + k - 0x10000), 1)[0]
         fin = {k: cur(k) for k in written}
         return {

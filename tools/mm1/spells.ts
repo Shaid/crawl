@@ -32,7 +32,7 @@ export function spellIndex(cls: number, level: number, slot: number): number {
 }
 
 /** deliberately wrong variants, used only by the null-control tests (each must disagree with the game on some vector) */
-export type Wrong = 'sorcListBase' | 'spCostIgnoresLevel' | 'noMonsterResist' | 'noSaveHalving' | 'noKindQuarter' | 'healNoCap' | 'gemNoBorrow' | 'skipPartyHit';
+export type Wrong = 'sorcListBase' | 'abilityNoChance' | 'abilityCarry' | 'spCostIgnoresLevel' | 'noMonsterResist' | 'noSaveHalving' | 'noKindQuarter' | 'healNoCap' | 'gemNoBorrow' | 'skipPartyHit';
 export class Caster {
   calls: Call[] = [];
   /** handler address last dispatched (coverage bookkeeping for the tests) */
@@ -249,7 +249,7 @@ export class ComCast extends Caster {
   }
   // ---- engines ----
   /** CODE+0xCD63: header for a multi-monster spell */
-  private cd63() {
+  protected cd63() {
     const m = this.m;
     this.clropt(); m.w8(0x3bdd, 0x14); m.w8(0x3bdc, 0);
     m.w16(BDW_TEXT, m.r16(CHARP)); this.ptext();
@@ -258,7 +258,7 @@ export class ComCast extends Caster {
     m.w8(MON0, m.r8(NMON));
   }
   /** CODE+0xCD8D: blank the two message rows and print the current target's name */
-  private cd8d() {
+  protected cd8d() {
     const m = this.m;
     for (let bl = 0; bl < 0x28; bl++) { this.ui('puttoscr'); this.ui('puttoscr'); }
     m.w8(0x3bdd, 0x16); m.w8(0x3bdc, 0);
@@ -268,7 +268,7 @@ export class ComCast extends Caster {
     if (borrow) al = 0;
     this.pmonname(al);
   }
-  private cdcc() { this.inc(0x3bdc); this.text(0x361a); this.ptext(); }
+  protected cdcc() { this.inc(0x3bdc); this.text(0x361a); this.ptext(); }
   /** monster resist kinds (DS:0x318A table of code pointers 0xA7EA..0xA80D): CF = the monster is of that kind (+0x1A mask test) */
   private mresl(kind: number): number {
     const m = this.m;
@@ -402,7 +402,7 @@ export class ComCast extends Caster {
     m.w8(m.r16(CHARPOS) + 0x3f, al & 0xbf);
   }
   /** CODE+0xD9FE: "the spell fails" */
-  private fail(): never {
+  protected fail(): never {
     const m = this.m;
     this.clropt(); this.text(0x3ba9); m.w8(0x3bdd, 0x16); m.w8(0x3bdc, 0xa);
     this.stars();
@@ -421,7 +421,7 @@ export class ComCast extends Caster {
   private d10x(n: number, base: number): number { let v = base; for (let i = 0; i < n; i++) v = u8(random(this.m, 10) + v); return v; }
   private partyFx(addr: number, plus: number) { const m = this.m; m.w8(addr, u8(m.r8(m.r16(CHARP) + 0x24) + plus)); }
   /** CODE+0xB475 `mdmga_s`: apply the spell to every party member (resist, save, damage) */
-  private partyDamage() {
+  protected partyDamage() {
     const m = this.m;
     const saved = m.r16(CHARP);
     let bl = 0;
@@ -436,7 +436,7 @@ export class ComCast extends Caster {
     m.w16(CHARP, saved);
   }
   /** CODE+0xB3FD..: one party member suffers P_VAL damage (resists/saves reduce it) */
-  private mdmga() {
+  protected mdmga() {
     const m = this.m;
     m.w8(0x3581, 1);
     m.w8(DMGTOT, m.r8(P_VAL));
@@ -447,7 +447,7 @@ export class ComCast extends Caster {
     this.inopsh();
     this.sub(applyDamageChar(m));
   }
-  private b5ac() {
+  protected b5ac() {
     const m = this.m;
     for (let bl = 0; bl < 0x28; bl++) { this.ui('puttoscr'); this.ui('puttoscr'); }
     m.w8(0x3bdd, 0x16); m.w8(0x3bdc, 0);
@@ -457,8 +457,8 @@ export class ComCast extends Caster {
     if (resistRoll(m, 0)) return;
     this.innoef(); throw new Abort();
   }
-  private innoef() { this.text(0x361a); this.ptext(); }
-  private b5f7() {
+  protected innoef() { this.text(0x361a); this.ptext(); }
+  protected b5f7() {
     const m = this.m;
     if (m.r8(P_RES) === 0) return;
     saveChar(m);
@@ -466,7 +466,7 @@ export class ComCast extends Caster {
     if (m.r8(0x3581) === 0) { this.innoef(); throw new Abort(); }
     m.w8(DMGTOT, m.r8(DMGTOT) >> 1);
   }
-  private b615() {
+  protected b615() {
     const m = this.m;
     const al = m.r8(P_CNT);
     if (al === 0 || al > 7) return;
@@ -475,7 +475,7 @@ export class ComCast extends Caster {
     m.w8(DMGTOT, m.r8(DMGTOT) >> 1); m.w8(DMGTOT, m.r8(DMGTOT) >> 1);
   }
   /** CODE+0xCFA1: kill the current monster (condition 0xFF) */
-  private killMonster() {
+  protected killMonster() {
     const bp = this.m.r16(0x38b2);
     this.m.w8(0x3879 + bp, 0xff);
     this.ui('dosound', [9]);
@@ -778,11 +778,16 @@ export class ComCast extends Caster {
     return this.turnTail();
   }
   /** CODE+0xD1C6: dispel everything (clear the party effect bytes, reset every member, clear every monster's condition) */
-  private goz(): void {
+  protected goz(): void {
     const m = this.m;
     const r = random(m, 100);
     const lim = this.getod(0x26);
     if (!(r >= (lim & 0xff))) return this.fail();
+    this.gozClear();
+  }
+  /** CODE+0xD1C6 `goz34` */
+  protected gozClear(): void {
+    const m = this.m;
     for (let bl = 0; bl < 0x13; bl++) m.w8(0x3c95 + bl, 0);
     m.w8(0x3b16, m.r8(CHARP)); m.w8(0x3b17, m.r8(CHARP + 1));
     let bp = 0;
@@ -860,3 +865,199 @@ export class ComCast extends Caster {
   }
 }
 class Abort extends Error {}
+
+/** CODE+0xAF49 `ability`: a monster's special action. Fields of the acting monster: +0x1C ability id (1..32), +0x1D use chance (percent),
+ *  +0x1E low nibble uses left. The 32 handlers (DS:0x33CF) set the engine bytes (3C82 magic-resist applies, 3C83 saving throw
+ *  applies / on breath weapons the element, 3C84 element kind, 3C85 value) and end in one of four engines: random-target damage
+ *  (0xB3FA), whole-party damage (0xB470), random-target status (0xB4B1) or whole-party status (0xB50E). Stops: 0x9E94 the action was
+ *  taken; stop = -1 means no ability this turn (melee follows). */
+export class MonsterAbility extends ComCast {
+  override run(): { stop: number; calls: Call[] } {
+    try { this.ability(); } catch (e) {
+      if (e instanceof Exit) return { stop: e.stop, calls: this.calls };
+      throw e;
+    }
+    return { stop: -1, calls: this.calls };
+  }
+  private ability(): void {
+    const m = this.m;
+    const mon = () => m.r16(MONPTR);
+    const bp = m.r16(0x38b2);
+    if ((m.r8(0x3879 + bp) & 8) !== 0) { this.text(0x33bd); this.inc(0x3bdc); this.ptext(); throw new Exit(0x9e94); }
+    const id0 = m.r8(mon() + 0x1c);
+    if (id0 === 0 || id0 >= 0x80) return;
+    const chance = m.r8(mon() + 0x1d);
+    m.w8(0x3bb8, chance);
+    const r = random(m, 100);
+    if (this.wrong !== 'abilityNoChance' && r >= m.r8(0x3bb8)) return;
+    if ((m.r8(mon() + 0x1e) & 0xf) === 0) return;
+    m.w8(mon() + 0x1e, m.r8(mon() + 0x1e) - 1);
+    const id = m.r8(mon() + 0x1c);
+    if (id === 0 || id >= 0x21) return;
+    const handler = m.r16(0x33cf + 2 * (id - 1));
+    m.w8(P_SAVE, 0); m.w8(P_RES, 0); m.w8(P_CNT, 0); m.w8(P_VAL, 0);
+    this.inc(0x3bdc);
+    try { this.abilityHandler(handler); } catch (e) { if (!(e instanceof Abort)) throw e; }
+    throw new Exit(0x9e94);
+  }
+  /** CODE+0xB3D3: casting gate for the "spell-like" abilities (anti-magic zone or the monster asleep/silenced = fizzles) */
+  private b3d3(): void {
+    const m = this.m;
+    if ((m.r8(0x3c10) & 2) !== 0) { this.text(0x3564); this.ptext(); throw new Abort(); }
+    const bp = m.r16(0x38b2);
+    if ((m.r8(0x3879 + bp) & 6) !== 0) { this.text(0x3564); this.ptext(); throw new Abort(); }
+    this.text(0x357a); this.ptext();
+  }
+  private b3c9(): void { this.text(0x355a); this.ptext(); }
+  /** CODE+0xB547: a random living party member (or the first living one) becomes the current character */
+  private pickMember(): void {
+    const m = this.m;
+    this.cout(0x3a);
+    let bl = u8(random(m, m.r8(NPARTY)) - 1);
+    bl = u8(bl << 1);
+    m.w8(CHARP, m.r8(PARTYTAB + bl)); m.w8(CHARP + 1, m.r8(PARTYTAB + bl + 1));
+    if ((m.r8(m.r16(CHARP) + 0x3f) & 0xc0) === 0) return;
+    for (let b = 0; ; ) {
+      const p = u8(b << 1);
+      m.w8(CHARP, m.r8(PARTYTAB + p)); m.w8(CHARP + 1, m.r8(PARTYTAB + p + 1));
+      if ((m.r8(m.r16(CHARP) + 0x3f) & 0xc0) === 0) return;
+      b++;
+      if (!(b < m.r8(NPARTY))) return;
+    }
+  }
+  /** CODE+0xB3FA: damage one random member */
+  private hitOne(): void { this.pickMember(); this.mdmga(); }
+  /** CODE+0xB470: damage every member */
+  private hitAll(): void { this.cout(0x3a); this.partyDamage(); }
+  /** CODE+0xB4B4: status P_VAL on the current member (with the same resist / save gates as damage) */
+  private condOne(): void {
+    const m = this.m;
+    m.w8(0x3581, 0);
+    try {
+      this.b5ac(); this.b5f7(); this.b615();
+    } catch (e) { if (e instanceof Abort) return; throw e; }
+    const al = m.r8(P_VAL);
+    this.setCond(al);
+    let bx = 0;
+    if (al === 0) bx = 10;
+    else if (al >= 0x80) bx = al === 0xc0 ? 7 : al === 0xa0 ? 8 : al === 0xff ? 9 : 10;
+    else { let a = al; for (;;) { const c = a & 1; a >>= 1; if (c) break; bx++; if (bx > 255) break; } }
+    m.w16(BDW_TEXT, m.r16(0x359b + 2 * bx)); this.ptext();
+    this.cout(0x21);
+  }
+  /** CODE+0xA6D3 `setcondi` on the current character */
+  private setCond(al: number): void {
+    const m = this.m;
+    m.w8(0x3bb8, al);
+    const c = m.r16(CHARP);
+    const cond = m.r8(c + 0x3f);
+    if (cond < 0x80) m.w8(c + 0x3f, cond | al);
+    else if (m.r8(0x3bb8) >= 0x80) m.w8(c + 0x3f, m.r8(c + 0x3f) | m.r8(0x3bb8));
+  }
+  private condOneRandom(): void { this.pickMember(); this.condOne(); }
+  /** CODE+0xB50E: status on every member */
+  private condAll(): void {
+    const m = this.m;
+    this.cout(0x3a);
+    let bl = 0;
+    do {
+      const bp = u8(bl << 1);
+      m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
+      m.w8(0x3582, bl);
+      this.condOne();
+      this.delay();
+      bl = u8(m.r8(0x3582) + 1);
+    } while (bl < m.r8(NPARTY));
+  }
+  private levelSum(step: number): void {
+    const m = this.m;
+    const bp = m.r16(0x38b2);
+    let bl = m.r8(0x3c29 + bp);
+    // the loop branches back to the `mov al, step` AFTER the clc, so the carry of one pass is added into the next
+    let cf = 0;
+    if (bl !== 0) do { const t = step + m.r8(P_VAL) + cf; cf = t > 255 && this.wrong !== 'abilityCarry' ? 1 : 0; m.w8(P_VAL, u8(t)); bl = u8(bl - 1); } while (bl !== 0);
+  }
+  private abilityHandler(a: number): void {
+    const m = this.m;
+    const rnd = (n: number, add: number) => m.w8(P_VAL, u8(random(m, n) + add));
+    switch (a) {
+      case 0xafe3: { this.b3d3(); this.text(0x340f); this.ptext(); const s = 1 + m.r8(0x3ca6); if (s <= 255) m.w8(0x3ca6, s); return; }
+      case 0xaffc: this.b3d3(); this.text(0x3417); this.ptext(); this.inc(P_SAVE); rnd(0x10, 4); return this.hitOne();
+      case 0xb01a: this.b3c9(); this.text(0x3424); this.ptext(); this.inc(P_RES); m.w8(P_CNT, 1); this.levelSum(6); return this.hitOne();
+      case 0xb04d: this.b3d3(); this.text(0x3429); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_VAL, 2); return this.condAll();
+      case 0xb069: this.text(0x3433); this.ptext(); this.inc(P_RES); m.w8(P_CNT, 6); m.w8(P_VAL, 0x10); return this.condAll();
+      case 0xb083: this.text(0x3441); this.ptext(); this.inc(P_RES); m.w8(P_CNT, 4); m.w8(P_VAL, random(m, 0x10)); return this.hitAll();
+      case 0xb0a0: this.b3d3(); this.text(0x344d); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_CNT, 7); m.w8(P_VAL, 1); return this.condAll();
+      case 0xb0c1: {
+        this.b3d3(); this.text(0x3453); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_CNT, 5); m.w8(P_VAL, 0x20);
+        const bp = m.r16(0x38b2);
+        if (m.r8(0x3c29 + bp) >= 5) return this.condAll();
+        return this.condOneRandom();
+      }
+      case 0xb0f0: this.b3d3(); this.text(0x345c); this.ptext(); this.gozClear(); return;
+      case 0xb100: this.b3d3(); this.text(0x3464); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_CNT, 3); rnd(0x25, 5); return this.hitOne();
+      case 0xb127: this.b3c9(); this.text(0x3473); this.ptext(); this.inc(P_RES); m.w8(P_CNT, 6); m.w8(P_VAL, 0xa0); return this.condAll();
+      case 0xb144: {
+        this.text(0x347f); this.ptext(); this.inc(P_RES); m.w8(P_CNT, 6);
+        let bp = m.r16(0x38b2);
+        m.w8(P_VAL, random(m, m.r8(0x3888 + bp)));
+        bp = m.r16(0x38b2);
+        m.w8(0x3888 + bp, 0); m.w8(0x3879 + bp, 0xff);
+        resMon2(m);
+        return this.hitAll();
+      }
+      case 0xb178: {
+        this.b3d3(); this.text(0x3487); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_CNT, 1);
+        this.levelSum(6);
+        m.w8(P_VAL, u8(random(m, m.r8(P_VAL)) + 4));
+        return this.hitAll();
+      }
+      case 0xb1bb: {
+        this.b3c9(); this.text(0x3424); this.ptext(); this.inc(P_RES); m.w8(P_CNT, 1);
+        this.levelSum(8);
+        m.w8(P_VAL, random(m, m.r8(P_VAL)));
+        return this.hitAll();
+      }
+      case 0xb1f7: this.text(0x3491); this.ptext(); this.inc(P_RES); m.w8(P_VAL, 0xa0); return this.condOneRandom();
+      case 0xb20c: this.b3d3(); this.text(0x3497); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_CNT, 4); rnd(0x1f, 9); return this.hitOne();
+      case 0xb233: this.text(0x34a2); this.ptext(); this.inc(P_RES); rnd(0x15, 0x27); return this.hitOne();
+      case 0xb24e: this.b3d3(); this.text(0x34bb); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_CNT, 2); rnd(0x29, 9); return this.hitOne();
+      case 0xb275: this.b3d3(); this.text(0x34c5); this.ptext(); this.inc(P_SAVE); rnd(0xe, 0x10); return this.hitAll();
+      case 0xb293: {
+        this.b3d3(); this.text(0x34d3); this.ptext();
+        let bl = 0;
+        do {
+          const bp = u8(bl << 1);
+          m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
+          m.w8(m.r16(CHARP) + 0x2b, 0); m.w8(m.r16(CHARP) + 0x2c, 0);
+          bl++;
+        } while (bl < m.r8(NPARTY));
+        this.gozClear(); return;
+      }
+      case 0xb2dc: this.b3d3(); this.text(0x34df); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_VAL, 0xc0); return this.condOneRandom();
+      case 0xb2f8: this.b3d3(); this.text(0x34ef); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); rnd(0x33, 0x31); return this.hitOne();
+      case 0xb31a: this.b3d3(); this.text(0x34f7); this.ptext(); this.inc(P_SAVE); this.inc(P_RES); m.w8(P_VAL, 0xff); return this.condOneRandom();
+      case 0xb336: this.text(0x3506); this.ptext(); m.w8(P_VAL, 0x64); return this.hitOne();
+      case 0xb347: m.w8(P_CNT, 6); return this.breath(0);
+      case 0xb352: m.w8(P_CNT, 3); return this.breath(1);
+      case 0xb35d: m.w8(P_CNT, 2); return this.breath(2);
+      case 0xb368: return this.breath(3);
+      case 0xb36e: m.w8(P_CNT, 4); return this.breath(4);
+      case 0xb379: m.w8(P_CNT, 1); return this.breath(5);
+      case 0xb384: return this.breath(6);
+      case 0xb3b1: this.text(0x3554); this.ptext(); this.inc(P_RES); m.w8(P_VAL, random(m, 0xc)); return this.hitAll();
+      default: throw new Error(`unported ability handler ${a.toString(16)}`);
+    }
+  }
+  /** CODE+0xB387: breath weapon k (0..6): damage = the monster's current HP to the whole party */
+  private breath(k: number): void {
+    const m = this.m;
+    m.w8(0x3516, k);
+    this.b3c9();
+    m.w16(BDW_TEXT, m.r16(0x3517 + 2 * m.r8(0x3516))); this.ptext();
+    const bp = m.r16(0x38b2);
+    m.w8(P_VAL, m.r8(0x3888 + bp));
+    this.inc(P_RES);
+    return this.hitAll();
+  }
+}
