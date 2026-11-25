@@ -15,7 +15,7 @@ import json, os, struct, sys
 import random as pyrandom
 sys.path.insert(0, os.path.dirname(__file__))
 import combat as C
-C.KEEP_JT.update({-32124, -32478, -32484, -32472, -32142, -32412})
+C.KEEP_JT.update({-32124, -32478, -32484, -32472, -32142, -32412, -32382})
 from combat import *            # noqa: F401,F403
 from combat3 import pack, w8, w16, label_offsets   # noqa: F401
 from combat4 import run_mid, c_off, argv           # noqa: F401
@@ -276,6 +276,118 @@ def make_train_vectors(n, seed):
 
 
 MAKERS['train'] = make_train_vectors
+
+
+HANDLERS = ['LAB_05D4', 'LAB_05BB', 'LAB_05DA', 'LAB_062F', 'LAB_0685', 'LAB_05EA', 'LAB_05B1', 'LAB_05E0', 'LAB_061D', 'LAB_05F1',
+            'LAB_05F6', 'LAB_0674', 'LAB_068C', 'LAB_062B', 'LAB_05EF', 'LAB_05D9', 'LAB_0643', 'LAB_0664', 'LAB_066A', 'LAB_0695', 'LAB_069B']
+
+
+def make_dispatch_vectors(n, seed):
+    """LAB_06B6 (CODE+0xe9be): the per-cell entity dispatcher with every handler stubbed (logged); the stubs script the state and the
+    advance flag the way real handlers do. FindEntitySlot (jt -32382) and TestBit run for real."""
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    stub_ui(c)
+    A4 = c.A4
+    for nm in HANDLERS: c._stub(c_off(nm), nm, log=4 if nm == 'LAB_05B1' else 0)
+    B = c.alloc(2048); slot = c.alloc(16)
+    script = []; c.side = {}
+    def side(cc, sp):
+        if not script: return
+        st, adv, f920 = script.pop(0)
+        cc.uc.mem_write(A4 - 18610, struct.pack('>H', st))
+        if adv is not None: cc.uc.mem_write(A4 - 10918, struct.pack('>H', adv))
+        if f920 is not None: cc.uc.mem_write(A4 - 10920, struct.pack('>H', f920))
+    for nm in HANDLERS: c.side[nm] = side
+    while len(out) < n:
+        blk = bytearray(rbytes(rng, 1800, 255))
+        R = rng.randrange(0, 12); px, py = rng.randrange(8), rng.randrange(8)
+        k = rng.randrange(1, 8)
+        for i in range(144):
+            blk[1296 + i] = R if rng.random() < .995 else rng.randrange(12)
+            blk[1008 + i] = px if rng.random() < .6 else rng.randrange(8)
+            blk[1152 + i] = py if rng.random() < .6 else rng.randrange(8)
+            blk[864 + i] = rng.choice([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 40, 255])
+            blk[1440 + i] = rng.randrange(80)
+            blk[2 * i] = rng.choice([0, 0, 0, 1]); blk[2 * i + 1] = rng.choice([0, 0, 5, 200])
+        lv = rng.randrange(1, 14)
+        flags = bytes(rng.choice([0, 0, 0x81, 0x24, 255, rng.randrange(256)]) for _ in range(10))
+        pad = rng.choice([[], [(5, 1, None)]])
+        c.apply([(B, bytes(blk)), (A4 - 18458, struct.pack('>I', B)), (A4 - 18306, struct.pack('>I', slot)),
+                 (A4 - 18330, struct.pack('>h', R)), (A4 - 18334, struct.pack('>h', px)), (A4 - 18332, struct.pack('>h', py)),
+                 (A4 - 18340, struct.pack('>h', lv)), (A4 - 18290 + lv * 10, flags),
+                 (A4 - 18148, struct.pack('>h', rng.choice([0, 0, 0, 0, 0, 3, 40, 143, -1]))),
+                 (A4 - 18610, struct.pack('>H', 5)), (A4 - 10896, struct.pack('>H', rng.choice([0, 1]))),
+                 (A4 - 10918, struct.pack('>H', 7)), (A4 - 10920, struct.pack('>H', rng.choice([0, 0, 1]))),
+                 (A4 - 18312, struct.pack('>h', 3)), (A4 - 15100, struct.pack('>H', 7))])
+        sc = []
+        for _ in range(160):
+            sc.append((rng.choice([5, 5, 5, 5, 5, 9, 0x12, 0x15, 3]), rng.choice([None, None, 0, 1]), rng.choice([None, None, None, 0, 1])))
+        script[:] = sc
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(c_off('LAB_06B6'), [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        used = 160 - len(script)
+        out.append(pack(c, res, {'seed': seed3, 'slot': slot, 'script': sc[:used]}))
+    return out
+
+
+MAKERS['dispatch'] = make_dispatch_vectors
+
+
+KIND_FUNCS = {'k3': 'LAB_05DA', 'k16': 'LAB_062B', 'k6': 'LAB_0685', 'mark': 'LAB_05CD', 'trig': 'LAB_066D'}
+
+
+def make_kind_handler_vectors(n, seed, which):
+    """One entity-kind handler (or its helper) on a random level block with LAB_05B1 (message box) stubbed and logged."""
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    stub_ui(c)
+    c._stub(c_off('LAB_05B1'), 'LAB_05B1', log=4)
+    A4 = c.A4
+    B = c.alloc(2048)
+    while len(out) < n:
+        writes, np_ = party_world(c, rng)
+        blk = bytearray(rbytes(rng, 1800, 255))
+        idx = rng.randrange(0, 144)
+        for i in range(144):
+            blk[2 * i] = rng.choice([0, 0, 0, 1, 2]); blk[2 * i + 1] = rng.choice([0, 3, 7, 200])
+            blk[1440 + i] = rng.choice([0, 0, 5, 33, 79])
+            blk[288 + 2 * i] = 0; blk[289 + 2 * i] = rng.choice([0, 3, 40, 79]); blk[1584 + i] = rng.choice([0, 3, 40, 79])   # trigger bit indices stay inside the 10-byte tables
+        word = rng.randrange(1 << 16)
+        blk[576 + 2 * idx:578 + 2 * idx] = struct.pack('>H', word)
+        # party items for kind 6: slot word 0 = item id, bit 0 of byte +7 = flagged; match the entity word often
+        eid = (blk[2 * idx] << 8) | blk[2 * idx + 1]
+        for i in range(6):
+            rec = bytearray(writes[i][1])
+            rec[428] = rng.randrange(0, 5)
+            for sl in range(8):
+                o = 64 + sl * 8
+                rec[o:o + 2] = struct.pack('>H', eid if rng.random() < .3 else rng.randrange(0, 300))
+                rec[o + 7] = rng.randrange(256)
+            writes[i] = (writes[i][0], bytes(rec))
+        lv = rng.randrange(0, 14)
+        writes += [(B, bytes(blk)), (A4 - 18458, struct.pack('>I', B)), (A4 - 18148, struct.pack('>h', idx)),
+                   (A4 - 18328, struct.pack('>h', rng.randrange(0, 4))), (A4 - 18340, struct.pack('>h', lv)),
+                   (A4 - 18312, struct.pack('>h', 3)), (A4 - 18610, struct.pack('>H', 5)), (A4 - 15296, struct.pack('>H', 77)),
+                   (A4 - 18290 + lv * 10, rbytes(rng, 10)), (A4 - 30310 + lv * 10, rbytes(rng, 10))]
+        c.apply(writes)
+        args = []
+        if which == 'mark': args = [rng.choice([-1, 0, 1, 2, 3])]
+        if which == 'trig': args = [rng.choice([0, 0, 5, 17, 79]), rng.choice([0, 3, 40, 79]), rng.choice([0, 1, 2])]
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(c_off(KIND_FUNCS[which]), args, seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'args': args, 'idx': idx}))
+    return out
+
+
+for k in KIND_FUNCS:
+    MAKERS[k] = (lambda k: lambda n, s: make_kind_handler_vectors(n, s, k))(k)
 
 
 if __name__ == '__main__':

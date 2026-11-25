@@ -79,6 +79,8 @@ class Combat(W6):
             sp = uc.reg_read(UC_M68K_REG_A7)
             if lg is not False and lg is not None and self.tracking:
                 self.effects.append([nm, bytes(uc.mem_read(sp + 4, lg)).hex()])
+            sd = getattr(self, 'side', {}).get(nm)
+            if sd: sd(self, sp)          # optional scripted side effect of the stubbed routine (pass 7)
             uc.reg_write(UC_M68K_REG_D0, getattr(self, 'retvals', {}).get(nm, 0))
             uc.reg_write(UC_M68K_REG_A7, sp + 4)
             uc.reg_write(UC_M68K_REG_PC, self.r32(sp))
