@@ -137,7 +137,7 @@ Level-drain is not implemented in this routine; the drain statuses (msg 5265-526
 ## 2. Combat
 
 ### 2.1 What is solved
-**Victory flow** (**code**: `CODE+0x503e6` victory entry, `CODE+0x5031a` XP split, `CODE+0x4fdd0` loot). The encounter start (`CODE+0x17fde`) clears the XP pool `-15300(A4)` and loads the group's treasure id from the monster record byte **+162** (`CODE+0x18024`; hyp: the first monster record of the encounter). Each monster removed from a group 1..5 adds its record's `+64` (u32) to the pool (`CODE+0x22e9a`; known). On victory:
+**Victory flow** (**code**: `CODE+0x503e6` victory entry, `CODE+0x5031a` XP split, `CODE+0x4fdd0` loot). The encounter start (`CODE+0x17fde`) clears the XP pool `-15300(A4)` and loads the group's treasure id from the monster record byte **+162** (`CODE+0x18024`; **harness**: `-15296 = u8(ReadSection(1-record base) + (-15100) + 162)`, read inside the real `LAB_0A31` run of `encounter.ts`/`encounter-vectors.json`, and consumed as the `ReadSection(7, id)` treasure id by `LAB_1D76`/`LAB_1DA4` in 12.5; the record is the first group's monster record, id `-15102`). Each monster removed from a group 1..5 adds its record's `+64` (u32) to the pool (`CODE+0x22e9a`; known). On victory:
 * `living` = characters whose `+417` is 0. If the pool is above 0, every living character gets `XP += pool / living` (signed 32-bit divide, `-32058`) and the text `EVERY SURVIVOR EARNS $ EXP` (msg 5001). The loot step sets game state 8 (`-18610(A4)`) when nobody is living (`CODE+0x4ffa2`).
 * Then, if the treasure id is not -1, the treasure record (`ReadSection(7, id)`, 40 bytes) is rolled (2.2). Gold and bonus XP are totalled; each living character gets `gold/living` added to `+20` (`EACH SHARE OF LOOT WORTH $ GOLD`, msg 5002) and the full bonus XP added to `+12` (`EVERYONE RECEIVES A $ EXP BONUS`, msg 5003). Items go to the loot-divvy screen (msg 5101-5107).
 
@@ -380,7 +380,7 @@ Method as before (`oracle/combat4.py`): the routine runs under Unicorn on synthe
 > **Pass 7 (2026-11-26, section 12):** the chest trap effects, damage / status / condition helpers, the trap picker, chest inspect, can-act, the pick-lock tumbler game and thief-skill training are harness-verified.
 > **Read from code, not executed:** the chest menu, the out-of-combat cast LAB_1D0D, the pre-roll chest step LAB_1D5C, group renumbering and the mist transformation in LAB_09DC, thief skills other than disarm, inspect.
 > **Established absent (code census, 11.3):** monster flee, monster morale, encounter-start surprise rolls, monsters using hide or run.
-> **Open:** spells 26, 28, 29, 44, 54, 69, 74, 79 are code cases in `spells.ts` (verified, not yet table data); the other 19 entity kinds of LAB_06B6 (11.5); map-side cloud decay; the encounter treasure id source (`record +162`, hyp); LAB_09DC's second half; the item divvy screen LAB_1D2D (UI); the generator seed. TODO ids: `w6-victory-flow`, `w6-world-rules`, `w6-stubbed-entity-kinds`, `w6-rng-seed`.
+> **Open:** spells 26, 28, 29, 44, 54, 69, 74, 79 are code cases in `spells.ts` (verified, not yet table data); the other 19 entity kinds of LAB_06B6 (11.5); map-side cloud decay; the item divvy screen LAB_1D2D input loop (UI); the generator seed. TODO ids: `w6-victory-flow`, `w6-world-rules`, `w6-stubbed-entity-kinds`, `w6-rng-seed`.
 
 ### 10.1 Status
 
@@ -575,10 +575,12 @@ Method as passes 2-6 (`oracle/combat6.py`, same footprint rule: the TypeScript p
 * **Loot hand-out** (`divvy.ts`, vectors give 1,500 / listdel 1,500 / chest1da4 1,500, 0 mismatches): `giveItem` = `LAB_1D12` (+`LAB_1D10` weight): stack on a same-id stackable slot with count + quantity <= 250 (searched from the end of the first area, then the second), else a new slot (first area while under 10, then second area slots 10..21), 22 full = -1; the slot word `+2` takes record `+30`, flag byte `+7` takes bits 8/4/16/32/2 of record `+59` into bits 2/3/4/5/6; weight `+32` rebuilt. `removeListEntry` = `LAB_1D2A` shifts the five parallel lists. `chestTreasureStep` = `LAB_1DA4`: with `-15296` not -1 the state becomes 0x15 and `LAB_1D76` runs; cursor `-18148` advances.
 * **`LAB_1D2D` itself** is the screen: list drawing, the cursor (`LAB_1B89` input) and a jump table over the five input results; the party cannot leave while an entry has the must-take flag `-3100[i] == 1` (message 0x13f5; `lootBlocksExit`, code). The key-to-cursor mapping is UI and stays **code**; smallest next step: script `LAB_1B89` returns through the `Scripted` retvals class and run the whole screen.
 
+> **Correction (2026-11-26):** the encounter treasure id source (monster record `+162` -> `-15296` at encounter start, then `ReadSection(7, id)`) was a **hyp**; it is now harness-verified by the existing encounter-start vectors (the whole `LAB_0A31` runs for real) plus the consumers in 12.5.
+
 > **Correction (2026-11-26):** the "Not ported" bullet of 11.4 (`LAB_09DC` second half, `LAB_1DA4`) is now ported and harness-verified as above.
 
 ### 12.6 Rerun
 `tools/wizardry6/oracle/combat6.py <trap|dmg|status|cond|pick> out.json --n N --seed S`, then `W6_TRAP_VECTORS=... W6_DMG_VECTORS=... W6_STATUS_VECTORS=... W6_COND_VECTORS=... W6_PICK_VECTORS=... npx vitest run tools/wizardry6/__tests__/traps.test.ts`; makers `dispatch|k3|k16|k6|mark|trig` -> `W6_DISPATCH_VECTORS`, `W6_K3_VECTORS`, `W6_K16_VECTORS`, `W6_K6_VECTORS`, `W6_MARK_VECTORS`, `W6_TRIG_VECTORS` with `__tests__/entities.test.ts`; makers `inspect|canact|picklock|train` -> `W6_INSPECT_VECTORS`, `W6_CANACT_VECTORS`, `W6_PICKLOCK_VECTORS`, `W6_TRAIN_VECTORS` with `__tests__/thief.test.ts`.
 
 ## 6. Hypotheses to treat with care
-Anything marked **hyp** above (and in section 7: member `+4`, the names of `+0x22` states and `+0x1e` stances, the simulator round loop). In particular: `-10456(A4)` flag, byte meanings of treasure tail bytes 36-38, `+321` skill mapping in 2.4, record `+162` as treasure id, and the group/member struct field names in 2.3.
+Anything marked **hyp** above (and in section 7: member `+4`, the names of `+0x22` states and `+0x1e` stances, the simulator round loop). In particular: `-10456(A4)` flag, byte meanings of treasure tail bytes 36-38, `+321` skill mapping in 2.4, and the group/member struct field names in 2.3.
