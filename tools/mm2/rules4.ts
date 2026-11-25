@@ -31,10 +31,11 @@ export function dispatchSpell(which: 'nc' | 'cb', spell: number): number | null 
  * CODE+0x13708: 1 when `spell` is one of the 12 words at A4-28040 (the spells that are cast through the non-combat handlers
  * even in a fight: the 12 spells whose spells.dat class is 'anywhere').
  */
-export function anywhereSpell(m: Mem, spell: number): number {
+export function anywhereSpell(m: Mem, spell: number, o: { eleven?: boolean } = {}): number {
+  const n = o.eleven ? 6 : 12;
   let k = 0;
-  for (; k < 12; k++) if (m.r16(g(-28040) + 2 * k) === (spell & 0xffff)) break;
-  return k === 12 ? 0 : 1;
+  for (; k < n; k++) if (m.r16(g(-28040) + 2 * k) === (spell & 0xffff)) break;
+  return k === n ? 0 : 1;
 }
 
 /** CODE+0x1338E dice(sides, bonus): A4-1342 = sum over the caster's level (+0x71) of (rand(1, sides) if sides != 0) + bonus (byte arithmetic, summed in 16 bits). */

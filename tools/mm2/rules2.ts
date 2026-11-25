@@ -77,7 +77,7 @@ export function initMonsterSlot(m: Mem, i: number): void {
 }
 
 /** CODE+0x11C82: clear the 11 per-slot arrays, then init slots 0..min(count,10) (count > 10 initialises all 11). */
-export function initMonsters(m: Mem): void {
+export function initMonsters(m: Mem, o: { cap10?: boolean } = {}): void {
   for (let i = 0; i < 11; i++) {
     m.w8(g(MS.uses) + i, 0);
     m.w8(g(MS.init) + i, 0);
@@ -85,7 +85,7 @@ export function initMonsters(m: Mem): void {
     m.w16(g(MS.hp) + 2 * i, 0);
   }
   let n = m.r8(g(-30654));
-  if (n > 10) n = 11;
+  if (n > 10) n = o.cap10 ? 10 : 11;
   for (let i = 0; i < n; i++) initMonsterSlot(m, i);
 }
 
@@ -195,13 +195,13 @@ export function encounterGenerate(m: Mem, o: { noMapLimit?: boolean } = {}): num
  * A4-24128[]) is moved into the runner's place, the last slot is emptied, A4-24141 is clamped to the party size,
  * the acting character resets to 0 and the party panel is redrawn (A4-31066 != 0).
  */
-export function characterFlee(m: Mem): Calls {
+export function characterFlee(m: Mem, o: { noCompact?: boolean } = {}): Calls {
   const calls: Calls = [];
   const r = randRange(m, 1, 100) & 0xff;
   if (!(r < m.r8(g(-22029)))) return calls;
   m.w8(g(-24140), 1);
   m.w16(g(-31066), m.r16(g(-31066)) - 1);
-  if (!(m.r8(g(-1269)) > m.r8(g(-31065)))) {
+  if (!(m.r8(g(-1269)) > m.r8(g(-31065))) && !o.noCompact) {
     const last = s16(m.r16(g(-31066)));
     const fl = m.r8(g(-24128) + last);
     const sl = m.r16(g(-31082) + 2 * last);

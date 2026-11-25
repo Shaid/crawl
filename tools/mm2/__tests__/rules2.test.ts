@@ -51,6 +51,9 @@ describe('monster slot init (CODE+0x11C82 / 0x11C2C)', () => {
     expect(V.length).toBeGreaterThan(30);
     for (const v of V) expect(changes(v, (m) => initMonsters(m))).toEqual(v.fin);
   });
+  it('null control: capping the count at 10 instead of 11 disagrees', () => {
+    expect(disagree(V, (v) => changes(v, (m) => initMonsters(m, { cap10: true })))).toBeGreaterThan(0);
+  });
 });
 
 describe('battle over (CODE+0x13282)', () => {
@@ -113,6 +116,9 @@ describe('character flees (CODE+0x116B0)', () => {
       expect(calls).toEqual(v.calls);
     }
     expect(V.some((v: any) => Object.keys(v.fin).length > 2)).toBe(true);
+  });
+  it('null control: no party compaction disagrees', () => {
+    expect(disagree(V, (v) => changes(v, (m) => characterFlee(m, { noCompact: true })))).toBeGreaterThan(0);
   });
 });
 
@@ -347,6 +353,7 @@ describe('equipment: weapon bytes, armour accumulator, AC (CODE+0xF36C, 0xF270, 
     const V = load('ac');
     expect(V.length).toBeGreaterThan(30);
     for (const v of V) expect(changes(v, (m) => recalcAc(m))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => recalcAc(m, { noClamp: true })))).toBeGreaterThan(0);
   });
   it('equip matches the game (weapon die/enchant, armour accumulator, stat bonus, AC); null control: no armour', () => {
     const V = load('equip');
@@ -358,6 +365,7 @@ describe('equipment: weapon bytes, armour accumulator, AC (CODE+0xF36C, 0xF270, 
     const V = load('unequip');
     expect(V.length).toBeGreaterThan(30);
     for (const v of V) expect(changes(v, (m) => unequipItem(m, v.char, v.slot))).toEqual(v.fin);
+    expect(disagree(V, (v) => changes(v, (m) => unequipItem(m, v.char, v.slot, { keepBase: true })))).toBeGreaterThan(0);
   });
 });
 
@@ -382,6 +390,7 @@ describe('Hall of Training: XP needed and cost (CODE+0x20796, 0x2073A)', () => {
     expect(V.length).toBeGreaterThan(30);
     for (const v of V) expect(xpNeeded(mem(v), v.char)).toBe(v.ret >>> 0);
     expect(V.some((x: any) => x.ret > 0x10000000)).toBe(true);
+    expect(V.some((v: any) => xpNeeded(mem(v), v.char, { noL15: true }) !== (v.ret >>> 0))).toBe(true);
   });
   it('training cost matches the game; null control: not adding the +1 level disagrees', () => {
     const V = load('traincost');

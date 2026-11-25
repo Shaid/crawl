@@ -12,10 +12,10 @@ const s16 = (v: number) => ((v & 0xffff) << 16) >> 16;
 const s8 = (v: number) => ((v & 0xff) << 24) >> 24;
 
 /** OVL+0x181E: first free slot of the creation screen's 24 x 0x82 B roster (in use = byte +0x0B != 0), 0xFFFF when full. */
-export function chargenSlot(m: Mem): number {
+export function chargenSlot(m: Mem, o: { n23?: boolean } = {}): number {
   let k = 0;
-  for (; k < 24; k++) if (m.r8(g(-10814 + 11) + 130 * k) === 0) break;
-  return k === 24 ? 0xffff : k;
+  for (; k < (o.n23 ? 23 : 24); k++) if (m.r8(g(-10814 + 11) + 130 * k) === 0) break;
+  return k === (o.n23 ? 23 : 24) ? 0xffff : k;
 }
 
 /**
@@ -426,8 +426,9 @@ export function pickItemSlot(m: Mem, keys: number[]): number {
  * 47 Enchant Item (0xB050): item picker; flag byte (+0x46+slot): plus count = low 6 bits, high bits kept; SP cost = 50 * count -> A4-16138 (the cast command charges it) and the caster needs `SP >= cost`; the count rises by one.
  * 38 Etherealize (0xAFFA): confirm; fails when A4-22016 bit 5 is set; else the party steps one square in its facing (A4-31153 'E' x+1, 'N' y+1, 'S' y-1, 'W' x-1; both coordinates & 15).
  */
-export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: number[] }, o: { noAge?: boolean; noEndurance?: boolean } = {}): Calls {
+export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: number[] }, o: { noAge?: boolean; noEndurance?: boolean; mut?: string } = {}): Calls {
   const calls: Calls = [];
+  const mut = o.mut;
   const caster = () => m.r32(g(-18380));
   const ok = () => confirmNc(m, io, calls);
   const ageAdd = (c: number, n: number) => {
@@ -439,7 +440,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
       const k = pickMemberNc(m, io, calls);
       if (k === ESC) break;
       const c = charPtr(m, k);
-      m.w8(c + 0x6a, m.r8(c + 0x0d));
+      m.w8(c + 0x6a, mut === 'v71' ? m.r8(c + 0x6a) ^ 1 : m.r8(c + 0x0d));
       done(m);
       if (m.r32(g(-18380)) === c) m.w8(g(-31208), 1);
       break;
@@ -448,7 +449,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
       if (!ok()) break;
       let fail = 0;
       if (m.r8(g(-22016)) & 0x40) fail++;
-      else if (m.r8(g(-22020)) === 0) fail++;
+      else if (m.r8(g(-22020)) === 0 && mut !== 'v72') fail++;
       else {
         m.w8(g(-31217), m.r8(g(-22020)) & 0xf);
         m.w8(g(-31216), m.r8(g(-22020)) >> 4);
@@ -474,7 +475,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
     case 91: {
       if (!ok()) break;
       let fail = 0;
-      if (m.r8(g(-22016)) & 0x40) fail++;
+      if (m.r8(g(-22016)) & 0x40 && mut !== 'v91') fail++;
       else {
         const p = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
         calls.push(['pick', [0x31, 0x35]]);
@@ -510,7 +511,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
       const k = pickItemSlot(m, io.ikeys);
       if (k === ESC) break;
       const c = caster() + k;
-      if (m.r8(c + 0x40) === 0xff) break;
+      if (m.r8(c + 0x40) === 0xff && mut !== 'v95') break;
       m.w8(c + 0x40, 1);
       done(m);
       break;
@@ -519,7 +520,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
       const k = pickItemSlot(m, io.ikeys);
       if (k === ESC) break;
       const c = caster() + k;
-      if (m.r8(c + 0x40) === 0) break;
+      if (m.r8(c + 0x40) === 0 && mut !== 'v34') break;
       m.w8(c + 0x40, m.r8(c + 0x40) + (randRange(m, 1, 6) & 0xff));
       done(m);
       break;
@@ -540,7 +541,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
           if (j === 6) fail++;
           else {
             const id = m.r8(caster() + k + 0x3a);
-            if (id >= 0xd0) fail++;
+            if (id >= 0xd0 && mut !== 'v37') fail++;
             else {
               m.w8(caster() + j + 0x3a, id);
               m.w8(caster() + j + 0x40, m.r8(caster() + k + 0x40));
@@ -558,7 +559,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
       const c = caster() + k;
       const hi = m.r8(c + 0x46) & 0xc0;
       let lo = m.r8(c + 0x46) & 0x3f;
-      const cost = (lo * 50) & 0xffff;
+      const cost = (lo * (mut === 'v47' ? 25 : 50)) & 0xffff;
       m.w16(g(-16138), cost);
       if (m.r16(caster() + 0x58) < cost) break;
       if (lo <= 0x3f) lo++;
@@ -569,7 +570,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
     }
     case 38: {
       if (!ok()) break;
-      if (m.r8(g(-22016)) & 0x20) break;
+      if (m.r8(g(-22016)) & 0x20 && mut !== 'v38') break;
       const d = m.r8(g(-31153));
       let dx = 0, dy = 0;
       if (d === 0x45) dx = 1;
@@ -584,7 +585,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
       break;
     }
     case 1: { // Detect Magic: confirm, show the pack charges, wait for any key (0 = no key yet), done
-      if (!ok()) break;
+      if (!ok() && mut !== 'v1') break;
       for (;;) {
         const k = io.ikeys.length ? io.ikeys.shift()! : ESC;
         if ((k & 0xffff) !== 0) break;
@@ -595,7 +596,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
     case 5: // Location: confirm, show the position screen (CODE+0x223A, UI), reload flags; no 'done' flag
       if (!ok()) break;
       m.w8(g(-31210), 1);
-      m.w8(g(-31204), 0);
+      m.w8(g(-31204), mut === 'v5' ? 1 : 0);
       break;
     case 10: { // Jump: two squares forward over a wall-less step: cell and target must be open
       if (!ok()) break;
@@ -610,7 +611,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
         [dx, dy] = dirVec(m);
         x1 = (m.r8(g(-31217)) + dx) & 0xf;
         y1 = (m.r8(g(-31216)) + dy) & 0xf;
-        if ((m.r8(g(-21946) + idx(y1, x1)) & mask()) !== 0) fail++;
+        if ((m.r8(g(-21946) + idx(y1, x1)) & mask()) !== 0 && mut !== 'v10') fail++;
         else if ((m.r8(g(-21690) + idx(y1, x1)) & mask() & 0x55) !== 0) fail++;
       }
       if (!fail) {
@@ -630,7 +631,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
         const k = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
         calls.push(['pick', [0x31, 0x32]]);
         if (k === ESC) fail++;
-        else if (k === 0x31) {
+        else if (k === (mut === 'v12' ? 0x32 : 0x31)) {
           m.w8(g(-31128), m.r8(g(-31218)));
           m.w8(g(-31127), ((m.r8(g(-31216)) << 4) + m.r8(g(-31217))) & 0xff);
         } else {
@@ -663,7 +664,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
           else {
             m.w8(g(-31216), 0xff);
             m.w8(g(-31217), 0xff);
-            m.w8(g(-31218), m.r8(g(-28976) + (k - 0x41) * 4 + (p - 0x31)));
+            m.w8(g(-31218), m.r8(g(-28976) + (k - 0x41) * (mut === 'v15' ? 3 : 4) + (p - 0x31)));
             m.w8(g(-31204), 1);
             m.w8(g(-31210), 1);
           }
@@ -675,7 +676,7 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
     case 30: { // Teleport: key 1-9 = squares ahead (no wall test; refused on A4-22016 bit 4 squares); reload flags only on success
       if (!ok()) break;
       let fail = 0;
-      if (m.r8(g(-22016)) & 0x10) fail++;
+      if (m.r8(g(-22016)) & (mut === 'v30' ? 0x20 : 0x10)) fail++;
       else {
         const p = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
         calls.push(['pick', [0x31, 0x39]]);

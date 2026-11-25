@@ -542,7 +542,7 @@ export function equipItem(m: Mem, ch: number, slot: number, o: { noArmour?: bool
   }
   itemStatBonus(m, ch, slot, true);
 }
-export function unequipItem(m: Mem, ch: number, slot: number): void {
+export function unequipItem(m: Mem, ch: number, slot: number, o: { keepBase?: boolean } = {}): void {
   const id = m.r8(ch + 40 + slot);
   const ench = m.r8(ch + 52 + slot) & 0x3f;
   const base = itemByte(m, id, 16);
@@ -556,7 +556,7 @@ export function unequipItem(m: Mem, ch: number, slot: number): void {
   }
   if (isArmour(id)) {
     floorSub(m, ch + 31, ench);
-    floorSub(m, ch + 31, base);
+    if (!o.keepBase) floorSub(m, ch + 31, base);
   }
   itemStatBonus(m, ch, slot, false);
 }
@@ -624,7 +624,7 @@ const mulu32 = (a: number, b: number) => Math.imul(a, b) >>> 0;
  * 0x2EE00 per level for 11..13, 0x5DC00 for 14..15, then 0xBB800 per level (16..20, capped at 5 steps), 0x177000 (21..30, 10 steps),
  * 0x2EE000 (31..50, 20 steps), 0x190000 (51..75, 25 steps) and 0x5DC000 per level above 75.
  */
-export function xpNeeded(m: Mem, ch: number): number {
+export function xpNeeded(m: Mem, ch: number, o: { noL15?: boolean } = {}): number {
   let L = m.r8(ch + 32);
   if (L !== 0xff) L++;
   const cls = m.r8(ch + 15);
@@ -635,7 +635,7 @@ export function xpNeeded(m: Mem, ch: number): number {
   if (L >= 0x0c) x = (x + 0x2ee00) >>> 0;
   if (L >= 0x0d) x = (x + 0x2ee00) >>> 0;
   if (L >= 0x0e) x = (x + 0x5dc00) >>> 0;
-  if (L >= 0x0f) x = (x + 0x5dc00) >>> 0;
+  if (L >= 0x0f && !o.noL15) x = (x + 0x5dc00) >>> 0;
   if (L >= 0x10) x = (x + mulu32(Math.min(L - 15, 5), 0xbb800)) >>> 0;
   if (L >= 0x15) x = (x + mulu32(Math.min(L - 20, 10), 0x177000)) >>> 0;
   if (L >= 0x1f) x = (x + mulu32(Math.min(L - 30, 20), 0x2ee000)) >>> 0;

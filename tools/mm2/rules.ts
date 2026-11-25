@@ -216,9 +216,9 @@ export function monsterMelee(m: Mem, opts: { noHalve?: boolean; ac5?: boolean } 
 /* ------------------------------------------------- character primitives */
 
 /** CODE+0x04442 stat_bonus(v): -3 + number of thresholds (A4-29830) that v exceeds, as a byte (0xFD = -3). */
-export function statBonus(m: Mem, v: number): number {
+export function statBonus(m: Mem, v: number, o: { ge?: boolean } = {}): number {
   let b = 0xfd;
-  for (let i = 0; v > m.r8(g(-29830) + i); i++) b = (b + 1) & 0xff;
+  for (let i = 0; o.ge ? v >= m.r8(g(-29830) + i) : v > m.r8(g(-29830) + i); i++) b = (b + 1) & 0xff;
   return b;
 }
 
@@ -468,8 +468,8 @@ export function monsterSpellDamage(m: Mem, n: number, opts: { plain?: boolean } 
  * +0x6B <- +0x10 (might), +0x6F <- +0x14 (accuracy), +0x6D <- +0x12 (personality), +0x6C <- +0x11 (int),
  * +0x71 <- +0x20 (level), +0x72 <- +0x23 (spell level), +0x6E <- +0x13 (speed).
  */
-export function syncStats(m: Mem, ch: number): void {
-  for (const [dst, src] of [[107, 16], [111, 20], [109, 18], [108, 17], [113, 32], [114, 35], [110, 19]] as const) m.w8(ch + dst, m.r8(ch + src));
+export function syncStats(m: Mem, ch: number, o: { skipLast?: boolean } = {}): void {
+  for (const [dst, src] of ([[107, 16], [111, 20], [109, 18], [108, 17], [113, 32], [114, 35], [110, 19]] as const).slice(0, o.skipLast ? 6 : 7)) m.w8(ch + dst, m.r8(ch + src));
 }
 
 /* ----------------------------------------- spell level / spell points */

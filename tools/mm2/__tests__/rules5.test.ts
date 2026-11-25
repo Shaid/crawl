@@ -16,6 +16,9 @@ describe('character creation: first free slot (OVL+0x181E)', () => {
     for (const v of V) expect(chargenSlot(mem(v))).toBe(v.ret);
     expect(V.some((v: any) => v.ret === 0xffff) && V.some((v: any) => v.ret > 0)).toBe(true);
   });
+  it('null control: scanning 23 slots disagrees', () => {
+    expect(V.some((v: any) => chargenSlot(mem(v), { n23: true }) !== v.ret)).toBe(true);
+  });
 });
 
 describe('character creation: class eligibility (OVL+0x1DF4)', () => {
@@ -320,4 +323,18 @@ describe('remaining non-combat spell handlers (1 5 10 12 15 30 34 37 38 47 71 72
     });
   nullCase('Rejuvenate ignoring the age floor disagrees', { noAge: true }, [80]);
   nullCase('Resurrection without the endurance check disagrees', { noEndurance: true }, [94]);
+  nullCase('Detect Magic ignoring a declined confirm disagrees', { mut: 'v1' }, [1]);
+  nullCase('Location setting the reload flag the wrong way disagrees', { mut: 'v5' }, [5]);
+  nullCase('Jump ignoring the target cell wall layer disagrees', { mut: 'v10' }, [10]);
+  nullCase("Lloyd's Beacon with the keys swapped disagrees", { mut: 'v12' }, [12]);
+  nullCase('Fly with a 3-wide spot table disagrees', { mut: 'v15' }, [15]);
+  nullCase('Teleport refused on the wrong square bit disagrees', { mut: 'v30' }, [30]);
+  nullCase('Recharge accepting an empty item disagrees', { mut: 'v34' }, [34]);
+  nullCase('Duplication ignoring the id < 0xD0 limit disagrees', { mut: 'v37' }, [37]);
+  nullCase('Etherealize ignoring the antimagic bit disagrees', { mut: 'v38' }, [38]);
+  nullCase('Enchant at 25 SP per plus disagrees', { mut: 'v47' }, [47]);
+  nullCase('Restore Alignment from the wrong byte disagrees', { mut: 'v71' }, [71]);
+  nullCase('Surface ignoring a zero recall coordinate disagrees', { mut: 'v72' }, [72]);
+  nullCase('Town Portal ignoring the no-teleport bit disagrees', { mut: 'v91' }, [91]);
+  nullCase('Uncurse accepting 0xFF flags disagrees', { mut: 'v95' }, [95]);
 });

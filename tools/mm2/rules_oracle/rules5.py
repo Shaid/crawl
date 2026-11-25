@@ -284,17 +284,17 @@ def gen_ncspell2(n, rnd):
     picks, ikeys = [], []
     e.stub(0x042AA, 'pick', nargs=2, fn=lambda e, sp: picks.pop(0) if picks else 0x1b)
     e.stub(0x22586, 'ikey', nargs=0, fn=lambda e, sp: ikeys.pop(0) if ikeys else 0x1b)
-    out = []
+    out = []; info = {}; zkeep = [0]
     for i in range(n):
         spell = NC2_PROG[i % len(NC2_PROG)] if i < 8 * len(NC2_PROG) else rnd.choice(NC2_PROG)
         seed = rnd.getrandbits(32)
         mk = rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x1b, 0x31]); ck = rnd.choice([0x0d, 0x0d, 0x1b, 0x20])
-        pp = []
+        pp = []; silent = rnd.choice([0, 1, 1]); lead = [] if silent else [ck]   # a confirm prompt (a key pick) happens only when A4-16140 == 0
         if spell in (71, 80, 94): pp = [mk, ck]
-        elif spell == 91: pp = [ck, rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x1b])]
+        elif spell == 91: pp = lead + [rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x1b])]
         elif spell in (72, 38): pp = [ck]
         elif spell in (10, 5, 1): pp = [ck]
-        elif spell in (12, 15, 30): pp = [ck, rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x39, 0x1b])]
+        elif spell in (12, 15, 30): pp = lead + [rnd.choice([0x31, 0x32, 0x31, 0x32, 0x33, 0x34, 0x35, 0x39, 0x1b])]
         else: pp = [ck]
         ik = [rnd.choice([0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x61, 0x62, 0x1b, 0x20, 0x47, rnd.getrandbits(8)]) for _ in range(5)]
         def setup(e):
@@ -303,9 +303,10 @@ def gen_ncspell2(n, rnd):
             setup_party(e, rnd, rnd.choice([1, 1, 2, 3, 4, 5, 6]))
             sz = e.r16(g(-31066)); idxs = [e.r16(g(-31082) + 2 * k) for k in range(8)]
             ch = g(-10814) + 130 * idxs[rnd.randrange(sz)]; sl(e, -18380, ch)
-            sb(e, -16140, rnd.choice([0, 1, 1])); sb(e, -31154, rnd.choice([2, 2, 0, 1])); sb(e, -21974, rnd.choice([0, 0, 0, 2, 3, rnd.getrandbits(8)]))
+            sb(e, -16140, silent if spell in (12, 15, 30, 91) else rnd.choice([0, 1, 1])); sb(e, -31154, rnd.choice([2, 2, 0, 1])); sb(e, -21974, rnd.choice([0, 0, 0, 2, 3, rnd.getrandbits(8)]))
             sb(e, -22016, rnd.choice([0, 0, 0x10, 0x20, 0x40, 0x60, 0x70, rnd.getrandbits(8)])); sb(e, -22020, rnd.choice([0, 0x34, 0x77, rnd.getrandbits(8)])); sb(e, -22018, rnd.randint(0, 59))
             for k in range(256): e.w8(g(-21946) + k, rnd.choice([0, 0, 0, 0x55, 0xaa, rnd.getrandbits(8)])); e.w8(g(-21690) + k, rnd.choice([0, 0, 0x55, rnd.getrandbits(8)]))
+            info['z'] = (e.r8(g(-22020)), e.r8(g(-22016)), e.r8(g(-16140)))
             sb(e, -21976, rnd.choice([0x03, 0x0c, 0x30, 0xc0, 0xff, 0xaa, rnd.getrandbits(8)])); sb(e, -31202, rnd.choice([0, 0, 1, 2])); sb(e, -31128, rnd.getrandbits(8)); sb(e, -31127, rnd.getrandbits(8))
             sb(e, -31153, rnd.choice([0x45, 0x4e, 0x53, 0x57])); sb(e, -31216, rnd.randint(0, 15)); sb(e, -31217, rnd.randint(0, 15)); sb(e, -31218, rnd.randint(0, 59))
             sb(e, -31064, rnd.getrandbits(8)); sb(e, -31208, rnd.getrandbits(8)); sb(e, -31210, rnd.getrandbits(8)); sb(e, -31204, rnd.getrandbits(8)); sb(e, -31056, rnd.getrandbits(8))
@@ -320,7 +321,9 @@ def gen_ncspell2(n, rnd):
                     e.w8(c + 58 + j, rnd.choice([0, 0, rnd.randint(1, 0xcf), rnd.randint(1, 255), 0xd0, 0xd1]))
                     e.w8(c + 64 + j, rnd.choice([0, 0, 1, 3, 0xff, rnd.getrandbits(8)])); e.w8(c + 70 + j, rnd.choice([0, 1, 0x3f, 0x40, 0xc1, 0x05, rnd.getrandbits(8)]))
         v = R.run(rules4.DISP_NC, (spell,), setup, max_insn=3_000_000)
-        out.append({'seed': seed, 'spell': spell, 'picks': pp, 'ikeys': ik, **({'keep': True} if i < len(NC2_PROG) and v['fin'] else {}), **v})
+        kp = i < len(NC2_PROG) and v['fin']
+        if spell == 72 and info['z'][0] == 0 and not info['z'][1] & 0x40 and info['z'][2] and zkeep[0] < 3: kp = True; zkeep[0] += 1   # keep the 'zero recall coordinate' refusal in the committed subset
+        out.append({'seed': seed, 'spell': spell, 'picks': pp, 'ikeys': ik, **({'keep': True} if kp else {}), **v})
     return out
 
 UNITS5 = {'cgslot': gen_slot, 'cgflags': gen_flags, 'cgroll': gen_roll, 'cgbuild': gen_build, 'cgmake': gen_make, 'loaders': gen_loaders, 'unlock': gen_unlock, 'bash': gen_bash, 'attrib': gen_attrib, 'charge': gen_charge, 'price': gen_price, 'buy': gen_buy, 'ncspell2': gen_ncspell2}

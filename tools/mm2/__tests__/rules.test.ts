@@ -102,6 +102,7 @@ describe('stat bonus (CODE+0x4442), luck save (0x48BA), damage_char (0x4952)', (
       const m = mem(v);
       expect(statBonus(m, v.arg)).toBe(v.ret & 0xff);
     }
+    expect(V.some((v: any) => { try { return statBonus(mem(v), v.arg, { ge: true }) !== (v.ret & 0xff); } catch { return true; } })).toBe(true); // null control: >= instead of >
   });
   it('luck save matches (RNG draws included)', () => {
     const V = load('luck');
@@ -199,6 +200,7 @@ describe('small combat/character rules', () => {
     const V = load('sync');
     expect(V.length).toBeGreaterThan(10);
     for (const v of V) { const m = mem(v); syncStats(m, v.char); expect(m.changes()).toEqual(v.fin); }
+    expect(V.some((v: any) => { const m = mem(v); syncStats(m, v.char, { skipLast: true }); return JSON.stringify(m.changes()) !== JSON.stringify(v.fin); })).toBe(true);
   });
 });
 

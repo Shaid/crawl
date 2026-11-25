@@ -39,6 +39,9 @@ describe("'anywhere' spell set (CODE+0x13708)", () => {
     for (const v of V) expect(anywhereSpell(mem(v), v.spell)).toBe(v.ret);
     expect(V.some((v: any) => v.ret === 1) && V.some((v: any) => v.ret === 0)).toBe(true);
   });
+  it('null control: scanning only the first 6 table entries disagrees', () => {
+    expect(V.some((v: any) => anywhereSpell(mem(v), v.spell, { eleven: true }) !== v.ret)).toBe(true);
+  });
 });
 
 describe('dice damage (CODE+0x1338E) and group size (CODE+0x1333A)', () => {
