@@ -210,3 +210,81 @@ export function lootRoll(c: Ctx, rec: Uint8Array, item: (id: number) => LootItem
   fx.push(['LAB_1B5B', '']);
   fx.push(['LAB_1B62', hex16(2)]);
 }
+
+/**
+ * LAB_09B5(g) (CODE+0x16...): re-place every member of group g on the formation grid after the group moved to a new slot. For each member with a
+ * cell (+42 not 0xff): free its three grid entries (words at -15160 + row*10 + col*2, bytes at -15124 and -15114 + row*5 + col), read the member's slot in the template at -31734 + row*5 + col (the new cell, 0xff = none), and take it when its word
+ * entry is free. The front-left cell (row 1, col 0) instead draws column Random(2)+1 of row 1, falling to the other column when taken.
+ * A member placed in row 0 asks for its picture position (LAB_09AF, logged). Ends with the two redraws.
+ */
+export function placeFormation(c: Ctx, g: number, fx: Effect[]): void {
+  const { m, rng, a4 } = c;
+  const gb = (): number => m.u32(a4 - 15266 + 4 * g);
+  for (let i = 0; i < m.u8(gb() + 413); i++) {
+    const M = gb() + i * 44;
+    const cell = s8(m.u8(M + 42));
+    if (cell === -1) continue;
+    const row = tdiv(cell, 10), col = cell % 10;
+    m.w16(a4 - 15160 + row * 10 + col * 2, 0);
+    m.w8(a4 - 15124 + row * 5 + col, 0);
+    m.w8(a4 - 15114 + row * 5 + col, 0);
+    m.w8(M + 42, 0xff);
+    const t = s8(m.u8(a4 - 31734 + row * 5 + col));
+    let row2 = tdiv(t, 10), col2 = t % 10;
+    if (row === 1 && col === 0) {
+      row2 = 1;
+      col2 = rng.random(2) + 1;
+      if (m.u16(a4 - 15160 + row2 * 10 + col2 * 2) !== 0) col2 = (col2 % 2) + 1;
+    }
+    if (m.u8(a4 - 31734 + row * 5 + col) === 0xff) continue;
+    if (m.u16(a4 - 15160 + row2 * 10 + col2 * 2) !== 0) continue;
+    m.w16(a4 - 15160 + row2 * 10 + col2 * 2, g);
+    m.w8(M + 42, row2 * 10 + col2);
+    if (row2 === 0) fx.push(['LAB_09AF', hex16(g) + hex16(col2)]);
+  }
+  fx.push(['LAB_0A87', ''], ['LAB_0973', hex16(4)]);
+}
+
+/**
+ * LAB_09DC (CODE+0x1a...): the group renumbering at the end of a fight. Every monster group 1.. is compacted (LAB_09C8); a non-empty group moves
+ * down into the first free slot (its 416-byte struct and 222-byte monster record are copied, its members re-placed by placeFormation, the old
+ * slot emptied); a group that stays in place has its mist members (formation cell 0x0b / 0x0c, the transformation bookkeeping) turned into cells 3 / 4,
+ * once each (-15154 / -15152 record the group, -15148 / -15146 are cleared). The group count -15140 becomes the number left; with none the fight
+ * is a victory (state 0x0f unless already 8, flag -15130 = 1). Ends with the picture-slot rebuild and the identification check (logged, ported in
+ * encounter.ts `evade`).
+ */
+export function renumberGroups(c: Ctx, fx: Effect[]): void {
+  const { m, a4 } = c;
+  let dest = 0;
+  const gp = (g: number): number => m.u32(a4 - 15266 + 4 * g);
+  for (let g = 1; g <= s16(m.u16(a4 - 15140)); g++) {
+    compactGroup(c, g);
+    if (m.u8(gp(g) + 413) === 0) continue;
+    dest++;
+    if (dest !== g) {
+      for (let k = 0; k < 416; k++) m.w8(gp(dest) + k, m.u8(gp(g) + k));
+      const ra = m.u32(a4 - 15294 + 4 * g), rb = m.u32(a4 - 15294 + 4 * dest);
+      for (let k = 0; k < 222; k++) m.w8(rb + k, m.u8(ra + k));
+      placeFormation(c, dest, fx);
+      m.w8(gp(g) + 413, 0);
+      continue;
+    }
+    for (let i = 0; i < m.u8(gp(dest) + 413); i++) {
+      const M = gp(dest) + i * 44;
+      if (m.u8(M + 42) === 0x0b && m.u16(a4 - 15154) === 0) {
+        m.w16(a4 - 15148, 0); m.w16(a4 - 15154, dest); m.w8(M + 42, 3);
+        fx.push(['LAB_09AF', hex16(dest) + hex16(3)]);
+      }
+      if (m.u8(M + 42) === 0x0c && m.u16(a4 - 15152) === 0) {
+        m.w16(a4 - 15146, 0); m.w16(a4 - 15152, dest); m.w8(M + 42, 4);
+        fx.push(['LAB_09AF', hex16(dest) + hex16(4)]);
+      }
+    }
+  }
+  m.w16(a4 - 15140, dest);
+  if (s16(m.u16(a4 - 15140)) === 0) {
+    if (m.u16(a4 - 18608) !== 8) m.w16(a4 - 18608, 0x0f);
+    m.w16(a4 - 15130, 1);
+  }
+  fx.push(['LAB_09D7', ''], ['LAB_09D0', '']);
+}

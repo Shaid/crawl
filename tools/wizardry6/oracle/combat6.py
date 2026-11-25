@@ -390,6 +390,128 @@ for k in KIND_FUNCS:
     MAKERS[k] = (lambda k: lambda n, s: make_kind_handler_vectors(n, s, k))(k)
 
 
+def make_renumber_vectors(n, seed):
+    """LAB_09DC (CODE+0x1a...): the group renumbering after a fight (compaction of every group, closing gaps, formation cells, the mist cell
+    values 0x0b / 0x0c). Layout, picture-slot and redraw callees are stubbed and logged; LAB_09C8 and LAB_09B5 run for real."""
+    import combat5 as C5
+    from combat3 import build_world
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    for nm, lg in (('LAB_09AF', 4), ('LAB_0A87', 0), ('LAB_0973', 2), ('LAB_09D7', 0), ('LAB_09D0', 0)):
+        c._stub(c_off(nm), nm, log=lg)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 6), party=rng.randrange(1, 5))
+        C5.randomize_members(fx, rng, A4, list(range(1, ng + 1)))
+        for g in range(1, ng + 1):
+            base = MEM_BASE + g * MEM_STRIDE
+            if rng.random() < .35:                       # an emptied group
+                for i in range(9): w8(fx, base + i * 44 + 34, 3)
+            for i in range(counts[g]):
+                if rng.random() < .15: w8(fx, base + i * 44 + 42, rng.choice([0x0b, 0x0c]))
+                if rng.random() < .15: w8(fx, base + i * 44 + 34, 3)
+        for k in range(100): w8(fx, A4 - 15160 + k, rng.choice([0, 0, 0, 1, 2]))
+        for k in range(25): w8(fx, A4 - 15124 + k, rng.choice([0, 0, 1])); w8(fx, A4 - 15114 + k, rng.choice([0, 0, 1]))
+        w16(fx, A4 - 15154, rng.choice([0, 0, 2])); w16(fx, A4 - 15152, rng.choice([0, 0, 3]))
+        w16(fx, A4 - 15148, 9); w16(fx, A4 - 15146, 9)
+        w16(fx, A4 - 18608, rng.choice([0, 5, 8, 0x12])); w16(fx, A4 - 15130, rng.choice([0, 0, 1]))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(c_off('LAB_09DC'), [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3}))
+    return out
+
+
+MAKERS['renumber'] = make_renumber_vectors
+
+
+def item_ids(c):
+    from combat4 import item_bytes
+    good = [i for i in range(1, 520) if int.from_bytes(item_bytes(c, i)[28:30], 'big')]
+    return good, item_bytes
+
+
+def make_give_vectors(n, seed, which='give'):
+    """LAB_1D12(member, listIndex) (CODE+0x4f...): give a found item to a member (stack on a matching slot, else a new one, second area
+    from slot 10), recomputing the carried weight with LAB_1D10; LAB_1D2A(index): remove a list entry. ReadSection(1, id) runs for real."""
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    stub_ui(c)
+    A4 = c.A4
+    good, item_bytes = item_ids(c)
+    pool = rng.sample(good, 12)
+    while len(out) < n:
+        writes, np_ = party_world(c, rng)
+        who = rng.randrange(0, 6)
+        rec = bytearray(writes[who][1])
+        rec[428] = rng.choice([0, 1, 3, 9, 10, 10]); rec[429] = rng.choice([0, 0, 2, 11, 12])
+        for sl in list(range(0, 10)) + list(range(10, 22)):
+            o = 64 + 8 * sl
+            rec[o:o + 2] = struct.pack('>H', rng.choice(pool))
+            rec[o + 2:o + 4] = struct.pack('>H', rng.randrange(0, 40))
+            rec[o + 4] = rng.choice([0, 1, 2, 5]) if rng.random() < .5 else 1
+            rec[o + 6] = rng.choice([0, 1, 5, 120, 240, 250, 255])
+        writes[who] = (writes[who][0], bytes(rec))
+        cnt = rng.randrange(1, 6)
+        lst = [rng.choice(pool) for _ in range(cnt)]
+        writes += [(A4 - 5446, b''.join(struct.pack('>h', i) for i in lst)), (A4 - 3114, struct.pack('>h', cnt)),
+                   (A4 - 8674, b''.join(struct.pack('>h', rng.choice([1, 2, 7, 30, 200])) for _ in range(cnt))),
+                   (A4 - 3112, b''.join(struct.pack('>h', rng.randrange(0, 900)) for _ in range(cnt))),
+                   (A4 - 8464, b''.join(struct.pack('>h', rng.randrange(0, 90)) for _ in range(cnt))),
+                   (A4 - 3100, b''.join(struct.pack('>h', rng.choice([0, 1])) for _ in range(cnt)))]
+        # make the member's slot kinds follow the real item records half of the time (so stacks can match)
+        for sl in range(22):
+            o = 64 + 8 * sl
+            iid = struct.unpack('>H', rec[o:o + 2])[0]
+            if rng.random() < .6: rec[o + 4] = item_bytes(c, iid)[60]
+        writes[who] = (writes[who][0], bytes(rec))
+        c.apply(writes)
+        idx = rng.randrange(0, cnt)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            if which == 'give': res = c.run_call(c_off('LAB_1D12'), [who, idx], seed3)
+            else: res = c.run_call(c_off('LAB_1D2A'), [idx], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        ids = {}
+        for k in lst: ids[str(k)] = item_bytes(c, k).hex()
+        out.append(pack(c, res, {'seed': seed3, 'who': who, 'idx': idx, 'items': ids, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['give'] = lambda n, s: make_give_vectors(n, s, 'give')
+MAKERS['listdel'] = lambda n, s: make_give_vectors(n, s, 'listdel')
+
+
+def make_chest1da4_vectors(n, seed):
+    """LAB_1DA4 (CODE+0x4f...): the chest variant of the treasure step: with a treasure id in -15296 the state becomes 0x15 and the roll runs."""
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    stub_ui(c)
+    c._stub(c_off('LAB_1D76'), 'LAB_1D76', log=0)
+    A4 = c.A4
+    for d in (-32526,):
+        c._stub(c.jt[d], 'jt%d' % d, log=False)
+    while len(out) < n:
+        writes, np_ = party_world(c, rng)
+        writes += [(A4 - 15296, struct.pack('>h', rng.choice([-1, -1, 0, 5, 77]))), (A4 - 18148, struct.pack('>h', rng.randrange(0, 50))),
+                   (A4 - 18608, struct.pack('>H', 9))]
+        c.apply(writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(c_off('LAB_1DA4'), [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3}))
+    return out
+
+
+MAKERS['chest1da4'] = make_chest1da4_vectors
+
+
 if __name__ == '__main__':
     kind, outp = sys.argv[1], sys.argv[2]
     V = MAKERS[kind](argv('--n', 200), argv('--seed', 1))
