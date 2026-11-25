@@ -540,3 +540,98 @@ export function xpAward(m: Mem, opts: { allMembers?: boolean } = {}): { treasure
   }
   return { treasure };
 }
+
+/* ------------------------------------------------ training (level gain) */
+
+/** CODE+0x04552 saturating byte add: *p = min(255, *p + n) */
+export function satAdd8(m: Mem, p: number, n: number): void {
+  const lim = (0xff - n) & 0xff;
+  if (m.r8(p) > lim) m.w8(p, 0xff);
+  else m.w8(p, (m.r8(p) + n) & 0xff);
+}
+
+/**
+ * CODE+0x20232 train(slot, cost): the level-up of a Hall of Training (hall index in A4-31218).
+ *  - a character with any condition bit (+0x26 != 0) is refused;
+ *  - cost > gold (+0x66): refused; cost == 0: gold += gold/2 (cap 50000), no payment;
+ *  - otherwise gold -= cost. Then +0x20 and +0x71 gain a level (saturating), Robber/Ninja
+ *    (class 5, 6) with a non-zero +0x1E gain one there too;
+ *  - HP gain = classDie[class] * hallMul[hall] / hallDiv[hall] (tables A4-25818/-25838/-25828),
+ *    +1 when there is a remainder (not for Cleric/Robber/Ninja), + endurance bonus
+ *    (stat_bonus(+0x27), negative counts as 0), added to +0x5E (HP), +0x60 and +0x74 (HP max);
+ *  - Paladin/Archer/Cleric/Sorcerer then run learn_spell_level().
+ */
+export function train(m: Mem, slot: number, cost: number, opts: { noRoundUp?: boolean } = {}): void {
+  const ch = charPtr(m, slot);
+  const gold = m.r32(ch + 102);
+  const affordable = gold >= cost;
+  if (m.r8(ch + 38) !== 0) return;
+  if (cost === 0) {
+    m.w32(ch + 102, (gold + Math.floor(gold / 2)) >>> 0);
+    if (m.r32(ch + 102) > 0xc350) m.w32(ch + 102, 0xc350);
+  } else if (!affordable) return;
+  if (cost !== 0) m.w32(ch + 102, (m.r32(ch + 102) - cost) >>> 0);
+  satAdd8(m, ch + 32, 1);
+  satAdd8(m, ch + 113, 1);
+  const cls = m.r8(ch + 15);
+  if ((cls === 6 || cls === 5) && m.r8(ch + 30) !== 0) satAdd8(m, ch + 30, 1);
+  const hall = m.r8(g(-31218));
+  const t = Math.imul(m.r16(g(-25818) + 2 * cls), m.r16(g(-25838) + 2 * hall)) & 0xffff;
+  const div = m.r16(g(-25828) + 2 * hall);
+  let rem = t % div;
+  let q = Math.floor(t / div) & 0xffff;
+  if (cls === 3 || cls === 6 || cls === 5) rem = 0;
+  if (rem !== 0 && !opts.noRoundUp) q = (q + 1) & 0xffff;
+  let b = statBonus(m, m.r8(ch + 39));
+  if (b >= 0xf0) b = 0;
+  q = (q + b) & 0xffff;
+  for (const f of [96, 116, 94]) m.w16(ch + f, m.r16(ch + f) + q);
+  if (cls === 3 || cls === 4 || cls === 2 || cls === 1) learnSpellLevel(m, slot);
+}
+
+/* ------------------------------------------------------------------ rest */
+
+/**
+ * CODE+0x19B28 the party's rest (the non-UI part). Every member with condition < 0x80:
+ *  - condition &= 0x0D (clears all but bits 0, 2, 3); age (+0x21) >= 0x50 and rand(1,100) < 50 -> dies of old age (0x81)
+ *  - HP (+0x5E) 0 -> 1; HP max (+0x74) = HP base (+0x60), or half of the current +0x74 when condition bit 3
+ *  - a member with food (+0x25): food -1; unless condition bit 2, HP = HP max; a member with a spell level
+ *    (+0x23) gets SP (+0x5A) = (bonus(INT for Sorcerer/Archer else PERSONALITY) + 3) * level (+0x20);
+ *    then stats are synced (CODE+0x4476), +0x73 = +0x27, +0x70 = +0x15, SP max (+0x58) = SP
+ * Afterwards, unless A4-31158 == 9, a rand(1,60) < 10 roll sets A4-31158 = 9 (an interrupted rest /
+ * encounter) and flags A4-31058 / A4-31204. Reported call: `redraw [0,255,255]` for that case.
+ */
+export function rest(m: Mem, opts: { noFoodGate?: boolean } = {}): { calls: [string, number[]][] } {
+  for (const d of [-31142, -31143, -31144, -31145, -31146, -31147, -31135, -31136, -31141, -31137, -31138, -31139, -31140]) m.w8(g(d), 0);
+  const calls: [string, number[]][] = [];
+  const size = s16(m.r16(g(PARTY.size)));
+  for (let i = 0; i < size; i++) {
+    const ch = charPtr(m, i);
+    if (m.r8(ch + 38) >= 0x80) continue;
+    m.w8(ch + 38, m.r8(ch + 38) & 0x0d);
+    if (m.r8(ch + 33) >= 0x50 && s16(randRange(m, 1, 100)) < 0x32) m.w8(ch + 38, 0x81);
+    if (m.r16(ch + 94) === 0) m.w16(ch + 94, 1);
+    if (m.r8(ch + 38) & 8) m.w16(ch + 116, m.r16(ch + 116) >> 1);
+    else m.w16(ch + 116, m.r16(ch + 96));
+    if (m.r8(ch + 37) === 0 && !opts.noFoodGate) continue;
+    m.w8(ch + 37, (m.r8(ch + 37) - 1) & 0xff);
+    if (!(m.r8(ch + 38) & 4)) m.w16(ch + 94, m.r16(ch + 116));
+    if (m.r8(ch + 35) !== 0) {
+      const cls = m.r8(ch + 15);
+      let b = statBonus(m, m.r8(ch + (cls === 4 || cls === 2 ? 17 : 18)));
+      if (b >= 0xf2) b = 0;
+      m.w16(ch + 90, ((b + 3) * m.r8(ch + 32)) & 0xffff);
+    }
+    syncStats(m, ch);
+    m.w8(ch + 115, m.r8(ch + 39));
+    m.w8(ch + 112, m.r8(ch + 21));
+    m.w16(ch + 88, m.r16(ch + 90));
+  }
+  if (s16(m.r16(g(-31158))) !== 9 && s16(randRange(m, 1, 60)) < 10) {
+    m.w16(g(-31158), 9);
+    calls.push(['redraw', [0, 255, 255]]);
+    m.w8(g(-31058), 1);
+    m.w8(g(-31204), 1);
+  }
+  return { calls };
+}

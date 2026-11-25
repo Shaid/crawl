@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { resolve } from 'node:path';
 import { StrictMem } from '../rules-mem.ts';
-import { damageChar, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
+import { damageChar, rest, train, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
 
 const DIR = resolve('tools/mm2/rules_oracle');
 export function load(name: string): any[] {
@@ -237,6 +237,34 @@ describe('end-of-battle XP award (CODE+0x12430)', () => {
   it('null control: dividing by the whole party instead of the living disagrees', () => {
     let bad = 0;
     for (const v of V) { const m = mem(v); try { xpAward(m, { allMembers: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('training hall level gain (CODE+0x20232)', () => {
+  const V = load('train');
+  it('matches the game: gold, level, HP gain tables, endurance bonus, spell level hook', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) { const m = mem(v); train(m, 0, v.cost); expect(m.changes()).toEqual(v.fin); }
+  });
+  it('null control: no round-up of the HP remainder disagrees', () => {
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { train(m, 0, v.cost, { noRoundUp: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('party rest (CODE+0x19B28)', () => {
+  const V = load('rest');
+  const game = (v: any) => v.calls.filter((c: any) => !String(c[0]).startsWith('ui'));
+  it('matches the game: healing, SP, old-age death, food, interrupted rest', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) { const m = mem(v); const r = rest(m); expect(m.changes()).toEqual(v.fin); expect(r.calls).toEqual(game(v)); }
+    expect(V.some((v: any) => game(v).length > 0)).toBe(true);
+  });
+  it('null control: resting without the food requirement disagrees', () => {
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { rest(m, { noFoodGate: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
     expect(bad).toBeGreaterThan(0);
   });
 });
