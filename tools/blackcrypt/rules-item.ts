@@ -92,3 +92,15 @@ export function lightEffect(a: A4Mem, calls?: number[][]): number {
   calls?.push([0x2d46, 1], [0x4ae]);
   return 1;
 }
+
+/**
+ * HOLD `+0x58FA(n)` (monster hold bolt n = 18, item effect 0x7C..): `A4+0x1756 += n` (word), and when the screen mode `A4+0x174A` is 1 or 10 the UI call `+0x14920(1, 1)` plus `A4+0x174C = 1`;
+ * then a message, `A4+0x1E80 = A4+0x1E82 = 0`, return 1. No RNG. Harness: `rules-light.test.ts` (vectors_hold.json.gz); the "party-click whitelist" itself is a separate routine (see game-rules 16.2).
+ */
+export function holdEffect(a: A4Mem, n: number): number {
+  a.setW(0x1756, (a.w(0x1756) + n) & 0xffff);
+  const m = a.w(0x174a);
+  if (m === 1 || m === 10) a.setB(0x174c, 1);
+  a.setW(0x1e80, 0); a.setW(0x1e82, 0);
+  return 1;
+}

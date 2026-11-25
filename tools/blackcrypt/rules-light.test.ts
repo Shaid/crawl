@@ -4,7 +4,7 @@ import { gunzipSync } from 'node:zlib';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { A4Mem } from './rules-spell';
-import { lightEffect } from './rules-item';
+import { lightEffect, holdEffect } from './rules-item';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const V = JSON.parse(gunzipSync(readFileSync(resolve(here, 'rules_oracle/vectors_light.json.gz'))).toString());
@@ -29,6 +29,18 @@ describe('LIGHT +0x58C6', () => {
   });
   it('null control: +100 instead of +120 disagrees', () => {
     const bad = V.cases.filter((c: any) => run(c, (a, k) => { a.setW(0x1754, (a.w(0x1754) + 100) & 0xffff); k.push([0x2d46, 1], [0x4ae]); return 1; }).length);
+    expect(bad.length).toBeGreaterThan(0);
+  });
+});
+
+const H = JSON.parse(gunzipSync(readFileSync(resolve(here, 'rules_oracle/vectors_hold.json.gz'))).toString());
+describe('HOLD +0x58FA', () => {
+  const go = (c: any, f: (a: A4Mem, n: number) => number) => run({ ...c, out: { ...c.out, log: [] } }, a => f(a, c.arg));
+  it(`matches the real routine (${H.cases.length} cases)`, () => {
+    expect(H.cases.map((c: any) => go(c, holdEffect)).filter((x: string[]) => x.length).slice(0, 3)).toEqual([]);
+  });
+  it('null control: ignoring the screen-mode gate disagrees', () => {
+    const bad = H.cases.filter((c: any) => go(c, (a, n) => { a.setW(0x1756, (a.w(0x1756) + n) & 0xffff); a.setB(0x174c, 1); a.setW(0x1e80, 0); a.setW(0x1e82, 0); return 1; }).length);
     expect(bad.length).toBeGreaterThan(0);
   });
 });

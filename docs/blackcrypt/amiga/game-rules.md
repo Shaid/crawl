@@ -873,3 +873,9 @@ None: no BUY/SELL/PRICE/COIN strings (GOLD occurs only in key names), no currenc
 > **Correction (2026-11-26):** LIGHT as item effect 0x80 was **hyp** ("taken as +120 like spell 1, not diffed alone"). The routine now runs for real in `oracle_spell` (`make_vectors_light.py`, `vectors_light.json.gz`, 40 cases, random light counters incl. 16-bit wrap): `A4+0x1754 += 120` (word wrap), then hooked UI calls `+0x2D46(1)` and `+0x4AE`, returns 1; no RNG, no other byte written. TS: `lightEffect` in `rules-item.ts`, wired in `bc-sim.ts`; `rules-light.test.ts` (40 / 40, null control +100 disagrees). The hyp was right.
 
 Still open in Black Crypt (not reached this pass): stairs map-load I/O `+0x16C62`, held-party click whitelist, ray-kill composition as one routine.
+
+### 16.2 Hold effect `+0x58FA` (harness) and the held-party click whitelist (still code)
+
+The hold effect runs for real (`make_vectors_hold.py`, `vectors_hold.json.gz`, 60 cases): `A4+0x1756 += n` (word wrap); only when the screen mode `A4+0x174A` is 1 or 10 does it call the UI routine `+0x14920(1, 1)` and set `A4+0x174C = 1`; then `A4+0x1E80 = A4+0x1E82 = 0`, returns 1, no RNG. TS `holdEffect` (`rules-item.ts`); `rules-light.test.ts` (60 / 60, null control without the mode gate disagrees). This upgrades section 11.8's "hold effect (code)" to harness; the mode gate (1 / 10) was not stated before.
+
+The click whitelist itself lives in the input dispatcher `+0xD6D8` (event read via `+0x1FD5E`, a jump table on `A4+0x1EB2`, heavy UI). Smallest next step: run `+0xD6D8` with the table-driven handlers stubbed and log which handler offsets each `(A4+0x1EB2, 0x1EB4, 0x1756, 0x174A)` combination reaches; that proves the 8 / 9 / 0x5B rule without porting the UI. Not done. The ray-kill composition and the stairs `+0x16C62` load I/O are likewise untouched.
