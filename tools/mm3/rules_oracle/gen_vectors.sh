@@ -35,3 +35,9 @@ for spec in classreq:1500:20 rollstats:1500:20 cbuild:1500:40 event:2500:60 shop
   $PY rules5.py $unit generated/$unit.json --n $n
   $PY rules5.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
 done
+# pass 6 units (rules6.py): party skill check
+for spec in skillcheck:3000:120 "$@"; do
+  IFS=: read unit n sub <<<"$spec"
+  $PY rules6.py $unit generated/$unit.json --n $n
+  $PY rules6.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
+done
