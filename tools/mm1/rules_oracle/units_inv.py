@@ -56,3 +56,42 @@ def _mk(name, entry):
             out.append(v)
         return out
 for _n, _a in INV_ENTRY.items(): _mk(_n, _a)
+
+# ---- terminal screens' own code: getinfo 0x46CB (item record), statue 0x276C, loadnext chain 0x509D (loadmaze 0xD35 / loadtype 0x4639 / resfrinn 0x45EB) ----
+SCR_LEAVES = {'clear7': (0x246b, None), 'readmaze': (0x142, lambda e: [e.rw(0x138)]), 'ovloader': (0x1c, None), 'getshape': (0x128c, None),
+              'clrp2': (0x42ca, None), 'pcomand': (0x4200, None), 'pnames2': (0x418f, None), 'draw': (0xf45, None)}
+
+def scr_stubs(e, keys):
+    w = inv_stubs(e, keys)
+    for n, (off, a) in SCR_LEAVES.items(): e.stub(off, n, None, a)
+    return w
+
+def _mk_scr(name, entry, regfn, keyfn=lambda r: [0x1b] * 3):
+    @unit(name)
+    def _(n, rnd):
+        e = Emu(); Rc = Rec(e); out = []; tries = 0
+        while len(out) < n and tries < n * 6:
+            tries += 1
+            keys = keyfn(rnd); seed = rnd.getrandbits(32); box = {}
+            def setup(e):
+                r2 = random.Random(seed); inv_state(e, r2); box['w'] = scr_stubs(e, keys); e.scratch.clear(); box['regs'] = regfn(e, r2)
+            try: v = run_vec(Rc, e, entry, setup, regs_fn=lambda: box['regs'])
+            except Exception as ex:
+                if tries < 4: print('err', name, ex)
+                continue
+            if e.scratch.get('abort'): continue
+            v['args'] = {'keys': box['w'].used}
+            out.append(v)
+        return out
+
+def _getinfo_regs(e, r): return {'ax': r.choice([0, 1, 0x3c, 0x3d, 0xff, r.randint(0, 255), r.randint(0, 255)])}
+def _statue_regs(e, r): return {'bp': r.choice([0, 1, 2, 5, 15, 16, 17, r.randint(0, 40)])}
+def _loadnext_regs(e, r):
+    starts, keys, names = screen_key_tables()
+    bp = r.randrange(4); i0 = starts[bp] // 2
+    k = keys[r.randrange(i0, 55)]
+    e.ww(0x136, r.choice([0, 1, 2, 3])); e.wb(0x3c38, r.randrange(16)); e.wb(0x3c39, r.randrange(16))
+    return {'ax': k & 255, 'bx': k >> 8, 'bp': bp}
+_mk_scr('getinfo', 0x46cb, _getinfo_regs)
+_mk_scr('statue', 0x276c, _statue_regs, lambda r: [r.choice([0x1b, 0x0d, 0x20, 0x41])] * 3)
+_mk_scr('loadnext', 0x509d, _loadnext_regs)

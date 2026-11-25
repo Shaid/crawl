@@ -213,6 +213,7 @@ export class X86 {
         const w = (op & 1) === 1, e = this.ea(b, p, seg); const n = op < 0xd2 ? 1 : this.cx & 31;
         this.wr(e, w, this.shift(e.reg, this.rd(e, w), n, w)); break;
       }
+      case 0xe2: { const d = rel8(); this.cx = (this.cx - 1) & 0xffff; this.ip = this.cx !== 0 ? (ni + d) & 0xffff : ni; return; }   // loop
       case 0xe8: { const d = rel16(); this.push(ni); this.ip = (ni + d) & 0xffff; return; }
       case 0xe9: { const d = rel16(); this.ip = (ni + d) & 0xffff; return; }
       case 0xeb: { const d = rel8(); this.ip = (ni + d) & 0xffff; return; }

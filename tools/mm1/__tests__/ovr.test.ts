@@ -66,11 +66,11 @@ describe.skipIf(!existsSync(`${DATA}/SORPIGAL.OVR`))('table-driven dispatcher (o
 
 describe('town services run from the game bytes (x86 port): food, general store, temple, tavern, training hall', () => {
   for (const [name, entry] of Object.entries(TOWN_ENTRY)) {
-    const run = (m: any, v: any) => { const x = runTown(m, v.code, entry, v.args.keys); return { ax: x.ax, bx: x.bx, cx: x.cx, dx: x.dx, si: x.si, di: x.di, bp: x.bp, calls: x.calls }; };
+    const run = (m: any, v: any) => { const x = runTown(m, v.code, entry, v.args.keys, undefined, v.regs); return { ax: x.ax, bx: x.bx, cx: x.cx, dx: x.dx, si: x.si, di: x.di, bp: x.bp, calls: x.calls }; };
     it(`${name}: strict reads, writes, UI call log, registers`, () => mustMatch(name, run, 30));
-    it.skipIf(name === 'poption')(`${name}: null control (key script shifted by one / ADC without carry-in)`, () => {
-      const n = nullBad(name, (m, v) => { const x = runTown(m, v.code, entry, [0x4e, ...v.args.keys]); return { calls: x.calls }; });
-      const n2 = nullBad(name, (m, v) => { const x = runTown(m, v.code, entry, v.args.keys, 'noCarryIn'); return { calls: x.calls }; });
+    it.skipIf(['poption', 'getinfo', 'loadnext'].includes(name))(`${name}: null control (key script shifted by one / ADC without carry-in)`, () => {
+      const n = nullBad(name, (m, v) => { const x = runTown(m, v.code, entry, [0x4e, ...v.args.keys], undefined, v.regs); return { calls: x.calls }; });
+      const n2 = nullBad(name, (m, v) => { const x = runTown(m, v.code, entry, v.args.keys, 'noCarryIn', v.regs); return { calls: x.calls }; });
       expect(n + n2).toBeGreaterThan(0);
     });
   }
@@ -88,6 +88,17 @@ describe('class-gate null controls (the replayed flows really depend on the clas
       expect(n).toBeGreaterThan(0);
     });
   }
+});
+
+describe('getinfo / loadnext input null controls', () => {
+  it('getinfo: a wrong item id changes the item record', () => {
+    const n = nullBad('getinfo', (m: any, v: any) => { const x = runTown(m, v.code, TOWN_ENTRY.getinfo, v.args.keys, undefined, { ...v.regs, ax: (v.regs.ax + 1) & 255 }); return { calls: x.calls }; });
+    expect(n).toBeGreaterThan(0);
+  });
+  it('loadnext: a wrong area class selects another screen', () => {
+    const n = nullBad('loadnext', (m: any, v: any) => { const x = runTown(m, v.code, TOWN_ENTRY.loadnext, v.args.keys, undefined, { ...v.regs, bp: (v.regs.bp + 1) & 3 }); return { calls: x.calls }; });
+    expect(n).toBeGreaterThan(0);
+  });
 });
 
 describe('cell loader `draw` CODE+0xF45 (cell id, wall byte, layer byte, dark rule)', () => {
