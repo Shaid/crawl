@@ -1,11 +1,11 @@
 # Might & Magic II (Amiga) — Game Rules
 
-Logic foundation for a browser remake's rules core, derived from the game's own 68000 code: the retail `mm2` executable (`data/mm2/amiga/data/mm2`, 181,524 B). No other port and no third-party reference code was used for any rule below; `docs/mm2/amiga/data-structure.md` (format work ported from Vairn/MM2) is used only for field *meanings*, and where the code disagrees with it this document says so (section 8). Written 2026-11-25; pass 2 (encounters, turn order, monster side, equipment, treasure, training, gates) the same day.
+Logic foundation for a browser remake's rules core, derived from the game's own 68000 code: the retail `mm2` executable (`data/mm2/amiga/data/mm2`, 181,524 B). No other port and no third-party reference code was used for any rule below; `docs/mm2/amiga/data-structure.md` (format work ported from Vairn/MM2) is used only for field *meanings*, and where the code disagrees with it this document says so (section 8). Written 2026-11-25; pass 2 (encounters, turn order, monster side, equipment, treasure, training, gates) and pass 3 (spells, item use, equip rules, clock) the same day.
 
 **Method.** Single real routines run in a Unicorn 68000 core (`tools/mm2/rules_oracle/`, no OS/disk/chipset emulation; UI, text and key-wait callees are replaced by logging stubs) on synthetic state. Per call the harness records every byte the routine read before writing (the input footprint), every byte it wrote, the return value and each logged stub call. `tools/mm2/rules.ts` is a TypeScript port written from the disassembly; `tools/mm2/__tests__/rules.test.ts` runs it against a *strict* sparse memory seeded with only that footprint, so a port that reads state the game did not read, writes a different byte, draws the RNG in a different order or returns a different value fails. Every check has a **null control**: a deliberately wrong variant of the port must disagree with the vectors on at least one case.
 
 **Address conventions.**
-- `CODE+0xNNNN` = offset into the root CODE hunk (0x2593C bytes; = file offset − 0x28). The executable is an overlay file: root hunks CODE (153,916 B), DATA (8,604 B), BSS; the 15,544 B overlay hunk after `HUNK_OVERLAY` (file `0x28854`) holds the `spells.dat`/`items.dat` loader strings and is **not** loaded by the harness.
+- `CODE+0xNNNN` = offset into the root CODE hunk (0x2593C bytes; = file offset − 0x28). The executable is an overlay file: root hunks CODE (153,916 B), DATA (8,604 B), BSS; the 15,544 B overlay hunk after `HUNK_OVERLAY` (file `0x28854`) holds the `spells.dat`/`items.dat` loader strings (SAS/C code calling the root hunk's libc through the A4 jump table) and is **not** loaded by the harness (13.9).
 - `A4` = DATA base + 0x7FFE (SAS/C small data; set by `LEA SECSTRT_1+32766,A4` at CODE+0x24920). `-N(A4)` is a global. The window `A4-0x7FFE .. A4` is the DATA hunk followed *contiguously* by the zero-cleared BSS (CODE+0x248B0 clears 0x16D8 longs from `A4-24162`); everything the rules touch lives in it. Calls such as `JSR -31668(A4)` go through a jump table of `JMP abs.l` stubs at the start of DATA: target = `u32` at DATA + (0x7FFE + disp) + 2. `tools/mm2/rules_oracle/resolve_asm.py` annotates the IRA listing with the resolved targets (`=> F_22BC6`).
 - Ints are 16 bit; C arguments are pushed right to left, the callee returns D0, the caller pops.
 - Character records are 130 (0x82) bytes at `A4-10814`, **big-endian words in memory** (little-endian on disk; swapped on load). `charPtr(slot)` = CODE+0x477E = `A4-10814 + slots[slot]*130` with the party table `slots` = 8 × `u16` at `A4-31082` (`0xFFFF` empty), party size `u16` at `A4-31066`.
@@ -17,46 +17,39 @@ Logic foundation for a browser remake's rules core, derived from the game's own 
 
 Reproduce: `tools/mm2/rules_oracle/gen_vectors.sh` (needs a venv with `unicorn`; full vector sets go to the gitignored `tools/mm2/rules_oracle/generated/`, small committed subsets to `tools/mm2/rules_oracle/vectors/`); `npx vitest run tools/mm2/__tests__/rules.test.ts` uses the full sets when present and the committed subsets otherwise.
 
-## MM2 rules status (build guide, updated 2026-11-25, pass 2)
+## MM2 rules status (build guide, updated 2026-11-25, pass 3)
 
-What a remake rules core can take **as is** (each unit: a real routine run in Unicorn, diffed against a TypeScript port with strict read/write-footprint parity, null control; sections cited; vector counts are full sets, ~1,000+ committed subsets in `tools/mm2/rules_oracle/vectors/`):
+What a remake rules core can take **as is**. Each unit is a real routine run in Unicorn and diffed against a TypeScript port with strict read/write-footprint parity and a null control; section numbers point to the rule text, vector counts are full sets (small subsets are committed in `tools/mm2/rules_oracle/vectors/`, 131,432 vectors over 3 passes).
 
 | Area | Verified (harness) | Where |
 |---|---|---|
 | RNG, `rand(lo,hi)` | LCG, hi+1 overshoot | 2 |
 | Monster record | unpack (all 256 retail + synthetic), ability uses, initiative | 3.1, 10 |
-| Encounter | group sizes, reinforcement pick, budget, generation loop | 10.1 |
+| Encounter | group sizes, reinforcement pick, budget, generation loop, **call for help** | 10.1, 13.5 |
 | Encounter prompt | surprise roll, Hide, Run, Bribe (Food/Gold/Gems) odds | 10.2 |
 | Turn order / round | actor selection, ties, status decay, battle-over test, a member running | 10.3 |
-| Monster turn | flee/morale, ability gate, melee vs ranged vs advance vs spell decision, melee and ranged target pick | 11.1-11.2, 4.1, 4.5 |
-| Monster hits party | hit roll, damage, saves, death, all **30** special/condition effects | 4.1, 4.3, 11.3 |
+| Monster turn | flee/morale, ability gate, melee vs ranged vs advance vs spell decision, target picks | 11.1-11.2, 4.1, 4.5 |
+| Monster hits party | hit roll, damage, saves, death, all 30 special/condition effects; monster spell **verb table** | 4.1, 4.3, 11.3, 13.5 |
 | Party hits monster | attack roll, crits, immunity, damage, death, removal, queue XP, quest flag, kill reward, XP award | 4.2, 4.6, 4.7, 11.4 |
-| Characters | stat bonus/sync, luck save, spell level/SP, training HP, **XP needed per level, training cost**, rest | 5, 12.2 |
-| Equipment | equip/unequip (weapon bytes, AC accumulator, stat bonus), AC recalculation | 12.1 |
+| **Party spells** | cast command, dispatch (96 spells -> 43 non-combat + 53 combat handlers), `partyEffect` engine (resist / immunity / save / damage / condition / kill), dice and group-size helpers, **51 combat and 25 non-combat handlers** (damage, conditions, buffs, heals, cures, party edits) | 13.1-13.4 |
+| Characters | stat bonus/sync, luck save, spell level/SP, training HP, XP needed per level, training cost, rest, **world clock and ageing** | 5, 12.2, 13.7 |
+| Equipment | equip/unequip, AC; **equip command (class mask, alignment, cursed flag, 0xF0), compatibility, item use (charges, free cast, stat boost)** | 12.1, 13.6 |
 | Treasure | treasure count, item roll, charges, use power | 12.3 |
-| Spells (gates only) | SP cost, gem gate, SP gate, combat-class gate, location gate | 6, 12.4 |
+| Spell gates and data | SP cost, gem gate, SP gate, combat-class gate, location gate; spells.dat vs dispatch tables (retail data) | 6, 12.4, 13.8 |
 
-**Open (not derived; smallest next step):**
-- `mm2-rules-spell-effects` — the **effects** of the 96 spells and the monster spell dispatcher CODE+0x1FB4E / group verbs (sprays, breaths, bolts...), the party cast handlers (~CODE+0x1AB0C), `partyEffect` CODE+0x10894, `advance` CODE+0x10118, `special` CODE+0x1042C. The `spells.dat`/`items.dat` loader (overlay hunk) was **not** needed: the harness writes the table bytes where the loader would and the verified routines only read them; extending the harness to load the overlay is still needed for the loader itself.
-- `mm2-rules-equipment` (remainder) — item *use* (items.dat `+0x0F` effect), curses/class restriction enforcement at equip, shop rules.
-- `mm2-rules-world` — traps, door bash/unlock (CODE+0x9C2A / 0x20D6E), food consumption outside rest, skills, passability.
-- `mm2-rules-chargen` — character creation (overlay code).
-- Pieces still stubbed inside verified units: the party action routine CODE+0x119C2 (command menu: attack, cast, use, run), bribe payment CODE+0x6C66 / 0x6ACE / 0x6B9A, `retreat` CODE+0x11646's map move; the meaning of per-map bytes `A4-22025` / `-22029` / `-22030..-22032` (hyp: map header fields, set by the map loader).
+**Open (not derived; smallest next step in 13.9 and `docs/mm2/TODO.md`):**
+- `mm2-rules-spell-effects` (remainder, 20 spells marked OPEN in the 13.4 table, e.g. Detect Magic, Location, Teleport-class movers, Identify/Recharge/Enchant item pickers, Raise Dead, Turn Undead/Holy Word engine CODE+0xC028); the monster spell leaves `spray1` / `sprayAll` / `cond` / `cond2` (CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896) and `advance` CODE+0x10118; who charges the SP and gem cost after a cast; the `spells.dat` / `items.dat` overlay loader (**blocked**: SAS/C overlay needing libc stubs).
+- `mm2-rules-equipment` (remainder): shop buy/sell prices (**not located**).
+- `mm2-rules-world`: door bash CODE+0x9B48 (read: Might sum of the first two members + a `rand(10,109)/10` roll against the door strength `A4-22024`; **code**, not harnessed), unlock CODE+0x20D6E, traps, food outside rest, skills, per-map bytes `A4-22025` / `-22029` / `-22030..-22032` (hyp: map header). The party command menu CODE+0x119C2 is still a stub.
+- `mm2-rules-chargen`: character creation (overlay code) — **not started**.
+- Training eligibility (`xp >= needed`, CODE+0x20988) is **code-read only**: that routine is the whole Hall UI loop (not a pure function) — `xp_needed` and `training_cost` are harness-verified.
 - Party-attack target prompt (target 0xFF) and ranged/melee mode selection are UI.
 
-Corrections made in pass 2 are in sections 8 and 11 (`> **Correction (date):**`).
+Corrections made in passes 2 and 3 are in sections 8, 11 and 13 (`> **Correction (date):**`).
 
 ## 1. Status summary
 
-| Area | Harness-verified (grade) | Open |
-|---|---|---|
-| Foundations | RNG: LCG, `rand(lo,hi)` incl. the hi+1 overshoot (harness) | — |
-| Character | stat bonus table, luck save, stat-to-working-copy sync, spell level gain and SP formula, Hall of Training level/HP gain, party rest, XP award (harness) | XP gate for training, ageing/ageing effects outside rest, equipment-derived weapon bytes (+0x4C..4F), item use, chargen |
-| Melee | monster unpack, monster-vs-party roll, party-vs-monster roll with Robber/Ninja crits, damage to a character incl. saves, kill reward, XP pool/share, party power (harness) | initiative/turn order, applying damage to monsters, monster special attacks and status effects, encounter generation/reinforcement/surprise/flee |
-| Spells | SP cost, gem gate, SP gate, spell-level learning, monster spell damage dice (harness) | the per-spell effect handlers (monster dispatcher CODE+0x1FB4E and the party handlers), combat/outdoor gate, spell book contents, spell list vs `tools/mm2/spells.ts` |
-| World | rest (harness) | traps, doors/unlock/bash, food consumption outside rest, skills (Mountaineering, Pathfinder...), overland passability, overlay code |
-
-Vector counts (full sets): rng 4,008, monunpack 856 (256 retail + 600 synthetic records), bonus 256, luck 3,000, dmgchar 3,000, melee 3,000, pmelee 3,000, monspecial 2,000, killreward 2,000, partystrength 1,000, mspelldmg 2,000, sync 100, spelllevel 3,000, xpaward 1,500, train 3,000, rest 2,000, spellcost 3,006 — 36,726 vectors; the committed subsets hold ~1,000. **Pass 2 adds 63500** (sections 10-12: encgroup 3,000, moninit 1,500, battleover 1,500, encpick 3,000, encbudget 2,000, encgen 1,500, charflee 2,000, round 2,000, driver 2,000, mondeath/mondamage/questkill/resolve/tgtranged/tgtmelee/monturn 2,000 each, setcond 4,000, monspecial2 3,000, spellgate 3,000, equip/unequip/ac/lootitem/treasure/xpneed/traincost 3,000 each), 100226 in total.
+The status block at the top lists what is verified and what is open. Vector counts (full sets): pass 1 rng 4,008, monunpack 856 (256 retail + 600 synthetic records), bonus 256, luck 3,000, dmgchar 3,000, melee 3,000, pmelee 3,000, monspecial 2,000, killreward 2,000, partystrength 1,000, mspelldmg 2,000, sync 100, spelllevel 3,000, xpaward 1,500, train 3,000, rest 2,000, spellcost 3,006 = 36,726; pass 2 63,500 (sections 10-12: encgroup 3,000, moninit 1,500, battleover 1,500, encpick 3,000, encbudget 2,000, encgen 1,500, charflee 2,000, round 2,000, driver 2,000, mondeath / mondamage / questkill / resolve / tgtranged / tgtmelee / monturn 2,000 each, setcond 4,000, monspecial2 3,000, spellgate 3,000, equip / unequip / ac / lootitem / treasure / xpneed / traincost 3,000 each); pass 3 31,206 (section 13). Total 131,432.
 
 ## 2. Foundations (harness)
 
@@ -102,7 +95,7 @@ State: acting character slot `u8 A4-1272`; acting monster slot `u8 A4-1271`; `ti
 3. `v = (AC <= T) ? T - AC : 5` with `AC` = character `+0x24`; **status bit 3 halves `v`**.
 4. For each of the `n` attacks: `d = rand(10,1009)/10`; if `v > d` the attack hits: `hits++`, `dmg += rand(1, damage die (A4-4531))`.
 5. **Status bit 2 halves the total damage.**
-6. The routine then calls CODE+0xFF42 (UI text + damage application; reported by the port as `applyHit [dmg, hits]`). That routine also draws `rand(1,8)` to pick the attack verb string.
+6. The routine then calls CODE+0xFF42 (UI text + damage application; reported by the port as `applyHit [dmg, hits]`). That routine also draws `rand(1,8)` to pick the attack verb string. (Superseded detail: the damage application is 4.3 and the special attack / condition path is 11.3; they were verified in passes 1-2.)
 
 So a monster's chance to hit is `v` percent per attack (`T - AC`, or a flat 5% when the character's AC exceeds the tier threshold) — AC is a *positive-is-good* byte here.
 
@@ -188,11 +181,11 @@ Spell data in memory: 2-byte records at `A4-11006`, index = Sorcerer 0..47 then 
 
 **SP gate** — CODE+0x79A0: current SP `+0x58` must be `>=` the cost in `A4-16138` (UI message 6 otherwise).
 
-The remaining gates the cast command checks (CODE+0x78A8: `(byte0 >> 6) & 3` combat/outdoor class; CODE+0x790E: `byte1 >= 0x80` outdoor-only; CODE+0x7B5x callers) were read (**code**) but not harnessed, and no per-spell effect has been derived: see section 9.
+The remaining gates the cast command checks (CODE+0x78A8 combat class, CODE+0x790E map-flag gate) are harness-verified in 12.4; the cast command itself, the spell dispatch and the effects are section 13.
 
 ## 7. What a rules core can take from this
 
-Combat round skeleton (confirmed pieces): `unpack_monster` -> monster attack roll (4.1) -> `damage_char` (4.3) -> party attack roll (4.2) -> kill reward (4.6) -> XP award (4.7); out of combat: rest (5.5), training (5.4), spell level (5.3), SP/gem gates (6). Missing for a playable loop: initiative (the monster byte `0x18` -> `-1294[slot]` and the round loop CODE+0x12A22/0x12C6E), encounter generation, monster-side damage application (CODE+0x10EAC, 0x10E5E) and special attacks, flee/surprise (CODE+0x12EE0: `rand(1,100) <= 0x28` and `<= A4-24142` -> surprise 2, `>= 0x5A` -> 3, hyp), and the spell effects.
+Combat round skeleton (all of it harness-verified): encounter generation and the prompt (10.1-10.2) -> turn order and round loop (10.3) -> per actor either the monster turn (11.1: flee, ability gate, melee 4.1 / ranged / advance / spell 13.5) with `damage_char` (4.3) and the 30 special effects (11.3), or the party action: attack (4.2), cast (13.1-13.4) or use an item (13.6) -> damage to monsters, death, removal and the kill reward (11.4, 4.6) -> end of battle XP (4.7) and treasure (12.3). Out of combat: rest (5.5), training (5.4, 12.2), spell level (5.3), the clock (13.7), equipment (12.1, 13.6). Not yet derived: the party command menu CODE+0x119C2 (stubbed), shops, doors/traps/food/skills, character creation, and the open spell handlers (status block).
 
 ## 8. Corrections to earlier claims
 
@@ -205,6 +198,10 @@ Combat round skeleton (confirmed pieces): `unpack_monster` -> monster attack rol
 > **Correction (2026-11-25):** `tools/mm2/monsters.ts` `decodeMonsterStat` (AC/damage/initiative) caps every value at 250; the game truncates AC x10 to a byte and caps damage/initiative at 250 only when the base value is > 25 (3.1). Identical on all retail records.
 
 > **Correction (2026-11-25):** the roster/in-memory record carries working copies at `+0x6B..+0x73` that combat reads (stat sync 5.2), and the weapon bytes the attack roll uses are `+0x4C..+0x4F` — inside the range data-structure.md labels "spellbook bitmask `$4C..$57`". The spell book written by 5.3 lands at `+0x51..`, so those four weapon bytes overlap the first bytes of that range as documented; one of the two readings is wrong (hyp: the weapon bytes are derived equipment values, recomputed when equipment changes; the spell book then starts at `+0x51` rather than `+0x4C`). **Resolved in pass 2 (12.1): confirmed (harness).**
+
+> **Correction (2026-11-25, pass 3):** the pass-1/2 pointer "party cast handlers ~CODE+0x1AB0C / 0x1AC94" was wrong: CODE+0x1AB0C is the "pack is full / you found ..." routine that files rolled treasure into the backpack (12.3), not a spell handler. The cast handlers are CODE+0xA812..0xC9B6 (13.4), reached through the dispatchers CODE+0xCD90 / 0xCFD0. Likewise `special` CODE+0x1042C is a monster special-attack message leaf and `advance` CODE+0x10118 is the monster's step forward, neither is a spell routine.
+
+> **Correction (2026-11-25, pass 3):** `tools/mm2/spells.ts` decoded `spells.dat` byte0 as "bit 0x10 special cost, low nibble gems" and byte1 bits 6-4 as the SP multiplier. The game uses `byte0 & 0x3F` gems (above 50 = 100; retail has 20, 50 and 63 = 100) and byte1 bits 5-4 as the multiplier with bit 6 choosing the monster-scaled base; `spells.ts` is fixed and its item "use power" boost table gained alignment (selector 4) and SP (7). The boost amount is also the slot's enchant byte plus the nibble (13.6).
 
 ## 9. Open (TODO ids in `docs/mm2/TODO.md`) — pass 1 list, superseded by the status block at the top
 
@@ -331,3 +328,164 @@ CODE+0x123B0: `d = rand(1,100)`: `< 11` -> 3 items, `< 46` -> 2, `< 91` -> 1, el
 
 - CODE+0x78A8: spells.dat byte0 bits 6-7 = 0 anywhere, 1 combat only (`A4-31154 == 2` is "in combat"; set by the round loop), 2 non-combat only, 3 never (messages 3 / 2).
 - CODE+0x790E: byte1 >= 0x80 spells are allowed when `A4-31202 == 1` (hyp: overland), otherwise only when the map's 16x16 bit map at `A4-22010` (bit `x & 7` of byte `y*2 + (x > 7)`, party position `A4-31217`/`A4-31216`) is clear (message 4 otherwise). The flagged spells are the outdoor family (Eagle Eye, Fly, Walk on Water, the Transmutations, Nature's Gate, Sand Storm, Meteor Shower, Star Burst, Moon Ray), so `tools/mm2/spells.ts`'s "outdoor-only" label for byte1 bit 7 is right in spirit but the rule is a per-square map flag, not an absolute ban.
+
+## 13. Spells, item use, equip rules and the clock (pass 3)
+
+Ports: `tools/mm2/rules4.ts`; vectors `tools/mm2/rules_oracle/rules4.py` (units below, full sets in the gitignored `generated/`, ~230 KB of subsets committed in `vectors/`); tests `tools/mm2/__tests__/rules4.test.ts` (28, each unit with a null control). Method as before: the real routine under Unicorn, UI/key leaves stubbed (quiet or logged with scripted answers stored in the vector), strict read/write footprint. Everything the handlers do to monsters goes through the **real** `partyEffect` / `unpack_monster` / RNG; only `damage_monster` (CODE+0x10EAC) and `monster_dies` (0x10E5E, both verified in 11.4) are logged stubs here, with the kill outcome scripted.
+
+Vector counts (full sets): castdisp 206, anywhere 2,000, dicedmg 2,000, maxtargets 2,000, castroute 2,000, partyeffect 2,000, cbspell 3,000, ncspell 3,000, monspell 2,000, itemuse 2,000, canequip 2,000, equipcmd 3,000, clock 3,000, callhelp 3,000 = **31,206**; with passes 1-2: 131,432.
+
+### 13.1 Dispatch (harness)
+
+A spell is a number 0..95: Sorcerer 0..47, Cleric 48..95 in `spells.ts` order (verified: the handler of every spell does what its name says, table below). Two 16-bit-relative jump tables select the handler:
+
+- **Combat dispatcher** CODE+0xCFD0: spells 2..93 through the table at CODE+0xD186 (92 words; the index is `spell - 2`, anything else does nothing).
+- **Non-combat dispatcher** CODE+0xCD90: spells 0..95 through the table at CODE+0xCEF6 (96 words; the default target CODE+0xCFCC does nothing).
+
+Each spell has a handler in **exactly one** table (43 non-combat + 53 combat = 96; harness: 206 vectors incl. out-of-range numbers). The assignment is the spells.dat class (byte0 bits 7-6, 12.4): class 1 ("combat only", 53 spells) is in the combat table; class 2 (31, "outside combat only") and class 0 (12, "anywhere") are in the non-combat table. Class-0 spells stay on the non-combat handlers even in a fight: CODE+0x13708 (harness 2,000) returns 1 when the spell is one of the 12 words at `A4-28040`, and the cast command picks the dispatcher with it. With the retail `spells.dat` the test asserts the partition (class counts 12 / 53 / 31 / 0).
+
+**Cast command** CODE+0x13AE2 `cast(ch, spellByte)` (harness 2,000): `spell = (spellByte & 0x7F) - 1` (so an item's use power 0x81 = spell 0); the combat gate and location gate of 12.4 run (messages 3/2/4); then `A4-18380 = ch` (the caster every handler reads), `A4-16140 = 1`, `A4-31209 = 1`, `A4-1342 = 0`, `A4-1339 = 0`; the dispatcher runs; then `A4-16140 = A4-31064` and `A4-31209 = 0`. **`A4-31064` = 1 means "the spell happened"**: every handler sets it on success, the pickers clear it first. `A4-16140 != 0` makes every confirm prompt auto-accept (`A4-16138` / `A4-16136` hold the pending SP and gem cost from the gates of section 6; the non-combat member picker zeroes both on cancel, so cancelling is free (**code**); the code that finally charges them was not traced).
+
+### 13.2 Effect engine `partyEffect(count, firstGroup, element)` — CODE+0x10894 (harness 2,000)
+
+The state it reads is in globals the handler filled: mode `A4-1339` (0 damage, 1 condition, 2 = a monster's lingering effect, treated as 0), damage `u16 A4-1342`, condition `u8 A4-1340`, extend flag `A4-1312`. For up to `count` monster slots from `firstGroup` (count capped by the monster count `A4-30654`; stops at slot 10, 11 with `A4-1312`, or at the monster count):
+
+1. unpack the slot's record (3.1).
+2. If `A4-1307 == 0` (set by the sacrifice spell 76 so its blow cannot be resisted): **magic resistance** — if the record's mres tier `A4-4527` is non-zero, `d = rand(casterLevel, 90)`, resisted when `d < tier`; then **element immunity** — `element != 0` and `A4-4522[element-1]` set (fire/electric/cold/acid are the flags unpacked from the damage and initiative bytes, element 5 and 6 from the mres bits 1 and 0, 7 = mres bit 2; names hyp from the spells that use them) resists; then a **save** — `rand(1,191) <= slotType[slot]` (the record index of the monster in that slot!, so later monsters save more often): damage is **halved** (unsigned), a condition below 9 **resists**, a condition of 9 or more is turned into 50 damage.
+3. Not resisted and damage 0: nothing happens. Damage: `damage_monster` with the damage; a killing blow (A4-3852 = 0xFFFF) re-visits the same slot (the queue shifted). Condition: `cond - 1` below 7 ORs the status bit `A4-28462[cond-1]` into the slot's status byte (`A4-1305`, bit meanings as in 4.1/11.1); 7 or more kills the monster outright (`monster_dies` with `A4-1310 = 1`).
+4. Damage and mode are restored from the entry values after every monster.
+
+### 13.3 Shared helpers (harness)
+
+- **dice(sides, bonus)** CODE+0x1338E (2,000): `A4-1342 = sum over the caster's level (+0x71) of (rand(1,sides) if sides != 0) + bonus` — "5d(1..5)+level" style, e.g. Energy Blast = L x (rand(1,5) + 1); `dice(0, n)` is a flat `n x level` (Cold Beam 6/L, Super Shock 20/L).
+- **group count** CODE+0x1333A (2,000): caster level + 4 below level 7; else 10, plus one when the level is at least the monster count (capped at 10).
+- **pickers** (real code, key input scripted; harness inside the handler vectors): CODE+0xD43C monster group (a single group is confirmed, otherwise a letter A..: an invalid key asks again; ESC = 0x1B), CODE+0xD390 "everything" confirm, CODE+0xD2EA party member (combat); CODE+0xCC18 member and CODE+0xCCE8 confirm (non-combat). Every picker clears `A4-31064`, sets it on a pick, and turns the pick into a cancel when the square's antimagic flag (`A4-21974` bit 1) is set. Group-area spells 18, 22, 26, 33, 62, 68 additionally refuse a target index below the melee group size `A4-1316`.
+
+### 13.4 Handler table
+
+Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5 sleep-type, 6 mind-type; names hyp), "cond n" a condition for the mode-1 path, "all" = 10 groups. **harness** unless marked OPEN; the 20 OPEN rows are handlers with big UI flows or helpers not yet harnessed (smallest next step in 13.9).
+
+| # | Spell | Class | Handler | Effect (grade harness unless OPEN) |
+|---|---|---|---|---|
+| 0 | Awaken | anywhere | 0x0C740 | Awaken: clear 0x90 bits of every living member |
+| 1 | Detect Magic | outside | 0x0A812 | OPEN |
+| 2 | Energy Blast | combat | 0x0B644 | dice(5,1) x L, 1 group, e0 |
+| 3 | Flame Arrow | combat | 0x0B684 | rand(1,5)+3, 1 monster, e1 |
+| 4 | Light | outside | 0x0A8CA | Light counter A4-31147 +1 |
+| 5 | Location | outside | 0x0A8FA | OPEN |
+| 6 | Sleep | combat | 0x0B6CC | cond 4 (sleep), maxTargets groups, e5 |
+| 7 | Eagle Eye | outside | 0x0A91C | Eagle Eye counter A4-31136 += 5/L (cap 250/255) |
+| 8 | Electric Arrow | combat | 0x0B718 | rand(1,9)+7, 1, e2 |
+| 9 | Identify Monster | combat | 0x0B760 | show monster record (key wait) |
+| 10 | Jump | outside | 0x0A974 | OPEN |
+| 11 | Levitate | outside | 0x0AAAE | Levitate counter A4-31144 +1 |
+| 12 | Lloyd's Beacon | outside | 0x0AADC | OPEN |
+| 13 | Protection from Magic | anywhere | 0x0C7A2 | A4-31146 = level + 10 |
+| 14 | Acid Stream | combat | 0x0B982 | dice(5,3), 1, e4 |
+| 15 | Fly | outside | 0x0ABCC | OPEN |
+| 16 | Invisibility | combat | 0x0B9C4 | party flag A4-31132 +1 |
+| 17 | Lightning Bolt | combat | 0x0B9EE | dice(5,1), 4 groups, e2 |
+| 18 | Web | combat | 0x0BA30 | cond 5, maxTargets, e6; target >= melee group |
+| 19 | Wizard Eye | outside | 0x0AD22 | Wizard Eye counter A4-31135 (as Eagle Eye) |
+| 20 | Cold Beam | combat | 0x0BA8C | dice(0,6) = 6/L, 1, e3 |
+| 21 | Feeble Mind | combat | 0x0BACC | cond 6, 5 groups, e0 |
+| 22 | Fire Ball | combat | 0x0BB0A | dice(5,1), 6 groups, e1; target >= melee group |
+| 23 | Guard Dog | outside | 0x0AD7A | Guard Dog counter A4-31142 +1 |
+| 24 | Shield | combat | 0x0BB5C | party flag A4-31131 +1 |
+| 25 | Time Distortion | combat | 0x0BB86 | party flag A4-1315 +1 (refused when A4-22016 bit 3) |
+| 26 | Disrupt | combat | 0x0BBB2 | 100 dmg, 1, e0; target >= melee group |
+| 27 | Fingers of Death | combat | 0x0BBFA | cond 8, 3 groups, e6 |
+| 28 | Sand Storm | combat | 0x0BC3A | dice(7,1), 10 groups, e0 |
+| 29 | Shelter | outside | 0x0ADA8 | Shelter counter A4-31084 +1 |
+| 30 | Teleport | outside | 0x0ADD6 | OPEN |
+| 31 | Disintegration | combat | 0x0BC7A | cond 9, 3 groups, e0 |
+| 32 | Entrapment | combat | 0x0BCB8 | party flag A4-1314 +1 (refused when A4-22016 bit 0) |
+| 33 | Fantastic Freeze | combat | 0x0BCE4 | dice(0,10) = 10/L, 3, e3; target >= melee group |
+| 34 | Recharge Item | outside | 0x0AEAC | OPEN |
+| 35 | Super Shock | combat | 0x0BD34 | dice(0,20) = 20/L, 1, e2 |
+| 36 | Dancing Sword | combat | 0x0BD74 | dice(11,1), all, e0 |
+| 37 | Duplication | outside | 0x0AF02 | OPEN |
+| 38 | Etherealize | outside | 0x0AFFA | OPEN |
+| 39 | Prismatic Light | combat | 0x0BDA6 | cond rand(1,9) (7 also sets A4-1313 = rand(1,4)), all, e0 |
+| 40 | Incinerate | combat | 0x0BE02 | dice(21,19), 1, e1 |
+| 41 | Mega Volts | combat | 0x0BE44 | dice(9,7), all, e2 |
+| 42 | Meteor Shower | combat | 0x0BE78 | rand(1,21)+24, all (extends past 10), e0 |
+| 43 | Power Shield | combat | 0x0BEBA | party flag A4-31130 +1 |
+| 44 | Implosion | combat | 0x0BEE4 | 1000 dmg, 1, e0 |
+| 45 | Inferno | combat | 0x0BF1C | dice(16,4), all, e1 |
+| 46 | Star Burst | combat | 0x0BF50 | rand(1,161)+39, all (extends past 10), e0 |
+| 47 | Enchant Item | outside | 0x0B050 | OPEN |
+| 48 | Apparition | combat | 0x0BF92 | cond 3, all, e6 |
+| 49 | Awaken | anywhere | 0x0C740 | Awaken (same handler) |
+| 50 | Bless | combat | 0x0BFC4 | party flag A4-31133 +1 |
+| 51 | First Aid | anywhere | 0x0C7D0 | heal 8 (member prompt) |
+| 52 | Light | outside | 0x0A8CA | Light (same handler) |
+| 53 | Power Cure | anywhere | 0x0C7E2 | heal sum of rand(1,10) over level |
+| 54 | Turn Undead | combat | 0x0BFEE | OPEN (Turn Undead engine CODE+0xC028) |
+| 55 | Cure Wounds | anywhere | 0x0C822 | heal 15 |
+| 56 | Heroism | combat | 0x0C12A | +6 level on one member |
+| 57 | Nature's Gate | outside | 0x0B0EA | OPEN |
+| 58 | Pain | combat | 0x0C162 | rand(1,12)+3, 1, e0 |
+| 59 | Protection From Elements | anywhere | 0x0C834 | A4-31145 = level + 20 |
+| 60 | Silence | combat | 0x0C1A8 | cond 1, maxTargets, e6 |
+| 61 | Weaken | combat | 0x0C1F4 | cond 2, all, e0 |
+| 62 | Cold Ray | combat | 0x0C224 | 25 dmg, 5, e3; target >= melee group |
+| 63 | Create Food | outside | 0x0B1BE | caster +0x25 += 8 below 0x28 |
+| 64 | Cure Poison | anywhere | 0x0C862 | cure bit 0x08 |
+| 65 | Immobilize | combat | 0x0C26E | cond 5, 5, e6 |
+| 66 | Lasting Light | outside | 0x0B1F2 | Lasting Light: A4-31147 += 20 (255 cap) |
+| 67 | Walk on Water | outside | 0x0B22C | flag A4-31143 = 1 |
+| 68 | Acid Spray | combat | 0x0C2AE | rand(1,49)+11, 3, e4; target >= melee group |
+| 69 | Air Transmutation | outside | 0x0B250 | flag A4-31139 = 1 |
+| 70 | Cure Disease | anywhere | 0x0C8BC | cure bit 0x04 |
+| 71 | Restore Alignment | outside | 0x0B26A | OPEN |
+| 72 | Surface | outside | 0x0B2B2 | OPEN |
+| 73 | Holy Bonus | combat | 0x0C308 | party flag A4-31129 += level/2 |
+| 74 | Air Encasement | combat | 0x0C332 | cond 7 effect 1 (lingering), 1, e0 |
+| 75 | Deadly Swarm | combat | 0x0C376 | rand(1,33)+7, all, e0 |
+| 76 | Frenzy | combat | 0x0C3AE | sacrifice one member (HP 0, cond 0x40, +0x73 -1) -> 2 x (+0x4C + +0x4D + 10) to all; once per fight (A4-1308) |
+| 77 | Paralyze | combat | 0x0C462 | cond 5, all, e6 |
+| 78 | Remove Condition | anywhere | 0x0C916 | clear condition |
+| 79 | Earth Transmutation | outside | 0x0B318 | flag A4-31137 = 1 |
+| 80 | Rejuvenate | outside | 0x0B332 | OPEN |
+| 81 | Stone to Flesh | anywhere | 0x0C96E | Stone to Flesh (cond 0x82 -> 0) |
+| 82 | Water Encasement | combat | 0x0C494 | cond 7 effect 2, 1, e3 |
+| 83 | Water Transmutation | outside | 0x0B3B2 | flag A4-31140 = 1 |
+| 84 | Earth Encasement | combat | 0x0C4DA | cond 7 effect 3, 1, e4 |
+| 85 | Fiery Flail | combat | 0x0C520 | rand(255,400), 1, e1 |
+| 86 | Moon Ray | combat | 0x0C566 | rand(1,91)+9 to all monsters and heals each living member the same way |
+| 87 | Raise Dead | anywhere | 0x0C9B6 | OPEN |
+| 88 | Fire Encasement | combat | 0x0C620 | cond 7 effect 4, 1, e1 |
+| 89 | Fire Transmutation | outside | 0x0B3CC | flag A4-31138 = 1 |
+| 90 | Mass Distortion | combat | 0x0C666 | half of the target group HP, 2 groups, e0 |
+| 91 | Town Portal | outside | 0x0B3E6 | OPEN |
+| 92 | Divine Intervention | combat | 0x0C6AE | once per fight (A4-1306): caster ages 5 years, everyone cond 0 (0xFF kept) and full HP |
+| 93 | Holy Word | combat | 0x0C72A | OPEN (CODE+0xC028 with A4-1312 = 1) |
+| 94 | Resurrection | outside | 0x0B492 | OPEN |
+| 95 | Uncurse Item | outside | 0x0B524 | OPEN |
+
+### 13.5 Monster spells — CODE+0x1FB4E `monster_spell(verb)` (harness 2,000)
+
+The verb is the monster's pabil/sabil spell number. It copies three per-verb bytes (`A4-26218/-26186/-26154`, the last minus 0x11) to the message state `A4-22064..-22062`. Verbs 0-1, 3-8, 0x18 and 0x1F are **breaths**: damage = the monster's current HP (`A4-1338[slot]`), halved when its record index is below 0xB3, minimum 1, to one member (`spray1`). The other verbs are a table over 2..30: 2 counts up `A4-31141` (max 255); 9, 11-14, 29 call unexamined effect leaves; 10 / 16 / 28 / 30 apply condition 0x82 / 0x10 / 0x02 / 0x20 to the party (`cond`); 19 / 20 apply 0x81 / 0xFF (`cond2`); 15, 21, 23, 27 (and 25 = 1000) are damage to **every** member (`sprayAll`: 15 = 6, 21 = 0x28, 23 = 0x32 dice with `monsterSpellDamage`, 27 = rand(1,15)+1); 17, 18, 22 (0xC), 26 (0x14) are damage to one member. The leaves `spray1` (CODE+0x1F414), `sprayAll` (0x1F632), `cond` (0x1F72E), `cond2` (0x1F896) and the others are logged stubs here: **their bodies are open** (they apply `damage_char` / the 30 special effects to chosen members, built from verified pieces).
+
+**Reinforcements** CODE+0x10082 (harness 3,000): once per battle (`A4-24139` clear), a monster whose record has the call-for-help bit (`A4-4513`, oabil bit 7) in a battle with 11..0x6D monsters including queued ones, whose slot's record index equals `A4-4564`, adds `count - 10` to the count (the queued group joins) and sets the flag; one `rand(1,100)` is always burned. CODE+0x10118 (`advance`, stubbed in `monturn`): the acting monster moves forward through the formation, swapping the per-slot arrays (hp, status, initiative, uses...) with the slots ahead; read (**code**) but **not harnessed** (open).
+
+### 13.6 Item use and equip rules (harness)
+
+- **Use** CODE+0x137E0 (backpack: ids `+0x3A`, charges `+0x40`, flags `+0x46`) and CODE+0x13896 (equipped: `+0x28`, `+0x2E`, `+0x34`) (2,000): no charges: message 0x10. Otherwise one charge is spent; at zero the item vanishes (id 0xFF, flag 0). An **equipped** item's last charge only destroys it (quirk, no effect). Then the record's use power (items.dat `+0x0F`): `>= 0x80` casts spell `(power & 0x7F) - 1` through 13.1 (no message); below 0x80 is a stat boost: byte selected by bits 4-6 of the power = `+0x75, +0x6B, +0x6E, +0x6F, +0x6A, +0x71, +0x72, +0x58` (max-HP low byte, Might working copy, speed, accuracy, alignment, level, spell level, current SP) gains (the slot's enchant byte + the low nibble), saturating at 255; then message 0x11 and `A4-16140 = 1`.
+- **Equip command** CODE+0xED9C (3,000): asks for a backpack letter A-F (ESC cancels, an empty slot asks again), takes the first free equipped slot (none: message 2). **Cursed**: a backpack flag byte of 0xFF sets condition bit 0 on the member (message 3). Otherwise errors, later overriding earlier: forbidden-class mask (record `+0x0D` AND `u8[8]@A4-28626` indexed by class `+0x0F` = `{0x80,0x40,0x20,0x10,0x08,0x04,0x02,0x01}` = Knight .. Barbarian, matching `items.ts`) -> message 4; alignment tag (flag byte bits 7-6, 0 = none) mapped by `u8[4]@A4-28630 = {0,2,0,1}` must equal the member's alignment `+0x6A` -> message 5; record bonus byte 0xF0 -> message 14. Then `canEquip`, the three bytes move, `equip_item` (12.1), the backpack closes up, AC is recomputed.
+- **Compatibility** CODE+0xEC02 (2,000): classes by item id A 1..0x41, B 0x42..0x5B (both melee), R 0x5C..0x72, C 0x73..0x7E, D 0x7F..0x9A, E 0x9B..0x9F. One melee weapon (A or B, message 6); a B weapon excludes any C item (12) and a C item a B weapon (13); one R (7), one C (8), one D (9), one E (10). B = two-handed and C = shield (hyp, from the exclusion).
+
+### 13.7 The world clock — CODE+0x69DC `advance_time(ticks)` (harness 3,000)
+
+`ticks == 1` on a dark square (`A4-21974` bit 5) with a lit torch spends one unit of the light counter `A4-31147`. The sub-day counter `A4-31156` gains the ticks; at 256 it keeps its low byte and a **day** passes: the calendar word `A4-31198[A4-31158]` +1, every member ages (`+0x22` day byte +1; at 181 the age `+0x21` +1 and the day byte restarts at 1, a year = 180 days), the day counters 60 / 120 / 180 clear the per-period flags `A4-31116`, `A4-31117` (hyp: food/rest used), and day 181 wraps to 1 with the year word `A4-31178[...]` +1 (max 999) and `A4-31126` cleared. (The 68k divides a register whose upper half is leftover from the previous call; the vectors run with it 0 — the low byte is kept.)
+
+### 13.8 Spell data (retail `spells.dat`, code-verified)
+
+`spells.ts` was corrected against the executable: **gems = `byte0 & 0x3F`, above 50 = 100** (retail values 0..10, 20 for Star Burst and Divine Intervention, 50 for Enchant Item and Uncurse Item, 63 = 100 for Duplication; the old "bit 0x10 special, low nibble" read mis-decoded those five), the SP multiplier is bits 5-4 only (bit 6 selects the monster-scaled base 10 instead of 8), and the item use selectors 4 (alignment) and 7 (SP) were missing. The spell order of `spells.ts` is confirmed by the behaviour of all 96 handlers.
+
+### 13.9 Open after pass 3 (TODO ids)
+
+- `mm2-rules-spell-effects` (remainder): the 20 OPEN rows of 13.4 — non-combat 1 (Detect Magic), 5 (Location), 10, 12, 15, 30, 34, 37, 38, 47, 57, 71, 72, 80, 87, 91, 94, 95 and combat 54 (Turn Undead), 93 (Holy Word) with the CODE+0xC028 engine; the monster leaves of 13.5; `advance` CODE+0x10118; the spell cost charge after the handler (the code that reads `A4-16138` / `A4-16136`). Smallest next step: copy `gen_ncspell` for 71 / 72 / 38 (pickers already real) and add stubs for CODE+0x5692 and the item picker CODE+0xB56E.
+- Overlay loader (`spells.dat` / `items.dat` read in the overlay hunk): **blocked** — the overlay is SAS/C code that calls the root hunk's libc through the A4 jump table (open/read/close/AllocMem); a harness needs those stubs and the overlay entry points. The tables were checked instead against the real files (spells.dat class bits vs the dispatchers, class/alignment tables vs `items.ts`).
+- `mm2-rules-equipment` (remainder): shop buy/sell prices were **not** located in this pass.

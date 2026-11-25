@@ -46,14 +46,15 @@ This repo hosts two first-person dungeon-crawler RE projects:
 
   **MM2 game rules** (RNG, monster unpack, melee rolls, damage, training, rest, XP, spell gates; pass 2:
   encounters, surprise/hide/run/bribe, turn order, monster turn and 30 special effects, monster damage/death,
-  equipment/AC, treasure, training XP/cost, spell gates) live in `docs/mm2/amiga/game-rules.md` (read its
-  "MM2 rules status" block first), method: `tools/mm2/rules_oracle/` (Unicorn single-routine harness on the
-  retail `mm2`; venv with `unicorn` at `rules_oracle/.venv`; `gen_vectors.sh` writes full vector sets to the
-  gitignored `generated/`, small subsets are committed in `vectors/`) -> `tools/mm2/rules.ts`, `rules2.ts`,
-  `rules3.ts` + `__tests__/rules.test.ts`, `rules2.test.ts`. 100226 vectors, null controls; roster HP/SP labels and the
-  spell-book range are corrected (game-rules sections 8, 12.1; `roster.ts` renamed). Still open: spell effects
-  (the 96 spells, monster group verbs), the party command menu, item use, world (traps/doors/food/skills), chargen
-  (TODO `mm2-rules-*`).
+  equipment/AC, treasure, training XP/cost; pass 3: spell dispatch + cast command + `partyEffect` engine + 76 of 96
+  spell handlers, monster spell verbs, call for help, item use, equip command/compatibility, world clock) live in
+  `docs/mm2/amiga/game-rules.md` (read its "MM2 rules status" block first), method: `tools/mm2/rules_oracle/` (Unicorn
+  single-routine harness on the retail `mm2`; venv with `unicorn` at `rules_oracle/.venv`; `gen_vectors.sh` writes full
+  vector sets to the gitignored `generated/`, small subsets are committed in `vectors/`) -> `tools/mm2/rules.ts`,
+  `rules2.ts`, `rules3.ts`, `rules4.ts` + `__tests__/rules*.test.ts`. 131,432 vectors, null controls; roster HP/SP labels,
+  the spell-book range and `spells.ts`'s gem/SP/item-boost decode are corrected (game-rules sections 8, 12.1, 13.8). Still open:
+  20 spell handlers (13.4 OPEN rows), the monster spell leaves, shops, the spells.dat/items.dat overlay loader (blocked:
+  SAS/C overlay needs libc stubs), world (doors/traps/food/skills), chargen, the party command menu (TODO `mm2-rules-*`).
 
 Both games share the generic `@seer-project/dungeon` walker package, which
 lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).

@@ -821,3 +821,21 @@ export function advanceTime(m: Mem, ticks: number, o: { noAge?: boolean } = {}):
     m.w8(g(-31126), 0);
   }
 }
+
+/**
+ * CODE+0x10082 monster reinforcement call: unpack the acting monster, burn one rand(1,100) (the result is unused), and once per battle
+ * (A4-24139 clear) when the record may call help (`A4-4513`, the oabil bit 7), the live-plus-queued count `A4-30654` is in 11..0x6D, and
+ * the acting slot's record index equals the byte at A4-4564, add `count - 10` to the count (the queued group arrives) and set A4-24139.
+ */
+export function callForHelp(m: Mem, o: { noOnce?: boolean } = {}): void {
+  const cur = m.r8(g(-1271));
+  unpackMonster(m, cur);
+  randRange(m, 1, 100);
+  if (!o.noOnce && m.r8(g(-24139)) !== 0) return;
+  if (m.r8(g(-4513)) === 0) return;
+  const mc = m.r8(g(-30654));
+  if (mc >= 0x6e || mc <= 10) return;
+  if (m.r8(g(-4574) + cur) !== m.r8(g(-4564))) return;
+  m.w8(g(-30654), mc + (mc - 10));
+  m.w8(g(-24139), m.r8(g(-24139)) + 1);
+}

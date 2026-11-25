@@ -12,7 +12,7 @@ for spec in rng:4000:60 monunpack:600:60:--synthetic bonus:256:256 melee:3000:60
   $PY rules.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
 done
 # pass 3 (spells and items): rules4.py units  unit:count:subset-size
-for spec in castdisp:0:206 anywhere:2000:40 dicedmg:2000:50 maxtargets:2000:40 castroute:2000:60 partyeffect:2000:60 cbspell:3000:150 ncspell:3000:150 monspell:2000:150 itemuse:2000:120 canequip:2000:150 equipcmd:3000:150 clock:3000:150 "$@"; do
+for spec in castdisp:0:206 anywhere:2000:40 dicedmg:2000:50 maxtargets:2000:40 castroute:2000:60 partyeffect:2000:60 cbspell:3000:150 ncspell:3000:150 monspell:2000:150 itemuse:2000:120 canequip:2000:150 equipcmd:3000:150 clock:3000:150 callhelp:3000:150 "$@"; do
   IFS=: read unit n sub flags <<<"$spec"
   $PY rules4.py $unit generated/$unit.json --n ${n:-2000}
   $PY rules4.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags

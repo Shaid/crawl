@@ -3,10 +3,12 @@
  * (tools/mm2/rules4.ts) against vectors recorded from the retail MM2 executable under Unicorn (rules_oracle/rules4.py).
  * Same strict-memory method and null controls as rules.test.ts.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { advanceTime, anywhereSpell, canEquip, equipCommand, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
+import { advanceTime, callForHelp, anywhereSpell, canEquip, equipCommand, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -313,6 +315,48 @@ describe('world clock (CODE+0x69DC, ageing 0x6988)', () => {
       try {
         const m = mem(v);
         advanceTime(m, v.ticks, { noAge: true });
+        if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('spells.dat against the dispatch tables (retail data when present)', () => {
+  const p = resolve('data/mm2/amiga/data/spells.dat');
+  (existsSync(p) ? it : it.skip)('class bits agree with the dispatcher each spell is reached through', () => {
+    const d = readFileSync(p);
+    const cls = [0, 0, 0, 0];
+    for (let i = 0; i < 96; i++) {
+      const c = d[2 * i] >> 6;
+      cls[c]++;
+      if (c === 1) expect(SPELL_HANDLER_CB[i]).not.toBeNull();
+      else expect(SPELL_HANDLER_CB[i]).toBeNull();
+      expect(SPELL_HANDLER_NC[i] !== null).toBe(c !== 1);
+    }
+    expect(cls).toEqual([12, 53, 31, 0]);
+  });
+});
+
+describe('monster reinforcements (CODE+0x10082)', () => {
+  const V = load('callhelp');
+  it('matches the game: once per battle, count window, RNG burn', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) {
+      const m = mem(v);
+      callForHelp(m);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(V.some((x: any) => Object.keys(x.fin).includes(String(0x167ffe - 24139)))).toBe(true);
+  });
+  it('null control: allowing repeat calls disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        callForHelp(m, { noOnce: true });
         if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
       } catch {
         bad++;

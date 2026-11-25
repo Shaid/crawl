@@ -307,6 +307,25 @@ def gen_clock(n, rnd):
         out.append({'ticks': ticks, **v})
     return out
 
-UNITS4 = {'clock': gen_clock, 'equipcmd': gen_equipcmd, 'canequip': gen_canequip, 'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
+def gen_callhelp(n, rnd):
+    """CODE+0x10082 monster reinforcement call (once per battle)"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3: e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed); synth_monsters(e, rnd)
+            cur = rnd.randint(0, 10); sb(e, -1271, cur)
+            mc = rnd.choice([rnd.randint(1, 20), rnd.randint(11, 40), 0x6d, 0x6e, 0x6f, 255]); sb(e, -30654, mc)
+            for k in range(11): sb(e, -4574 + k, rnd.randint(0, 255))
+            sb(e, -24139, rnd.choice([0, 0, 1])); sb(e, -4513, rnd.choice([0, 1, 1]))
+            for d in range(-4562, -4562 + 0x38): sb(e, d, rnd.getrandbits(8))
+            sb(e, -4564, e.r8(g(-4574) + cur) if rnd.random() < .6 else rnd.getrandbits(8))
+        v = R.run(0x10082, (), setup, max_insn=1_000_000)
+        out.append({'seed': seed, **v})
+    return out
+
+UNITS4 = {'callhelp': gen_callhelp, 'clock': gen_clock, 'equipcmd': gen_equipcmd, 'canequip': gen_canequip, 'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
 rules.UNITS.update(UNITS4)
 if __name__ == '__main__': rules.main()

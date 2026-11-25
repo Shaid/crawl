@@ -12,11 +12,18 @@
  * 48..95, in the same flat order as the item effect index) + 64 trailing
  * bytes of leftover data preserved verbatim on round-trip. Each 2-byte record:
  *
- *   byte0: bit 0x40 combat-only, bit 0x80 non-combat-only, bit 0x10 special
- *          cost (gem count hard-coded in game code), low nibble = gem cost
- *          (0..15) when not special
- *   byte1: bit 0x80 outdoor-only, bits 6-4 = per-level SP multiplier, low
- *          nibble = flat SP cost (0 ⇒ cost is per caster level)
+ *   byte0: bits 7-6 where it may be cast (CODE+0x78A8, harness-verified:
+ *          0 anywhere, 1 combat only, 2 outside combat only, 3 never), low 6
+ *          bits = gem cost (CODE+0x795C: n > 50 means 100 gems)
+ *   byte1: bit 0x80 map-flag gated (CODE+0x790E), bit 0x40 selects the
+ *          monster-scaled base 10 instead of 8, bits 5-4 = per-level SP
+ *          multiplier, low nibble = flat SP cost (CODE+0x4BBC: flat wins; else
+ *          level * multiplier; else base + monster count)
+ *
+ * Corrected 2026-11-25 against the retail executable (docs/mm2/amiga/game-rules.md
+ * sections 6 and 13): the earlier "0x10 special cost / low-nibble gems / 3-bit
+ * multiplier" reading mis-decoded Star Burst and Divine Intervention (20 gems),
+ * Enchant Item and Uncurse Item (50 gems) and Duplication (63 = 100 gems).
  */
 
 export const SPELLS_PER_LEVEL = [7, 7, 6, 6, 5, 5, 4, 4, 4]; // L1..L9, both schools
@@ -85,8 +92,13 @@ export interface ItemEffect {
   text: string;
 }
 
+/**
+ * Use-power stat selector (bits 4-6), the character byte CODE+0x13B80 adds to: +0x75 (low byte of the effective max HP word), +0x6B
+ * Might working copy, +0x6E Speed, +0x6F Accuracy, +0x6A alignment (also the byte the equip command compares), +0x71 Level,
+ * +0x72 Spell Level, +0x58 current SP. The amount is the slot's enchant byte plus the low nibble (saturating at 255), not the nibble alone.
+ */
 const USE_BOOST_KINDS: Record<number, string> = {
-  0: 'Max HP', 1: 'Might', 2: 'Speed', 3: 'Accuracy', 5: 'Level', 6: 'Spell Level',
+  0: 'Max HP', 1: 'Might', 2: 'Speed', 3: 'Accuracy', 4: 'Alignment', 5: 'Level', 6: 'Spell Level', 7: 'Spell Points',
 };
 
 /** Decode an `items.dat` effect byte (0x0F). */
@@ -110,14 +122,19 @@ export interface SpellDatRecord {
   index: number;
   byte0: number;
   byte1: number;
-  /** 0x40 combat-only, 0x80 non-combat-only, 0x10 special/computed cost. */
+  /** byte0 bits 7-6: 1 combat only, 2 outside combat only (3 = never, 0 = anywhere). */
   combatOnly: boolean;
   nonCombatOnly: boolean;
-  specialCost: boolean;
+  /** gems the cast needs (byte0 & 0x3F; above 50 the game charges 100). */
   gemCost: number;
+  /** byte1 bit 7: only on squares whose map flag allows it (the outdoor family). */
   outdoorOnly: boolean;
-  /** Per-level SP multiplier (X in "X/L"), used when spCost is 0. */
+  /** Per-level SP multiplier (byte1 bits 5-4), used when spCost is 0. */
   spPerLevel: number;
+  /** flat cost 0 and multiplier 0: the cost is `spBase` + the number of monsters. */
+  monsterScaled: boolean;
+  /** 10 when byte1 bit 6 is set, else 8. */
+  spBase: number;
   /** Flat SP cost; 0 means per-caster-level. */
   spCost: number;
   spell: SpellRef | null;
@@ -131,12 +148,13 @@ export function decodeSpellRecord(byte0: number, byte1: number, index: number): 
     index,
     byte0,
     byte1,
-    combatOnly: (byte0 & 0x40) !== 0,
-    nonCombatOnly: (byte0 & 0x80) !== 0,
-    specialCost: (byte0 & 0x10) !== 0,
-    gemCost: byte0 & 0x0f,
+    combatOnly: (byte0 >> 6) === 1,
+    nonCombatOnly: (byte0 >> 6) === 2,
+    gemCost: (byte0 & 0x3f) > 50 ? 100 : byte0 & 0x3f,
     outdoorOnly: (byte1 & 0x80) !== 0,
-    spPerLevel: (byte1 >> 4) & 0x07,
+    spPerLevel: (byte1 >> 4) & 0x03,
+    monsterScaled: (byte1 & 0x0f) === 0 && ((byte1 >> 4) & 0x03) === 0,
+    spBase: byte1 & 0x40 ? 10 : 8,
     spCost: byte1 & 0x0f,
     spell,
   };

@@ -15,6 +15,7 @@ npx vitest run tools/mm2/__tests__/rules.test.ts
 |---|---|
 | `emu.py` | root-hunk loader (CODE/DATA + contiguous BSS, `A4 = DATA+0x7FFE`), C-call helper, function stubs (`quiet=True` stubs are not logged; a stub's own writes via `e.w8/w16/w32` become part of the recorded write footprint) |
 | `harness.py` | per-call recorder: input footprint, written bytes, return value, stub log |
+| `rules4.py` | pass 3 generators (spells, item use, equip, clock; merges its units into `rules.UNITS`, same CLI) |
 | `rules.py` | vector generators per unit (`rules.py UNIT OUT.json --n N`, `rules.py subset IN OUT.gz --n N`) |
 | `replay.py` | replay one recorded vector with a trace of `rand()` calls |
 | `resolve_asm.py`, `funcs.py`, `v.py`, `summ.py`, `lab.sh`, `show.sh` | listing helpers over the IRA disassembly (`data/mm2/amiga/mm2.asm`, gitignored; build it from the root hunks only: IRA rejects `HUNK_OVERLAY`, so `head -c $((0x28818)) mm2 > mm2root`, set `CODE $18 - $2593C` in the `.cnf`, then `resolve_asm.py`) |
@@ -26,3 +27,5 @@ addresses the overlay loader would use (`A4-30658` monsters pointer, `A4-16126` 
 callees (party command menu CODE+0x119C2, monster leaf actions, bribe payments, key input) are
 logged stubs whose scripted answers are stored in the vector and replayed by the port.
 Do not commit `.venv/` (ignored).
+
+Pass 3 (`rules4.py`) runs spell handlers through the real dispatchers CODE+0xCD90 / 0xCFD0 and the real `partyEffect`; only key input (CODE+0x97A2, 0x42AA) and `damage_monster` / `monster_dies` are scripted. The overlay hunk (spells.dat / items.dat loader, chargen) is still not loaded: it is SAS/C code that calls the root hunk's libc (open/read/close/AllocMem) through the A4 jump table, so it needs libc stubs first.

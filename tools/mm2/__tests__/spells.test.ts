@@ -80,6 +80,21 @@ describe('spells.dat record decode', () => {
     expect(web.spCost).toBe(3);
   });
 
+  it('gem cost follows the game (byte0 & 0x3F, above 50 = 100), checked against the retail records', () => {
+    expect(decodeSpellRecord(0x54, 0x0a, 46).gemCost).toBe(20); // Star Burst
+    expect(decodeSpellRecord(0xb2, 0x0f, 47).gemCost).toBe(50); // Enchant Item
+    expect(decodeSpellRecord(0xbf, 0x07, 37).gemCost).toBe(100); // 63 > 50
+    const m = decodeSpellRecord(0x41, 0xc0, 46);
+    expect(m.monsterScaled).toBe(true);
+    expect(m.spBase).toBe(10);
+    expect(decodeSpellRecord(0xc1, 0, 0).combatOnly).toBe(false); // class 3 = never
+  });
+
+  it('item use power selects the byte the game adds to (CODE+0x13B80)', () => {
+    expect(decodeItemEffect(0x45)).toMatchObject({ kind: 'boost', boost: 'Alignment', amount: 5 });
+    expect(decodeItemEffect(0x72)).toMatchObject({ kind: 'boost', boost: 'Spell Points', amount: 2 });
+  });
+
   it('round-trips a full 256-byte spells.dat (96 records + 64 trailing bytes)', () => {
     const data = new Uint8Array(256);
     for (let i = 0; i < 96; i++) {
