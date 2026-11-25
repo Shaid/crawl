@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { anywhereSpell, canEquip, equipCommand, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
+import { advanceTime, anywhereSpell, canEquip, equipCommand, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -288,6 +288,32 @@ describe('equip command (CODE+0xED9C)', () => {
     for (const v of V) {
       try {
         if (JSON.stringify(run(v, { noClassMask: true })) !== JSON.stringify({ calls: v.calls, ch: v.fin })) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('world clock (CODE+0x69DC, ageing 0x6988)', () => {
+  const V = load('clock');
+  it('matches the game: light counter, days, resets, calendar, ageing', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) {
+      const m = mem(v);
+      advanceTime(m, v.ticks);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(V.some((x: any) => x.ticks >= 256)).toBe(true);
+  });
+  it('null control: no ageing disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        advanceTime(m, v.ticks, { noAge: true });
+        if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
       } catch {
         bad++;
       }

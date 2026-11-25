@@ -86,6 +86,7 @@ def gen_castroute(n, rnd):
         out.append({'ch': ch, 'spell': spell, **v})
     return out
 
+LAB03D1 = 0x062c8
 QUIET3 = (0x1119E, 0x132E6, 0x129CC, 0x05070, 0x05030, 0x22376, 0x22480, 0x218EA, 0x22108)
 
 def pe_state(e, rnd):
@@ -285,6 +286,27 @@ def gen_equipcmd(n, rnd):
         out.append({'seed': seed, 'ch': ch, 'picks': pp, **v})
     return out
 
-UNITS4 = {'equipcmd': gen_equipcmd, 'canequip': gen_canequip, 'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
+def gen_clock(n, rnd):
+    """CODE+0x69DC advance_time(ticks): light counter, 256-tick days, 60/120/180 resets, calendar, member ageing"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3 + (0x21EAE, 0x05E28, LAB03D1): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    out = []
+    for i in range(n):
+        ticks = rnd.choice([1, 1, 1, 2, 5, 100, 255, 256, 300, rnd.randint(0, 600)])
+        def setup(e):
+            sb(e, -21974, rnd.choice([0x20, 0x20, 0, rnd.getrandbits(8)])); sb(e, -31147, rnd.choice([0, 1, 5, rnd.getrandbits(8)]))
+            sw(e, -31156, rnd.choice([0, 255, 254, 250, rnd.getrandbits(8), rnd.getrandbits(16) & 0x1ff])); sw(e, -31158, rnd.randint(0, 9))
+            for k in range(10):
+                sw(e, -31198 + 2 * k, rnd.choice([0, 1, 59, 60, 119, 179, 180, 181, rnd.randint(0, 200)])); sw(e, -31178 + 2 * k, rnd.choice([0, 998, 999, rnd.randint(0, 1200)]))
+            for d in (-31116, -31117, -31126, -31205): sb(e, d, rnd.choice([0, 1, rnd.getrandbits(8)]))
+            setup_party(e, rnd, rnd.randint(1, 6)); sz = e.r16(g(-31066))
+            for k in range(sz):
+                c = g(-10814) + 130 * e.r16(g(-31082) + 2 * k)
+                e.w8(c + 34, rnd.choice([0, 1, 179, 180, 181, 255, rnd.getrandbits(8)])); e.w8(c + 33, rnd.choice([20, 100, 255, rnd.getrandbits(8)]))
+        v = R.run(0x69DC, (ticks,), setup, max_insn=2_000_000)
+        out.append({'ticks': ticks, **v})
+    return out
+
+UNITS4 = {'clock': gen_clock, 'equipcmd': gen_equipcmd, 'canequip': gen_canequip, 'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
 rules.UNITS.update(UNITS4)
 if __name__ == '__main__': rules.main()

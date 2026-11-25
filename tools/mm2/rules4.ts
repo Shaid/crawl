@@ -774,3 +774,50 @@ export function equipCommand(m: Mem, ch: number, io: CastIo, o: { noClassMask?: 
   recalcAc(m);
   return calls;
 }
+
+/* ------------------------------------------------------ the world clock */
+
+/**
+ * CODE+0x6988: one day passes for every party member: the day byte `+0x22` goes up and at 181 the age `+0x21` gains a year and the day
+ * byte restarts at 1 (a year is 180 days).
+ */
+export function ageParty(m: Mem): void {
+  for (let i = 0; i < s16(m.r16(g(-31066))); i++) {
+    const c = charPtr(m, i);
+    m.w8(c + 34, m.r8(c + 34) + 1);
+    if (m.r8(c + 34) >= 0xb5) {
+      m.w8(c + 33, m.r8(c + 33) + 1);
+      m.w8(c + 34, 1);
+    }
+  }
+}
+
+/**
+ * CODE+0x69DC advance_time(ticks): a single step (ticks == 1) in a dark map square (A4-21974 bit 5) burns one unit of the light
+ * counter A4-31147. Ticks add to the sub-day counter A4-31156; every 256 the counter keeps its low byte and a day passes: calendar
+ * day word `A4-31198[A4-31158]` +1, members age (above), the counters 60/120/180 clear the two per-period flags A4-31116 / A4-31117 (hyp: ate / rested),
+ * day 181 wraps to 1, the year word `A4-31178[...]` goes up to 999 and A4-31126 is cleared (new-year flag, hyp). (The 68k divides a register whose upper half
+ * is the previous call's leftover; the harness stub returns 0, so the low byte is kept.)
+ */
+export function advanceTime(m: Mem, ticks: number, o: { noAge?: boolean } = {}): void {
+  ticks &= 0xffff;
+  if (ticks === 1 && m.r8(g(-21974)) & 0x20 && m.r8(g(-31147)) !== 0) m.w8(g(-31147), m.r8(g(-31147)) - 1);
+  m.w16(g(-31156), m.r16(g(-31156)) + ticks);
+  if (s16(m.r16(g(-31156))) < 0x100) return;
+  const idx = g(-31198) + 2 * s16(m.r16(g(-31158)));
+  m.w16(idx, m.r16(idx) + 1);
+  const day = m.r16(idx);
+  m.w16(g(-31156), m.r16(g(-31156)) & 0xff);
+  if (!o.noAge) ageParty(m);
+  if (day === 0x3c || day === 0x78 || day === 0xb4) {
+    m.w8(g(-31116), 0);
+    m.w8(g(-31117), 0);
+  }
+  const di = g(-31198) + 2 * s16(m.r16(g(-31158)));
+  if (s16(m.r16(di)) > 0xb4) {
+    m.w16(di, 1);
+    const yi = g(-31178) + 2 * s16(m.r16(g(-31158)));
+    if (m.r16(yi) !== 0x3e7) m.w16(yi, m.r16(yi) + 1);
+    m.w8(g(-31126), 0);
+  }
+}
