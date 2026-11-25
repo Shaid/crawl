@@ -20,7 +20,7 @@ const PARTYTAB = 0x3ca8, NPARTY = 0x3bc0, CURIDX = 0x3bf4, PARTYG = 0x3855;
 const P_SAVE = 0x3c82, P_RES = 0x3c83, P_CNT = 0x3c84, P_VAL = 0x3c85;
 const CHARPOS = 0x3cb6, MONPTR = 0x3cb4, STARTNUM = 0x398a, MON0 = 0x3ad8;
 
-class Exit extends Error {
+export class Exit extends Error {
   stop: number;
   constructor(stop: number) { super(`exit ${stop.toString(16)}`); this.stop = stop; }
 }
@@ -32,7 +32,7 @@ export function spellIndex(cls: number, level: number, slot: number): number {
 }
 
 /** deliberately wrong variants, used only by the null-control tests (each must disagree with the game on some vector) */
-export type Wrong = 'sorcListBase' | 'abilityNoChance' | 'abilityCarry' | 'spCostIgnoresLevel' | 'noMonsterResist' | 'noSaveHalving' | 'noKindQuarter' | 'healNoCap' | 'gemNoBorrow' | 'skipPartyHit';
+export type Wrong = 'sorcListBase' | 'abilityNoChance' | 'abilityCarry' | 'spCostIgnoresLevel' | 'noMonsterResist' | 'noSaveHalving' | 'noKindQuarter' | 'healNoCap' | 'gemNoBorrow' | 'skipPartyHit' | 'itemNoCharge' | 'itemKeepSpent';
 export class Caster {
   calls: Call[] = [];
   /** handler address last dispatched (coverage bookkeeping for the tests) */
@@ -100,7 +100,7 @@ export class ComCast extends Caster {
     throw new Error('comcast fell through');
   }
   /** c9ac: stars; delay; retfvqr */
-  private finish(): never { this.stars(); this.delay(); throw new Exit(0xc5e1); }
+  protected finish(): never { this.stars(); this.delay(); throw new Exit(0xc5e1); }
   private menu() {
     const m = this.m;
     this.clropt(); this.escl();
@@ -165,6 +165,12 @@ export class ComCast extends Caster {
     if (gem !== 0 && m.r8(chr() + 0x32) === 0 && m.r8(chr() + 0x31) < gem) {
       this.clropt(); m.w8(0x3bdd, 0x15); m.w8(0x3bdc, 9); this.text(0x38f4); return this.finish();
     }
+    return this.castTail();
+  }
+  /** CODE+0xC95F..: flag gates, targeting, payment (DS:3988 SP / 3989 gems), item charge, handler dispatch (entered directly by `useitem`) */
+  protected castTail(): never {
+    const m = this.m;
+    const chr = () => m.r16(CHARP);
     // ---- flags ----
     const fl = (): number => m.r8(SPD_FLAGS + (m.r16(0x3987) & 0xff));
     if (fl() & 2) { this.clropt(); m.w8(0x3bdd, 0x15); m.w8(0x3bdc, 8); this.text(0x3911); return this.finish(); }
@@ -188,13 +194,34 @@ export class ComCast extends Caster {
     m.w8(c + 0x32, m.r8(c + 0x32) - (gm < 0 && this.wrong !== 'gemNoBorrow' ? 1 : 0));
     const handler = m.r16(COMBAT_TABLE + 2 * (m.r16(0x3987) & 0xff));
     this.reached = handler;
-    if (m.r8(0x393b) !== 0) throw new Error('cast from an item (DS:393B != 0) is not part of comcast');
+    this.c773();
     m.w8(P_SAVE, 0); m.w8(P_RES, 0); m.w8(P_CNT, 0); m.w8(P_VAL, 0);
     if (m.r8(0x3c10) & 2) { this.clropt(); m.w8(0x3bdd, 0x16); m.w8(0x3bdc, 5); this.text(0x3921); return this.finish(); }
     this.handler(handler);
+    return this.castDone();
+  }
+  /** CODE+0xCA6E: "the spell worked" message, stars, delay, mark the caster as having acted */
+  protected castDone(): never {
+    const m = this.m;
     this.clropt(); m.w8(0x3bdd, 0x16); m.w8(0x3bdc, 0xe); this.text(0x39ab);
     this.stars(); this.delay();
-    this.retfspl();
+    return this.retfspl();
+  }
+  /** CODE+0xC773: item charge bookkeeping when the cast came from an item (DS:393B != 0): decrement the charge, remove a spent item */
+  protected c773() {
+    const m = this.m;
+    if (m.r8(0x393b) === 0 || this.wrong === 'itemNoCharge') return;
+    const bp = m.r16(0x3c89) & 0xff;
+    let bl = m.r8(0x3c88);
+    const chr = m.r16(CHARP);
+    if (bl !== 0) {
+      bl = u8(bl - 1);
+      m.w8(chr + bp, bl);
+      if (bl !== 0) return;
+    }
+    if (m.r8(0x3c87) < 0x46 || this.wrong === 'itemKeepSpent') return;
+    m.w8(chr + (m.r16(0x3c87) & 0xff), 0xff);
+    m.w8(chr + (m.r16(0x3c89) & 0xff), 0);
   }
   /** c9f5: "(A)ll / Enter" confirmation */
   private confirm() {
@@ -871,6 +898,86 @@ class Abort extends Error {}
  *  applies / on breath weapons the element, 3C84 element kind, 3C85 value) and end in one of four engines: random-target damage
  *  (0xB3FA), whole-party damage (0xB470), random-target status (0xB4B1) or whole-party status (0xB50E). Stops: 0x9E94 the action was
  *  taken; stop = -1 means no ability this turn (melee follows). */
+/** The combat item use `useitem` (CODE+0xC5FD): choose an item (1-6 / A-F); a stat item changes the stat, a spell item enters the combat cast at 0xC95F with no SP / gem cost. */
+export class UseItem extends ComCast {
+  runItem(): { stop: number; calls: Call[] } {
+    try { this.useitem(); } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
+    throw new Error('useitem fell through');
+  }
+  private retfvqr2() { for (const n of ['home', 'pdatal', 'pround', 'pmonst', 'pinit', 'pcharn', 'pnums']) this.ui(n); }
+  private useitem() {
+    const m = this.m;
+    let bx = 0, bp = 0, found = false;
+    for (;;) {
+      if (m.r8(PARTYTAB + bx) === m.r8(CHARP) && m.r8(PARTYTAB + bx + 1) === m.r8(CHARP + 1)) { found = true; break; }
+      bx = u8(bx + 2); bp = u8(bp + 1);
+      if (bp >= m.r8(NPARTY)) break;
+    }
+    if (!found) bp = 0;
+    bp = u8(bp + 1);
+    this.ui('viewch', [bp]);
+    for (;;) {                                  // 0xC635: the prompt
+      this.ui('clrtext4'); this.escl();
+      m.w8(0x3bdc, 7); m.w8(0x3bdd, 0x14); this.text(0x393c); this.ptext();
+      let k: number;
+      let item: { id: number; slot: number } | undefined;
+      while (!item) {
+        k = this.wait();
+        if (k === 0x1b) throw new Exit(0xc5e1);
+        if (k < 0x31) continue;
+        if (k < 0x37) { m.w8(0x3c86, u8(k - 0x31)); m.w8(0x3939, 0x40); m.w8(0x393a, 0x46); }
+        else {
+          if (k < 0x41 || k >= 0x47) continue;
+          m.w8(0x3c86, u8(k - 0x41)); m.w8(0x3939, 0x46); m.w8(0x393a, 0x4c);
+        }
+        let slot = m.r16(0x3939) & 0xff, nth = 0;
+        for (;;) {
+          const id = m.r8(m.r16(CHARP) + slot);
+          if (id !== 0) {
+            if (nth === m.r8(0x3c86)) { item = { id, slot }; break; }
+            nth++;
+          }
+          slot = u8(slot + 1);
+          if (slot >= m.r8(0x393a)) break;
+        }
+      }
+      m.w8(0x3c86, item.id); m.w8(0x3c87, item.slot);
+      m.w8(0x3c89, u8(item.slot + 0x0c));
+      m.w8(0x3c88, m.r8(m.r16(CHARP) + u8(item.slot + 0x0c)));
+      this.getInfo(item.id);
+      let bad = 0;
+      if (m.r8(0x3cec) === 0) bad = 0x3957;
+      else if (m.r8(0x3cea) !== 1 && m.r8(0x3c87) >= 0x46) bad = 0x3978;
+      else if (m.r8(0x3c88) === 0) bad = 0x3968;
+      if (bad) {
+        this.clropt(); this.text(bad); m.w8(0x3bdd, 0x15); m.w8(0x3bdc, 8); this.stars(); this.delay();
+        continue;
+      }
+      this.inc(0x393b);
+      const sp = m.r8(0x3cec);
+      if (sp !== 0xff) {
+        const t = m.r16(0x3cec) & 0xff;
+        m.w8(m.r16(CHARP) + t, u8(m.r8(0x3ced) + m.r8(m.r16(CHARP) + t)));
+        this.c773();
+        this.ui('viewch', [m.r8(0x2686)]);
+        return this.castDone();
+      }
+      m.w8(0x3987, m.r8(0x3ced)); m.w8(0x3988, 0); m.w8(0x3989, 0);
+      this.retfvqr2(); this.escl();
+      return this.castTail();
+    }
+  }
+  /** CODE+0x46CB getinfo (see world.ts) */
+  private getInfo(id: number) {
+    const m = this.m;
+    const base = id < 0x56 ? 0x917a + 0x18 * (id - 1) : 0x9972 + 0x18 * (id - 0x56);
+    m.w16(BDW_TEXT, base);
+    for (let i = 0; i < 0x0e; i++) m.w8(0x3cda + i, m.r8(base + i));
+    m.w8(0x3cda + 0x0e, 0);
+    for (let i = 0x0e; i < 0x19; i++) m.w8(0x3cda + i + 1, m.r8(base + i));
+  }
+}
+
 export class MonsterAbility extends ComCast {
   override run(): { stop: number; calls: Call[] } {
     try { this.ability(); } catch (e) {
