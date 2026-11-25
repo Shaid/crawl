@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { mustMatch, nullBad } from './check.ts';
-import { QCast, Surprise, Rest, Step, Pool, type WorldWrong } from '../world.ts';
+import { QCast, Surprise, Rest, Step, Pool, Door, type WorldWrong } from '../world.ts';
 import { UseItem } from '../spells.ts';
 import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
@@ -80,6 +80,18 @@ describe('pooling the party CODE+0x74BC (gather) / 0x7763 (share)', () => {
   it('null controls', () => {
     for (const w of ['poolFoodNoCap', 'poolGoldNoSat', 'poolShareNoRemainder'] as const) {
       const n = nullBad('pool', (m, v) => { const ip = v.args[v.args.length - 1]; const r = new Pool(m, v.args.slice(0, -1), w).run(ip === 0x74bc ? 'gather' : 'share'); return { stop: r.stop, calls: r.calls }; });
+      expect(n, w).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('search / lock picking / bashing CODE+0x4A28, 0x4A6C, 0x4BE4', () => {
+  const ent = (ip: number) => (ip === 0x4a28 ? 'search' : ip === 0x4a6c ? 'unlock' : 'bash') as 'search' | 'unlock' | 'bash';
+  const run = (m: any, v: any) => { const ip = v.args[v.args.length - 1]; const r = new Door(m, v.args.slice(0, -1)).run(ent(ip)); return { stop: r.stop, calls: r.calls }; };
+  it('matches the game on every vector', () => mustMatch('door', run, 100));
+  it('null controls', () => {
+    for (const w of ['doorNoToggle', 'doorBashNoMight', 'doorUnlockNoLockLevel'] as const) {
+      const n = nullBad('door', (m, v) => { const ip = v.args[v.args.length - 1]; const r = new Door(m, v.args.slice(0, -1), w).run(ent(ip)); return { stop: r.stop, calls: r.calls }; });
       expect(n, w).toBeGreaterThan(0);
     }
   });

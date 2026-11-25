@@ -1229,13 +1229,11 @@ export class Pool extends Caster {
     this.inc(0x3bdd); m.w8(0x3bdc, 0x14); this.text(0x2b1e); this.ptext();
     this.inc(0x3bdd); m.w8(0x3bdc, 0x14); this.text(0x2b26); this.ptext();
   }
-  private head(row: number, col: number, text: number) {
+  private head(col: number, text: number) {
     const m = this.m;
     this.ui('clrtext4'); m.w8(0x3bdd, 0x14); m.w8(0x3bdc, col); this.text(text); this.ptext(); this.pall(); this.esctext();
-    void row;
   }
   private n(): number { return this.m.r8(NPARTY); }
-  private cp(i: number): number { return this.m.r16(PARTYTAB + 2 * i); }
   private cur(): number { return this.m.r16(CHARP); }
   /** `walk`: the game keeps its pointer into the party table in a DS word and bumps it by 2 per member; the final word values are part of the footprint */
   private walk(ptr: number, f: (c: number) => boolean | void) {
@@ -1257,7 +1255,7 @@ export class Pool extends Caster {
   }
   private gather() {
     const m = this.m;
-    this.head(0x14, 7, 0x2b2e);
+    this.head(7, 0x2b2e);
     for (;;) {
       const k = this.wait();
       if (k === 0x1b) this.stop(BACKVIEW);
@@ -1308,7 +1306,7 @@ export class Pool extends Caster {
     m.w8(c + 0x39, m.r8(0x3c86)); m.w8(c + 0x3a, m.r8(0x3c87)); m.w8(c + 0x3b, m.r8(0x3c88));
   }
   private share() {
-    this.head(0x14, 8, 0x2953);
+    this.head(8, 0x2953);
     for (;;) {
       const k = this.wait();
       if (k === 0x1b) this.stop(BACKVIEW);
@@ -1384,5 +1382,124 @@ export class Pool extends Caster {
       s = m.r8(cc + 0x3a) + 1; m.w8(cc + 0x3a, s);
       if (s > 0xff) m.w8(cc + 0x3b, m.r8(cc + 0x3b) + 1);
     }
+  }
+}
+
+export type DoorWrong = 'doorNoToggle' | 'doorBashNoMight' | 'doorUnlockNoLockLevel';
+
+/** Search (CODE+0x4A28), pick a lock (CODE+0x4A6C `unlock`) and bash a door (CODE+0x4BE4 `bash`).
+ *  The wall byte DS:3C3C and the door layer DS:3C10 hold two bits per side; a door in front of the party (layer bit set) whose overlay lock-kind byte
+ *  getod(0x1E + wall code) is 1 can be opened; the toggle writes the cell's door byte (DS:3DFA + cell). */
+export class Door extends Caster {
+  w: DoorWrong | undefined;
+  constructor(m: Mem, keys: number[], w?: DoorWrong) { super(m, keys); this.w = w; }
+  private stop(a: number): never { throw new Exit(a); }
+  private ph2() { ph2Model(this.m, this.calls); }
+  private clr2() { this.ui('clrbtm2'); }
+  private msg(row: number, col: number, text: number) { const m = this.m; m.w8(0x3bc3, row); m.w8(0x3bc4, col); this.text(text); this.ph2(); }
+  private ph2one(al: number) { const m = this.m; m.w16(0x3c0e, al); m.w16(BDW_TEXT, 0x3c0e); this.ph2(); }
+  run(entry: 'search' | 'unlock' | 'bash'): { stop: number; calls: Call[] } {
+    try { this[entry](); } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
+    throw new Error('door routine fell through');
+  }
+  private search(): never {
+    const m = this.m;
+    this.clr2(); this.msg(0x15, 0, 0x20b1);
+    let bl = 0;
+    for (; bl < 6; bl++) if (m.r8(0x3c7a + bl) !== 0) break;
+    if (bl >= 6) { this.text(0x20bb); this.ph2(); return this.stop(0x4a19); }
+    this.text(0x20c3); this.ph2(); this.ui('noises', [2]);
+    return this.stop(0x3740);
+  }
+  /** wall code in front (0 = code 1, 1 = code 2 door, 2 = code 3) or undefined when the front is open */
+  private wallKind(): number | undefined {
+    const m = this.m;
+    const a = m.r8(0x3c3c) & m.r8(0x3c3d);
+    if (a === 0) return undefined;
+    if ((a & 0x55) === 0) return 1;
+    return (a & 0xaa) === 0 ? 0 : 2;
+  }
+  private toggle() {
+    const m = this.m;
+    if (this.w === 'doorNoToggle') return;
+    const bl = m.r8(0x3c3a);
+    const al = (m.r8(0x3c3d) & 0x55) ^ m.r8(0x3dfa + bl);
+    m.w8(0x3dfa + bl, al); m.w8(0x3c10, al);
+  }
+  private unlock(): never {
+    const m = this.m;
+    if ((m.r8(0x3c10) & 0x55 & m.r8(0x3c3d)) === 0) this.stop(0x4cd6);
+    const kind = this.wallKind();
+    if (kind === undefined) this.stop(0x4cd6);
+    if (this.getod(kind + 0x1e) !== 1) this.stop(0x4cd6);
+    let sel = 0;
+    const askKey = () => {
+      m.w8(0x3bc3, 0x17); m.w8(0x3bc4, 0); this.text(0x1fc0); this.ph2();
+      for (;;) {
+        const k = this.wait();
+        if (k === 0x1b) { this.clr2(); this.stop(0x4cd6); }
+        if (k < 0x31 || k >= 0x37) continue;
+        const s = u8(k - 0x31);
+        if (s >= m.r8(NPARTY)) continue;
+        return s;
+      }
+    };
+    if (m.r8(NPARTY) >= 2) {
+      this.clr2(); this.msg(0x15, 4, 0x20d0);
+      this.ph2one(m.r8(NPARTY) + 0x30); this.ph2one(0x27); this.ph2one(0x3f);
+      sel = askKey();
+    }
+    for (;;) {
+      const bp = u8(sel << 1);
+      m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
+      if (m.r8(m.r16(CHARP) + 0x3f) & 0xe1) { this.ui('noises', [2]); sel = askKey(); continue; }
+      break;
+    }
+    const c = m.r16(CHARP);
+    const lock = u8(this.w === 'doorUnlockNoLockLevel' ? 0 : this.getod(0x31) << 2);
+    m.w8(0x3bb8, lock);
+    const roll = u8(random(m, 100) + m.r8(0x3bb8));
+    if (roll < m.r8(c + 0x6c)) {
+      this.toggle();
+      this.clr2(); this.msg(0x15, 0xb, 0x20f1);
+      return this.stop(0x4a19);
+    }
+    const r2 = random(m, 100);
+    if (r2 < this.getod(0x30)) { this.clr2(); this.msg(0x15, 8, 0x20e3); return this.stop(0x4a19); }
+    this.toggle();
+    return this.trapped();
+  }
+  private trapped(): never {
+    const m = this.m;
+    this.clr2(); this.msg(0x15, 9, 0x20fa);
+    m.w8(0x3c79, this.getod(0x31));
+    m.w16(CHARP, m.r16(PARTYTAB));
+    this.ui('noises', [2]);
+    return this.stop(0x3749);
+  }
+  private bash(): never {
+    const m = this.m;
+    if ((m.r8(0x3c10) & 0x55 & m.r8(0x3c3d)) === 0) this.stop(0x4cdc);
+    const kind = this.wallKind();
+    if (kind === undefined) this.stop(0x4cdc);
+    if (this.getod(kind + 0x1e) !== 1) this.stop(0x4cdc);
+    this.ui('noises', [1]);
+    m.w16(0x1fe8, PARTYTAB);
+    let al = random(m, 100);
+    let bl = 0;
+    for (;;) {
+      const di = m.r16(m.r16(0x1fe8));
+      const s = al + (this.w === 'doorBashNoMight' ? 0 : m.r8(di + 0x18));
+      if (s > 0xff) { al = 0xff; break; }
+      al = s;
+      bl = u8(bl + 1);
+      if (bl === m.r8(NPARTY)) break;
+      m.w16(0x1fe8, m.r16(0x1fe8) + 1); m.w16(0x1fe8, m.r16(0x1fe8) + 1);
+    }
+    const need = this.getod(0x2d);
+    if (need !== 0 && al >= need) this.toggle();
+    const r = random(m, 100);
+    if (r < this.getod(0x30)) this.stop(0x4cdc);
+    return this.trapped();
   }
 }

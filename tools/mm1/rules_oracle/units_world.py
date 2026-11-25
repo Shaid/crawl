@@ -363,3 +363,43 @@ def _(n, rnd):
         k = (d['args'][-1], d['args'][0], len(d['fin']) // 4)
         if k not in seen: seen.add(k); d['keep'] = True
     return res
+
+DUI = [('ph2', 0x40e1, puts_model, lambda e: [e.rw(0x3bd4), e.rb(0x3bc3), e.rb(0x3bc4)]), uistub('clrbtm2', 0x43a8), ('noises', 0x1ab3, None, lambda e: [e.regs()['ax'] & 255])]
+
+@unit('door')
+def _(n, rnd):
+    """CODE+0x4A28 search, 0x4A6C unlock (lock picking), 0x4BE4 bash"""
+    res = []
+    e = Emu(); Rc = Rec(e)
+    for _ in range(n):
+        r = rnd
+        ip = r.choice([0x4a28, 0x4a6c, 0x4a6c, 0x4be4, 0x4be4])
+        box = {}
+        def setup(em, ip=ip):
+            a, np_ = qworld(em, r)
+            em.ww(0x132, 0xc940)
+            for i in range(0x80): em.wb(0xc940 + i, r.choice([0, 1, 1, 2, 3, 4, 20, 50, 100, r.getrandbits(8)]))
+            for k in (0x1e, 0x1f, 0x20): em.wb(0xc940 + k, r.choice([1, 1, 1, 0, 2, 4]))
+            em.wb(0xc940 + 0x31, r.choice([0, 1, 2, 5, 10, 30])); em.wb(0xc940 + 0x30, r.choice([0, 10, 50, 100, 255])); em.wb(0xc940 + 0x2d, r.choice([0, 50, 120, 200, 255]))
+            door = r.choice([0x55 & m_ for m_ in (0xc0, 0x30, 0x0c, 0x03)])
+            rot = r.choice([0xc0, 0x30, 0x0c, 0x03])
+            em.wb(0x3c3d, rot)
+            em.wb(0x3c3c, r.choice([rot & 0x55, rot & 0xaa, rot, 0, rot, rot & 0x55]) | r.choice([0, 0, 0x15, 0x2a]))
+            em.wb(0x3c10, r.choice([rot & 0x55, rot & 0x55, 0, 0x55, rot]))
+            em.wb(0x3c3a, r.getrandbits(8))
+            for i in range(np_):
+                ra = em.rw(PARTYTAB + 2 * i)
+                em.wb(ra + 0x3f, r.choice([0, 0, 0, 0, 0x01, 0x20, 0x80, 0x40]))
+                em.wb(ra + 0x6c, r.choice([0, 30, 60, 90, 120, r.getrandbits(8)]))
+                em.wb(ra + 0x18, r.choice([5, 12, 20, 30, 40, r.getrandbits(8)]))
+            for i in range(6): em.wb(0x3c7a + i, r.choice([0, 0, 0, 1]))
+            box['keys'] = [r.choice([0x31, 0x32, 0x33, 0x34, 0x1b, 0x37]), r.choice([0x31, 0x32, 0x35])] if r.random() < 0.9 else [r.choice([0x1b, 0x31])]
+            for st in DUI + [make_wait(em, box['keys'])]: em.stub(st[1], st[0], st[2] if len(st) > 2 else None, st[3] if len(st) > 3 else None)
+        e.stubs.clear()
+        v = Rc.run(ip, None, setup, stops=(0x4cd6, 0x4cdc, 0x4a19, 0x3749, 0x3740))
+        res.append({'args': box['keys'] + [ip], **v})
+    seen = set()
+    for d in res:
+        k = (d['args'][-1], d['out']['stop'], len(d['calls']), len(d['fin']) // 3)
+        if k not in seen: seen.add(k); d['keep'] = True
+    return res
