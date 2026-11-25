@@ -242,6 +242,49 @@ def gen_itemuse(n, rnd):
         out.append({'kind': kind, 'ch': ch, 'rec': rec, 'slot': slot, **v})
     return out
 
-UNITS4 = {'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
+def gen_canequip(n, rnd):
+    """CODE+0xEC02 can an item be equipped alongside what is worn (one melee weapon, two-handed vs body armour, ranged, armour classes)"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3 + (0x042DC,): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    e.stub(0xE238, 'msg', nargs=1)
+    out = []
+    for i in range(n):
+        ch = g(-10814) + 130 * rnd.randint(0, 47); slot = rnd.randint(0, 5)
+        def idf(): return rnd.choice([0, 0, rnd.randint(1, 0x41), rnd.randint(0x42, 0x5b), rnd.randint(0x5c, 0x72), rnd.randint(0x73, 0x7e), rnd.randint(0x7f, 0x9a), rnd.randint(0x9b, 0x9f), rnd.getrandbits(8)])
+        def setup(e):
+            for k in range(6): e.w8(ch + 0x28 + k, idf() if rnd.random() < .5 else 0)
+            e.w8(ch + 0x3a + slot, idf())
+        v = R.run(0xEC02, ((ch, 4), slot), setup)
+        out.append({'ch': ch, 'slot': slot, **v})
+    return out
+
+def gen_equipcmd(n, rnd):
+    """CODE+0xED9C equip command: pick a backpack item, free slot, cursed flag, alignment tag, class mask, 0xF0 items, compatibility, move, AC"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3 + (0x042DC,): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    picks = []
+    e.stub(0x042AA, 'pick', nargs=2, fn=lambda e, sp: picks.pop(0) if picks else 0x1b)
+    e.stub(0xE238, 'msg', nargs=1); e.stub(0x036AE, 'draw', nargs=1)
+    out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32); ch = g(-10814) + 130 * rnd.randint(0, 47)
+        pp = [rnd.choice([0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x61, 0x62, 0x1b, 0x46]) for _ in range(rnd.randint(1, 3))]
+        def idf(): return rnd.choice([0, rnd.randint(1, 0x41), rnd.randint(0x42, 0x5b), rnd.randint(0x5c, 0x72), rnd.randint(0x73, 0x7e), rnd.randint(0x7f, 0x9a), rnd.randint(0x9b, 0x9f), rnd.randint(1, 255)])
+        def setup(e):
+            picks[:] = pp; sl(e, SEED, seed)
+            e.uc.mem_write(g(-16126), bytes(rnd.getrandbits(8) if rnd.random() < .5 else rnd.choice([0, 0xf0, 0x11]) for _ in range(256 * 20)))
+            for r_ in range(256): e.w8(g(-16126) + 20 * r_ + 14, rnd.choice([0, 0x11, 0x23, 0xf0, rnd.getrandbits(8)])); e.w8(g(-16126) + 20 * r_ + 13, rnd.choice([0, 0, 0x01, 0x80, 0x41, rnd.getrandbits(8)]))
+            for k in range(6):
+                e.w8(ch + 0x28 + k, idf() if rnd.random() < .45 else 0); e.w8(ch + 0x3a + k, idf() if rnd.random() < .7 else 0)
+                e.w8(ch + 0x40 + k, rnd.randint(0, 9)); e.w8(ch + 0x46 + k, rnd.choice([0, 0x40, 0x80, 0xc0, 0xff, 0x05, rnd.getrandbits(8)]))
+            e.w8(ch + 0x0f, rnd.randint(0, 7)); e.w8(ch + 0x6a, rnd.randint(0, 3)); e.w8(ch + 38, rnd.getrandbits(8))
+            for k in range(8): sb(e, -28626 + k, rnd.choice([1 << rnd.randint(0, 7), rnd.getrandbits(8)]))
+            for k in range(4): sb(e, -28630 + k, rnd.randint(0, 3))
+            setup_party(e, rnd, 6)
+        v = R.run(0xED9C, ((ch, 4),), setup, max_insn=3_000_000)
+        out.append({'seed': seed, 'ch': ch, 'picks': pp, **v})
+    return out
+
+UNITS4 = {'equipcmd': gen_equipcmd, 'canequip': gen_canequip, 'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
 rules.UNITS.update(UNITS4)
 if __name__ == '__main__': rules.main()

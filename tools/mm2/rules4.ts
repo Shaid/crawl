@@ -7,7 +7,7 @@ import { type Mem, g } from './rules-mem.ts';
 import { charPtr, monsterSpellDamage, randRange, unpackMonster } from './rules.ts';
 
 const s16 = (v: number) => ((v & 0xffff) << 16) >> 16;
-import { spellCombatGate, spellLocationGate } from './rules3.ts';
+import { equipItem, recalcAc, spellCombatGate, spellLocationGate } from './rules3.ts';
 
 export type Calls = [string, number[]][];
 
@@ -672,5 +672,105 @@ export function useItem(m: Mem, kind: 'pack' | 'equip', ch: number, rec: number,
   itemBoost(m, ch, power, kind === 'pack' ? slot + 6 : slot);
   calls.push(['msg', [0x11]]);
   m.w8(g(-16140), 1);
+  return calls;
+}
+
+/* --------------------------------------------- equip compatibility */
+
+/** item id classes of the equip rules (CODE+0xF5F4..0xF68E): A 1..0x41 and B 0x42..0x5B melee (B = two-handed, hyp), R 0x5C..0x72 ranged, C 0x73..0x7E, D 0x7F..0x9A, E 0x9B..0x9F */
+export const equipClass = (id: number): 'A' | 'B' | 'R' | 'C' | 'D' | 'E' | null =>
+  id >= 1 && id <= 0x41 ? 'A' : id >= 0x42 && id <= 0x5b ? 'B' : id >= 0x5c && id <= 0x72 ? 'R' : id >= 0x73 && id <= 0x7e ? 'C' : id >= 0x7f && id <= 0x9a ? 'D' : id >= 0x9b && id <= 0x9f ? 'E' : null;
+
+/**
+ * CODE+0xEC02 can_equip(ch, backpackSlot): 1 when the item in backpack slot (id `+0x3A + slot`) fits beside the six equipped ids
+ * (`+0x28..+0x2D`). One melee weapon (A or B; message 6), a B weapon excludes any class-C item (12) and a C item excludes a B weapon (13),
+ * one ranged weapon (7), one C (8), one D (9), one E (10). Returns 0 and the message number otherwise.
+ */
+export function canEquip(m: Mem, ch: number, slot: number, o: { noTwoHanded?: boolean } = {}): { ok: number; calls: Calls } {
+  const id = m.r8(ch + 0x3a + slot);
+  const cls = equipClass(id);
+  const has = (...cs: string[]) => {
+    for (let k = 0; k < 6; k++) if (cs.includes(equipClass(m.r8(ch + 0x28 + k)) ?? '')) return true;
+    return false;
+  };
+  const bad = (n: number) => ({ ok: 0, calls: [['msg', [n]]] as Calls });
+  if (cls === 'A') {
+    if (has('A', 'B')) return bad(6);
+  } else if (cls === 'B') {
+    if (has('A', 'B')) return bad(6);
+    if (!o.noTwoHanded && has('C')) return bad(12);
+  } else if (cls === 'R') {
+    if (has('R')) return bad(7);
+  } else if (cls === 'C') {
+    if (has('C')) return bad(8);
+    if (!o.noTwoHanded && has('B')) return bad(13);
+  } else if (cls === 'D') {
+    if (has('D')) return bad(9);
+  } else if (cls === 'E') {
+    if (has('E')) return bad(10);
+  }
+  return { ok: 1, calls: [] };
+}
+
+/**
+ * CODE+0xED9C equip command. Asks for a backpack letter (CODE+0x42AA, A-F; 0x1b cancels; an empty slot asks again), takes the
+ * first empty equipped slot (none: message 2). A backpack flag byte (`+0x46`) of 0xFF is a **cursed** item: the member gets condition
+ * bit 0 and message 3. Otherwise the first of these errors applies, later ones overriding earlier: the record's forbidden-class mask
+ * (`+0x0D`) against `A4-28626[class +0x0F]` (message 4); the flag's top two bits (alignment tag, 0 = none) mapped by `A4-28630[tag]`
+ * against the member's alignment `+0x6A` (message 5); a record bonus byte `+0x0E` of 0xF0 (message 14). With no error `canEquip`
+ * must pass; then the id / charge / flag bytes move to the equipped slot, `equipItem` runs, the backpack closes up and AC is recomputed.
+ */
+export function equipCommand(m: Mem, ch: number, io: CastIo, o: { noClassMask?: boolean } = {}): Calls {
+  const calls: Calls = [];
+  let k: number;
+  for (;;) {
+    let raw = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+    calls.push(['pick', [0x41, 0x66]]);
+    if (raw > 0x60 && raw <= 0x7a) raw -= 0x20;
+    k = raw;
+    if (k === ESC) return calls;
+    if (m.r8(ch + 0x3a + ((k - 0x41) & 0xffff)) !== 0) break;
+  }
+  k -= 0x41;
+  let free = 0;
+  while (free < 6 && m.r8(ch + 0x28 + free) !== 0) free++;
+  if (free === 6) {
+    calls.push(['msg', [2]]);
+    return calls;
+  }
+  const id = m.r8(ch + 0x3a + k);
+  const rec = g(-16126) + 20 * id;
+  const flag = m.r8(ch + 0x46 + k);
+  const tag = flag >> 6;
+  if (flag === 0xff) {
+    m.w8(ch + 38, m.r8(ch + 38) | 1);
+    calls.push(['msg', [3]]);
+    calls.push(['draw', [m.r8(ch + 38)]]);
+    return calls;
+  }
+  let err = 0;
+  if ((m.r8(g(-28626) + m.r8(ch + 0x0f)) & m.r8(rec + 13)) !== 0 && !o.noClassMask) err = 4;
+  if (tag !== 0 && m.r8(g(-28630) + tag) !== m.r8(ch + 0x6a)) err = 5;
+  if (m.r8(rec + 14) === 0xf0) err = 14;
+  if (err) {
+    calls.push(['msg', [err]]);
+    return calls;
+  }
+  const c = canEquip(m, ch, k);
+  calls.push(...c.calls);
+  if (!c.ok) return calls;
+  m.w8(ch + 0x28 + free, m.r8(ch + 0x3a + k));
+  m.w8(ch + 0x2e + free, m.r8(ch + 0x40 + k));
+  m.w8(ch + 0x34 + free, m.r8(ch + 0x46 + k));
+  equipItem(m, ch, free);
+  for (let s = k; s !== 5; s++) {
+    m.w8(ch + 0x3a + s, m.r8(ch + 0x3a + s + 1));
+    m.w8(ch + 0x40 + s, m.r8(ch + 0x40 + s + 1));
+    m.w8(ch + 0x46 + s, m.r8(ch + 0x46 + s + 1));
+  }
+  m.w8(ch + 0x3f, 0);
+  m.w8(ch + 0x45, 0);
+  m.w8(ch + 0x4b, 0);
+  recalcAc(m);
   return calls;
 }

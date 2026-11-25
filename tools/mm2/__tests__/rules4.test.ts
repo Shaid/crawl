@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { anywhereSpell, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
+import { anywhereSpell, canEquip, equipCommand, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -238,6 +238,56 @@ describe('item use (CODE+0x137E0 / 0x13896, stat boost CODE+0x13B80)', () => {
     for (const v of V) {
       try {
         if (JSON.stringify(run(v, { noCharge: true })) !== JSON.stringify({ calls: v.calls, ch: v.fin })) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('equip compatibility (CODE+0xEC02)', () => {
+  const V = load('canequip');
+  it('matches the game: one weapon, two-handed vs class-C armour, one item per class', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) {
+      const m = mem(v);
+      const r = canEquip(m, v.ch, v.slot);
+      expect({ ok: r.ok, calls: r.calls }).toEqual({ ok: v.ret, calls: v.calls });
+      expect(m.changes()).toEqual(v.fin);
+    }
+    const msgs = new Set(V.flatMap((x: any) => x.calls.map((c: any) => c[1][0])));
+    for (const n of [6, 7, 8, 9, 10, 12, 13]) expect(msgs.has(n)).toBe(true);
+  });
+  it('null control: dropping the two-handed rule disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      const r = canEquip(mem(v), v.ch, v.slot, { noTwoHanded: true });
+      if (r.ok !== v.ret) bad++;
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('equip command (CODE+0xED9C)', () => {
+  const V = load('equipcmd');
+  const run = (v: any, o = {}) => {
+    const m = mem(v);
+    const calls = equipCommand(m, v.ch, { keys: [], picks: [...v.picks], kills: [] }, o);
+    return { calls, ch: m.changes() };
+  };
+  it('matches the game: slot search, curse, class, alignment, 0xF0, compatibility, move', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) expect(run(v)).toEqual({ calls: v.calls, ch: v.fin });
+    const msgs = new Set(V.flatMap((x: any) => x.calls.filter((c: any) => c[0] === 'msg').map((c: any) => c[1][0])));
+    for (const n of [3, 4, 5, 14]) expect(msgs.has(n)).toBe(true);
+    expect(V.some((v: any) => Object.keys(v.fin).length > 8)).toBe(true);
+  });
+  it('null control: ignoring the class mask disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        if (JSON.stringify(run(v, { noClassMask: true })) !== JSON.stringify({ calls: v.calls, ch: v.fin })) bad++;
       } catch {
         bad++;
       }
