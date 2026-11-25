@@ -53,6 +53,34 @@ def gen_toggle(n, rnd):
         out.append({'idx': idx, **R.run(0x6E0, (idx,), setup)})
     return out
 
-UNITS7 = {'cgxchg': gen_xchg, 'partytoggle': gen_toggle}
+def gen_disarm(which):
+    """chest / trap disarm CODE+0x1AEC2 `disarm(effect.b)` (which='a') and CODE+0x1AF6E `pick_and_disarm()` ('b'): a member is picked (0xFF effect skips the pick and the roll;
+    ESC cancels), d = rand(1,100); the disarm works when d <= 0x60 and d <= the member's thief byte +0x1E; otherwise a non-zero effect id is applied to the member
+    (0x1AA70, logged); then (A) the 'anyone able to act' test 0x47A2 shows the open-chest screen. Picker 0x1AE2E, the effect and the screens are stubs."""
+    def gen(n, rnd):
+        e = new_emu(); R = Rec(e); out = []
+        for off in (0x560A, 0x54F2, 0x1AC94, 0x097A2, 0x06DA6): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+        picks = []
+        e.stub(0x1AE2E, 'pick', nargs=0, fn=lambda e, sp: picks.pop(0) if picks else 0x1b)
+        e.stub(0x1AA70, 'effect', nargs=2)
+        for i in range(n):
+            seed = rnd.getrandbits(32)
+            eff = rnd.choice([0, 0xff, 0xff, 1, 2, 3, 4, 5, 7, rnd.randint(0, 255)])
+            size = rnd.choice([1, 2, 3, 4, 5, 6, rnd.randint(1, 6)])
+            pk = rnd.choice([0x1b] + list(range(size)) + [rnd.randint(0, 7)])
+            def setup(e):
+                sl(e, SEED, seed); picks[:] = [pk]
+                idxs = setup_party(e, rnd, size)
+                for r in idxs:
+                    a = g(-10814) + 130 * r
+                    e.w8(a + 30, rnd.choice([0, 0x10, 0x30, 0x5f, 0x60, 0x61, 0x80, rnd.getrandbits(8)])); e.w8(a + 38, rnd.choice([0, 0, 0, 0x20, 0x40, 0x80, rnd.getrandbits(8)]))
+            if which == 'a': v = R.run(0x1AEC2, (eff,), setup)
+            else: v = R.run(0x1AF6E, (eff,), setup)
+            out.append({'seed': seed, 'eff': eff, 'pick': pk, **v})
+            e.heap = HEAP
+        return out
+    return gen
+
+UNITS7 = {'cgxchg': gen_xchg, 'partytoggle': gen_toggle, 'disarm': gen_disarm('a'), 'disarm2': gen_disarm('b')}
 rules.UNITS.update(UNITS7)
 if __name__ == '__main__': rules.main()

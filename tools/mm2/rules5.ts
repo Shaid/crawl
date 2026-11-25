@@ -823,3 +823,39 @@ export function rosterToggle(m: Mem, idx: number, o: { sixLimit?: number; noHire
   m.w16(g(-31082) + 2 * s16(sz), idx + off);
   return 1;
 }
+
+/**
+ * Chest / trap disarm (pass 6). `disarm` = CODE+0x1AEC2 `(effect.b)`; with `effect == 0xFF` the pick and the roll are skipped. Otherwise `io.pick()`
+ * (0x1AE2E, UI) returns a party slot or ESC (0x1B: the cancel screen, return 0); `d = rand(1,100)` (low byte); the disarm works when `d <= 0x60` and
+ * `d <= thief byte +0x1E` of that member (unsigned bytes); on failure a non-zero effect id is applied to the slot (0x1AA70, logged as `effect [id, slot]`).
+ * Then the "anyone able to act" test 0x47A2 (a member whose condition byte `+0x26 & 0xE0` is clear; first one found ends the scan) draws the open-chest screen (UI).
+ * Returns 1. `pickAndDisarm` = CODE+0x1AF6E `(effect.b)`: always picks and rolls, then the same tail as `disarm(0xFF)`.
+ */
+export type DisarmIo = { pick: () => number; calls: any[] };
+function ableToAct(m: Mem): number {
+  let d4 = 0;
+  const size = s16(m.r16(g(-31066)));
+  for (let i = 0; i < size && d4 === 0; i++) {
+    if ((m.r8(charPtr(m, i) + 38) & 0xe0) === 0) d4++;
+  }
+  return d4;
+}
+function disarmRoll(m: Mem, eff: number, io: DisarmIo, o: { noCap?: boolean }): boolean {
+  const key = io.pick() & 0xffff;
+  io.calls.push(['pick', []]);
+  if (key === 0x1b) return false;
+  const skill = m.r8(charPtr(m, s16(key)) + 30);
+  const d = randRange(m, 1, 100) & 0xff;
+  const ok = (o.noCap ? true : d <= 0x60) && d <= skill;
+  if (!ok && (eff & 0xff) !== 0) io.calls.push(['effect', [eff & 0xff, key]]);
+  return true;
+}
+export function disarm(m: Mem, eff: number, io: DisarmIo, o: { noCap?: boolean } = {}): number {
+  if ((eff & 0xff) !== 0xff && !disarmRoll(m, eff, io, o)) return 0;
+  ableToAct(m);
+  return 1;
+}
+export function pickAndDisarm(m: Mem, eff: number, io: DisarmIo, o: { noCap?: boolean } = {}): number {
+  if (!disarmRoll(m, eff, io, o)) return 0;
+  return disarm(m, 0xff, io);
+}

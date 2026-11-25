@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats, rosterToggle, partyRemove } from '../rules5.ts';
+import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats, rosterToggle, partyRemove, disarm, pickAndDisarm } from '../rules5.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -390,4 +390,31 @@ describe('roster screen: add / remove a party member (CODE+0x6E0, remove 0x362C)
     for (const v of V) { try { const m = mem(v); partyRemoveNoShift(m, v.idx); if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
     expect(bad).toBeGreaterThan(3);
   });
+});
+
+describe('chest / trap disarm (CODE+0x1AEC2, 0x1AF6E)', () => {
+  for (const [name, fn] of [['disarm', disarm], ['disarm2', pickAndDisarm]] as const) {
+    const V = load(name);
+    const run = (v: any, o: any = {}) => {
+      const m = mem(v);
+      const calls: any[] = [];
+      const r = fn(m, v.eff, { pick: () => v.pick, calls }, o);
+      return { r, calls, ch: m.changes() };
+    };
+    it(`${name}: matches the game (pick, roll with the 0x60 cap, effect on failure, able-to-act test)`, () => {
+      for (const v of V) {
+        const { r, calls, ch } = run(v);
+        expect(r).toBe(v.ret);
+        expect(calls).toEqual(v.calls);
+        expect(ch).toEqual(v.fin);
+      }
+      expect(V.some((x: any) => x.calls.some((c: any) => c[0] === 'effect'))).toBe(true);
+      expect(V.some((x: any) => x.ret === 0)).toBe(true);
+    });
+    it(`${name}: null control without the 0x60 cap disagrees`, () => {
+      let bad = 0;
+      for (const v of V) { try { const { r, calls, ch } = run(v, { noCap: true }); if (r !== v.ret || JSON.stringify(calls) !== JSON.stringify(v.calls) || JSON.stringify(ch) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
+      expect(bad).toBeGreaterThan(0);
+    });
+  }
 });
