@@ -241,7 +241,18 @@ Each = `u16LE` size word + ScreenDecoder RLE stream at **320×200**, 0
 remainder on all 10. Colour remap `_indexes = [0,2,4,15]` (screen 2 uses
 `[0,3,5,15]`) — `views/title.cpp` `Title::msgFocus`. → `screens/title-*.png`.
 
-### `MM.RSM` — overlay-loader symbol table (6656 B, **hypothesis**, observed)
+### `MM.RSM` — overlay-loader symbol table (6656 B, **confirmed**, 579 symbols)
+
+> **Correction (2026-11-26):** the 412-symbol count and the "address
+> encoding open" status below are superseded. Record = `[type][0x28][off16 LE][name\0]`:
+> the 4-byte field **precedes its own name** (the old pairing was shifted by
+> one). 579 symbols; type 2 = code (CS offset = `MM.EXE` image offset, image =
+> file[0x200:]), type 3 = data (DS offset; DS = CS+0x107B paragraphs, i.e. DS:0 =
+> image 0x107B0). Verified by code at the addresses (`loadabort_` at CS:0x10D
+> prints "Error %d loading overlay"; `itemlow`/`mondata` land on the known
+> table offsets). Used by `tools/mm1/rules_oracle/lst.py`. Closes
+> `mm1-rsm-encoding`. See `game-rules.md` §0.
+
 
 Not consumed by ScummVM. `parse_rsm_symbols()` (`scripts/extract_mm1_misc.py`)
 scans null-terminated names, each followed by a 4-byte address field
