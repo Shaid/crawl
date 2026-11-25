@@ -26,7 +26,7 @@ import {
 import { popDue, type DueEvent } from './rules-pop';
 import { monsterDeath, damageCharacter, enterParty, cancelEventsFor, triggerActions } from './rules-death';
 import { executeAction, glyphEffect, pitEffect, doorClick, keyUse, type ExecHooks } from './rules-action';
-import { useItem, type ItemCallee } from './rules-item';
+import { useItem, lightEffect, type ItemCallee } from './rules-item';
 import { ramBossItem } from './rules-boss';
 import { ObjectWorld } from './object-world';
 
@@ -484,8 +484,8 @@ export class BcSim extends ObjectWorld {
   }
   /**
    * USE AN ITEM (`+0x12FEA`, harness for the shell, the effect map and the inline potions: rules-item.ts). The routines the effects 0x80..0x90 call are supplied here from the ports that are harnessed
-   * elsewhere (rays: castRay with the constant parameters, DISPEL: dispel, HEALING: healTarget, RAISE DEAD: raiseDead, the boss items: ramBossItem / forceHammer); LIGHT (`+0x58C6`) is taken to add
-   * 120 to the light counter like spell 1 (hyp: not diffed on its own).
+   * elsewhere (rays: castRay with the constant parameters, DISPEL: dispel, HEALING: healTarget, RAISE DEAD: raiseDead, the boss items: ramBossItem / forceHammer); LIGHT (`+0x58C6`, `lightEffect`, harness 40 / 40) adds
+   * 120 to the light counter.
    */
   useItem(k: number, item: number, ui: { pick?: number } = {}): number {
     const a = this.a;
@@ -496,7 +496,7 @@ export class BcSim extends ObjectWorld {
         case 0x4c46: return dispel(a, args[0], 2);
         case 0x5070: { const tgt = a.w(0x1e74 + 2 * (ui.pick ?? k)); const c = this.spChars()[tgt]; healTarget(c as unknown as SpChar, args[0], this.rng); a.setW(CH(tgt) + 0x4e, c.hp); return 1; }
         case 0x5cfa: return raiseDead(a, this.t.statBonusT1, ui.pick ?? 0xffff);
-        case 0x58c6: a.setW(0x1754, (a.w(0x1754) + 120) & 0xffff); return 1;
+        case 0x58c6: return lightEffect(a);
         case 0x78da: return this.bossItem('prot');
         case 0x79c2: return this.bossItem('sf');
         case 0x7b2e: return this.bossItem('vx');

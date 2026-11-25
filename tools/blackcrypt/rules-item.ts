@@ -82,3 +82,13 @@ export function useItem(a: A4Mem, rng: BcRng, t1: number[], ch: number, item: nu
   }
   return s16(d3);
 }
+
+/**
+ * LIGHT `+0x58C6` (item effect 0x80, also the tail of spell 1): `light (A4+0x1754) += 120` (16-bit wrap), then the palette setter `+0x2D46(1)` and one redraw `+0x4AE` (both UI, hooked), returns 1.
+ * No RNG, no other state. Harness: `rules-light.test.ts` against `vectors_light.json.gz` (40 / 40, null control).
+ */
+export function lightEffect(a: A4Mem, calls?: number[][]): number {
+  a.setW(0x1754, (a.w(0x1754) + 120) & 0xffff);
+  calls?.push([0x2d46, 1], [0x4ae]);
+  return 1;
+}

@@ -682,10 +682,10 @@ Evidence labels as before. No protection data was read or recorded. New files: `
 * **Vitals-tick DamageCharacter flag (resolved, harness).** In the committed tick vectors all 1,157 `+0x17686` calls from the tick handler carry flag 1; the sim passes 1.
 
 ### 15.5 `bc-sim.ts` after this pass
-New commands: `openDoor` (party click), `trigger {x, y, type}` (plate / lever), `useKey`, `cursor`, `use {char, item, pick?}`. `move` runs pit / glyph / teleporter / trap verdicts; the effect slot (event 0x28) runs the real executor; DISMISS / BINDING (facing, with the real death), REFRESH, the boss items (PROTECTOR / SOULFREEZER / VORTEX via `ramBossItem`, FORCEHAMMER via `forceHammer`) are wired. `useItem` supplies the callee routines from the ports harnessed elsewhere; LIGHT (`+0x58C6`) is **hyp** (taken as +120 light like spell 1, not diffed alone). Tests: `bc-sim.test.ts` (17), `bc-sim-world.test.ts` (12: trap, delayed plate, lever, glyphs, pit, key, door, ray-kill order, item use, boss items, DISMISS / BINDING), `bc-playthrough.test.ts` (second playthrough: trap, plate, glyph, locked door and key, pit, potion, PROTECTOR, SOULFREEZER, VORTEX, FORCEHAMMER, with facts, null controls and a golden timeline). `combat-sim.ts` is **not retired**: its 26 tests still cover the legacy path; bc-sim is the superset and the module to build the remake on.
+New commands: `openDoor` (party click), `trigger {x, y, type}` (plate / lever), `useKey`, `cursor`, `use {char, item, pick?}`. `move` runs pit / glyph / teleporter / trap verdicts; the effect slot (event 0x28) runs the real executor; DISMISS / BINDING (facing, with the real death), REFRESH, the boss items (PROTECTOR / SOULFREEZER / VORTEX via `ramBossItem`, FORCEHAMMER via `forceHammer`) are wired. `useItem` supplies the callee routines from the ports harnessed elsewhere; LIGHT (`+0x58C6`) is **harness** since 2026-11-26 (`lightEffect`, section 16.1; was hyp). Tests: `bc-sim.test.ts` (17), `bc-sim-world.test.ts` (12: trap, delayed plate, lever, glyphs, pit, key, door, ray-kill order, item use, boss items, DISMISS / BINDING), `bc-playthrough.test.ts` (second playthrough: trap, plate, glyph, locked door and key, pit, potion, PROTECTOR, SOULFREEZER, VORTEX, FORCEHAMMER, with facts, null controls and a golden timeline). `combat-sim.ts` is **not retired**: its 26 tests still cover the legacy path; bc-sim is the superset and the module to build the remake on.
 
 ### 15.6 What is NOT harness-verified (final list)
-* **Code only:** the stairs / teleporter map load `+0x16C62` (I/O); the ray-kill composition (damage -> death) as one routine; the callee spell routines inside item use as composed (each is harnessed alone); LIGHT `+0x58C6` effect (**hyp**).
+* **Code only:** the stairs / teleporter map load `+0x16C62` (I/O); the ray-kill composition (damage -> death) as one routine; the callee spell routines inside item use as composed (each is harnessed alone).
 * **UI only:** text, redraw flags, sounds, the executor's second-pass sound, the `+0x8C54E` presentation.
 * **Hyp:** PAL as default region; negative corpse index; generator real-time rate; hand 0 = `+0x1C`; glyph kinds 0 and >= 5 register garbage.
 * **Open, small:** a composed harness for ray -> death; LIGHT in isolation; the held-party click whitelist; turn cost.
@@ -864,3 +864,12 @@ None: no BUY/SELL/PRICE/COIN strings (GOLD occurs only in key names), no currenc
 
 ### B. Open list (status 2026-11-23)
 1. ~~Use-effects 0x8D-0x90 names~~ named (§10.6).  2. ~~Stat index to name map~~ solved (§8.9).  3. ~~Ogreblade curse~~ no mechanical drain found (§8.10).  4. Counter `+0x89` unused (§10.6), `+0x8D` / `+0x8E` = ice / fire resist flags.  5. ~~Starting food/water/energy~~ solved (§1.3).  6. Held-party click whitelist read (§10.6; region meaning hyp).
+
+
+## 16. Pass 9 (2026-11-26)
+
+### 16.1 LIGHT `+0x58C6` (harness)
+
+> **Correction (2026-11-26):** LIGHT as item effect 0x80 was **hyp** ("taken as +120 like spell 1, not diffed alone"). The routine now runs for real in `oracle_spell` (`make_vectors_light.py`, `vectors_light.json.gz`, 40 cases, random light counters incl. 16-bit wrap): `A4+0x1754 += 120` (word wrap), then hooked UI calls `+0x2D46(1)` and `+0x4AE`, returns 1; no RNG, no other byte written. TS: `lightEffect` in `rules-item.ts`, wired in `bc-sim.ts`; `rules-light.test.ts` (40 / 40, null control +100 disagrees). The hyp was right.
+
+Still open in Black Crypt (not reached this pass): stairs map-load I/O `+0x16C62`, held-party click whitelist, ray-kill composition as one routine.
