@@ -761,3 +761,27 @@ function dirVec(m: Mem): [number, number] {
   if (d === 0x57) return [0xff, 0];
   throw new Error('facing byte not E/N/S/W');
 }
+
+/**
+ * OVL+0x201A exchange stats (pass 6): the UI prompts for a letter A..G naming the second stat; `nextKey()` is the game's key reader (range-limited
+ * to 'A'..'G' or ESC in the real UI; here it is scripted and may return anything). The letter goes through the C-library toupper (CODE+0x2408E, a-z only);
+ * ESC leaves, a value above 0x47 asks again, the same stat leaves, otherwise the two stat bytes are swapped, the class flags are recomputed (0x1DF4)
+ * and the stats screen is redrawn (UI). Returns true when it swapped.
+ */
+export function exchangeStats(m: Mem, idx: number, st: number, fl: number, nextKey: () => number, o: { noUpper?: boolean; noFlags?: boolean } = {}): boolean {
+  let k: number;
+  for (;;) {
+    let c = nextKey() & 0xff;
+    if (!o.noUpper && c > 0x60 && c <= 0x7a) c -= 0x20;
+    k = c;
+    if (k === 0x1b || k <= 0x47) break;
+  }
+  if (k === 0x1b) return false;
+  k -= 0x41;
+  if (s8(idx & 0xff) === k) return false;
+  const t = m.r8(st + k);
+  m.w8(st + k, m.r8(st + s8(idx & 0xff)));
+  m.w8(st + s8(idx & 0xff), t);
+  if (!o.noFlags) chargenFlags(m, st, fl);
+  return true;
+}

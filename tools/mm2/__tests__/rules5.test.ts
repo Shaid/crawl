@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter } from '../rules5.ts';
+import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats } from '../rules5.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -339,4 +339,26 @@ describe('remaining non-combat spell handlers (1 5 10 12 15 30 34 37 38 47 57 71
   nullCase('Uncurse accepting 0xFF flags disagrees', { mut: 'v95' }, [95]);
   nullCase("Nature's Gate ignoring the overland-mode word disagrees", { mut: 'v57' }, [57]);
   nullCase('Raise Dead not ageing the target disagrees', { mut: 'v87' }, [87]);
+});
+
+describe('character creation: exchange stats (OVL+0x201A)', () => {
+  const V = load('cgxchg');
+  const run = (v: any, o: any = {}) => {
+    const m = mem(v);
+    const ks = [...v.keys];
+    exchangeStats(m, v.idx, v.stats, v.flags, () => ks.shift() ?? 0x1b, o);
+    return m.changes();
+  };
+  it('matches the game: key loop, toupper, swap, eligibility recompute', () => {
+    for (const v of V) expect(run(v)).toEqual(v.fin);
+    expect(V.some((v: any) => Object.keys(v.fin).length > 3)).toBe(true);
+    expect(V.some((v: any) => Object.keys(v.fin).length === 0)).toBe(true);
+  });
+  it('null controls: no toupper / no flag recompute disagree', () => {
+    for (const o of [{ noUpper: true }, { noFlags: true }]) {
+      let bad = 0;
+      for (const v of V) { try { if (JSON.stringify(run(v, o)) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
+      expect(bad).toBeGreaterThan(5);
+    }
+  });
 });
