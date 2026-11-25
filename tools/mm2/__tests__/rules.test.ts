@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { resolve } from 'node:path';
 import { StrictMem } from '../rules-mem.ts';
-import { damageChar, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
+import { damageChar, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
 
 const DIR = resolve('tools/mm2/rules_oracle');
 export function load(name: string): any[] {
@@ -138,6 +138,105 @@ describe('stat bonus (CODE+0x4442), luck save (0x48BA), damage_char (0x4952)', (
     for (const v of V) {
       try { if (JSON.stringify(run(v, { noQuarter: true })) !== JSON.stringify(v.fin)) bad++; } catch { bad++; }
     }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('party attack roll (CODE+0x111DA)', () => {
+  const V = load('pmelee');
+  const run = (v: any, o = {}) => {
+    const m = mem(v);
+    const r = partyAttack(m, v.tgt, o);
+    return { calls: r.calls, ch: m.changes() };
+  };
+  it('matches the game: hit/miss ladder, damage, class crits, RNG draws, every byte written', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const o = run(v);
+      expect(o.calls).toEqual(v.calls);
+      expect(o.ch).toEqual(v.fin);
+    }
+  });
+  it('null controls: no class crits, or ignoring monster AC, both disagree', () => {
+    for (const o of [{ noCrit: true }, { flatAc: true }]) {
+      let bad = 0;
+      for (const v of V) {
+        try { if (JSON.stringify(run(v, o).ch) !== JSON.stringify(v.fin)) bad++; } catch { bad++; }
+      }
+      expect(bad).toBeGreaterThan(0);
+    }
+  });
+});
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+describe('small combat/character rules', () => {
+  it('monster ability use gate (CODE+0x105B6)', () => {
+    const V = load('monspecial');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) { const m = mem(v); expect(monsterUsesAbility(m)).toBe(v.ret); expect(m.changes()).toEqual(v.fin); }
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { monsterUsesAbility(m, { alwaysSpend: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+  it('kill reward (CODE+0x10B70)', () => {
+    const V = load('killreward');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) { const m = mem(v); killReward(m); expect(m.changes()).toEqual(v.fin); }
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { killReward(m, { noShift: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+  it('party power for encounters (CODE+0x11E58)', () => {
+    const V = load('partystrength');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) { const m = mem(v); partyPower(m); expect(m.changes()).toEqual(v.fin); }
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { partyPower(m, { noDifficulty: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+  it('monster spell damage (CODE+0x1F6DC)', () => {
+    const V = load('mspelldmg');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) { const m = mem(v); monsterSpellDamage(m, v.arg); expect(m.changes()).toEqual(v.fin); }
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { monsterSpellDamage(m, v.arg, { plain: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+  it('stat sync to working copies (CODE+0x4476)', () => {
+    const V = load('sync');
+    expect(V.length).toBeGreaterThan(10);
+    for (const v of V) { const m = mem(v); syncStats(m, v.char); expect(m.changes()).toEqual(v.fin); }
+  });
+});
+
+describe('spell level and spell points (CODE+0x20064)', () => {
+  const V = load('spelllevel');
+  it('matches the game: spell-level gate, class caps, spell-book bits, SP formula', () => {
+    expect(V.length).toBeGreaterThan(30);
+    expect(V.some((v: any) => v.ret === 1)).toBe(true);
+    for (const v of V) { const m = mem(v); expect(learnSpellLevel(m, 0)).toBe(v.ret); expect(m.changes()).toEqual(v.fin); }
+  });
+  it('null control: SP without the +3 disagrees', () => {
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { learnSpellLevel(m, 0, { halfOnly: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('end-of-battle XP award (CODE+0x12430)', () => {
+  const V = load('xpaward');
+  it('matches the game: pool / living members added to each living member', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const m = mem(v);
+      const r = xpAward(m);
+      expect(m.changes()).toEqual(v.fin);
+      expect(v.calls.some((c: any) => c[0] === 'treasure')).toBe(r.treasure);
+    }
+  });
+  it('null control: dividing by the whole party instead of the living disagrees', () => {
+    let bad = 0;
+    for (const v of V) { const m = mem(v); try { xpAward(m, { allMembers: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
     expect(bad).toBeGreaterThan(0);
   });
 });

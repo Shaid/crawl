@@ -293,3 +293,250 @@ export function damageChar(m: Mem, ch: number, dmg: number, pB: number, pA: numb
   }
   m.w16(g(-3852), dmg);
 }
+
+/* -------------------------------------- party attack roll (CODE+0x111DA) */
+
+/**
+ * Party member attacks monster `target` (melee, or ranged when A4-24114 == 1).
+ * Per attack (count = level / classTbl[-28470] + 1):
+ *   d = d100: < 6 hits outright, < 9 misses outright
+ *   else r = rand(1, (class-flag bit0 of +0x26 ? 3 : 25) + level/classTbl[-28478]) (cap 250),
+ *        s = r + (weapon accuracy byte + stat_bonus(accuracy +0x6F) + A4-31133)
+ *        s > 255 hit; s <= 10 miss; (s&255) - A4-31141 outside 0..127 miss;
+ *        else hit iff (s&255) >= monster AC
+ *   hit: damage = rand(1, dieByte) + (weapon bonus + stat_bonus(might +0x6B)), > 250 -> 1
+ * Total damage += A4-31129 when anything hit. Melee only: Robber (class 5) crit on d<5 or >90
+ * (x2), Ninja (class 6) on d<5 or >94 (x4), d = rand(1, 100 + min(+0x72,100)).
+ * The result is handed to CODE+0x11040 (messages and damage application), reported as
+ * `resolve [damage, hits, crit]`. The interactive target prompt (target 0xFF) is not modelled.
+ */
+export function partyAttack(m: Mem, target: number, opts: { noCrit?: boolean; flatAc?: boolean } = {}): { calls: [string, number[]][] } {
+  const mode = m.r8(g(-24114));
+  let n = mode === 1 ? m.r8(g(-30654)) : m.r8(g(-1316));
+  if (n > 10) n = 10;
+  let arg = target & 0xff;
+  if (n <= 1) arg = 0;
+  if (arg === 0xff) throw new Error('interactive target prompt not modelled');
+  m.w8(g(-1309), arg);
+  const ch = charPtr(m, m.r8(g(-1269)));
+  unpackMonster(m, arg);
+  for (const d of [-24106, -24111, -24112, -24113]) m.w8(g(d), 0);
+  m.w16(g(-3852), 0);
+  const cls = m.r8(ch + 15);
+  const lvl = m.r8(ch + 113);
+  m.w8(g(-24108), Math.floor(lvl / m.r8(g(-28478) + cls)) & 0xff);
+  m.w8(g(-24110), (Math.floor(lvl / m.r8(g(-28470) + cls)) + 1) & 0xff);
+  m.w8(g(-24109), m.r8(g(-24110)));
+  m.w8(g(-24112), m.r8(ch + 76));
+  m.w8(g(-24107), m.r8(ch + 77));
+  if (mode === 1) {
+    m.w8(g(-24107), m.r8(ch + 79));
+    if (cls !== 2) m.w8(g(-24112), m.r8(ch + 78));
+    else m.w8(g(-24111), randRange(m, 1, Math.min(m.r8(ch + 113), 100)));
+  }
+  const add8 = (d: number, v: number) => m.w8(g(d), (m.r8(g(d)) + v) & 0xff);
+  add8(-24111, m.r8(g(-24107)));
+  add8(-24111, statBonus(m, m.r8(ch + 107)));
+  add8(-24107, statBonus(m, m.r8(ch + 111)));
+  add8(-24107, m.r8(g(-31133)));
+  for (let i = 0; i < m.r8(g(-24110)); i++) {
+    let hit = 0;
+    const d = randRange(m, 1, 100) & 0xff;
+    if (d < 6) hit = 1;
+    else if (d < 9) hit = 0;
+    else {
+      const t = m.r8(ch + 38) & 1 ? 3 : 25;
+      let w = t + m.r8(g(-24108));
+      if (w > 250) w = 250;
+      const s = (randRange(m, 1, w) + m.r8(g(-24107))) & 0xffff;
+      if (s > 255) hit = 1;
+      else if (s <= 10) hit = 0;
+      else if ((((s & 0xff) - m.r8(g(-31141))) & 0xffff) >= 0x80) hit = 0;
+      else hit = (s & 0xff) < (opts.flatAc ? 0 : m.r8(g(-4532))) ? 0 : 1;
+    }
+    if (hit) {
+      let dmg = (randRange(m, 1, m.r8(g(-24112))) + m.r8(g(-24111))) & 0xff;
+      if (dmg > 0xfa) dmg = 1;
+      add8(-24113, 1);
+      m.w16(g(-3852), m.r16(g(-3852)) + dmg);
+    }
+  }
+  if (m.r8(g(-24113)) !== 0) m.w16(g(-3852), m.r16(g(-3852)) + m.r8(g(-31129)));
+  if (mode === 0 && !opts.noCrit) {
+    const r = randRange(m, 1, 100 + Math.min(m.r8(ch + 114), 100)) & 0xff;
+    if (m.r8(ch + 15) === 5) {
+      if (r > 0x5a || r < 5) {
+        add8(-24106, 1);
+        m.w16(g(-3852), m.r16(g(-3852)) * 2);
+      }
+    } else if (m.r8(ch + 15) === 6) {
+      if (r > 0x5e || r < 5) {
+        m.w8(g(-24106), 2);
+        m.w16(g(-3852), m.r16(g(-3852)) * 4);
+      }
+    }
+  }
+  return { calls: [['resolve', [m.r16(g(-3852)), m.r8(g(-24113)), m.r8(g(-24106))]]] };
+}
+
+/* --------------------------------------------- monster/party small rules */
+
+/**
+ * CODE+0x105B6: may the acting monster use its group ability this turn?
+ * Needs: not status bit 6, ability uses left (A4-1283[slot]) > 0, and rand(1,100) <= the
+ * unpacked ability-chance tier (A4-4539, from pabil bits 5-7 -> table {0,10,20,35,50,75,90,100}).
+ * Spends one use. Returns 1/0.
+ */
+export function monsterUsesAbility(m: Mem, opts: { alwaysSpend?: boolean } = {}): number {
+  let f = 0;
+  const r = randRange(m, 1, 100) & 0xff;
+  const slot = m.r8(g(PARTY.curMon));
+  if (!(m.r8(g(-1305) + slot) & 0x40) && m.r8(g(-1283) + slot) !== 0 && !(m.r8(g(-4539)) < r)) f = 1;
+  if (f || opts.alwaysSpend) m.w8(g(-1283) + slot, (m.r8(g(-1283) + slot) - 1) & 0xff);
+  return f;
+}
+
+/**
+ * CODE+0x10B70 reward for the monster in A4-1309 that just died: unpacked flag bytes
+ * (treasure field of monsters.dat) drive three accumulators.
+ *  gems  (A4-16146, u16) += rand(1,10)                          if A4-4542
+ *  gold  (A4-16144, u32) += rand(1,50)+6 + (b << 8) where b = id (>>4 if A4-4543==2, >>1 if >=3)
+ *        plus rand(1,b); b = 0 when A4-4543 == 1                 if A4-4543
+ *  item tier (A4-24105/-24104) records the best (id>>4, A4-4541) seen so far  if A4-4541
+ *  xp pool (A4-28614, u32) += unpacked monster xp (A4-4510)
+ */
+export function killReward(m: Mem, opts: { noShift?: boolean } = {}): void {
+  const slot = () => m.r8(g(-1309));
+  let b = 0;
+  if (m.r8(g(-4542))) m.w16(g(-16146), m.r16(g(-16146)) + randRange(m, 1, 10));
+  const k = m.r8(g(-4543));
+  if (k) {
+    b = m.r8(g(-4574) + slot());
+    if (k === 2) b = (b >> 4) & 0xff;
+    if (k >= 3) b = (b >> 1) & 0xff;
+    b = (b + randRange(m, 1, b)) & 0xff;
+    const w4 = (randRange(m, 1, 50) + 6) & 0xffff;
+    if (k === 1) b = 0;
+    m.w32(g(-16144), m.r32(g(-16144)) + w4);
+    m.w32(g(-16144), m.r32(g(-16144)) + (opts.noShift ? b : (b << 8) & 0xffff));
+  }
+  const t = m.r8(g(-4541));
+  if (t && !(t < m.r8(g(-24105)))) {
+    m.w8(g(-24104), m.r8(g(-4574) + slot()) >> 4);
+    m.w8(g(-24105), t);
+  }
+  m.w32(g(-28614), m.r32(g(-28614)) + m.r32(g(-4510)));
+}
+
+/**
+ * CODE+0x11E58 party power for encounter generation: sum of every member's +0x74 word,
+ * / 8, then by difficulty (A4-31150): 0 -> /4, 1 -> /2, 3 -> x2 (2 unchanged); also leaves
+ * half the highest member level (+0x71 / 2) in A4-28610.
+ */
+export function partyPower(m: Mem, opts: { noDifficulty?: boolean } = {}): void {
+  m.w32(g(-28618), 0);
+  let top = 0;
+  const size = s16(m.r16(g(PARTY.size)));
+  for (let i = 0; i < size; i++) {
+    const ch = charPtr(m, i);
+    m.w32(g(-28618), m.r32(g(-28618)) + m.r16(ch + 116));
+    const half = m.r8(ch + 113) >> 1;
+    if (half > top) top = half;
+  }
+  m.w32(g(-28618), Math.floor(m.r32(g(-28618)) / 8));
+  const d = m.r8(g(-31150));
+  if (!opts.noDifficulty) {
+    if (d === 0) m.w32(g(-28618), Math.floor(m.r32(g(-28618)) / 4));
+    if (d === 1) m.w32(g(-28618), Math.floor(m.r32(g(-28618)) / 2));
+    if (d === 3) m.w32(g(-28618), Math.imul(m.r32(g(-28618)), 2) >>> 0);
+  }
+  m.w8(g(-28610), top);
+}
+
+/** CODE+0x1F6DC monster-cast spell damage: adds (record index>>4) dice rand(1,n) to A4-3852, then x2 + 1. */
+export function monsterSpellDamage(m: Mem, n: number, opts: { plain?: boolean } = {}): void {
+  const tier = m.r8(g(-4574) + m.r8(g(PARTY.curMon))) >> 4;
+  for (let d = 0; d < tier; d++) m.w16(g(-3852), m.r16(g(-3852)) + randRange(m, 1, n));
+  if (!opts.plain) {
+    m.w16(g(-3852), (m.r16(g(-3852)) * 2) & 0xffff);
+    m.w16(g(-3852), m.r16(g(-3852)) + 1);
+  }
+}
+
+/**
+ * CODE+0x04476 copies the character's stored stats into the working copies combat reads:
+ * +0x6B <- +0x10 (might), +0x6F <- +0x14 (accuracy), +0x6D <- +0x12 (personality), +0x6C <- +0x11 (int),
+ * +0x71 <- +0x20 (level), +0x72 <- +0x23 (spell level), +0x6E <- +0x13 (speed).
+ */
+export function syncStats(m: Mem, ch: number): void {
+  for (const [dst, src] of [[107, 16], [111, 20], [109, 18], [108, 17], [113, 32], [114, 35], [110, 19]] as const) m.w8(ch + dst, m.r8(ch + src));
+}
+
+/* ----------------------------------------- spell level / spell points */
+
+export const CLASS = { knight: 0, paladin: 1, archer: 2, cleric: 3, sorcerer: 4, robber: 5, ninja: 6, barbarian: 7 } as const;
+
+/**
+ * CODE+0x20064 learn_spell_level(slot): called when a character may have earned a new spell
+ * level. w = level (+0x20) for Cleric/Sorcerer, level - 5 for the other classes, then
+ * w = w/2 (arithmetic shift, only when > 0). Nothing happens unless 1 <= w <= 10 and w is
+ * above the character's current spell level (+0x23). Paladin/Archer cap w at 7.
+ * On success: +0x23 and +0x72 = w; the first four spells of tier w (clerical table
+ * A4-25762 for Paladin/Cleric, sorcerous A4-25794 for Archer/Sorcerer, 4 entries per
+ * tier, 0x80 = none, > 0x2F -> -0x30) are OR-ed into the spell book at +0x51;
+ * SP max = SP current = (bonus(INT for Archer/Sorcerer else PERSONALITY) + 3) * w
+ * (a stat bonus byte >= 0xF2, i.e. negative, counts as 0). Returns 1, else 0.
+ */
+export function learnSpellLevel(m: Mem, slot: number, opts: { halfOnly?: boolean } = {}): number {
+  const ch = charPtr(m, slot);
+  const cur = m.r8(ch + 35);
+  let w = m.r8(ch + 32);
+  const cls = m.r8(ch + 15);
+  if (cls !== 3 && cls !== 4) w -= 6;
+  w += 1;
+  if (w > 0) w >>= 1;
+  if (w < 1 || w > 10) return 0;
+  if (!(w > cur)) return 0;
+  if ((cls === 2 || cls === 1) && w > 7) w = 7;
+  m.w8(ch + 114, w & 0xff);
+  m.w8(ch + 35, w & 0xff);
+  const tbl = cls === 3 || cls === 1 ? -25762 : -25794;
+  for (let k = 0; k < 4; k++) {
+    let t = m.r8(g(tbl) + (w - 1) * 4 + k);
+    if (t === 0x80) continue;
+    if (t > 0x2f) t -= 0x30;
+    const a = ch + (t >> 3);
+    m.w8(a + 81, m.r8(a + 81) | m.r8(g(-25802) + (t & 7)));
+  }
+  let b = statBonus(m, m.r8(ch + (cls === 2 || cls === 4 ? 17 : 18)));
+  if (b >= 0xf2) b = 0;
+  const sp = (opts.halfOnly ? b : (b + 3) * w) & 0xffff;
+  m.w16(ch + 88, sp);
+  m.w16(ch + 90, sp);
+  return 1;
+}
+
+/* ------------------------------------------------ end-of-battle XP award */
+
+/**
+ * CODE+0x12430 (the non-UI part): the encounter's XP pool (A4-28614, summed by killReward)
+ * is divided by the number of party members whose condition byte (+0x26) is < 0x80, and
+ * each of those gets the share added to the u32 at +0x62. Treasure (CODE+0x123B0) is
+ * triggered when a treasure tier was recorded (A4-24105 or A4-24104 non-zero). Also sets
+ * A4-30653 = 1 and A4-31052 = 0. Reported call: `treasure` (when it ran).
+ */
+export function xpAward(m: Mem, opts: { allMembers?: boolean } = {}): { treasure: boolean } {
+  m.w8(g(-30653), 1);
+  m.w8(g(-31052), 0);
+  const treasure = m.r8(g(-24105)) !== 0 || m.r8(g(-24104)) !== 0;
+  const size = s16(m.r16(g(PARTY.size)));
+  let living = 0;
+  for (let i = 0; i < size; i++) if (m.r8(charPtr(m, i) + 38) < 0x80 || opts.allMembers) living++;
+  m.w32(g(-28614), Math.floor(m.r32(g(-28614)) / living));
+  for (let i = 0; i < size; i++) {
+    const ch = charPtr(m, i);
+    if (m.r8(ch + 38) >= 0x80) continue;
+    m.w32(ch + 98, m.r32(ch + 98) + m.r32(g(-28614)));
+  }
+  return { treasure };
+}

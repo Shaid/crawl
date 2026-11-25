@@ -162,7 +162,135 @@ def gen_dmgchar(n, rnd):
         out.append({'char': a, 'dmg': dmg, 'seed': seed, 'pA': HEAP, 'pB': HEAP + 1, 'pC': HEAP + 2, **v})
     return out
 
-UNITS = {'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
+def gen_pmelee(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    md = mondata(); e.uc.mem_write(HEAP + 0x1000, md)
+    for off in (0x1119E, 0x22376, 0x218EA, 0x22108, 0x22480, 0x06DA6, 0x097A2, 0x2408E, 0x044E0):
+        e.stub(off, 'ui%x' % off, nargs=0)
+    e.stub(0x11040, 'resolve', nargs=0, argfn=lambda e: [e.r16(g(-3852)), e.r8(g(-24113)), e.r8(g(-24106))])
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        mode = rnd.randint(0, 1)
+        cnt = rnd.randint(1, 11); grp = rnd.randint(1, 11)
+        tgt = rnd.randint(0, max(0, min(cnt, 10) - 1))
+        cls = rnd.randint(0, 7)
+        def setup(e, mode=mode, cnt=cnt, grp=grp, tgt=tgt, cls=cls):
+            sl(e, SEED, seed)
+            sl(e, P_MONBUF, HEAP + 0x1000)
+            idxs = setup_party(e, rnd)
+            ci = rnd.randrange(len(idxs)); sb(e, -1269, ci)
+            a = g(-10814) + idxs[ci] * 130
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            e.w8(a + 15, cls); e.w8(a + 113, rnd.choice([rnd.randint(1, 20), rnd.randint(1, 60), rnd.randint(1, 255)]))
+            e.w8(a + 38, rnd.choice([0, 1, 0, rnd.getrandbits(8)]))
+            for fld in (76, 77, 78, 79): e.w8(a + fld, rnd.randint(0, 40))
+            e.w8(a + 107, rnd.randint(1, 80)); e.w8(a + 111, rnd.randint(1, 80)); e.w8(a + 114, rnd.randint(0, 150))
+            sb(e, -24114, mode); sb(e, -30654, cnt); sb(e, -1316, grp)
+            sb(e, -31133, rnd.choice([0, 0, rnd.randint(0, 20)])); sb(e, -31129, rnd.choice([0, rnd.randint(0, 20)]))
+            sb(e, -31141, rnd.choice([0, 0, rnd.randint(0, 60), rnd.getrandbits(8)]))
+            for k in range(11): sb(e, -4574 + k, rnd.randint(0, 255))
+            # synthetic monster record for the target (no retail bytes in the vectors); AC low 5 bits biased to span hit/miss
+            mid = e.r8(g(-4574 + tgt)); rec = bytearray(rnd.getrandbits(8) for _ in range(26))
+            rec[22] = rnd.choice([rnd.randint(0, 31), rnd.randint(0, 31) + 32, rnd.getrandbits(8)])
+            e.uc.mem_write(HEAP + 0x1000 + mid * 26, bytes(rec))
+            sw(e, -3852, rnd.getrandbits(16))
+            for d in (-24106, -24111, -24112, -24113): sb(e, d, rnd.getrandbits(8))
+        v = R.run(0x111DA, (tgt,), setup, max_insn=400000)
+        out.append({'seed': seed, 'tgt': tgt, **v})
+    return out
+
+def rnd_byte(rnd, small=None):
+    return rnd.choice([0, 0, 1, 2, 3, rnd.randint(0, 20), rnd.getrandbits(8)])
+
+def gen_monspecial(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed)
+            slot = rnd.randint(0, 10); sb(e, P_MONSLOT, slot)
+            sb(e, -1305 + slot, rnd.choice([0, 0x40, 0x41, rnd.getrandbits(8)]))
+            sb(e, -1283 + slot, rnd_byte(rnd)); sb(e, -4539, rnd.choice([0, 10, 20, 35, 50, 75, 90, 100]))
+        out.append({'seed': seed, **R.run(0x105B6, (), setup)})
+    return out
+
+def gen_killreward(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed)
+            slot = rnd.randint(0, 10); sb(e, -1309, slot); sb(e, -4574 + slot, rnd.getrandbits(8))
+            sb(e, -4542, rnd.randint(0, 1)); sb(e, -4543, rnd.randint(0, 3)); sb(e, -4541, rnd.randint(0, 3))
+            sb(e, -24105, rnd.randint(0, 3)); sb(e, -24104, rnd.getrandbits(8))
+            sl(e, -4510, rnd.choice([rnd.randint(0, 5000), rnd.getrandbits(32)]))
+            sl(e, -28614, rnd.getrandbits(32)); sw(e, -16146, rnd.getrandbits(16)); sl(e, -16144, rnd.getrandbits(32))
+        out.append({'seed': seed, **R.run(0x10B70, (), setup)})
+    return out
+
+def gen_partystrength(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        def setup(e):
+            idxs = setup_party(e, rnd)
+            for r in idxs:
+                a = g(-10814) + r * 130
+                e.w8(a + 113, rnd.choice([rnd.randint(1, 20), rnd.randint(1, 255)])); e.w16(a + 116, rnd.choice([rnd.randint(0, 300), rnd.getrandbits(16)]))
+            sb(e, -31150, rnd.randint(0, 3)); sl(e, -28618, rnd.getrandbits(32)); sb(e, -28610, rnd.getrandbits(8))
+        out.append(R.run(0x11E58, (), setup))
+    return out
+
+def gen_mspelldmg(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        seed = rnd.getrandbits(32); arg = rnd.choice([2, 4, 6, 8, 10, 12, 20, rnd.randint(1, 100)])
+        def setup(e):
+            sl(e, SEED, seed)
+            slot = rnd.randint(0, 10); sb(e, P_MONSLOT, slot); sb(e, -4574 + slot, rnd.getrandbits(8)); sw(e, -3852, rnd.getrandbits(16))
+        out.append({'seed': seed, 'arg': arg, **R.run(0x1F6DC, (arg,), setup)})
+    return out
+
+def gen_sync(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        a = g(-10814) + rnd.randint(0, 47) * 130
+        def setup(e, a=a):
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+        out.append({'char': a, **R.run(0x4476, ((a, 4),), setup)})
+    return out
+
+def gen_spelllevel(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for i in range(n):
+        def setup(e):
+            idxs = setup_party(e, rnd)
+            a = g(-10814) + idxs[0] * 130
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            e.w8(a + 15, rnd.randint(0, 7)); e.w8(a + 32, rnd.choice([rnd.randint(1, 30), rnd.randint(1, 255)]))
+            e.w8(a + 35, rnd.choice([0, 0, rnd.randint(0, 9), rnd.getrandbits(8)]))
+            e.w8(a + 17, rnd.choice([rnd.randint(1, 30), rnd.randint(1, 255)])); e.w8(a + 18, rnd.choice([rnd.randint(1, 30), rnd.randint(1, 255)]))
+        out.append(R.run(0x20064, (0,), setup))
+    return out
+
+def gen_xpaward(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    for off in (0x042DC, 0x22076, 0x22108, 0x218EA, 0x22376, 0x2249C, 0x06FB8, 0x06798, 0x1215A):
+        e.stub(off, 'ui%x' % off, nargs=0)
+    e.stub(0x123B0, 'treasure', nargs=0)
+    for i in range(n):
+        def setup(e):
+            idxs = setup_party(e, rnd)
+            living = rnd.randint(1, len(idxs))
+            for j, r in enumerate(idxs):
+                a = g(-10814) + r * 130
+                e.w8(a + 38, rnd.choice([0, 0x10, 0x40]) if j < living else rnd.choice([0x80, 0x81, 0xff]))
+                e.w32(a + 98, rnd.choice([0, rnd.randint(0, 100000), rnd.getrandbits(32)]))
+            sl(e, -28614, rnd.choice([rnd.randint(0, 5000), rnd.randint(0, 3000000), rnd.getrandbits(32)]))
+            sb(e, -24105, rnd.randint(0, 3)); sb(e, -24104, rnd.randint(0, 3))
+        out.append(R.run(0x12430, (), setup))
+    return out
+
+UNITS = {'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
 
 def main():
     a = sys.argv[1:]
