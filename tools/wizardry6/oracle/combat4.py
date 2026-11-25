@@ -9,7 +9,7 @@ import json, os, struct, sys
 import random as pyrandom
 sys.path.insert(0, os.path.dirname(__file__))
 import combat as C
-C.KEEP_JT.add(-32124)          # the swap/copy helper: part of the rules (party order), not presentation
+C.KEEP_JT.update({-32124, -32478})          # the swap/copy helper: part of the rules (party order), not presentation
 from combat import *            # noqa: F401,F403
 from combat3 import build_world, ensure_living, pack, w8, w16, label_offsets, G6_MEM   # noqa: F401
 
@@ -144,6 +144,187 @@ def make_postcombat_vectors(n, seed):
 
 
 MAKERS['postcombat'] = make_postcombat_vectors
+
+TICK = 0x120da          # LAB_07FA(member, hpDie, stamMult, dt, spFlag): per-time-unit regen / poison / disease / timers
+
+
+def make_tick_vectors(n, seed):
+    """LAB_07FA: the party member's time tick (used per step by the world clock and per rest minute)."""
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    c._stub(c_off('LAB_0751'), 'LAB_0751', log=2)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        i = rng.randrange(6)
+        P = A4 - 17922 + i * 0x1b0
+        w8(fx, P + 417, rng.choice([0, 0, 0, 1, 2, 3, 4]))
+        for k in (418, 419, 420): w8(fx, P + k, rng.choice([0, 0, 0, 1, 2, 5]))
+        mx = rng.randrange(1, 200); w16(fx, P + 26, mx); w16(fx, P + 24, rng.choice([rng.randrange(-20, mx + 20), 1, 0]))
+        sm = rng.randrange(1, 300); w16(fx, P + 30, sm); w16(fx, P + 28, rng.choice([rng.randrange(-5, sm + 20), 0]))
+        for k in range(290, 300): w8(fx, P + k, rng.choice([0, 0, 1, 3, 10, 255]))
+        w8(fx, P + 293, rng.choice([0, 0, 2])); w8(fx, P + 292, rng.choice([0, 0, 4]))
+        for k in range(6):
+            smx = rng.randrange(0, 40); w16(fx, P + 42 + 4 * k, smx); w16(fx, P + 40 + 4 * k, rng.randrange(0, smx + 8))
+            w8(fx, P + 284 + k, rng.choice([0, 1, 2, 6]))
+        w8(fx, P + 414, rng.randrange(0, 6))
+        c.apply(fx.writes)
+        args = [i, rng.choice([0, 0, 6, 10, 20]), rng.choice([0, 0, 5, 10, 50]), rng.choice([1, 1, 2, 5, 60]), rng.choice([0, 1])]
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(TICK, args, seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'args': args}))
+    return out
+
+
+MAKERS['tick'] = make_tick_vectors
+
+REST = 0x12456          # LAB_0808(): camp (8 rest minutes, each +60 on the clock), returns 1 when a wandering encounter interrupts
+
+
+def make_rest_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    for nm in ('LAB_078D', 'LAB_0784'): c._stub(c_off(nm), nm, log=False)
+    c._stub(c_off('LAB_0751'), 'LAB_0751', log=2)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        np_ = rng.randrange(1, 5)
+        w16(fx, A4 - 15306, np_); w16(fx, A4 - 18610, 5); w16(fx, A4 - 10886, 0)
+        clock = rng.randrange(6000, 100000)
+        fx.writes.append((A4 - 18302, struct.pack('>I', clock)))
+        fx.writes.append((A4 - 18298, struct.pack('>I', clock - rng.choice([0, 30, 100, 1000, 5000]))))
+        fx.writes.append((A4 - 18294, struct.pack('>I', rng.choice([0, 100, 5000, 12000]))))
+        for k in range(6):
+            w16(fx, A4 - 18138 + 4 * k, rng.choice([0, 1, 30, 100, 600])); w16(fx, A4 - 18136 + 4 * k, rng.randrange(0, 50))
+        for i in range(6):
+            P = A4 - 17922 + i * 0x1b0
+            w8(fx, P + 417, rng.choice([0, 0, 0, 1, 3]))
+            for k in (418, 419, 420, 421, 422, 423): w8(fx, P + k, rng.choice([0, 0, 1, 2, 5, 9]))
+            mx = rng.randrange(1, 200); w16(fx, P + 26, mx); w16(fx, P + 24, rng.randrange(1, mx + 1))
+            sm = rng.randrange(1, 300); w16(fx, P + 30, sm); w16(fx, P + 28, rng.randrange(0, sm + 1))
+            for k in range(290, 300): w8(fx, P + k, rng.choice([0, 0, 1, 3, 10, 255]))
+            for k in range(6):
+                smx = rng.randrange(0, 40); w16(fx, P + 42 + 4 * k, smx); w16(fx, P + 40 + 4 * k, rng.randrange(0, smx + 8))
+                w8(fx, P + 284 + k, rng.choice([0, 1, 2, 6]))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(REST, [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['rest'] = make_rest_vectors
+
+STEP_TICK = 0x13d60     # LAB_08AE: the per-step clock / hunger / exhaustion / wandering-encounter tail of the post-move routine LAB_08A7
+STEP_TICK_END = 0x13f1c  # LAB_08BD: the routine falls through here when nothing happened
+
+
+def run_mid(c, entry, stop, seed):
+    """Run a stretch of a routine from mid-function `entry` (a fake LINK frame stands in for the skipped prologue) until it
+    returns or reaches `stop`. Same tracking as run_call."""
+    from unicorn.m68k_const import UC_M68K_REG_A5, UC_M68K_REG_A7, UC_M68K_REG_A4, UC_M68K_REG_PC
+    from unicorn import UC_HOOK_CODE
+    import emu as E
+    c.effects = []; c.written = {}; c.foot = {}; c.rargs = []
+    c.seed(*seed)
+    a5 = E.STACK_TOP - 0x800
+    c.w32(a5, 0); c.w32(a5 + 4, E.RET_MAGIC)
+    c.uc.reg_write(UC_M68K_REG_A5, a5); c.uc.reg_write(UC_M68K_REG_A7, a5 - 64); c.uc.reg_write(UC_M68K_REG_A4, c.A4)
+    hit = []
+    def stop_hook(uc, a, sz, ud): hit.append(1); uc.emu_stop()
+    h = c.uc.hook_add(UC_HOOK_CODE, stop_hook, begin=CODE_BASE + stop, end=CODE_BASE + stop)
+    c.tracking = True
+    try:
+        c.uc.emu_start(CODE_BASE + entry, E.RET_MAGIC + 0x100, count=200_000_000)
+    finally:
+        c.tracking = False
+        c.uc.hook_del(h)
+    diffs = {a: c.uc.mem_read(a, 1)[0] for a in c.written}
+    return {'foot': c.foot, 'diff': diffs, 'effects': c.effects, 'rng': list(c.state()), 'rargs': [], 'fell': bool(hit)}
+
+
+def make_steptick_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    for nm in ('LAB_078D', 'LAB_0784'): c._stub(c_off(nm), nm, log=False)
+    c._stub(c_off('LAB_0751'), 'LAB_0751', log=2)
+    tbl = c.alloc(2048); slot = c.alloc(16)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        np_ = rng.randrange(1, 5)
+        w16(fx, A4 - 15306, np_); w16(fx, A4 - 18610, 5); w16(fx, A4 - 10886, 0); w16(fx, A4 - 18330, rng.randrange(0, 12))
+        clock = rng.choice([rng.randrange(6000, 100000), 600 * rng.randrange(10, 100) + 5, 60 * rng.randrange(100, 900) + 10 * rng.randrange(6) + 4])
+        fx.writes.append((A4 - 18302, struct.pack('>I', clock)))
+        fx.writes.append((A4 - 18298, struct.pack('>I', clock - rng.choice([0, 30, 1000]))))
+        fx.writes.append((A4 - 18294, struct.pack('>I', rng.choice([0, 100, 5000]))))
+        for k in range(6):
+            w16(fx, A4 - 18138 + 4 * k, rng.choice([0, 1, 30, 100, 600])); w16(fx, A4 - 18136 + 4 * k, rng.randrange(0, 50))
+        for i in range(6):
+            P = A4 - 17922 + i * 0x1b0
+            w8(fx, P + 417, rng.choice([0, 0, 0, 1, 3] if rng.random() < .8 else [3, 3, 4]))
+            for k in (418, 419, 420, 421, 422, 423): w8(fx, P + k, rng.choice([0, 0, 1, 2, 5, 9]))
+            mx = rng.randrange(1, 200); w16(fx, P + 26, mx); w16(fx, P + 24, rng.randrange(1, mx + 1))
+            sm = rng.randrange(1, 300); w16(fx, P + 30, sm); w16(fx, P + 28, rng.randrange(0, sm + 1))
+            for k in range(290, 300): w8(fx, P + k, rng.choice([0, 0, 1, 3, 10, 255]))
+            w8(fx, P + 292, rng.choice([0, 1, 4])); w8(fx, P + 293, rng.choice([0, 0, 2]))
+            for k in range(6):
+                smx = rng.randrange(0, 40); w16(fx, P + 42 + 4 * k, smx); w16(fx, P + 40 + 4 * k, rng.randrange(0, smx + 8))
+                w8(fx, P + 284 + k, rng.choice([0, 1, 2, 6]))
+        if rng.random() < .35:        # whole party exhausted: forces the camp
+            for i in range(np_): w8(fx, A4 - 17922 + i * 0x1b0 + 292, rng.choice([1, 4]))
+        b = bytearray(rng.randrange(256) for _ in range(1400))
+        for k in range(1334, 1346): b[k] = rng.choice([0, 1, 30, 80, 100, 255])
+        c.apply([(tbl, bytes(b)), (A4 - 18462, struct.pack('>I', tbl)), (A4 - 18306, struct.pack('>I', slot))])
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = run_mid(c, STEP_TICK, STEP_TICK_END, seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'fell': res['fell'], 'slot': slot}))
+    return out
+
+
+MAKERS['steptick'] = make_steptick_vectors
+
+ENC_GROUP = 0x1017a     # LAB_0732(level)  -> region group nibble
+ENC_MON = 0x1010a       # LAB_072E(group)   -> monster id
+
+
+def make_encounter_pick_vectors(n, seed):
+    """LAB_0732 + LAB_072E: the random-encounter pick. -18462(A4) points at the level table block (chance bytes at +1334,
+    group nibbles at +1322, monster ids at +0); the table is random bytes here and the footprint records what was read."""
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    tbl = c.alloc(2048)
+    while len(out) < n:
+        which = 'group' if len(out) % 2 == 0 else 'mon'
+        blk = bytes(rng.randrange(256) for _ in range(1400))
+        if rng.random() < .5:
+            b = bytearray(blk)
+            for k in range(1334, 1346): b[k] = rng.choice([0, 1, 30, 50, 80, 100, 101, 255])
+            blk = bytes(b)
+        c.apply([(tbl, blk), (A4 - 18462, struct.pack('>I', tbl))])
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        arg = rng.randrange(0, 12) if which == 'group' else rng.randrange(0, 16)
+        try:
+            res = c.run_call(ENC_GROUP if which == 'group' else ENC_MON, [arg], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'which': which, 'arg': arg, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['encpick'] = make_encounter_pick_vectors
 
 if __name__ == '__main__':
     kind, outp = sys.argv[1], sys.argv[2]
