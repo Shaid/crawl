@@ -27,10 +27,16 @@ cited by offset; ScummVM's (GPL) MM1 engine was **not** used as a source.
 | Encounter group building 0x2F87..0x3206 (level budget, level/type draws, group sizes, monster record copy) | `after.ts` `encGen` | harness (1200) |
 | Round loop pieces: monster upkeep `regenmon` 0xAD44, `monadv` 0xAC41, run away 0x9A17, end of round 0x9F1A, next monster + nerve check 0x9A76..0x9B9D | `after.ts` | harness (800 each) |
 | Monster special abilities `ability` 0xAF49 (32 handlers via DS:0x33CF, 4 engines: one/all x damage/status) | `spells.ts` `MonsterAbility` | harness (1500) |
-| Non-combat cast `qcast`, cast-from-item (0xC5FD/0xC773), world rules (rest, food, shops, share gold, traps, doors, searching, skills, step tick), surprise/bribe menu 0x32BE | **open** | see TODO `mm1-rules-*` |
+| Non-combat cast `qcast` 0x8794 (45 handlers via DS:0x2BEB), item use 0x8619, combat item use 0xC5FD/0xC773 | `tools/mm1/world.ts`, `spells.ts` `UseItem` | harness (qcast 2500, use 1500, useitem 1500; 6 null controls) |
+| Encounter greeting/surprise/bribe/retreat/surrender 0x3206 (alignment, gold wipe) | `world.ts` `Surprise` | harness (2500, 3 null controls) |
+| Resting `rest` 0x6EE5 / `okrest` 0x6F98 (ambush roll, recovery, ageing with the stat-zero hang, food, max SP 0x71CD) | `world.ts` `Rest` | harness (1500 each, 4 null controls) |
+| Party movement forward 0x4D7E / back 0x4E81 / turn 0x4F43, 0x4F7A (walls, doors, map-edge exits, encounter roll) | `world.ts` `Step` | harness (3000, 2 null controls) |
+| Gather 0x74BC / share 0x7763 of gems, gold, food | `world.ts` `Pool` | harness (2500, 3 null controls) |
+| Search 0x4A28, pick lock `unlock` 0x4A6C, `bash` 0x4BE4 | `world.ts` `Door` | harness (2500, 3 null controls) |
+| Still open: food 0x1DF3, shops 0x2196, traps 0x3749, thievery/skills, training-hall flow, class-specific rules, overlay handler execution | **open** | `mm1-rules-world`, `mm1-ovr-code` |
 
 Addressing: image = `MM.EXE[0x200:]`; CS base = image 0; DS = CS+0x107B
-paragraphs (DS:0 = image 0x107B0), SS = DS. Overlay code (CS:0xF48F) was not executed; overlay *data* (DS:0xC940, read through the pointer DS:0x132 as `getod(n)`) is modelled by random bytes in the harness, which is enough for every unit above that only reads it. The game code is hand-translated
+paragraphs (DS:0 = image 0x107B0), SS = DS. Overlay code (CS:0xF48F) has still not been executed in the harness; overlay *data* (DS:0xC940, read through the pointer DS:0x132 as `getod(n)`) is modelled by random bytes in the harness, which is enough for every unit above that only reads it. The game code is hand-translated
 6502-style assembly (8-bit carry arithmetic, `[bp+di]` = field offset +
 record pointer), so most "formulas" are 8-bit with silent wrap; the port
 reproduces that.
@@ -74,11 +80,22 @@ Grades: harness = port replayed against recorded vectors with strict read/write 
 
 Harness note: stub argument lambdas that read memory (e.g. the `ptext` log reading DS:3BDC/3BDD) are now recorded as reads of the call (`harness.py`); older committed vectors are unaffected.
 
+## 4. Pass 3 findings
+
+- **qcast**: spell flag bytes DS:0xC5DC (bit0 combat only, bit1 outside only, bit2 pick member, bit3 pick monster group, bit4 needs getod(0)&0x80), cost bytes DS:0xC63A; item info record[0x11]==0xFF casts spell record[0x12], else adds record[0x12] to a stat. `use` jumps into the same gates at 0x894F. Handlers that `pop ax` before `jmp` drop their return address (their jmps are stops); the fail path 0x971F goes through ddal to backview 0x74B6. (harness)
+- **Greeting 0x3206**: menu A/R/B/S; surprise by either side; run/bribe/surrender wipe gold; alignment counter +0x6F is clamped. (harness)
+- **okrest hangs deliberately** (`jmp $` at 0x7100) when an aged stat reaches 0; the spare-one-member ambush compares a 0-based index with a 1-based roll. (harness)
+- **Movement**: wall byte DS:3C3C and door layer DS:3C10 hold 2 bits per side; rotation set DS:3C3D..3C40; encounter flag DS:3C18 set when random(getod(0x1D)) equals getod(0x1D); crossing 0..15 jumps to the edge loaders (yplus/xplus/ymin/xmin). (harness)
+- **Pooling**: gems 16 bit, gold 24 bit (top byte saturates at 0xFF), food 8 bit capped at 40 on gather; share gives the remainder to the current member. (harness)
+- **Doors**: a door in front opens only if getod(0x1E+wallcode)==1; pick-lock rolls random(100)+4*getod(0x31) against the member's +0x6C; bash sums the party's might (+0x18) against getod(0x2D). (harness)
+- **Overlays**: `.OVR` = 7 LE words (magic 0xF2, code load 0xF48F, code size, data load 0xC940, data size, bss, entry); entry installs the special-cell dispatcher into DS:0x134 and sets DS:0x132=0xC940; dispatch reads cell table at data+0x33 (count data+0x32), direction masks, word handler table; a miss goes to `erase` then `encountr`. 55 overlays / 886 special cells censused with `rules_oracle/ovr_census.py` (handlers call stanp, wait_, erase, clrbtm2, encountr, ph2, random, loadnext, blacks/food/tavern/temple/training...). 77 table entries fall outside the code (DEMON, part of PP4/AREAE2: different table layout, not analysed). (code-read, census)
+
+> **Correction (2026-11-26):** `.OVR` header word +0x00 is the magic 0xF2 (not an entry offset), +0x02 is the code load offset, +0x0C is the real entry offset. The opcodes are now disassemblable (`rules_oracle/lst_ovr.py`). Pass 2's "qcast is code-read only" is closed.
+
 ## Open (all listed in `docs/mm1/TODO.md`)
 
-- `mm1-rules-qcast`: non-combat cast (`qcast`, table DS:0x2BEB) and cast-from-item (0xC5FD, `c773` with DS:393B non-zero) are code-read only, not ported.
-- `mm1-rules-world`: rest/`okrest` 0x6EE5/0x6F98, food 0x1DF3, share/gather gold 0x7763/0x74BC, shops 0x2196, traps 0x3749, search 0x4A28, step tick 0x4D7E, skills; overlay (.OVR) loading; the pass-1 question whether the bit-7 bonus of monster touch effects acts elsewhere. Not started in pass 2 (no evidence either way).
-- `mm1-rules-surprise`: the surprise/bribe/run menu 0x32BE.. after the encounter group is built.
+- `mm1-rules-world`: food 0x1DF3, shops (blacks 0x2196 etc.), traps 0x3749, thievery/skills, training-hall flow, class-specific rules; the bit-7 touch-effect bonus question (not investigated).
+- `mm1-ovr-code`: overlay handlers not executed in the harness (DEMON/PP4/AREAE2 table layouts differ).
 
 Paths tried: r2 listing (misaligned) -> custom capstone lister; first RSM parse
 paired addresses with the wrong names -> re-derived and checked against code.

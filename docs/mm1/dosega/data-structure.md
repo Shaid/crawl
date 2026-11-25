@@ -373,7 +373,7 @@ AREAA1.OVR, ...). `scripts/mm1lib/ovr.py` + `scripts/extract_mm1_ovr.py`
 
 | Offset | Size | Field |
 |--------|------|-------|
-| +0x00 | 2 | entry offset into the code segment (242 in all 55 files) |
+| +0x00 | 2 | magic 0xF2 (242) in all 55 files. > **Correction (2026-11-26):** not an entry offset; +0x02 = code load offset 0xF48F, +0x0C = entry offset (see game-rules.md § 4) |
 | +0x02 | 2 | far-data constant 0xF48F (all files) |
 | +0x04 | 2 | `code_sz` |
 | +0x06 | 2 | far-data constant 0xC940 (all files; the code entry writes it — `MOV AX,0xC940` / `MOV [0x132],AX`) |

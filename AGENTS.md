@@ -74,7 +74,7 @@ This repo hosts two first-person dungeon-crawler RE projects:
   `tools/mm1/rules_oracle/`, `tools/mm1/rules.ts`) — rules passes 1-2: Unicorn
   8086 harness over `MM.EXE` (symbols from `MM.RSM`), RNG, character creation,
   training, melee/damage, saving throws, resistances and monster touch effects
-  harness-verified; pass 2 adds combat spells, monster abilities, treasure/XP/encounter generation and round-loop pieces (`tools/mm1/spells.ts`, `after.ts`). Open: qcast, world, surprise (`mm1-rules-*`).
+  harness-verified; pass 2 adds combat spells, monster abilities, treasure/XP/encounter generation and round-loop pieces (`tools/mm1/spells.ts`, `after.ts`). pass 3 adds non-combat cast/item use, encounter greeting, rest, movement, gather/share, search/lock/bash (`tools/mm1/world.ts`). Open: food, shops, traps, skills, overlay execution (`mm1-rules-world`, `mm1-ovr-code`).
 
 Both games share the generic `@seer-project/dungeon` walker package, which
 lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).
