@@ -11,7 +11,16 @@
   "healPools": "when the caster is in group 0: each of the six spell pools (cur +40+4k, max +42+4k) gains the dice roll, capped",
   "cure": "target member bytes at +off each fall by amount (floor 0); refreshes the party record when the target is in group 0",
   "cloud": "after the engine recipe: group trailer +402+k (the cloud duration) becomes max(power, current) + 1 and +406+k the trigger tick + 1",
-  "typeOnly": "engine recipe with argument 5 replaced: spell strength + 3 * word difference when the target record byte +208 equals type, else -100"
+  "typeOnly": "engine recipe with argument 5 replaced: spell strength + 3 * word difference when the target record byte +208 equals type, else -100",
+  "engineBuffMembers": "engine call (args: tg, ti, str, power, literals), result buffs signed byte +off of every member of the group (mode as buff)",
+  "groupSub": "group trailer bytes +offs of the caster or target group each fall by per*power (floor 0); ifPositive: only when the byte is above 0",
+  "allGroupsClear": "every monster group: when Random(100) < power*perPower + base - level*perLevel, group byte +off becomes 0",
+  "blinkCaster": "caster member: when byte +off is 0, byte +off2 = Random(tick/2) + tick/2; then byte +off += power*mul",
+  "mutualDrain": "target member bytes +a and +b: a falls by power*perA (<=0: a=0 and b=0 first), then b falls by power*perB (<=0: b=0 and a=0); refreshes the party record when the target is in group 0",
+  "chance": "when Random(100) < power*perPower run the then ops, else the else ops",
+  "engineCall": "engine routine call; args: number, \"tg\", \"ti\", \"str\", \"power\" or {p: k} (= k*power); store keeps the result; psyncIfParty refreshes the target record when the target is in group 0",
+  "hpRatioDamage": "area damage engine call: strength -100 unless the target record type byte +208 is in okTypes (or altType with the word at altFlag set); damage base = max(min, HP*mul/maxHP) of the target member",
+  "healCasterFrac": "caster heals HP with dice (x/div, div, x/div) where x = the stored engine result (HEAL WOUNDS code aimed at the caster)"
  },
  "cases": {
   "3": [
@@ -25,6 +34,65 @@
      0
     ],
     "mode": 0
+   }
+  ],
+  "7": [
+   {
+    "op": "cloud",
+    "k": 0
+   }
+  ],
+  "10": [
+   {
+    "op": "heal",
+    "who": "target",
+    "pool": "stamina",
+    "dice": [
+     [
+      0,
+      2,
+      0
+     ],
+     [
+      8,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  ],
+  "14": [
+   {
+    "op": "membersAll",
+    "group": "caster",
+    "aliveOnly": true,
+    "offs": [
+     41
+    ],
+    "amt": [
+     0,
+     2,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "15": [
+   {
+    "op": "cure",
+    "offs": [
+     17
+    ],
+    "amt": [
+     0,
+     25,
+     0
+    ]
    }
   ],
   "16": [
@@ -64,6 +132,315 @@
      0
     ],
     "mode": 0
+   }
+  ],
+  "25": [
+   {
+    "op": "cloud",
+    "k": 1
+   }
+  ],
+  "26": [
+   {
+    "op": "mutualDrain",
+    "a": 35,
+    "b": 19,
+    "perA": 1,
+    "perB": 5
+   }
+  ],
+  "28": [
+   {
+    "op": "groupSub",
+    "group": "caster",
+    "offs": [
+     402,
+     403,
+     404,
+     405
+    ],
+    "per": 1
+   },
+   {
+    "op": "groupSub",
+    "group": "caster",
+    "offs": [
+     399
+    ],
+    "per": 10,
+    "ifPositive": true
+   }
+  ],
+  "29": [
+   {
+    "op": "chance",
+    "perPower": 5,
+    "then": [
+     {
+      "op": "engineCall",
+      "call": "area_stat",
+      "args": [
+       "tg",
+       "ti",
+       3489,
+       6,
+       3,
+       "str",
+       1,
+       0,
+       0,
+       0,
+       14,
+       6
+      ]
+     }
+    ],
+    "else": [
+     {
+      "op": "engineCall",
+      "call": "area_stat2",
+      "args": [
+       "tg",
+       "ti",
+       3477,
+       6,
+       {
+        "p": 1
+       },
+       "str",
+       3,
+       5,
+       5,
+       0,
+       {
+        "p": 10
+       },
+       4,
+       {
+        "p": 10
+       },
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  ],
+  "30": [
+   {
+    "op": "globalAdd",
+    "addr": -18118,
+    "amt": [
+     0,
+     5,
+     0
+    ]
+   }
+  ],
+  "31": [
+   {
+    "op": "cloud",
+    "k": 2
+   }
+  ],
+  "37": [
+   {
+    "op": "memberSigned",
+    "off": 38,
+    "amt": [
+     0,
+     1,
+     0
+    ],
+    "mode": 1
+   }
+  ],
+  "38": [
+   {
+    "op": "globalAdd",
+    "addr": -18138,
+    "amt": [
+     0,
+     100,
+     0
+    ]
+   }
+  ],
+  "41": [
+   {
+    "op": "globalAdd",
+    "addr": -18134,
+    "amt": [
+     0,
+     50,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "addr": -18132,
+    "amt": [
+     0,
+     0,
+     1
+    ],
+    "mode": 0
+   }
+  ],
+  "43": [
+   {
+    "op": "cloud",
+    "k": 3
+   }
+  ],
+  "44": [
+   {
+    "op": "engineBuffMembers",
+    "group": "target",
+    "call": "resscale",
+    "args": [
+     "tg",
+     "power",
+     0,
+     "str"
+    ],
+    "off": 38,
+    "mode": 0
+   }
+  ],
+  "49": [
+   {
+    "op": "membersAll",
+    "group": "caster",
+    "offs": [
+     38,
+     39
+    ],
+    "amt": [
+     0,
+     0,
+     1
+    ],
+    "mode": 1
+   }
+  ],
+  "51": [
+   {
+    "op": "cure",
+    "offs": [
+     15,
+     16,
+     18,
+     22,
+     23
+    ],
+    "amt": [
+     0,
+     2,
+     0
+    ]
+   }
+  ],
+  "53": [
+   {
+    "op": "globalAdd",
+    "addr": -18130,
+    "amt": [
+     0,
+     50,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "addr": -18128,
+    "amt": [
+     70,
+     5,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "54": [
+   {
+    "op": "allGroupsClear",
+    "off": 412,
+    "base": 80,
+    "perPower": 10,
+    "perLevel": 5
+   }
+  ],
+  "57": [
+   {
+    "op": "cure",
+    "offs": [
+     21
+    ],
+    "amt": [
+     0,
+     25,
+     0
+    ]
+   }
+  ],
+  "64": [
+   {
+    "op": "heal",
+    "who": "target",
+    "pool": "hp",
+    "dice": [
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      7,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  ],
+  "67": [
+   {
+    "op": "typeOnly",
+    "type": 20
+   }
+  ],
+  "68": [
+   {
+    "op": "globalAdd",
+    "addr": -18126,
+    "amt": [
+     0,
+     35,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "addr": -18124,
+    "amt": [
+     0,
+     0,
+     1
+    ],
+    "mode": 0
+   }
+  ],
+  "69": [
+   {
+    "op": "blinkCaster",
+    "off": 36,
+    "off2": 37,
+    "mul": 3
    }
   ],
   "70": [
@@ -113,181 +490,50 @@
     "mode": 0
    }
   ],
-  "37": [
+  "74": [
    {
-    "op": "memberSigned",
-    "off": 38,
-    "amt": [
-     0,
-     1,
-     0
+    "op": "engineCall",
+    "call": "spelldmg",
+    "args": [
+     "tg",
+     "ti",
+     {
+      "p": 4
+     },
+     4,
+     {
+      "p": 4
+     },
+     11,
+     "str"
     ],
-    "mode": 1
-   }
-  ],
-  "49": [
-   {
-    "op": "membersAll",
-    "group": "caster",
-    "offs": [
-     38,
-     39
-    ],
-    "amt": [
-     0,
-     0,
-     1
-    ],
-    "mode": 1
-   }
-  ],
-  "14": [
-   {
-    "op": "membersAll",
-    "group": "caster",
-    "aliveOnly": true,
-    "offs": [
-     41
-    ],
-    "amt": [
-     0,
-     2,
-     0
-    ],
-    "mode": 0
-   }
-  ],
-  "30": [
-   {
-    "op": "globalAdd",
-    "addr": -18118,
-    "amt": [
-     0,
-     5,
-     0
-    ]
-   }
-  ],
-  "38": [
-   {
-    "op": "globalAdd",
-    "addr": -18138,
-    "amt": [
-     0,
-     100,
-     0
-    ]
-   }
-  ],
-  "41": [
-   {
-    "op": "globalAdd",
-    "addr": -18134,
-    "amt": [
-     0,
-     50,
-     0
-    ]
+    "store": "dmg",
+    "psyncIfParty": true
    },
    {
-    "op": "globalBuff",
-    "addr": -18132,
-    "amt": [
-     0,
-     0,
-     1
+    "op": "healCasterFrac",
+    "from": "dmg",
+    "div": 7
+   }
+  ],
+  "75": [
+   {
+    "op": "typeOnly",
+    "type": 21
+   }
+  ],
+  "79": [
+   {
+    "op": "hpRatioDamage",
+    "okTypes": [
+     20,
+     21
     ],
-    "mode": 0
-   }
-  ],
-  "53": [
-   {
-    "op": "globalAdd",
-    "addr": -18130,
-    "amt": [
-     0,
-     50,
-     0
-    ]
-   },
-   {
-    "op": "globalBuff",
-    "addr": -18128,
-    "amt": [
-     70,
-     5,
-     0
-    ],
-    "mode": 0
-   }
-  ],
-  "68": [
-   {
-    "op": "globalAdd",
-    "addr": -18126,
-    "amt": [
-     0,
-     35,
-     0
-    ]
-   },
-   {
-    "op": "globalBuff",
-    "addr": -18124,
-    "amt": [
-     0,
-     0,
-     1
-    ],
-    "mode": 0
-   }
-  ],
-  "10": [
-   {
-    "op": "heal",
-    "who": "target",
-    "pool": "stamina",
-    "dice": [
-     [
-      0,
-      2,
-      0
-     ],
-     [
-      8,
-      0,
-      0
-     ],
-     [
-      0,
-      1,
-      0
-     ]
-    ]
-   }
-  ],
-  "64": [
-   {
-    "op": "heal",
-    "who": "target",
-    "pool": "hp",
-    "dice": [
-     [
-      0,
-      1,
-      0
-     ],
-     [
-      7,
-      0,
-      0
-     ],
-     [
-      0,
-      1,
-      0
-     ]
-    ]
+    "altType": 22,
+    "altFlag": -15126,
+    "min": 2,
+    "mul": 8,
+    "call": "area_dmg"
    }
   ],
   "80": [
@@ -349,85 +595,6 @@
       0
      ]
     ]
-   }
-  ],
-  "15": [
-   {
-    "op": "cure",
-    "offs": [
-     17
-    ],
-    "amt": [
-     0,
-     25,
-     0
-    ]
-   }
-  ],
-  "57": [
-   {
-    "op": "cure",
-    "offs": [
-     21
-    ],
-    "amt": [
-     0,
-     25,
-     0
-    ]
-   }
-  ],
-  "51": [
-   {
-    "op": "cure",
-    "offs": [
-     15,
-     16,
-     18,
-     22,
-     23
-    ],
-    "amt": [
-     0,
-     2,
-     0
-    ]
-   }
-  ],
-  "7": [
-   {
-    "op": "cloud",
-    "k": 0
-   }
-  ],
-  "25": [
-   {
-    "op": "cloud",
-    "k": 1
-   }
-  ],
-  "31": [
-   {
-    "op": "cloud",
-    "k": 2
-   }
-  ],
-  "43": [
-   {
-    "op": "cloud",
-    "k": 3
-   }
-  ],
-  "67": [
-   {
-    "op": "typeOnly",
-    "type": 20
-   }
-  ],
-  "75": [
-   {
-    "op": "typeOnly",
-    "type": 21
    }
   ]
  }

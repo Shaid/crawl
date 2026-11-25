@@ -48,7 +48,7 @@ export function strengthIndex(m: Mem, a4: number, spell: number, power: number):
 
 type Recipe = { fn: string; args: number[][] };
 /** One operation of spell-cases.json (see the file's `ops` table). */
-type SpellOp = { op: string; when?: string; group?: string; off: number; offs: number[]; amt: number[]; mode: number; addr: number; pool?: string; who?: string; dice?: number[][]; stamina?: number[][]; hp?: number[][]; k: number; type: number; aliveOnly?: boolean };
+type SpellOp = { [k: string]: any; op: string; when?: string; group?: string; off: number; offs: number[]; amt: number[]; mode: number; addr: number; pool?: string; who?: string; dice?: number[][]; stamina?: number[][]; hp?: number[][]; k: number; type: number; aliveOnly?: boolean };
 const RECIPES = (recipes as { recipes: Record<string, Recipe[]> }).recipes;
 
 /** LAB_0F06: apply the effect of `spell` at `power` from caster member A (target = A[31]/A[32]). */
@@ -137,7 +137,10 @@ export function castEffect(c: Ctx, A: number, spell: number, power: number, eng:
     const half = tdiv(s16(power - 1), 2) + 1;
     const amt = (a: number[]): number => (a[0] ?? 0) + (a[1] ?? 0) * power + (a[2] ?? 0) * half;
     const cloudOf = (g: number) => GB(g);
-    for (const op of OPS) {
+    const stored: Record<string, number> = {};
+    const resolveArgs = (args: any[]): number[] => args.map((a) => a === 'tg' ? tg : a === 'ti' ? ti : a === 'str' ? str : a === 'power' ? power : typeof a === 'object' ? a.p * power : a);
+    const runOps = (list: SpellOp[]): void => {
+    for (const op of list) {
       if (op.when === 'casterIsParty' && agf() !== 0) continue;
       switch (op.op) {
         case 'groupByte': {
@@ -201,6 +204,68 @@ export function castEffect(c: Ctx, A: number, spell: number, power: number, eng:
           m.w8(base + 406 + op.k, tickf() + 1);
           break;
         }
+        case 'engineBuffMembers': {
+          const v = eng.call(op.call, resolveArgs(op.args));
+          eachMember(op.group === 'target' ? tg : agf(), (M) => m.w8(M + op.off, buffCounter(v, s8(m.u8(M + op.off)), op.mode)));
+          break;
+        }
+        case 'groupSub': {
+          const gb = GB(op.group === 'target' ? tg : agf());
+          for (const off of op.offs as number[]) {
+            if (op.ifPositive && m.u8(gb + off) <= 0) continue;
+            let v = m.u8(gb + off) - power * op.per;
+            if (v < 0) v = 0;
+            m.w8(gb + off, v);
+          }
+          break;
+        }
+        case 'allGroupsClear':
+          for (let g = 1; g <= s16(m.u16(a4 - 15140)); g++) {
+            if (rng.random(100) < power * op.perPower + op.base - s16(m.u16(a4 - 18340)) * op.perLevel) m.w8(GB(g) + op.off, 0);
+          }
+          break;
+        case 'blinkCaster': {
+          const M = member(c, agf(), aif());
+          if (m.u8(M + op.off) === 0) m.w8(M + op.off2, rng.random(tdiv(tickf(), 2)) + tdiv(tickf(), 2));
+          m.w8(M + op.off, m.u8(M + op.off) + power * op.mul);
+          break;
+        }
+        case 'mutualDrain': {
+          let v = m.u8(T + op.a) - power * op.perA;
+          if (v <= 0) { v = 0; m.w8(T + op.b, 0); }
+          m.w8(T + op.a, v);
+          v = m.u8(T + op.b) - power * op.perB;
+          if (v <= 0) { v = 0; m.w8(T + op.a, 0); }
+          m.w8(T + op.b, v);
+          if (tg === 0) psync(ti);
+          break;
+        }
+        case 'chance': {
+          const sub = rng.random(100) < power * op.perPower ? op.then : op.else;
+          runOps(sub);
+          break;
+        }
+        case 'engineCall': {
+          const r = eng.call(op.call, resolveArgs(op.args));
+          if (op.store) stored[op.store] = r;
+          if (op.psyncIfParty && tg === 0) psync(ti);
+          break;
+        }
+        case 'hpRatioDamage': {
+          const R = m.u32(a4 - 15294 + 4 * tg);
+          const r208 = m.u8(R + 208);
+          let st = str;
+          if (!((r208 === op.altType && s16(m.u16(a4 + op.altFlag)) !== 0) || (op.okTypes as number[]).includes(r208))) st = -100;
+          let v = tdiv(s16(m.u16(T + 2)) * op.mul, s16(m.u16(T + 4)));
+          if (v < op.min) v = op.min;
+          eng.call(op.call, [tg, ti, 1, v, power, 0, st]);
+          break;
+        }
+        case 'healCasterFrac': {
+          const x = s16(stored[op.from]);
+          healHp(agf(), aif(), tdiv(x, op.div), op.div, tdiv(x, op.div));
+          break;
+        }
         case 'typeOnly': {
           const type = m.u8(m.u32(a4 - 15294 + 4 * tg) + 208);
           callRecipe({ 5: type === op.type ? s16(str + 3 * s16(m.u16(A) - m.u16(T))) : -100 });
@@ -208,71 +273,12 @@ export function castEffect(c: Ctx, A: number, spell: number, power: number, eng:
         }
       }
     }
+    };
+    runOps(OPS);
     return;
   }
-  switch (spell) {
-    case 44: {
-      const v = eng.call('resscale', [tg, power, 0, str]);
-      eachMember(tg, (M) => m.w8(M + 38, buffCounter(v, s8(m.u8(M + 38)), 0)));
-      return;
-    }
-    case 28: {
-      for (let k = 0; k < 4; k++) {
-        let v = m.u8(GB(agf()) + 402 + k) - power;
-        if (v < 0) v = 0;
-        m.w8(GB(agf()) + 402 + k, v);
-      }
-      if (m.u8(GB(agf()) + 399) > 0) {
-        let v = m.u8(GB(agf()) + 399) - power * 10;
-        if (v < 0) v = 0;
-        m.w8(GB(agf()) + 399, v);
-      }
-      return;
-    }
-    case 54:
-      for (let g = 1; g <= s16(m.u16(a4 - 15140)); g++) {
-        if (rng.random(100) < power * 10 + 80 - s16(m.u16(a4 - 18340)) * 5) m.w8(GB(g) + 412, 0);
-      }
-      return;
-    case 69: {
-      const M = member(c, agf(), aif());
-      if (m.u8(M + 36) === 0) m.w8(M + 37, rng.random(tdiv(tickf(), 2)) + tdiv(tickf(), 2));
-      m.w8(M + 36, m.u8(M + 36) + power * 3);
-      return;
-    }
-    case 26: {
-      let v = m.u8(T + 35) - power;
-      if (v <= 0) { v = 0; m.w8(T + 19, 0); }
-      m.w8(T + 35, v);
-      v = m.u8(T + 19) - power * 5;
-      if (v <= 0) { v = 0; m.w8(T + 35, 0); }
-      m.w8(T + 19, v);
-      if (tg === 0) psync(ti);
-      return;
-    }
-    case 29:
-      if (rng.random(100) < power * 5) eng.call('area_stat', [tg, ti, 3489, 6, 3, str, 1, 0, 0, 0, 14, 6]);
-      else eng.call('area_stat2', [tg, ti, 3477, 6, power, str, 3, 5, 5, 0, power * 10, 4, power * 10, 0, 0]);
-      return;
-    case 79: {
-      const R = m.u32(a4 - 15294 + 4 * tg);
-      const r208 = m.u8(R + 208);
-      if (!((r208 === 0x16 && s16(m.u16(a4 - 15126)) !== 0) || r208 === 0x14 || r208 === 0x15)) str = -100;
-      let v = tdiv(s16(m.u16(T + 2)) * 8, s16(m.u16(T + 4)));
-      if (v < 2) v = 2;
-      eng.call('area_dmg', [tg, ti, 1, v, power, 0, str]);
-      return;
-    }
-    case 74: {
-      const dmg = eng.call('spelldmg', [tg, ti, power * 4, 4, power * 4, 11, str]);
-      if (tg === 0) psync(ti);
-      healHp(agf(), aif(), tdiv(s16(dmg), 7), 7, tdiv(s16(dmg), 7));   // falls through into HEAL WOUNDS' code, aimed at the caster
-      return;
-    }
-    default:
-      if (rows) callRecipe();
-      else throw new Error(`spell ${spell}: no recipe or case`);
-  }
+  if (rows) callRecipe();
+  else throw new Error(`spell ${spell}: no recipe or case`);
 }
 
 

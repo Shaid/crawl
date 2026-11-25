@@ -4,9 +4,9 @@ import recipes from '../spell-recipes.json' with { type: 'json' };
 import cases from '../spell-cases.json' with { type: 'json' };
 import { NO_EFFECT, SUMMON } from '../spells.ts';
 
-const IN_CODE = [26, 28, 29, 44, 54, 69, 74, 79];
+const IN_CODE: number[] = [];
 describe('spell dispatcher tables', () => {
-  it('every spell id is a recipe, a data case, a summon, a no-effect id or one of the eight code cases', () => {
+  it('every spell id is a recipe, a data case, a summon, a no-effect id or (none left) a code case', () => {
     const rec = new Set(Object.keys((recipes as any).recipes).map(Number));
     const cs = new Set(Object.keys((cases as any).cases).map(Number));
     const missing: number[] = [];

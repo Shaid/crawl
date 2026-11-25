@@ -380,7 +380,7 @@ Method as before (`oracle/combat4.py`): the routine runs under Unicorn on synthe
 > **Pass 7 (2026-11-26, section 12):** the chest trap effects, damage / status / condition helpers, the trap picker, chest inspect, can-act, the pick-lock tumbler game and thief-skill training are harness-verified.
 > **Read from code, not executed:** the chest menu, the out-of-combat cast LAB_1D0D, the pre-roll chest step LAB_1D5C, group renumbering and the mist transformation in LAB_09DC, thief skills other than disarm, inspect.
 > **Established absent (code census, 11.3):** monster flee, monster morale, encounter-start surprise rolls, monsters using hide or run.
-> **Open:** spells 26, 28, 29, 44, 54, 69, 74, 79 are code cases in `spells.ts` (verified, not yet table data); the other 19 entity kinds of LAB_06B6 (11.5); map-side cloud decay; the item divvy screen LAB_1D2D input loop (UI); the generator seed. TODO ids: `w6-victory-flow`, `w6-world-rules`, `w6-stubbed-entity-kinds`, `w6-rng-seed`.
+> **Open:** the other 19 entity kinds of LAB_06B6 (11.5); map-side cloud decay; the item divvy screen LAB_1D2D input loop (UI); the generator seed. TODO ids: `w6-victory-flow`, `w6-world-rules`, `w6-stubbed-entity-kinds`, `w6-rng-seed`.
 
 ### 10.1 Status
 
@@ -426,7 +426,7 @@ No HP-based monster morale or flee exists in the harnessed planner (`LAB_0C63`/`
 
 ### 10.8 Not done
 * Searching, thief skills (inspect, pick locks, find traps), per-turn status effects beyond `tickMember`, cloud decay on the map, doors and traps beyond movement (TODO `w6-world-rules`).
-* The hand-written non-affine spell cases in `spells.ts` remain code, not exported tables (`rules-tables.ts` exports the affine recipes only).
+* The hand-written non-affine spell cases in `spells.ts` remain code, not exported tables (superseded: all are data since 12.6) (`rules-tables.ts` exports the affine recipes only).
 * (Pass 6: the scripted-spot trigger and the zone code are done, section 11.)
 
 ### 10.9 Rerun
@@ -579,7 +579,10 @@ Method as passes 2-6 (`oracle/combat6.py`, same footprint rule: the TypeScript p
 
 > **Correction (2026-11-26):** the "Not ported" bullet of 11.4 (`LAB_09DC` second half, `LAB_1DA4`) is now ported and harness-verified as above.
 
-### 12.6 Rerun
+### 12.6 The last eight spell code cases are table data (**harness**)
+Spells 26, 28, 29, 44, 54, 69, 74, 79 moved from `switch` cases in `spells.ts` into `spell-cases.json` as nine new documented ops (`engineBuffMembers`, `groupSub`, `allGroupsClear`, `blinkCaster`, `mutualDrain`, `chance`, `engineCall`, `hpRatioDamage`, `healCasterFrac`); `spells.ts` now has no per-spell code, only the op interpreter, summons and recipes. Re-verified against the game with 2,500 fresh vectors (`combat3.py spells`, about 30 per spell), 0 mismatches; the committed subset still has 2 per spell. `spell-tables.test.ts` now requires every id to be a recipe, case, summon or no-effect id.
+
+### 12.7 Rerun
 `tools/wizardry6/oracle/combat6.py <trap|dmg|status|cond|pick> out.json --n N --seed S`, then `W6_TRAP_VECTORS=... W6_DMG_VECTORS=... W6_STATUS_VECTORS=... W6_COND_VECTORS=... W6_PICK_VECTORS=... npx vitest run tools/wizardry6/__tests__/traps.test.ts`; makers `dispatch|k3|k16|k6|mark|trig` -> `W6_DISPATCH_VECTORS`, `W6_K3_VECTORS`, `W6_K16_VECTORS`, `W6_K6_VECTORS`, `W6_MARK_VECTORS`, `W6_TRIG_VECTORS` with `__tests__/entities.test.ts`; makers `inspect|canact|picklock|train` -> `W6_INSPECT_VECTORS`, `W6_CANACT_VECTORS`, `W6_PICKLOCK_VECTORS`, `W6_TRAIN_VECTORS` with `__tests__/thief.test.ts`.
 
 ## 6. Hypotheses to treat with care
