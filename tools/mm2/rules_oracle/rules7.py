@@ -81,6 +81,35 @@ def gen_disarm(which):
         return out
     return gen
 
-UNITS7 = {'cgxchg': gen_xchg, 'partytoggle': gen_toggle, 'disarm': gen_disarm('a'), 'disarm2': gen_disarm('b')}
+def gen_trapfx(n, rnd):
+    """trap effect application CODE+0x1A90E `(effect.b, slot.w)`: kind = effect-1; the picked member is hit again when its class (+0x0F) is 5 or 6, then every party member;
+    each hit is damage_char(member, base << A4-22022, luck save on, percentage save on, type kind) with base = A4-26892[danger index 0..4 from A4-31203] (0x1A8A4, real damage_char 0x4952)"""
+    e = new_emu(); R = Rec(e); out = []
+    for off in (0x6FB8, 0x6798): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        eff = rnd.choice([1, 2, 3, 4, 5, 6, 7, 8, 0, rnd.randint(1, 20), rnd.getrandbits(8)])
+        size = rnd.choice([1, 2, 3, 4, 5, 6, rnd.randint(1, 6)])
+        def setup(e):
+            sl(e, SEED, seed)
+            idxs = setup_party(e, rnd, size)
+            for r in idxs:
+                a = g(-10814) + 130 * r
+                for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+                e.w8(a + 38, rnd.choice([0, 0, 0, 0x10, 0x20, 0x40, 0x50, 0x80, 0x81, rnd.getrandbits(8)]))
+                e.w16(a + 94, rnd.choice([rnd.randint(0, 40), rnd.randint(0, 300), rnd.getrandbits(16)]))
+                e.w8(a + 32, rnd.randint(1, 40)); e.w8(a + 21, rnd.randint(1, 100)); e.w8(a + 15, rnd.choice([0, 1, 2, 3, 4, 5, 5, 6, 6, 7]))
+            sb(e, -31203, rnd.choice([0, 1, 2, 3, 4, 5, 6, 7]))
+            sb(e, -22022, rnd.choice([0, 1, 2, 3, 4, rnd.randint(0, 20), 255]))
+            for k in range(5): sw(e, -26892 + 2 * k, rnd.choice([rnd.randint(1, 20), rnd.randint(1, 300), rnd.getrandbits(16)]))
+            sb(e, -31146, rnd.choice([0, rnd.randint(0, 60), rnd.getrandbits(8)])); sb(e, -31145, rnd.choice([0, rnd.randint(0, 60), rnd.getrandbits(8)]))
+            sw(e, -3852, rnd.getrandbits(16))
+        member = rnd.randint(0, 7) if rnd.random() < .1 else rnd.randrange(size)
+        v = R.run(0x1A90E, (eff, member), setup)
+        out.append({'seed': seed, 'eff': eff, 'member': member, **v})
+        e.heap = HEAP
+    return out
+
+UNITS7 = {'trapfx': gen_trapfx, 'cgxchg': gen_xchg, 'partytoggle': gen_toggle, 'disarm': gen_disarm('a'), 'disarm2': gen_disarm('b')}
 rules.UNITS.update(UNITS7)
 if __name__ == '__main__': rules.main()

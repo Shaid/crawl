@@ -5,7 +5,7 @@
  * Overlay offsets are `OVL+0xNNNN`. Conventions as in rules.ts.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { charPtr, randRange } from './rules.ts';
+import { charPtr, damageChar, randRange } from './rules.ts';
 import { type CastIo, type Calls, confirmNc, pickMemberNc } from './rules4.ts';
 
 const s16 = (v: number) => ((v & 0xffff) << 16) >> 16;
@@ -858,4 +858,42 @@ export function disarm(m: Mem, eff: number, io: DisarmIo, o: { noCap?: boolean }
 export function pickAndDisarm(m: Mem, eff: number, io: DisarmIo, o: { noCap?: boolean } = {}): number {
   if (!disarmRoll(m, eff, io, o)) return 0;
   return disarm(m, 0xff, io);
+}
+
+/** a private scratch area (the caller's stack locals: flags and the damage type byte live on the 68k stack, outside the tracked game memory) */
+class WithScratch implements Mem {
+  static readonly BASE = 0x7f000000;
+  private s = new Map<number, number>();
+  private m: Mem;
+  constructor(m: Mem) { this.m = m; }
+  r8(a: number) { return a >= WithScratch.BASE ? this.s.get(a) ?? 0 : this.m.r8(a); }
+  r16(a: number) { return (this.r8(a) << 8) | this.r8(a + 1); }
+  r32(a: number) { return ((this.r16(a) << 16) | this.r16(a + 2)) >>> 0; }
+  w8(a: number, v: number) { if (a >= WithScratch.BASE) this.s.set(a, v & 0xff); else this.m.w8(a, v); }
+  w16(a: number, v: number) { this.w8(a, v >> 8); this.w8(a + 1, v); }
+  w32(a: number, v: number) { this.w16(a, v >>> 16); this.w16(a + 2, v); }
+}
+
+/** CODE+0x1B112: danger index 0..4 from the area type byte `A4-31203` (0 -> 0, 3 -> 1, 1 -> 2, 6 or 4 -> 3, else 4). */
+export function trapIndex(m: Mem): number {
+  const t = m.r8(g(-31203));
+  return t === 0 ? 0 : t === 3 ? 1 : t === 1 ? 2 : t === 6 || t === 4 ? 3 : 4;
+}
+/** CODE+0x1A8A4 trap hit on one member: base damage word `A4-26892[trapIndex]`, doubled `u8 A4-22022` times (16-bit wrap), then the real damage_char with luck and percentage saves on and damage type = kind. */
+export function trapHit(m: Mem, slot: number, kind: number, o: { noDouble?: boolean } = {}): void {
+  let w = m.r16(g(-26892) + 2 * trapIndex(m));
+  let c = m.r8(g(-22022));
+  while (c !== 0) { c = (c - 1) & 0xff; if (!o.noDouble) w = (w * 2) & 0xffff; }
+  const ws = new WithScratch(m);
+  const B = WithScratch.BASE;
+  ws.w8(B, 1); ws.w8(B + 1, 1); ws.w8(B + 2, kind & 0xff);
+  damageChar(ws, charPtr(m, slot), w, B, B + 1, B + 2);
+}
+/** CODE+0x1A90E trap effect `(effect, slot)`: kind = effect-1 (byte); a Robber/Ninja-class picked member (+0x0F is 5 or 6) is hit once extra, then every party member once. */
+export function trapEffect(m: Mem, effect: number, slot: number, o: { noDouble?: boolean; noExtra?: boolean } = {}): void {
+  const kind = ((effect & 0xff) - 1) & 0xff;
+  const cls = m.r8(charPtr(m, slot) + 15);
+  if ((cls === 6 || cls === 5) && !o.noExtra) trapHit(m, slot, kind, o);
+  const size = s16(m.r16(g(-31066)));
+  for (let i = 0; i < size; i++) trapHit(m, i, kind, o);
 }

@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats, rosterToggle, partyRemove, disarm, pickAndDisarm } from '../rules5.ts';
+import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats, rosterToggle, partyRemove, disarm, pickAndDisarm, trapEffect } from '../rules5.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -417,4 +417,20 @@ describe('chest / trap disarm (CODE+0x1AEC2, 0x1AF6E)', () => {
       expect(bad).toBeGreaterThan(0);
     });
   }
+});
+
+describe('trap effect application (CODE+0x1A90E, hit 0x1A8A4, with the real damage_char)', () => {
+  const V = load('trapfx');
+  const run = (v: any, o: any = {}) => { const m = mem(v); trapEffect(m, v.eff, v.member, o); return m.changes(); };
+  it('matches the game: danger index, 16-bit doubling, extra hit for class 5/6, then the whole party', () => {
+    for (const v of V) expect(run(v)).toEqual(v.fin);
+    expect(V.some((x: any) => Object.keys(x.fin).length > 8)).toBe(true);
+  });
+  it('null controls: no doubling, no extra hit disagree', () => {
+    for (const o of [{ noDouble: true }, { noExtra: true }]) {
+      let bad = 0;
+      for (const v of V) { try { if (JSON.stringify(run(v, o)) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
+      expect(bad).toBeGreaterThan(0);
+    }
+  });
 });
