@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Effect } from '../combat.ts';
-import { postCombat, restParty, stepTick, swapParty, tickMember, useItem } from '../itemuse.ts';
+import { disarmChest, postCombat, restParty, stepTick, swapParty, tickMember, useItem } from '../itemuse.ts';
 import { loadVectors, mismatches } from './vec-util.ts';
 
 const U = loadVectors('W6_USEITEM_VECTORS', 'useitem-vectors.json');
@@ -14,6 +14,7 @@ const Q = loadVectors('W6_POSTCOMBAT_VECTORS', 'postcombat-vectors.json');
 const T = loadVectors('W6_TICK_VECTORS', 'tick-vectors.json');
 const R = loadVectors('W6_REST_VECTORS', 'rest-vectors.json');
 const K = loadVectors('W6_STEPTICK_VECTORS', 'steptick-vectors.json');
+const D = loadVectors('W6_DISARM_VECTORS', 'disarm-vectors.json');
 const same = (v: any, r: any) => JSON.stringify(r.fx) === JSON.stringify(v.effects);
 
 const recOf = (v: any) => (id: number) => {
@@ -115,5 +116,20 @@ describe.skipIf(K.length === 0)('per-step world tick LAB_08AE', () => {
   });
   it('null control: another seed disagrees', () => {
     expect(mismatches(K, body, (_v, _m, r) => { r.s[0] = (r.s[0] + 5) % 30269; }, same2)).toBeGreaterThan(K.length / 5);
+  });
+});
+
+describe.skipIf(D.length === 0)('chest disarm decision LAB_1C5B', () => {
+  const body = (v: any, mem: any, rng: any) => disarmChest({ m: mem, rng, a4: v.a4 }, v.who, v.chosen);
+  const ret = (v: any, r: any) => (r.fx & 0xffff) === v.ret;
+  it('matches the game: wrong trap, class bonuses, clamps, the three outcomes, skill training', () => {
+    expect(mismatches(D, body, undefined, ret)).toBe(0);
+  }, 60_000);
+  it('covers disarmed, retry and sprung', () => {
+    for (const r of [1, 0, 0xffff]) expect(D.some((v) => v.ret === r)).toBe(true);
+  });
+  it('null control: a wrong class bonus or another seed disagrees', () => {
+    expect(mismatches(D, body, (_v, _m, r) => { r.s[1] = (r.s[1] + 9) % 30307; }, ret)).toBeGreaterThan(D.length / 8);
+    expect(mismatches(D, (v, m, r) => body({ ...v, who: (v.who + 1) % 4 }, m, r), undefined, ret)).toBeGreaterThan(D.length / 8);
   });
 });

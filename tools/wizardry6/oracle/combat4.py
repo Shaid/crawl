@@ -226,10 +226,10 @@ STEP_TICK = 0x13d60     # LAB_08AE: the per-step clock / hunger / exhaustion / w
 STEP_TICK_END = 0x13f1c  # LAB_08BD: the routine falls through here when nothing happened
 
 
-def run_mid(c, entry, stop, seed):
+def run_mid(c, entry, stop, seed, frame=()):
     """Run a stretch of a routine from mid-function `entry` (a fake LINK frame stands in for the skipped prologue) until it
     returns or reaches `stop`. Same tracking as run_call."""
-    from unicorn.m68k_const import UC_M68K_REG_A5, UC_M68K_REG_A7, UC_M68K_REG_A4, UC_M68K_REG_PC
+    from unicorn.m68k_const import UC_M68K_REG_A5, UC_M68K_REG_A7, UC_M68K_REG_A4, UC_M68K_REG_PC, UC_M68K_REG_D0
     from unicorn import UC_HOOK_CODE
     import emu as E
     c.effects = []; c.written = {}; c.foot = {}; c.rargs = []
@@ -237,9 +237,10 @@ def run_mid(c, entry, stop, seed):
     a5 = E.STACK_TOP - 0x800
     c.w32(a5, 0); c.w32(a5 + 4, E.RET_MAGIC)
     c.uc.reg_write(UC_M68K_REG_A5, a5); c.uc.reg_write(UC_M68K_REG_A7, a5 - 64); c.uc.reg_write(UC_M68K_REG_A4, c.A4)
+    for off, data in frame: c.uc.mem_write(a5 + off, bytes(data))
     hit = []
     def stop_hook(uc, a, sz, ud): hit.append(1); uc.emu_stop()
-    h = c.uc.hook_add(UC_HOOK_CODE, stop_hook, begin=CODE_BASE + stop, end=CODE_BASE + stop)
+    h = c.uc.hook_add(UC_HOOK_CODE, stop_hook, begin=CODE_BASE + (stop or 0x7ffffff0), end=CODE_BASE + (stop or 0x7ffffff0))
     c.tracking = True
     try:
         c.uc.emu_start(CODE_BASE + entry, E.RET_MAGIC + 0x100, count=200_000_000)
@@ -247,7 +248,7 @@ def run_mid(c, entry, stop, seed):
         c.tracking = False
         c.uc.hook_del(h)
     diffs = {a: c.uc.mem_read(a, 1)[0] for a in c.written}
-    return {'foot': c.foot, 'diff': diffs, 'effects': c.effects, 'rng': list(c.state()), 'rargs': [], 'fell': bool(hit)}
+    return {'foot': c.foot, 'diff': diffs, 'effects': c.effects, 'rng': list(c.state()), 'rargs': [], 'fell': bool(hit), 'ret': c.uc.reg_read(UC_M68K_REG_D0) & 0xffff}
 
 
 def make_steptick_vectors(n, seed):
@@ -294,6 +295,37 @@ def make_steptick_vectors(n, seed):
 
 
 MAKERS['steptick'] = make_steptick_vectors
+
+DISARM = 0x4ca82        # LAB_1C5B after the trap-type menu: mismatch -> -1, else the skill roll (1 disarmed, 0 retry, -1 trap triggers)
+
+
+def make_disarm_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        who = rng.randrange(4); P = A4 - 17922 + who * 0x1b0
+        w8(fx, P + 415, rng.choice([3, 3, 4, 13, 6, rng.randrange(14)]))
+        w16(fx, P + 36, rng.randrange(1, 25))
+        for k in (304, 323): w8(fx, P + k, rng.choice([0, 10, 30, 60, 100, 200]))
+        w8(fx, P + 308 + 15, rng.choice([0, 30, 99, 100]))
+        w16(fx, A4 - 18340, rng.randrange(1, 13))
+        actual = rng.randrange(0, 16); w16(fx, A4 - 3236, actual)
+        chosen = actual if rng.random() < .85 else rng.randrange(0, 16)
+        idx = rng.randrange(0, 5)
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        frame = [(8, struct.pack('>H', who)), (-12, struct.pack('>H', idx)), (-46 + 2 * idx, struct.pack('>H', chosen))]
+        try:
+            res = run_mid(c, DISARM, None, seed3, frame)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'who': who, 'chosen': chosen, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['disarm'] = make_disarm_vectors
 
 ENC_GROUP = 0x1017a     # LAB_0732(level)  -> region group nibble
 ENC_MON = 0x1010a       # LAB_072E(group)   -> monster id

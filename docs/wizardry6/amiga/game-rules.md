@@ -22,6 +22,10 @@ Exported tables (`buildAssets`, `tools/wizardry6/rules-tables.ts`): `public/asse
 | 3 Spells and skills | 82-row spell table (realm, level, SP cost, caster mask) and who-can-learn mask (code + data); caster groups; spell tier from skill (`skill/18+1`); SP pools per realm; known-spell bitset; skill array offsets and the 30 skill names | per-spell effects (`CODE+0x289a4`, `0x27b26`, `0x2ebb6`, `0x2ef36`), skill use and skill-point award, mapping of class to caster group |
 | 4 World | chest trap names, loot table drives chest contents (code/data) | rest, food, poison, doors/traps beyond movement, the 19 stubbed entity kinds, scripted events (section 6) |
 
+## 2026-11-25 status summary (pass 5)
+
+Item use, party swap, post-combat outcome, the per-step world tick (hunger, regeneration, poison, forced camp, wipe), camp, the random-encounter pick and the chest-disarm decision are harness-verified (section 10); two earlier claims were corrected (the "call for help" action is a banner; the `+412` "engaged" flag is a name-identification flag).
+
 ## 2026-11-24 status summary (pass 2: combat)
 
 Pass 2 solved the attack resolver and the status machinery by running the game's own routines in the Unicorn core against synthetic state and diffing **every byte written, every logged call and the generator state** against a TypeScript port. Details in section 7.
@@ -192,7 +196,9 @@ Thirty skills at `rec+308+k`: 0 WAND&DAGGER, 1 SWORD, 2 AXE, 3 MACE&FLAIL, 4 POL
 
 Solved by earlier passes and stays valid: movement, doors, teleports, stairs (`data-structure.md` §4.7.10, parity-tested). New here: chest trap names (msg 5300-5315: NO TRAP, VORPAL BLADES, CLOUD OF FEAR, GUARD ALARM, POISON DAGGER, PRISMIC MISSILE, RAY OF ENFEEBLE, FIZZLE FIELD, ENERGY DRAIN, DIMENSION DOOR, CURSE OF MEDUSA, ARMOR MELT, PHANTASMAL HAND, NOXIOUS VAPORS, FIRE BOMB, KISS OF DEATH), the chest menu (INSPECT / DISARM / OPEN / SPELL / LEAVE, msg 5200-5235) and the loot formula (2.2).
 
-**Open** (none traced this pass): rest, food and poison; disease; the 19 stubbed entity kinds (`OTHER_KIND_HANDLERS` in the oracle) and what scripted events (section 6) trigger; chest trap selection and disarm chance; hunger (the old records `+52/+54/+56` belong to Black Crypt, not this game). Smallest next steps: for rest, grep for the `REST` action (msg 2011) handler; for entities, extend `tools/wizardry6/oracle/oracle.py` `OTHER_KIND_HANDLERS` one kind at a time starting with the messages kind.
+**2026-11-25 update (section 10):** camp, hunger, the per-step clock, poison/disease/regeneration, wandering encounters and the chest-disarm decision are now **harness**; the remainder below still stands.
+
+**Open** (none traced this pass, apart from the part moved to section 10): rest, food and poison; disease; the 19 stubbed entity kinds (`OTHER_KIND_HANDLERS` in the oracle) and what scripted events (section 6) trigger; chest trap selection and disarm chance; hunger (the old records `+52/+54/+56` belong to Black Crypt, not this game). Smallest next steps: for rest, grep for the `REST` action (msg 2011) handler; for entities, extend `tools/wizardry6/oracle/oracle.py` `OTHER_KIND_HANDLERS` one kind at a time starting with the messages kind.
 
 ## 5. Tooling, vectors and parity
 
@@ -364,6 +370,60 @@ For a fight the player starts and drives through attack, cast, hide, run and amm
 ### 9.6 Rerun
 
 Large vector sets are not committed. Generate with `tools/wizardry6/oracle/combat3.py <maker> out.json --n N --seed S` for makers `summon`, `flee`, `encounter`, `breath`, `engine`, `spells`, then run the tests with `W6_SUMMON_VECTORS`, `W6_FLEE_VECTORS`, `W6_ENCOUNTER_VECTORS`, `W6_BREATH_VECTORS`, `W6_ENGINE_VECTORS`, `W6_SPELL_VECTORS` set to the file. Encounter sets are large (about 40 KB per vector); generate in the background.
+
+## 10. Pass 5 (2026-11-25): item actions, party order, the world clock, camp, wandering encounters, chest disarm
+
+Method as before (`oracle/combat4.py`): the routine runs under Unicorn on synthetic state with presentation stubbed and the C-runtime exchange helper (`-32124(A4)`) and the bit-field reader (`-32478(A4)`) running for real; the TypeScript port (`itemuse.ts`, `randenc.ts`) runs on exactly the bytes the game read and throws on any other read; writes, logged callees and the generator state are diffed. Every group has null controls. Where a routine is only half harnessable (the front half is a menu), the harness enters it mid-function with a fake `LINK` frame (`run_mid`) and says so.
+
+### 10.1 Status
+
+| System | Code | Grade | Vectors generated (0 mismatches) | Committed subset |
+|---|---|---|---|---|
+| Use item `LAB_0F8A` (`CODE+0x275f0`) | `itemuse.ts` `useItem` | **harness** | 300 | `useitem-vectors.json` (90) |
+| Party swap `LAB_0FDB` / `LAB_0FDA` (`CODE+0x286c0` / `0x285be`) | `swapParty` | **harness** | 300 | `swap-vectors.json` (24) |
+| Post-combat sort and outcome `LAB_0A03` (`CODE+0x17814`) | `postCombat` | **harness** | 300 | `postcombat-vectors.json` (24) |
+| Member time tick `LAB_07FA` (`CODE+0x120da`) | `tickMember` | **harness** | 400 | `tick-vectors.json` (60) |
+| Camp `LAB_0808` (`CODE+0x12456`) with `LAB_07A0` (minute timers) | `restParty`, `tickTimers` | **harness** (the tick inside is the verified one) | 200 | `rest-vectors.json` (20) |
+| Per-step world tick, `LAB_08AE`..`LAB_08BD` (`CODE+0x13d60`..`0x13f1c`, entered mid-function) | `stepTick` | **harness** | 300 | `steptick-vectors.json` (24) |
+| Random-encounter pick `LAB_0732` / `LAB_072E` (`CODE+0x1017a` / `0x1010a`) | `randenc.ts` | **harness** | 400 | `encpick-vectors.json` (60) |
+| Chest disarm decision (`LAB_1C5B` from `CODE+0x4ca82`, entered mid-function) | `disarmChest` | **harness** | 300 | `disarm-vectors.json` (40) |
+
+Null controls (all in `__tests__/itemuse.test.ts`, `randenc.test.ts`): another generator state, a wrong item kind, a wrong swap target, an unsorted party, a different elapsed time, another class slot, another level or tier threshold. Each fails as it should. The simulator also takes the actions: `PartyPlan` `useitem` and `swap` (`item-sim.test.ts`, with nulls: an inert item, no swap), and `hasFled()` now runs the verified `postCombat`.
+
+### 10.2 Item and order actions (**harness**)
+* **Use item.** Only a party member does anything (a monster's use is a delay). The item id is the member's slot `A[10]`. Item record (scenario section 1, 74 bytes at `0x380 + id*74`, **data**): word `+28` = `(power << 8) | spell`, byte `+60` = kind, byte `+69` = subkind. Word 0: nothing happens (message only, the item stays). Otherwise the item is **always used up** (`use_ammo`, `inventory.ts` `removeItem`). Kind 13 casts with training skill `0x18`; kinds 12 and 16 cast untrained; any other kind with a spell id below `0x50`: a non-zero power byte casts trained on skill `0x16`; a zero power byte lets a class-6 member derive `power = skill(+320)/15 + 2 - spell level` (clamped 0..6, trains skill 12 x1), anyone else gets power 0 (no cast). Subkind 7 sets `-15126 = 1` and cancels the training. Cast roll `r = Random(level*10 + power*5) - 10` (unsigned word: a negative value always counts as above the skill); trained skill `S` (record `+308+k`): `r > S` then `Random(36) > luck(+307) + 18` is a backfire (`-10484 = 1`), otherwise a fizzle (`-10482 = 1`); the spell row's flag byte (`+3`) bit 1 lets a backfire stand (else it becomes a fizzle) and bit 0 lets a fizzle stand (else it is forgiven). A fizzle ends it; a backfire retargets the user; then `LAB_0F06(A, spell, power)` (`castEffect`).
+* **Swap `LAB_0FDB(a, b)`.** Moves member `a` to position `b` by exchanging records two places apart (rows alternate by index parity) plus one neighbour exchange when the parities differ. `LAB_0FDA(x, y)` swaps the 432-byte record, the 44-byte combat struct and the two word tables at `-15330` / `-15318`.
+* **Equip `LAB_0FC4`** is only a screen change (game state `0x11`, return `0xd`); the executor already does that. **code**: no rule.
+* **Post-combat `LAB_0A03`.** Sorts the party ascending by record byte `+417` (condition; exchange sort, records, structs and word tables together), then: every member `>= 2` sets `-18608 = 8` (the party is lost); otherwise any combat struct `+43 == 2` (a successful run) sets `0x17`; both set `-15130 = 1`.
+
+### 10.3 The world clock, hunger, camp (**harness**)
+* **`tickMember(i, hpDie, stamMult, dt, spFlag)`** (`LAB_07FA`): skipped at condition `>= 3`. `HP += Random(hpDie) + regen(+418)*dt - poison(+419)*dt - disease(+420)*dt`, capped at max (`+26`); `HP <= 0` kills (condition 3, stamina 0, game message). `stamina <= 0` sets the exhaustion counter `+292 = Random(6)+6`. With `stamMult > 0`: `v = max(+30) * stamMult / 100`, stamina `+= Random(v/2) + v/2 + 1`, capped. The ten status timers `+290..+299` fall by `dt` (255 = permanent, floored at 0). Disease byte `+420` and `+295` clear together when either is 0. With `spFlag`, each of six spell-point pools gains `Random(rate(+284+k) + 1)`, capped at its max.
+* **Per step `stepTick`**: the clock `-18302` advances 1. At `clock % 10 == 5` every living member ticks (dt 1, no dice) and the one whose index equals `(clock % 60) / 10` also pays hunger (stamina `-= encumbrance byte(+421) + 1`, floored 0) and regains spell points. No member at condition 0: state 8 (the party is lost). Every member with an exhaustion counter (`+292` or `+293`): the party camps by force (`restParty`); an interrupted camp starts an encounter. Otherwise **`Random(1000) >= 995` (0.5 percent per step) starts a wandering encounter** (the id from 10.4, `-15100 = 0`, state 10).
+* **Camp `restParty`**: up to 8 rest minutes. Each: exhaustion counters set to 10, the clock `+60`, the six party-wide minute timers (`-18138 + 4k`: light and the like; the paired word at `-18136 + 4k` clears at 0 for `k > 0`) fall by 60, every member ticks (dt 6, spell points on, stamina regeneration = record `+423` percent, hit-point die = `+422 + 1` only while "4-minute chunks" owed since the last camp remain: `acc += clock - lastClock`, one chunk per 240 of `acc/60 >= 4`), exhaustion counter re-rolled `Random(5)`, disease `-1`, one random member's counter zeroed; then **`Random(1000) >= 975` (2.5 percent) interrupts the camp** (returns 1). At the end a member above 3/4 of max stamina loses the exhaustion counter. A key press aborts in the game; the harness holds the key check at "none".
+
+### 10.4 Random encounters (**harness** for the pick, **code** for the trigger)
+* **Pick.** `LAB_0732(level)`: `pick = Random(100) >= chance(level)` (byte `block+1334+level`); the group nibble is 4-bit field `level*2 + pick` of the array at `block+1322` (packed little-endian, `getField`). `LAB_072E(group)`: column `Random(100) % 4`, tier by `Random(100)` (`< 74` tier 0, `< 92` tier 1, else 2); monster id = `block[group*12 + column*3 + tier]`. The block is the level table behind `-18462(A4)` (`data-structure.md` already locates these fields). Wandering encounters write the id to the word the pointer at `-18306(A4)` names, with `-15100 = 0` (not scripted).
+* **Scripted spots (code).** At level load (`LAB_073F`, `CODE+0x103e8`) the bit-map at `-18018(A4)` is cleared and each of five per-level spots (3-bit x/y fields at block `+1274` / `+1298`) arms a region by flood fill (`LAB_0735`, over open edges, `CODE+0x101ca`). After a step (`LAB_08A7`, `CODE+0x13c54`) the cell's bit starting an encounter uses the same pick with `-15100 = 1` (scripted). **Open (`w6-encounter-trigger`):** the order of the region clear (`LAB_0735(...,0)` at `CODE+0x13ca4`, skipped only when the return state is `0x17`) and the bit test at `0x13ce8` was not resolved statically: read literally the clear precedes the test; a trace through the real step is needed to say which cells fire.
+
+### 10.5 Chest disarm (**harness** for the decision)
+The player names the trap among a menu of 16 (`LAB_1C5B`, the menu is UI); a wrong name springs it. Otherwise chance `= level(+36) + (+323)/2 + (+304)/2 - 2*dungeon level`, `+ (+304)*3` for class 3 (trains skill 15 x3) or `+ (+304)*2` for classes 4, 6, 13 (trains skill 15 x2), clamped 5..95. `Random(100)`: below the chance, disarmed; above `100 - (100 - chance)/3`, the trap goes off; between, nothing (retry). **Open:** the trap effect on opening (`LAB_1D0D`) and the trap types' effects (names in section 4), inspect.
+
+### 10.6 Corrections (2026-11-25)
+> **Correction (2026-11-25):** section 9.4 said message 3512 ("CALLS FOR HELP!", `CODE+0x19542`) was a monster **call-for-help action**. It is not. It is the banner `LAB_0AB5` (`CODE+0x1934a`) prints when a fight starts with more than one group and the return state `-18608` is `0x12` (a maze-launched encounter): "<first group> CALLS FOR HELP!" announces the companion groups, which `LAB_0A31`'s companion chain (section 9.2, **harness**) already creates. No separate monster AI exists there; the call also sets presentation flags `-10862 = (state != 0x12)`, `-10840 = (state == 0x12)`. **code**.
+> **Correction (2026-11-25):** group trailer byte `+412` (called the "engaged flag" in section 9.2 and `encounter.ts`) is an **identified flag**: every consumer (`CODE+0x1999a`, `0x1ad02`, `0x21c34`, `0x173fe`, `0x197ce`) uses it as `record + (flag << 5) + (count == 1 ? 0 : 16)`, the name string to display (unidentified vs real, singular vs plural). `LAB_09D0` is therefore the party's **monster-identification check**; groups it leaves at 0 still fight. The simulator's `evaded` field is that set. The arithmetic stays **harness**.
+> **Correction (2026-11-25):** member byte `+0x2b` (section 7.1 "surprise flag"): the same byte is the hide / run / blink state used by the executor (`+43`: 1 hidden, 2 fled, 3 blinked) and the attack resolver's "surprise" bonus is the **hidden attacker** bonus (value 1 is consumed to `0xff` by the attack and restored to 1 afterwards, `CODE+0x208c2`, `0x20a72`). No party-surprised / monsters-surprised roll was found at encounter start; none exists in `LAB_0A31`, `LAB_09D0` or `LAB_0AB5` (**code**, absence argued from those three routines). `hasFled()` is now the harness-verified `postCombat`.
+> **Correction (2026-11-25):** section 8.2 listed "hide, run, swap, equip, use item" as not ported: hide and run were ported in pass 4, and use item and swap now are; equip is a screen change.
+
+### 10.7 Morale, flee, loot (**open**)
+No HP-based monster morale or flee exists in the harnessed planner (`LAB_0C63`/`0C96`), executor (`LAB_0FF9`) or round driver (`LAB_102D`); monsters leave only by death, by the mist transformation (record `+220` bit 2 against a statused target, message 3218) and by the status effects. Absence elsewhere in the 80 KB of code is **not** proven (`w6-combat-ai-items`). Loot beyond the XP pool and treasure record (section 2.2): not traced.
+
+### 10.8 Not done
+* Searching, thief skills (inspect, pick locks, find traps), per-turn status effects beyond `tickMember`, cloud decay on the map, doors and traps beyond movement (TODO `w6-world-rules`).
+* The hand-written non-affine spell cases in `spells.ts` remain code, not exported tables (`rules-tables.ts` exports the affine recipes only).
+* The step trigger for scripted spots (10.4), and the bit-map / zone code after `LAB_08BD`.
+
+### 10.9 Rerun
+`tools/wizardry6/oracle/combat4.py <useitem|swap|postcombat|tick|rest|steptick|encpick|disarm> out.json --n N --seed S`, then the tests with `W6_USEITEM_VECTORS`, `W6_SWAP_VECTORS`, `W6_POSTCOMBAT_VECTORS`, `W6_TICK_VECTORS`, `W6_REST_VECTORS`, `W6_STEPTICK_VECTORS`, `W6_ENCPICK_VECTORS`, `W6_DISARM_VECTORS`. Use item needs the scenario file (read through the game's `ReadSection` by the harness).
 
 ## 6. Hypotheses to treat with care
 Anything marked **hyp** above (and in section 7: member `+4`, the names of `+0x22` states and `+0x1e` stances, the simulator round loop). In particular: `-10456(A4)` flag, byte meanings of treasure tail bytes 36-38, `+321` skill mapping in 2.4, record `+162` as treasure id, and the group/member struct field names in 2.3.

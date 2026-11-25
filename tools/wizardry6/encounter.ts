@@ -10,7 +10,7 @@
  * through {@link EncounterIO}; the harness feeds it the exact bytes and results the game produced.
  *
  * Group layout written here (group trailer, offsets from the member array): +410 monster id (low byte), +411 formation
- * slot, +412 engaged flag (the evasion check clears it), +413 member count. Companion rule (exact in effect, meaning
+ * slot, +412 identified flag (selects which of the record's name strings is shown; the check LAB_09D0 clears it, see game-rules section 10.6), +413 member count. Companion rule (exact in effect, meaning
  * **hyp**): group g gets a companion group only while g < min(5, (level+1)/2 + 1 (+1 for a scripted fight)); two
  * candidates are tried in order, record byte +164+k (monster id) with percent chance +166+k, k = 0, 1.
  */
@@ -106,7 +106,7 @@ export function buildParty(c: Ctx): void {
 }
 
 /**
- * LAB_09D0: for every engaged group and party member roll Random(100); the group is evaded (engaged flag cleared,
+ * LAB_09D0: for every identified group and party member roll Random(100); the group stays unidentified (flag +412 cleared,
  * skill 23 trains with multiplier 0) if the roll is below `skill23 - 3 x level` (compared as an unsigned word, so a
  * negative difference always evades) or below attribute 1 (record +301).
  */

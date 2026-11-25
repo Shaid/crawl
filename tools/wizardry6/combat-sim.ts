@@ -90,7 +90,7 @@ export class CombatWorld {
   readonly partySize: number;
   groupSizes: number[];
   log: RoundLog[] = [];
-  /** encounter start results: the groups the evasion check disengaged (hyp: they take no part) */
+  /** groups the start check LAB_09D0 left unidentified (flag +412 = 0: the name shown is the unidentified one; code-grade, game-rules 10.6). They still fight. */
   evaded: number[] = [];
   /** monster ids per group as created by {@link CombatWorld.fromEncounter} */
   groupIds: number[] = [];

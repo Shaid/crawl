@@ -275,3 +275,26 @@ export function stepTick(c: Ctx, fx: Effect[]): boolean {
   if (rng.random(1000) >= 0x3e3) return encounter();
   return true;
 }
+
+/**
+ * Chest disarm, the decision half of LAB_1C5B (CODE+0x4c880, from CODE+0x4ca82; the trap-type menu before it is UI).
+ * The player names the trap (`chosen`, one of 16); naming it wrong springs it (-1). Otherwise the chance is
+ * level (+36) + (+323)/2 + (+304)/2 - 2 * dungeon level, plus (+304) * 3 for class 3 (trains skill 15, x3) or
+ * (+304) * 2 for classes 4, 6 and 13 (trains skill 15, x2), clamped to 5..95. Random(100) below it disarms (1); above
+ * 100 - (100 - chance) / 3 springs the trap (-1); in between nothing happens (0, retry). Diffed against the game
+ * (oracle/combat4.py disarm).
+ */
+export function disarmChest(c: Ctx, who: number, chosen: number): number {
+  const { m, rng, a4 } = c;
+  if (s16(chosen) !== s16(m.u16(a4 - 3236))) return -1;
+  const P = a4 - 17922 + who * 0x1b0;
+  let ch = s16(m.u16(P + 36) + (m.u8(P + 323) >> 1) + (m.u8(P + 304) >> 1) - 2 * s16(m.u16(a4 - 18340)));
+  const cls = m.u8(P + 415);
+  if (cls === 3) { ch = s16(ch + m.u8(P + 304) * 3); skillUse(m, rng, a4, who, 15, 3); }
+  else if (cls === 13 || cls === 4 || cls === 6) { ch = s16(ch + m.u8(P + 304) * 2); skillUse(m, rng, a4, who, 15, 2); }
+  if (ch > 0x5f) ch = 0x5f;
+  if (ch < 5) ch = 5;
+  const roll = rng.random(100);
+  if (roll < ch) return 1;
+  return roll > 100 - tdiv(100 - ch, 3) ? -1 : 0;
+}

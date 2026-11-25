@@ -24,9 +24,13 @@ This repo hosts two first-person dungeon-crawler RE projects:
   cast gate, round planner and driver, and item removal are harness-verified against the game
   (`tools/wizardry6/oracle/combat*.py`, `combat.ts`, `planner.ts`, `round.ts`, `spells.ts`,
   `engines.ts`, `combat-sim.ts`; spec in game-rules §7-§9). Casts, summons, hide/run, breath and encounter start are
-  verified and wired into the sim. Still open: monster call-for-help/morale, use/swap/equip
-  actions, surprise, loot award, skills and world rules (TODO `w6-combat-ai-items`,
-  `w6-world-rules`).
+  verified and wired into the sim. Pass 5 (2026-11-25, game-rules §10, `oracle/combat4.py`,
+  `itemuse.ts`, `randenc.ts`): use item, party swap, post-combat outcome, the per-step world
+  tick (hunger, regen, poison, forced camp, wipe), camp, wandering encounters (0.5%/step) and
+  the encounter pick, and the chest-disarm decision are harness-verified; "call for help" was a
+  banner and `+412` an identified-name flag (corrected). Still open: HP-based monster morale
+  (none found), surprise, loot award, searching/thief skills, trap effects, the scripted-spot
+  trigger (TODO `w6-combat-ai-items`, `w6-world-rules`, `w6-encounter-trigger`).
 - **Might & Magic II** (`data/mm2/amiga/`, `docs/mm2/`, `tools/mm2/`,
   `public/assets/mm2/amiga/`) — integrated 2026-08-12 as a **port from a
   finished ground-truth RE** (Vairn/MM2, https://github.com/Vairn/MM2): crawl's
