@@ -168,6 +168,44 @@ def gen_monleaf(n, rnd):
         out.append({'seed': seed, 'which': which, 'arg': arg, **v})
     return out
 
-UNITS6 = {'monleaf': gen_monleaf, 'advance': gen_advance, 'sell': gen_sell, 'inspect': gen_inspect, 'undead': gen_undead, 'paygold': gen_pay('gold'), 'paygems': gen_pay('gems'), 'payfood': gen_pay('food'), 'sharegold': gen_share('gold'), 'sharegems': gen_share('gems'), 'sharefood': gen_share('food')}
+def gen_hall(n, rnd):
+    """the Hall of Training loop CODE+0x20988, entered mid-function at LAB_14DE (CODE+0x20A54) on a fake frame (-6 = redraw 1, -4 = the member shown) and run
+    to its epilogue (CODE+0x20C2A) with scripted keys: the eligibility test (XP >= needed), the cost, T (train), G (sheet), 1-6 (member), ESC"""
+    e = Emu(); R = Rec(e); out = []
+    keys = []
+    for off in sorted(set(QUIET_UI) | set(rules4.QUIET3) | {0x7F68, 0x220BE, 0x043A8, 0x15D9A, 0x171AC, 0x2249C}): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    def key(e, sp):   # the Hall loop's own key wait gets the script; the waits inside the routines it calls (training, sheet) just see 'no key' as in the training vectors
+        return (keys.pop(0) if keys else 0x1b) if 0x20988 <= e.last_ret - CODE_BASE < 0x20C30 else 0
+    e.stub(0x097A2, 'key', nargs=0, quiet=True, fn=key)
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        ks = [rnd.choice([0x54, 0x54, 0x74, 0x47, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x1b]) for _ in range(rnd.randint(0, 5))] + [0x1b]
+        member = rnd.randint(0, 5)
+        def setup(e):
+            keys[:] = ks; sl(e, SEED, seed)
+            size = rnd.choice([1, 2, 3, 4, 5, 6, 6]); idxs = setup_party(e, rnd, size)
+            sb(e, -31218, rnd.randint(0, 9))
+            for k in range(size):
+                if rnd.random() < .2: sw(e, -31082 + 2 * k, rnd.randint(24, 47))
+                a = g(-10814) + 130 * e.r16(g(-31082) + 2 * k)
+                for q in range(130): e.w8(a + q, rnd.getrandbits(8))
+                e.w8(a + 15, rnd.randint(0, 7)); e.w8(a + 38, rnd.choice([0, 0, 0, 0, 0x10, 0x40]))
+                lv = rnd.choice([rnd.randint(1, 30), rnd.randint(1, 255), 254, 255]); e.w8(a + 32, lv); e.w8(a + 113, rnd.randint(1, 255)); e.w8(a + 35, rnd.randint(0, 9))
+                e.w8(a + 39, rnd.choice([rnd.randint(1, 30), rnd.randint(1, 140), rnd.getrandbits(8)])); e.w8(a + 30, rnd.choice([0, rnd.randint(0, 255)]))
+                e.w32(a + 102, rnd.choice([rnd.randint(0, 600), rnd.randint(0, 30000), rnd.getrandbits(32)]))
+                for h in (94, 96, 116): e.w16(a + h, rnd.choice([rnd.randint(0, 200), rnd.getrandbits(16)]))
+                # XP near the threshold of the next level so both outcomes occur
+                need = e.call(0x20796, ((a, 4),)) & 0xffffffff; cost = e.call(0x2073A, ((a, 4), k)) & 0xffff
+                e.w32(a + 98, rnd.choice([need, need, (need + 1) & 0xffffffff, (need - 1) & 0xffffffff, rnd.getrandbits(32), rnd.randint(0, 5000), rnd.randint(0, 3_000_000), (need + rnd.randint(0, 100000)) & 0xffffffff]))
+                e.w32(a + 102, rnd.choice([cost, cost, cost + 1, max(cost - 1, 0), rnd.randint(0, 30000), rnd.getrandbits(32)]))
+        eff = []
+        def call_fn():
+            eff.append(member if member < e.r16(g(-31066)) else 0)
+            return e.call_range(0x20A54, 0x20C2A, max_insn=6_000_000, frame={-6: (1, 2), -4: (eff[0], 2)})
+        v = R.run(0, (), setup, call_fn=call_fn, max_insn=6_000_000)
+        out.append({'seed': seed, 'keys': ks, 'member': eff[0], **v})
+    return out
+
+UNITS6 = {'hall': gen_hall, 'monleaf': gen_monleaf, 'advance': gen_advance, 'sell': gen_sell, 'inspect': gen_inspect, 'undead': gen_undead, 'paygold': gen_pay('gold'), 'paygems': gen_pay('gems'), 'payfood': gen_pay('food'), 'sharegold': gen_share('gold'), 'sharegems': gen_share('gems'), 'sharefood': gen_share('food')}
 rules.UNITS.update(UNITS6)
 if __name__ == '__main__': rules.main()

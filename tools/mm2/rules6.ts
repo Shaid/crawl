@@ -4,9 +4,9 @@
  * see docs/mm2/amiga/game-rules.md section 15. Conventions as in rules.ts.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { charPtr, damageChar, luckSave, randRange, unpackMonster } from './rules.ts';
+import { charPtr, damageChar, luckSave, randRange, train, unpackMonster } from './rules.ts';
 import { confirmAll } from './rules4.ts';
-import { monsterDies, monsterSpecial, pickTargetRanged } from './rules3.ts';
+import { monsterDies, monsterSpecial, pickTargetRanged, trainingCost, xpNeeded } from './rules3.ts';
 
 /**
  * CODE+0xC028 `undead_engine(limit)`: the engine of combat spells 54 (Turn Undead, 0xBFEE) and 93 (Holy Word, 0xC72A).
@@ -384,4 +384,43 @@ export function monsterCondOne(m: Mem, bits: number, o: { noSave?: boolean } = {
   }
   monsterCondMember(m, bits, o);
   m.w8(g(-1272), saved);
+}
+
+/* ------------------------------------------------------------------ Hall of Training loop */
+
+/**
+ * CODE+0x20988 the Hall of Training screen, from its redraw point (CODE+0x20A54): the member shown is `idx`; on a redraw the next level is `level + 1` (cap 255), the
+ * XP needed for it comes from xpNeeded (CODE+0x20796) and the member is **eligible iff XP (+0x62, unsigned long) >= needed**; only an eligible member's cost is computed
+ * (trainingCost, CODE+0x2073A with the party slot). Keys (CODE+0x97A2, case folded by CODE+0x2408E): 'G' shows the sheet (UI; only for real characters, party table entry < 24),
+ * 'T' trains (rules.ts train(slot, cost), 12.2) when eligible and redraws, '1'..'6' picks that party slot (if it exists) and redraws, ESC leaves; any other key does nothing.
+ */
+export function hallLoop(m: Mem, member: number, keys: number[], o: { eligGt?: boolean } = {}): void {
+  let redraw = true;
+  let idx = member;
+  let eligible = false;
+  let cost = 0;
+  for (;;) {
+    if (redraw) {
+      redraw = false;
+      const ch = charPtr(m, idx);
+      const need = xpNeeded(m, ch);
+      eligible = o.eligGt ? m.r32(ch + 0x62) > need : m.r32(ch + 0x62) >= need;
+      if (eligible) cost = trainingCost(m, ch, idx);
+    }
+    const raw = keys.length ? keys.shift()! : 0x1b;
+    const k = raw > 0x60 && raw <= 0x7a ? raw - 0x20 : raw;
+    if (k === 0x47 && s16(m.r16(g(-31082) + 2 * idx)) < 0x18) {
+      // sheet (UI)
+    } else if (k === 0x54 && eligible) {
+      train(m, idx, cost);
+      redraw = true;
+    } else if (k !== 0x1b) {
+      const n = k - 0x31;
+      if (n >= 0 && n < s16(count(m))) {
+        redraw = true;
+        idx = n;
+      }
+    }
+    if (k === 0x1b) break;
+  }
 }

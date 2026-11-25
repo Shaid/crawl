@@ -14,11 +14,13 @@ from emu import Emu, DATA_BASE, WIN, A4V, HEAP
 class Rec:
     def __init__(self, e: Emu):
         self.e = e
-    def run(self, off, args=(), setup=None, ret_bits=16, max_insn=2_000_000):
+    def run(self, off, args=(), setup=None, ret_bits=16, max_insn=2_000_000, call_fn=None):
         e = self.e
         uc = e.uc
         e.log.clear()
         if setup: setup(e)
+        try: uc.ctl_flush_tb()   # a setup that ran game code would leave translated blocks without the read/write hooks below
+        except Exception: pass
         init, wpre, written = {}, {}, set()
         def rd(u, access, addr, size, value, ud):
             for a in range(addr, addr + size):
@@ -39,7 +41,7 @@ class Rec:
         h3 = uc.hook_add(UC_HOOK_MEM_READ, rd, begin=HEAP, end=HEAP + 0x100000)
         h4 = uc.hook_add(UC_HOOK_MEM_WRITE, wr, begin=HEAP, end=HEAP + 0x100000)
         try:
-            d0 = e.call(off, args, max_insn=max_insn)
+            d0 = call_fn() if call_fn else e.call(off, args, max_insn=max_insn)   # call_fn: e.g. a mid-function entry through Emu.call_range
         finally:
             e.on_write = None
             for h in (h1, h2, h3, h4): uc.hook_del(h)

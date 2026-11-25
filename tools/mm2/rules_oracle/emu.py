@@ -171,12 +171,14 @@ class Emu:
             raise RuntimeError(f'did not return: pc=CODE+{pc - CODE_BASE:#x} (insn cap?)')
         return uc.reg_read(UC_M68K_REG_D0)
 
-    def call_range(self, start, stop, absolute=False, max_insn=5_000_000, a5_off=0x1000):
+    def call_range(self, start, stop, absolute=False, max_insn=5_000_000, a5_off=0x1000, frame=None):
         """Run straight-line code from `start` until the PC reaches `stop` (a fragment of a larger routine, e.g. one loader inside the
         overlay's startup function) on a scratch stack frame (A5 = STACK_TOP - a5_off, locals below it)."""
         uc = self.uc
         a5 = STACK_TOP - a5_off
         uc.mem_write(a5 - 0x200, bytes(0x300))
+        for off, (val, sz) in (frame or {}).items():   # pre-set locals of the fake frame: {A5 displacement: (value, bytes)}
+            uc.mem_write(a5 + off, struct.pack('>H' if sz == 2 else '>I' if sz == 4 else '>B', val & (0xffff if sz == 2 else 0xffffffff if sz == 4 else 0xff)))
         uc.reg_write(UC_M68K_REG_A5, a5)
         uc.reg_write(UC_M68K_REG_A7, a5 - 0x200)
         uc.reg_write(UC_M68K_REG_A4, A4V)

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castUndead, payPool, shareGold, shareGems, shareFood, sellItem, inspectItem, monsterAdvance, monsterSpray, monsterHitOne, monsterCondAll, monsterCondOne } from '../rules6.ts';
+import { castUndead, payPool, shareGold, shareGems, shareFood, sellItem, inspectItem, monsterAdvance, monsterSpray, monsterHitOne, monsterCondAll, monsterCondOne, hallLoop } from '../rules6.ts';
 
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 function disagree(V: any[], run: (m: StrictMem, v: any) => void): number {
@@ -146,5 +146,21 @@ describe('monster spell leaves: spray1 (CODE+0x1F414), hit1 (0x1F632), cond (0x1
   });
   it('null control: conditions that skip the saves disagree', () => {
     expect(disagree(V.filter((v: any) => v.which === 'cond' || v.which === 'cond2'), (m, v) => run(m, v, { noSave: true }))).toBeGreaterThan(0);
+  });
+});
+
+describe('Hall of Training loop, entered mid-function at its redraw point (CODE+0x20988 / 0x20A54)', () => {
+  const V = load('hall');
+  it('matches the game: eligibility (XP >= needed), cost, T trains, digits pick the member, G/other keys change nothing', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const m = mem(v);
+      hallLoop(m, v.member, [...v.keys]);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(V.some((v: any) => Object.keys(v.fin).length > 3)).toBe(true);
+  });
+  it('null control: XP strictly above the requirement disagrees', () => {
+    expect(disagree(V, (m, v) => hallLoop(m, v.member, [...v.keys], { eligGt: true }))).toBeGreaterThan(0);
   });
 });
