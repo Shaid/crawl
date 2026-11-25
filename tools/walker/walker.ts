@@ -289,6 +289,11 @@ async function loadBlackCrypt(assetBase: string, unitId: number, startPose: Pose
   for (const ref of slots.banks.slice(1)) {
     banks[ref.id] = reindexed(await loadBank(assetBase, ref.atlas, ref.image));
   }
+  // Remake play mode (`?play=1`): the live scene also draws monsters and effect flashes (tools/blackcrypt/remake/live-scene.ts).
+  if (new URLSearchParams(window.location.search).get('play') === '1') {
+    banks['monsters'] = reindexed(await loadBank(assetBase, 'sprites/monsters.json', 'sprites/monsters.png'));
+    banks['bcspeed'] = reindexed(await loadBank(assetBase, 'sprites/bcspeed.json', 'sprites/bcspeed.png'));
+  }
   const automapBank = await loadBank(assetBase, 'sprites/automap.json', 'sprites/automap.png');
 
   return new BlackCryptView({
@@ -745,7 +750,7 @@ async function main() {
   if (startGame === 'blackcrypt' && new URLSearchParams(window.location.search).get('play') === '1') {
     const { attachBlackCryptPlay } = await import('../blackcrypt/remake/browser.ts');
     play = await attachBlackCryptPlay(
-      { getView: () => view, loadMap: (level, pose) => loadGame('blackcrypt', level, pose), setStatus },
+      { getView: () => view, loadMap: (level, pose) => loadGame('blackcrypt', level, pose), setStatus, assetBase: getAssetBasePath('blackcrypt', 'amiga') },
       startLevel,
     );
   }
