@@ -76,6 +76,9 @@ This repo hosts two first-person dungeon-crawler RE projects:
   training, melee/damage, saving throws, resistances and monster touch effects
   harness-verified; pass 2 adds combat spells, monster abilities, treasure/XP/encounter generation and round-loop pieces (`tools/mm1/spells.ts`, `after.ts`). pass 3 adds non-combat cast/item use, encounter greeting, rest, movement, gather/share, search/lock/bash (`tools/mm1/world.ts`). Open: food, shops, traps, skills, overlay execution (`mm1-rules-world`, `mm1-ovr-code`).
 
+- **Remake layer (2026-11-26):** lives in crawl; ScummVM-style host shell + per-title `Engine` plugins (concept only, no GPL code). Spec `docs/remake-architecture.md`, contract `tools/remake/engine.ts`. First engine: Black Crypt (`tools/blackcrypt/remake/`, plan `docs/blackcrypt/remake-plan.md`; play at `?game=blackcrypt&map=1&play=1` on the dev server). Verified per-title rules stay separate; share logic across titles only when both vector sets pass.
+- **Rules pass 5-7 additions (2026-11-26):** W6 pass 7 (chest traps, thief skills, entity dispatcher, group renumbering, loot hand-out, 8 spells as data; game-rules §12), MM2 (exchange-stats, party toggle, disarm, trap effect; starting gold 0), MM3 (party skill check, absent-list footprint audit), MM1 pass 5 (chest flow, equip/remove/trade/discard, terminal screens, event table coverage 94.6%), BC LIGHT/hold effects. Open items are in each game's TODO.md.
+
 Both games share the generic `@seer-project/dungeon` walker package, which
 lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).
 
