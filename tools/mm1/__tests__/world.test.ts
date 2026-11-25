@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { mustMatch, nullBad } from './check.ts';
-import { QCast, type WorldWrong } from '../world.ts';
+import { QCast, Surprise, type WorldWrong } from '../world.ts';
 import { UseItem } from '../spells.ts';
 import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
@@ -37,6 +37,16 @@ describe('non-combat cast CODE+0x8794', () => {
     const variants: WorldWrong[] = ['qcastNoBorrow', 'qcastHealNoCap', 'qcastResetNoRes', 'qcastAgeNoFloor'];
     for (const w of variants) {
       const n = nullBad('qcast', (m, v) => { const r = new QCast(m, v.args, w).run(); return { stop: r.stop, calls: r.calls }; });
+      expect(n, w).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('encounter greeting CODE+0x3206 (surprise, attack / retreat / bribe / surrender)', () => {
+  it('matches the game on every vector (strict reads, writes, UI calls, stop address)', () => mustMatch('surprise', (m, v) => { const r = new Surprise(m, v.args).run(); return { stop: r.stop, calls: r.calls }; }, 100));
+  it('null controls', () => {
+    for (const w of ['surprNoGoldWipe', 'surprRunNoParty', 'surprAlignNoClamp'] as const) {
+      const n = nullBad('surprise', (m, v) => { const r = new Surprise(m, v.args, w).run(); return { stop: r.stop, calls: r.calls }; });
       expect(n, w).toBeGreaterThan(0);
     }
   });

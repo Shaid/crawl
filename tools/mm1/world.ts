@@ -749,3 +749,233 @@ export class QCast extends Caster {
     for (let i = 0x0e; i < 0x19; i++) m.w8(0x3cda + i + 1, m.r8(base + i));
   }
 }
+
+export type SurpriseWrong = 'surprNoGoldWipe' | 'surprRunNoParty' | 'surprAlignNoClamp';
+
+/** The encounter greeting CODE+0x3206..0x3740 (after the group is built): who surprised whom, then the Attack / Retreat / Bribe / Surrender menu.
+ *  `ph2` (CODE+0x40E1) is modelled as its effect on the text cursor only (DS:3BC3 row, 3BC4 column); exhausted scripted keys cycle N, A. */
+export class Surprise extends Caster {
+  w: SurpriseWrong | undefined;
+  constructor(m: Mem, keys: number[], w?: SurpriseWrong) { super(m, keys); this.w = w; }
+  private tailI = 0;
+  wait(): number {
+    const k = this.keysLeft() ? this.nextKey() : [0x4e, 0x41][this.tailI++ % 2];
+    this.ui('wait_', [k]);
+    return k;
+  }
+  private qi = 0;
+  private keysLeft() { return this.qi < this.keys.length; }
+  private nextKey() { return this.keys[this.qi++]; }
+  private stop(a: number): never { throw new Exit(a); }
+  private ph2() {
+    const m = this.m;
+    this.calls.push(['ph2', [m.r16(BDW_TEXT), m.r8(0x3bc3), m.r8(0x3bc4)]]);
+    let p = m.r16(BDW_TEXT), x = m.r8(0x3bc4), y = m.r8(0x3bc3);
+    if (x >= 0x28) { x = 0x27; y = u8(y - 1); }
+    for (;;) {
+      const c = m.r8(p);
+      if (c === 0) break;
+      p++;
+      if (c === 0x0d) { x = 0; y = u8(y + 1); continue; }
+      x++;
+      if (x >= 0x28) { x = 0; y = u8(y + 1); }
+    }
+    m.w8(0x3bc4, x); m.w8(0x3bc3, y);
+  }
+  private msg(row: number, col: number, text: number) { const m = this.m; m.w8(0x3bc3, row); m.w8(0x3bc4, col); this.text(text); this.ph2(); }
+  run(): { stop: number; calls: Call[] } {
+    try { this.main(); } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
+    throw new Error('encounter greeting fell through');
+  }
+  private clr() { this.ui('clrtext4'); }
+  /** CODE+0x35F8: one 1d100 roll against DS:3C8F; true = failed (CF) */
+  private roll(): boolean { const m = this.m; return random(m, 100) > m.r8(0x3c8f); }
+  private main() {
+    const m = this.m;
+    do { m.w8(0x3bc4, 0x1f); this.text(0x1906); this.ph2(); } while ((m.r16(0x3bc3) & 0xff) < 0x10);
+    this.ui('monstpix', [m.r8(0x3c26)]);
+    this.clr();
+    const flag = m.r8(0x3c19);
+    if (flag !== 0) {
+      if (flag & 0x80) return this.monstersSurprised();
+      const r = random(m, 100);
+      if (r <= this.getod(0x15)) return this.partySurprised();
+    }
+    if (m.r8(0x3ca0) === 0) {
+      const r = random(m, 100);
+      if (r <= this.getod(0x14)) return this.monstersSurprised();
+    }
+    return this.menu();
+  }
+  private partySurprised() {          // 0x3270
+    const m = this.m;
+    this.msg(0x15, 2, 0x181f);
+    this.inc(0x3bc3);
+    this.msg(m.r8(0x3bc3), 0xb, 0x1842);
+    for (;;) {
+      const k = this.wait();
+      if (k === 0x59) return this.menu();
+      if (k === 0x4e) return this.end();
+    }
+  }
+  private monstersSurprised() {       // 0x32A3
+    this.msg(0x15, 6, 0x1852);
+    this.m.w8(0x3c19, 0xff);
+    return this.fight();
+  }
+  private menu(): never {
+    const m = this.m;
+    for (;;) {
+      this.clr();
+      this.msg(0x15, 0, 0x17e3);
+      this.inc(0x3bc3);
+      m.w8(0x3bc4, 0xa); this.text(0x1805); this.ph2();
+      let k: number;
+      for (;;) { k = this.wait(); if (k === 0x41 || k === 0x52 || k === 0x53 || k === 0x42) break; }
+      if (k === 0x41) return this.attack();
+      if (k === 0x52) return this.retreat();
+      if (k === 0x53) return this.surrender();
+      if (this.bribe()) continue;
+    }
+  }
+  private attack(): never {
+    for (let i = 0; i < 3; i++) if (!this.roll()) { this.alignUp(); return this.combatMsg(); }
+    return this.combatMsg();
+  }
+  private combatMsg(): never { this.clr(); this.msg(0x15, 0x10, 0x186e); return this.fight(); }
+  private retreat(): never {
+    const m = this.m;
+    const r = random(m, 110);
+    if (r < 100) {
+      if (r > this.getod(0x16)) { this.clr(); this.msg(0x15, 0xb, 0x1876); return this.fight(); }
+      if (this.w !== 'surprRunNoParty' && m.r8(0x3c1d) >= m.r8(NPARTY) && this.roll()) { this.clr(); this.msg(0x15, 5, 0x1885); return this.fight(); }
+    }
+    return this.moveParty(0x17, 0x18);
+  }
+  private moveParty(a: number, b: number): never {
+    const m = this.m;
+    m.w8(0x3c38, this.getod(a)); m.w8(0x3c39, this.getod(b));
+    return this.end();
+  }
+  private surrender(): never {
+    const m = this.m;
+    const no = (): never => { this.clr(); this.msg(0x15, 2, 0x18a0); return this.fight(); };
+    if (random(m, 100) > this.getod(0x19)) return no();
+    if (random(m, 100) > m.r8(0x3c8f)) return no();
+    m.w8(0x3c38, this.getod(0x1a)); m.w8(0x3c39, this.getod(0x1b));
+    const r = random(m, 200);
+    if (r < 0x33) { /* nothing taken */ }
+    else if (r < 0x97) this.wipe(0x39, 3);
+    else if (r < 0xa1) this.wipe(0x31, 2);
+    else if (r < 0xab) this.wipe(0x3e, 1);
+    else if (r < 0xbf) { this.wipe(0x3e, 1); this.wipe(0x39, 3); }
+    else if (r < 0xc8) { this.wipe(0x39, 3); this.wipe(0x31, 2); }
+    else { this.wipe(0x31, 2); this.wipe(0x3e, 1); this.wipe(0x39, 3); }
+    return this.end();
+  }
+  /** returns true when the menu is to be shown again (the offer was declined) */
+  private bribe(): boolean {
+    const m = this.m;
+    this.clr();
+    if (this.roll()) {
+      if (m.r8(0x17e2) === 0) this.alignDown();
+      this.msg(0x15, 0xc, 0x18c3);
+      return this.fight();
+    }
+    if (random(m, 7) === 5 && m.r8(0x17e0) === 0) return this.end();
+    this.inc(0x17e0); this.inc(0x17e2);
+    this.msg(0x15, 5, 0x18cf);
+    m.w8(0x3bc3, 0x15); m.w8(0x3bc4, 0x16);
+    const r = random(m, 100);
+    let bl: number;
+    if (r < 6) { this.text(0x18f1); this.ph2(); bl = 3; }
+    else if (r < 0x10) { this.text(0x18f6); this.ph2(); bl = 2; }
+    else { this.text(0x18ec); this.ph2(); bl = 1; }
+    m.w8(0x3bba, bl);
+    for (;;) {
+      const k = this.wait();
+      if (k === 0x4e) return true;
+      if (k === 0x59) break;
+    }
+    if (random(m, 100) > this.getod(0x1c)) { this.clr(); this.msg(0x15, 0xe, 0x18fb); return this.fight(); }
+    const what = m.r8(0x3bba);
+    if (what === 2) this.wipe(0x3e, 1);
+    else if (what === 3) this.wipe(0x31, 2);
+    else if (this.w !== 'surprNoGoldWipe') this.wipe(0x39, 3);
+    return this.end();
+  }
+  /** CODE+0x3607/361E/3625 via 0x3634: zero `n` consecutive bytes from record offset `off` in every party member */
+  private wipe(off: number, n: number) {
+    const m = this.m;
+    for (let k = 0; k < n; k++) {
+      let bl = m.r8(NPARTY);
+      for (let i = 0; i < 6; i++) {
+        m.w8(m.r16(PARTYTAB + 2 * i) + off + k, 0);
+        bl = u8(bl - 1);
+        if (bl === 0) break;
+      }
+    }
+  }
+  /** CODE+0x3503: the party is no longer in a fight: clear the asleep/stunned bit (+0x3F bit 0) of the living and redraw */
+  private end(): never {
+    const m = this.m;
+    this.clr();
+    for (let bl = 0; bl < m.r8(NPARTY); bl++) {
+      m.w16(CHARPOS, m.r16(PARTYTAB + u8(bl << 1)));
+      const al = m.r8(m.r16(CHARPOS) + 0x3f);
+      if (!(al & 0x80)) m.w8(m.r16(CHARPOS) + 0x3f, al & 0xfe);
+    }
+    return this.stop(0x45f7);
+  }
+  /** CODE+0x3551: the fight starts (with an alignment notice when the party's alignment changed) */
+  private fight(): never {
+    const m = this.m;
+    if (m.r8(0x17e1) !== 0) { this.msg(0x17, 8, 0x1910); this.ui('noises', [2]); }
+    return this.stop(0x4fef);
+  }
+  /** CODE+0x36D0: set the character's alignment (+0x12) and flag that it changed */
+  private setAlign(al: number) {
+    const m = this.m, c = m.r16(CHARP);
+    if (m.r8(c + 0x12) === al) return;
+    m.w8(m.r16(CHARP) + 0x12, al);
+    this.inc(0x17e1);
+  }
+  /** CODE+0x3675: every member's alignment counter (+0x6F) goes up one (stops at 0x20) */
+  private alignUp() {
+    const m = this.m;
+    m.w8(CHARP, m.r8(PARTYTAB)); m.w8(CHARP + 1, m.r8(PARTYTAB + 1));
+    let bl = 0;
+    do {
+      const c = m.r16(CHARP);
+      const al = m.r8(c + 0x6f);
+      if (al !== 0x20 || this.w === 'surprAlignNoClamp') {
+        const n = u8(al + 1);
+        m.w8(m.r16(CHARP) + 0x6f, n);
+        if (n === 0x20) this.setAlign(3);
+        else if (n === 0x10) this.setAlign(2);
+      }
+      bl++;
+      const bp = u8(bl << 1);
+      m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
+    } while (bl < m.r8(NPARTY));
+  }
+  /** CODE+0x36E6: the counters go down one (not below 0) */
+  private alignDown() {
+    const m = this.m;
+    m.w8(CHARP, m.r8(PARTYTAB)); m.w8(CHARP + 1, m.r8(PARTYTAB + 1));
+    let bl = 0;
+    do {
+      const c = m.r16(CHARP);
+      const al = m.r8(c + 0x6f);
+      if (al !== 0) {
+        const n = u8(al - 1);
+        m.w8(m.r16(CHARP) + 0x6f, n);
+        if (n === 0) this.setAlign(1);
+        else if (n === 0x10) this.setAlign(2);
+      }
+      bl++;
+      const bp = u8(bl << 1);
+      m.w8(CHARP, m.r8(PARTYTAB + bp)); m.w8(CHARP + 1, m.r8(PARTYTAB + bp + 1));
+    } while (bl < m.r8(NPARTY));
+  }
+}

@@ -42,14 +42,20 @@ class Rec:
                 if a not in written and a not in init and 0 <= a < TRACK_END: init[a] = orb(a)
         def rb2(o): note(o, 1); return orb(o)
         def rw2(o): note(o, 2); return orw(o)
-        e.rb, e.rw = rb2, rw2   # reads made by stub argument lambdas count as reads of the call
+        owb, oww = e.wb, e.ww
+        def wb2(o, v):          # writes made by a stub's side-effect function count as writes of the call
+            if 0 <= o < TRACK_END and o not in written:
+                written.add(o); wpre[o] = orb(o)
+            owb(o, v)
+        def ww2(o, v): wb2(o, v & 255); wb2(o + 1, (v >> 8) & 255)
+        e.rb, e.rw, e.wb, e.ww = rb2, rw2, wb2, ww2   # reads made by stub argument lambdas count as reads of the call
         h1 = uc.hook_add(UC_HOOK_MEM_READ, rd)
         h2 = uc.hook_add(UC_HOOK_MEM_WRITE, wr)
         rin = {k: (regs or {}).get(k, 0) & 0xffff for k in ('ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp')}
         try:
             out = e.call(ip, rin, stop=stop, stops=stops, max_insn=max_insn)
         finally:
-            uc.hook_del(h1); uc.hook_del(h2); e.rb, e.rw = orb, orw
+            uc.hook_del(h1); uc.hook_del(h2); e.rb, e.rw, e.wb, e.ww = orb, orw, owb, oww
         def cur(k): return uc.mem_read((DS_BASE + k) if k < 0x10000 else (CS_BASE + k - 0x10000), 1)[0]
         fin = {k: cur(k) for k in written}
         return {
