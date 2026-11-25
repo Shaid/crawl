@@ -67,6 +67,12 @@ def main(U):
         data = json.load(open(a[1])); n = int(a[a.index('--n') + 1]) if '--n' in a else 40
         r = random.Random(7)
         keep, seen = [], set()
+        if '--exact' in a:
+            sub = r.sample(data, min(n, len(data)))
+            raw = json.dumps(sub, separators=(',', ':')).encode()
+            if a[2].endswith('.gz'): gzip.GzipFile(a[2], 'wb', mtime=0).write(raw)
+            else: open(a[2], 'wb').write(raw)
+            return
         for d in data:      # keep one vector per distinct (stub-call sequence, stop address) signature
             sig = (tuple(c[0] for c in d.get('calls', [])), d.get('out', {}).get('stop'), len(d.get('fin', {})) > 0)
             if d.get('keep') or sig not in seen: seen.add(sig); keep.append(d)

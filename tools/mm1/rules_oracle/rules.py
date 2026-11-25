@@ -4,7 +4,7 @@ Big sets go to tools/mm1/rules_oracle/generated/ (gitignored); `subset IN OUT.gz
 Unit generators live in units_*.py (register with @unit)."""
 from common import *
 import units_chargen, units_train, units_combat
-for _m in ('units_effects', 'units_spells', 'units_after', 'units_world'):
+for _m in ('units_effects', 'units_spells', 'units_after', 'units_world', 'units_ovr', 'units_shops'):
     try: __import__(_m)
     except ModuleNotFoundError: pass
 if __name__ == '__main__': main(U)

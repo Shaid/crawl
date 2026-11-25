@@ -299,6 +299,9 @@ export const GAME_CONFIGS: GameConfig[] = defineGameConfig([{
         execFileSync(py, [resolve(repo, 'scripts/extract_mm1_misc.py')], { stdio: 'inherit', cwd: repo });
         execFileSync(py, [resolve(repo, 'scripts/extract_mm1_tables.py')], { stdio: 'inherit', cwd: repo });
         execFileSync(py, [resolve(repo, 'scripts/extract_mm1_ovr.py')], { stdio: 'inherit', cwd: repo });
+        // Per-map special-cell event table: harness-derived behaviour, re-verified against the game files (tools/mm1/export-events.ts)
+        const { exportEventsAsset } = await import('../mm1/export-events.ts');
+        console.log(`  mm1/dosega: ${exportEventsAsset(resolve('data/mm1/dosega'))}`);
       },
     }],
   },
