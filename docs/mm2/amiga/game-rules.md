@@ -40,9 +40,11 @@ What a remake rules core can take **as is**. Each unit is a real routine run in 
 | **World (pass 4)** | door unlock and bash; shop price and buy; 16 more non-combat spell handlers (Detect Magic, Location, Jump, Beacon, Fly, Teleport, Recharge, Duplication, Etherealize, Enchant, Restore Alignment, Surface, Rejuvenate, Town Portal, Resurrection, Uncurse) | 14.4-14.6 |
 | **Pass 5** | Nature's Gate (57), Raise Dead (87); **undead engine** CODE+0xC028 for Turn Undead (54) and Holy Word (93) with the real monster_dies; the four monster spell leaves (spray1 0x1F414, hit1 0x1F632, cond 0x1F72E, cond2 0x1F896) with real damage/save/special; monster advance 0x10118; shop sell 0x1BC26 and paid examine 0x1B6E0; party pool payments (gold/gems/food 0x6ACE/0x6B9A/0x6C66) and sharing (0x7BBE/0x7CB0/0x7D3E); Hall of Training eligibility by a mid-function entry (CODE+0x20A54); null controls for every non-combat handler and every previously bare unit | 15 |
 
-**Open after pass 5 (not derived; located facts in 15.5 and `docs/mm2/TODO.md`):**
-- `mm2-rules-world`: food outside rest, traps beyond the door trap, thief skills other than the unlock roll, the party command menu CODE+0x119C2 and the main command loop CODE+0xF1C (UI + key dispatch; its move command is `step handler LAB_036D(dir)` then `advance_time(1)`, so a per-step tick is the verified clock with 1 tick).
-- `mm2-rules-chargen`: roster-full is a message and roster delete does not exist (14.2); party add/remove harnessed (exchange-stats OVL+0x201A is harnessed, pass 6, 14.2); starting gold is **0** (14.2: the build clears the record and nothing in the overlay or the dialogue writes `+0x66`).
+**Pass 6 (2026-11-26, `rules7.py` / `rules5.ts` additions, 14.2, 14.7, 15.6, 15.7):** exchange-stats OVL+0x201A (3,000), roster-screen party add/remove CODE+0x6E0 (3,000), chest disarm CODE+0x1AEC2 / 0x1AF6E (3,000 each), trap damage on the party CODE+0x1A90E with the real `damage_char` (3,000). Closed by census: starting gold = 0, roster-full is a message, no roster delete exists, food is consumed only by rest, the thief byte `+0x1E` has four readers (unlock, party average, disarm, display).
+
+**Open after pass 6:**
+- `mm2-rules-world`: the party command menu CODE+0x119C2 (UI; key map recorded in 14.7) and the main command loop CODE+0xF1C; trap animation/picker are UI.
+- `mm2-rules-chargen`: none.
 - Party-attack target prompt (target 0xFF) and ranged/melee mode selection are UI.
 - Not a gap: every spell handler of the 96 is now harnessed (combat 53, non-combat 43).
 
