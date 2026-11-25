@@ -563,7 +563,8 @@ Still OPEN: non-combat 57 (Nature's Gate, 0x0B0EA: a calendar table walk) and 87
 ### 14.7 Open after pass 4
 
 - Pools: CODE+0x6ACE / 0x6B9A / 0x6C66 pay gold / gems / food out of the whole party's pool (event costs: they are in the opcode jump table at CODE+0x25AC8..) and even the remainder out through CODE+0x7BBE / 0x7CB0 / 0x7D3E; located and read, not harnessed.
-- Food outside rest, traps beyond the door trap, thief skills other than the unlock roll, the per-step ticks and the party command menu CODE+0x119C2 are not traced.
+- **Food outside rest (pass 6, code census, closed):** every write to the character's food byte `+0x25` in the root hunk (`ADD/SUB/MOVE/CLR ...,37(An)`) and in the overlay hunk: `CODE+0x19C12` (the rest decrement, **harnessed**: `-1` per member per rest while food > 0 and the member is not in 0xD..0xF), `0x6D00` and `0x7D94/0x7DC2` (the pool pay/share routines, harnessed 15.2), `0xB1CE/0xB1DA` (Create Food: `+8`, capped at `0x28`), `0x1EFEC/0x1F006` (the monster special effect that eats the food, harnessed 11.3) and `OVL+0x185A` (creation: 10). There is **no per-step, hourly or daily food consumption**: `advance_time` (harnessed `clock`) touches no `+0x25`, and no other instruction writes it. So the only food sink is rest (and monsters, and the event costs through 15.2). (An access through a computed pointer would not appear in this census; the harnessed `clock` footprints show none.)
+- Traps beyond the door trap, thief skills other than the unlock roll and the party command menu CODE+0x119C2 are not traced (the traps and the thief skill byte `+0x1E` readers sit in the event VM and the shop code; see TODO `mm2-rules-world`).
 - The monster leaves CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896 and `advance` CODE+0x10118; training eligibility CODE+0x20988 (the Hall UI loop).
 
 ## 15. Pass 5: undead engine, monster leaves, pool, shop sell, Hall eligibility (harness; `rules6.py` / `rules6.ts` / `__tests__/rules6.test.ts`)
