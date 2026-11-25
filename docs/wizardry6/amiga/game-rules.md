@@ -377,7 +377,8 @@ Method as before (`oracle/combat4.py`): the routine runs under Unicorn on synthe
 
 > ### W6 rules status (2026-11-25, after pass 6; the clean build guide for sections 7-11)
 > **Verified against the game (harness: the real routine run under Unicorn, a TypeScript port diffed on bytes, RNG state and logged calls, null controls):** the random generator; character record, level-up, creation arithmetic; attack resolver, weapon effects, SetStatus and kill cleanup; monster planner, round driver and executor; the cast gate and all spell engines (82 of 82 ids, 79 with a combat effect); summons; hide, run, breath; encounter start (group build, companion chain); use item, party swap; **end of fight** (party upkeep with poison deaths, group compaction with monster regeneration, buff and cloud decay, record write-back, XP split, treasure roll, item list: section 11); the world clock, camp, hunger, wandering encounters; the **scripted-spot trigger** (region flood, exploration entry and per-move test, entity kinds 4 and 5, zone indicator: section 11); chest disarm decision.
-> **Read from code, not executed:** the chest trap effect catalogue (11.5), the chest menu, the out-of-combat cast LAB_1D0D, the pre-roll chest step LAB_1D5C, group renumbering and the mist transformation in LAB_09DC, thief skills other than disarm, inspect.
+> **Pass 7 (2026-11-26, section 12):** the chest trap effects, damage / status / condition helpers and the trap picker are harness-verified.
+> **Read from code, not executed:** the chest menu, the out-of-combat cast LAB_1D0D, the pre-roll chest step LAB_1D5C, group renumbering and the mist transformation in LAB_09DC, thief skills other than disarm, inspect.
 > **Established absent (code census, 11.3):** monster flee, monster morale, encounter-start surprise rolls, monsters using hide or run.
 > **Open:** spells 26, 28, 29, 44, 54, 69, 74, 79 are code cases in `spells.ts` (verified, not yet table data); the other 19 entity kinds of LAB_06B6 (11.5); map-side cloud decay; the encounter treasure id source (`record +162`, hyp); LAB_09DC's second half; the item divvy screen LAB_1D2D (UI); the generator seed. TODO ids: `w6-victory-flow`, `w6-world-rules`, `w6-stubbed-entity-kinds`, `w6-rng-seed`.
 
@@ -491,7 +492,7 @@ The victory handler `LAB_0AB0` (`CODE+0x192c2`) runs: `LAB_0A03` (party), `LAB_0
 * **Zone indicator (harness):** on level 5, and level 12 above region 8, a set bit at the party's cell in the zone bit array (block `+1082`) shows message 2023 and sets `-10894 = 1`; on level 8 with `-18136 = 1` (flying, set by the water-crossing state) message 2054; otherwise the flag clears. The bit-map clear and flood is 11.2.
 * **Chest menu (code):** `CODE+0x4fb10` (open), `0x4fb60` (inspect: trap id `-3236(A4)` shown through `LAB_1D56`, then `LAB_1C4B`), `0x4fbc4` (disarm; decision in 10.5), `0x4fd08` (cast a spell: `LAB_1D0D`). `-3132 = 1` after a spell means opened, `-1` means the trap fired.
 * **Correction (pass 6): `LAB_1D0D` (`CODE+0x4e870`) is not a trap effect.** It is the out-of-combat cast: the chosen spell (`LAB_1CCB`) costs the caster `spPerPower * power` of the pool at record `+40+4*realm`, runs the effect through `LAB_1C80`, then charges stamina `Random(power) + spellLevel + power` (an exhaustion counter `+292 = Random(6) + 6` when it falls below 0). It repeats the cast gate's cost rules.
-* **Chest trap effects (code, `LAB_1C0D` at `CODE+0x4ba56`, called with the trap id from `-3236(A4)` and the opener):** 15 types, each an animation id (`LAB_1C0B`) and presentation helpers `LAB_1BFC(member, dice, sides)` (damage), `LAB_1C02(member, msg, ...)` (status application with percentages 50 / 10 / 10), `LAB_1BF8(member, msg, kind, n)` (instant condition). By id: 1 every member takes `(level + 1)d8`; 2 paralysis gas (message 5253) on all; 3 and 9 nothing (alarm-class); 4 poison needle on the opener (1d6 and POISONED); 5 a per-member crossbow: blinding and damage; 6 weakness (a strength point lost, 75 + record `+x` percent); 7 no effect beyond the animation; 8 vitality or hit point loss `Random(4) + 1`; 10 petrification of all (message 5263); 11 animation only; 12 the phantasmal hand: one random member beaten for `(level + 1)d8` twice, a choke message; 13 every member `(level + 1)d8` and nauseated (5275); 14 `(level + 1)d10` to all; 15 everyone slain (message 5260, kind 3). This is a **code** catalogue; the arguments were read, not harnessed (`w6-world-rules`).
+* **Chest trap effects (code, `LAB_1C0D` at `CODE+0x4ba56`, called with the trap id from `-3236(A4)` and the opener):** 15 types, each an animation id (`LAB_1C0B`) and presentation helpers `LAB_1BFC(member, dice, sides)` (damage), `LAB_1C02(member, msg, ...)` (status application with percentages 50 / 10 / 10), `LAB_1BF8(member, msg, kind, n)` (instant condition). By id: 1 every member takes `(level + 1)d8`; 2 paralysis gas (message 5253) on all; 3 and 9 nothing (alarm-class); 4 poison needle on the opener (1d6 and POISONED); 5 a per-member crossbow: blinding and damage; 6 weakness (a strength point lost, 75 + record `+x` percent); 7 no effect beyond the animation; 8 vitality or hit point loss `Random(4) + 1`; 10 petrification of all (message 5263); 11 animation only; 12 the phantasmal hand: one random member beaten for `(level + 1)d8` twice, a choke message; 13 every member `(level + 1)d8` and nauseated (5275); 14 `(level + 1)d10` to all; 15 everyone slain (message 5260, kind 3). This was a **code** catalogue; **harness-verified in pass 7 with corrections: see 12.2** (several lines above are superseded).
 * **Open, with the smallest next step:** thief skills other than disarm (inspect: `LAB_1D56`, `LAB_1C4B`) and pick locks; the 19 other entity kinds of `LAB_06B6` (kinds 1, 2, 3 teleport / stairs / messages: `LAB_05D4`, `LAB_05BB`, `LAB_05DA`; kind 6 `LAB_05EA`...) - each is a mid-function harness like kind 4; cloud decay on the map (no routine found: the clouds the game decays are the group clouds of 11.4); per-turn status effects other than the ones in the upkeep and `tickMember` (none found beyond them).
 
 ### 11.6 Spell tables
@@ -505,6 +506,48 @@ The hand-written cases of the dispatcher that only write state are now data: `to
 
 ### 11.8 Rerun
 `tools/wizardry6/oracle/combat5.py <region|entry|loop|kind4|kind5|zone|upkeep|compact|decay|writeback|xpsplit|loot|postfull> out.json --n N --seed S`, then the tests with `W6_REGION_VECTORS`, `W6_ENTRY_VECTORS`, `W6_LOOP_VECTORS`, `W6_KIND4_VECTORS`, `W6_KIND5_VECTORS`, `W6_ZONE_VECTORS`, `W6_UPKEEP_VECTORS`, `W6_COMPACT_VECTORS`, `W6_DECAY_VECTORS`, `W6_WRITEBACK_VECTORS`, `W6_XPSPLIT_VECTORS`, `W6_LOOT_VECTORS`, `W6_POSTFULL_VECTORS`. The loot maker reads the scenario file through the game's own `ReadSection`.
+
+## 12. Pass 7 (2026-11-26): chest traps and the remaining world rules
+
+Method as passes 2-6 (`oracle/combat6.py`, same footprint rule: the TypeScript port throws on a read outside what the game read, writes, logged presentation calls in order and the generator state are diffed, every group has null controls). Large vector sets go to the scratchpad / `W6_*_VECTORS`, committed subsets stay below 100 KB per file.
+
+### 12.1 Status
+
+| System | Code | Grade | Vectors generated (0 mismatches) | Committed subset |
+|---|---|---|---|---|
+| Chest trap effects `LAB_1C0D` (`CODE+0x4ba56`), all 15 ids, the no-trap id and ids past the table | `traps.ts` `chestTrap` | **harness** | 1,500 | `trap-vectors.json` (90) |
+| Member damage `LAB_1BFC` (`CODE+0x4b760`) | `damageMember` | **harness** | 1,500 | `dmg-vectors.json` (30) |
+| Status counter application `LAB_1C02` (`CODE+0x4b88a`) | `applyStatus` | **harness** | 1,500 | `status-vectors.json` (40) |
+| Instant condition / death `LAB_1BF8` (`CODE+0x4b66a`) | `instantCond` | **harness** | 1,500 | `cond-vectors.json` (30) |
+| Trap picker `LAB_1C31` (`CODE+0x4c2f0`) | `pickTrap` | **harness** | 1,500 | `pick-vectors.json` (30) |
+
+### 12.2 Chest traps (**harness**) - resolves the "code catalogue" of 11.5
+`LAB_1C0D(trap, who)` is called from the chest menu (open `CODE+0x4fb50`, spell-open `0x4fca6`, `0x4fd8a`) with the trap id `-3236(A4)` and the opener (`who`). It runs the real helpers; only messages, portrait redraws, the delay and the window calls are stubbed (recorded). Ids at or beyond 16, or negative, do nothing after the window set-up; id 0 shows message `0x146c` (no trap). Damage dice are `count` d `sides` with `level` = `-18340(A4)`, applied to every member `i < -15306(A4)`.
+
+| Id | Effect (all numbers from the harness-verified code) |
+|---|---|
+| 1 | every member `(level+1)d8` damage |
+| 2 | every member: status counter 3 (`+293`), duration `50 + 10d10`, resist byte index 10 |
+| 3, 9 | animation only (alarm class) |
+| 4 | the opener: `1d6` damage, then counter 5 (`+295`, poison) with duration `50 + (level+2)d10` and **poison level byte `+420` = level + 2**, no resist roll |
+| 5 | per member: skipped when `Random(100) <= byte(+340)`; else `Random(6)`: 0 damage `(level+1)d8`, 1 counter 4 (resist 2), 2 counter 2 (resist 9), 3 counter 3 (resist 4), 4 condition 3 (death), resist `+349`, 5 condition 2, resist `+349` |
+| 6 | per member: counter 9 (resist 11, `50 + 10d10`), then one stat point is lost from attribute `+300`, or failing that from `+303`, when `Random(100) > byte(+349) + 75`, the attribute is above 3 and the member is not dead (a failed first test falls to the second attribute) |
+| 7, 11 | animation only |
+| 8 | per living member, when `Random(100) > byte(+349) + 50`: maximum HP `-(Random(4)+1)` (minimum 1, current HP capped to it) |
+| 10 | every member: condition 2, resist `+349` |
+| 12 | a random living member (redraws until `+417 < 3`; the game would loop forever if the whole party is dead): `(level+1)d8`; then, if still alive and `Random(21) > byte(+307)`, `(level+1)*2 d8` more and, on a second `Random(21) > byte(+307)`, condition 3 |
+| 13 | every member `(level+1)d8` then counter 8 (resist 5) |
+| 14 | every member `(level+1)d10` |
+| 15 | every member condition 3 (death), resist `+349` |
+
+**Helpers.** `LAB_1BFC` rolls `count`d`sides` (`Random(sides)+1` each, bytes; **it leaves the packed {base, count, sides} at `-30330(A4)`**, a scratch the status and damage code both write), returns for 0 damage or a dead member (`+417 >= 3`), caps damage at current HP, subtracts, and at 0 HP or less runs `LAB_1BF8(who, msg, 0, 3)`. `LAB_1BF8(who, msg, resist, kind)`: a non-zero `resist` is an index into the byte array at `+338`: `Random(100) <= byte` saves; a condition already at or above `kind` (`+417`, unsigned) is left; else `+417 = kind`; kind 3 or more zeroes HP `+24` and stamina `+28`. `LAB_1C02(who, msg, resist, counter, p16, p18, p20)`: members with `+417 >= 2` are skipped; the duration `p20 + p16 d p18` is rolled **before** the resist test; `p20 == 0xff` sets the counter `+290 + counter` to 0xff (permanent), otherwise the counter is raised by the duration but capped at 250 (the cap arithmetic is on the word, so a negative duration wraps); counter 5 also writes the poison level `+420 = p16`.
+
+**Trap picker `LAB_1C31(chest)`** (called from `LAB_1D5C` before the treasure roll): `-3236 = 0`; `need = Random(100) + 1`; the id advances 1..15 then wraps to 0 (a lap, at most 100) and each id whose bit is set in the 16-bit mask at chest record `+36` (TestBit) takes one off `need`; the id when `need` reaches 0 is the trap. A chest whose mask is empty leaves id 15 / 0 after 100 laps. The text for the chosen id is message `0x14b4 + id`.
+
+> **Correction (2026-11-26, pass 7):** 11.5's "code catalogue" of the trap effects is now harness-verified and several of its details were wrong or vague: trap 4 sets the **poison level** `+420` to level + 2 (not 1d6; the 1d6 is damage); trap 5 is not a "crossbow with blinding" but the six-way roll above (damage, three status counters, death, condition 2); trap 6 reduces attributes `+300` / `+303`, not "weakness at 75 + x percent"; trap 8 reduces **maximum HP** (not vitality); trap 10 is condition 2 on all (the message called it petrification), trap 15 condition 3; ids 3, 7, 9, 11 are animations only.
+
+### 12.3 Rerun
+`tools/wizardry6/oracle/combat6.py <trap|dmg|status|cond|pick> out.json --n N --seed S`, then `W6_TRAP_VECTORS=... W6_DMG_VECTORS=... W6_STATUS_VECTORS=... W6_COND_VECTORS=... W6_PICK_VECTORS=... npx vitest run tools/wizardry6/__tests__/traps.test.ts`.
 
 ## 6. Hypotheses to treat with care
 Anything marked **hyp** above (and in section 7: member `+4`, the names of `+0x22` states and `+0x1e` stances, the simulator round loop). In particular: `-10456(A4)` flag, byte meanings of treasure tail bytes 36-38, `+321` skill mapping in 2.4, record `+162` as treasure id, and the group/member struct field names in 2.3.
