@@ -194,9 +194,10 @@ UNITS['partyhit'] = gen_partyhit
 def gen_element(n, rnd):
     e = Emu(); Rc = Rec(e); out = []
     for _ in range(n):
-        kind = rnd.choice([0, 3])
+        kind = rnd.choice([0, 3, 0, 3, 1, 2, 4, 5, 9])
         def setup(e):
             setup_target(e, rnd)
+            sw(e, 0x332e, rnd.choice([0, 1, 2, 3, 4, 5, 6, 7, rnd.randint(0, 40)]))
             sb(e, 0x3310, rnd.choice([0, rnd.randint(1, 8), rnd.randint(9, 40), rnd.getrandbits(8)]))
         out.append({'args': [kind], **Rc.run(F_ELEMENT, (kind,), setup)})
     return out

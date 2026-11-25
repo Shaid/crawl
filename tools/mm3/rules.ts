@@ -312,7 +312,12 @@ export function partyHit(m: Mem, c: number, mode: number, opts: { noReroll?: boo
 const RES = [-0x58b0, -0x5856, -0x57fc, -0x57a2, -0x5748];   // fire, elec, cold, acid, energy (u8 per monster type)
 /** OV4+0x12D56 (kind 0 or 3): damage of the weapon's element after the monster's resistance: base = u8 A4-0x2A05[el]; the resist table is chosen by el (<9 fire, <0x10 elec, <0x15 cold, <0x1a acid, <0x22 energy, else magic A4-0x590A). */
 export function elementDamage(m: Mem, kind: number): number {
-  void kind;
+  if (kind !== 0 && kind !== 3) {
+    // spell kinds: base stays 0, so the result is always 0; the game still reads A4+0x332E and the matching resistance byte (OV4+0x12E76, jump table 0x12F66)
+    const k = m.r16(g(0x332e));
+    if (k < 7) m.r8(g([-0x56ee, -0x590a, -0x58b0, -0x5856, -0x57fc, -0x57a2, -0x5748][k]) + m.r16(g(MON_TYPE) + 2 * m.r8(g(TARGET))));
+    return 0;
+  }
   const el = s8(m.r8(g(W.el)));
   const base = m.r8(g(-0x2a05) + el);
   let d5 = base, d4: number;

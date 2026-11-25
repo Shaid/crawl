@@ -11,3 +11,9 @@ for spec in rng:4000:60 bracket:600:60 level:2000:40 age:2000:40 condmod:3000:80
   $PY rules.py $unit generated/$unit.json --n $n
   $PY rules.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
 done
+# pass 2 units (rules2.py): monster turn, turn order, damage to a monster, item generator, spell cast gate
+for spec in monturn:3000:60 initiative:3000:50 mondmg:3000:60 item:3000:40 castpay:3000:60 castrefund:3000:30 castblock:3000:40 spellsp:3000:40 spellprice:3000:40 "$@"; do
+  IFS=: read unit n sub <<<"$spec"
+  $PY rules2.py $unit generated/$unit.json --n $n
+  $PY rules2.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
+done
