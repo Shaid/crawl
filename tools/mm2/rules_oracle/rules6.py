@@ -75,6 +75,65 @@ def gen_share(kind):
         return out
     return gen
 
-UNITS6 = {'undead': gen_undead, 'paygold': gen_pay('gold'), 'paygems': gen_pay('gems'), 'payfood': gen_pay('food'), 'sharegold': gen_share('gold'), 'sharegems': gen_share('gems'), 'sharefood': gen_share('food')}
+def shop_state(e, rnd):
+    ch = g(-10814) + 130 * rnd.randint(0, 47); sl(e, -23102, ch)
+    e.w8(ch + 0x26, rnd.choice([0, 0, 0, 0, 1, 0x80]))
+    fill = rnd.choice([0, 1, 3, 5, 6, 6])
+    for k in range(6): e.w8(ch + 0x3a + k, rnd.randint(1, 255) if k < fill else 0)
+    for k in range(6): e.w8(ch + 0x40 + k, rnd.getrandbits(8)); e.w8(ch + 0x46 + k, rnd.getrandbits(8))
+    e.w32(ch + 0x66, rnd.choice([0, 100, 5000, 70000, rnd.getrandbits(32), rnd.randint(0, 3000), 0xffffff00]))
+    for k in range(6):
+        sb(e, -23052 + k, rnd.choice([0, rnd.randint(1, 255), rnd.randint(1, 255)])); sb(e, -23064 + k, rnd.getrandbits(8)); sb(e, -23070 + k, rnd.choice([0, 0, 1, 2, rnd.getrandbits(8)]))
+        sb(e, -23058 + k, rnd.getrandbits(8))
+        iid = rnd.randint(0, 255); sl(e, -23046 + 4 * k, g(-16126) + 20 * iid)
+        e.w16(g(-16126) + 20 * iid + 0x12, rnd.choice([0, 1, 10, 200, 1000, 20000, 65535, rnd.randint(0, 3000)]))
+        for q in (14, 15): e.w8(g(-16126) + 20 * iid + q, rnd.getrandbits(8))
+    sw(e, -23248, rnd.choice([0, 1, 2, 3, 4, 5, 6])); e.w8(ch + 0x50, rnd.getrandbits(8))
+    for k in range(6): sl(e, -23094 + 4 * k, rnd.choice([0, 10, 100, 5000, 70000, rnd.randint(0, 4000), 0xffffff00]))
+
+def shop_emu(msg=True):
+    e = rules5.new_emu(); R = Rec(e)
+    quiet = {0x42DC, 0x22108, 0x2249C, 0x22376, 0x22480, 0x218EA, 0x05312, 0x06484, 0x064BA, 0x06D32}
+    for off in quiet: e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    e.stub(0x097A2, 'key', nargs=0, quiet=True, fn=lambda e, sp: 0x1b)   # the examine screen waits for ESC
+    return e, R
+
+def gen_sell(n, rnd):
+    """CODE+0x1BC26 sell the buyer's pack slot to the shop: stock check, price from the displayed table, gold += price, pack compaction (F_046F0)"""
+    e, R = shop_emu(); e.stub(0x1C432, 'msg', nargs=1); out = []
+    for i in range(n):
+        slot = rnd.choice([0, 1, 2, 3, 4, 5, 5, rnd.randint(0, 5)])
+        v = R.run(0x1BC26, (slot,), lambda e: shop_state(e, rnd))
+        out.append({'slot': slot, **v})
+    return out
+
+def gen_inspect(n, rnd):
+    """CODE+0x1B6E0 the 'examine / identify item for a fee' command of the shop list: condition and stock gates, pays the displayed price (CODE+0x1BDD6), then only draws"""
+    e, R = shop_emu(); e.stub(0x1C432, 'msg', nargs=1)
+    for L in ('LAB_126D', 'LAB_1269'):
+        off = int(os.popen('./lab.sh ' + L).read().strip(), 16); e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    out = []
+    for i in range(n):
+        slot = rnd.choice([0, 1, 2, 3, 4, 5, rnd.randint(0, 5)])
+        v = R.run(0x1B6E0, (slot,), lambda e: shop_state(e, rnd), max_insn=3_000_000)
+        out.append({'slot': slot, **v})
+    return out
+
+def gen_advance(n, rnd):
+    """CODE+0x10118 a monster advances: the acting monster (A4-1271) swaps places with the first other slot whose unpacked record has A4-4523 == 0; the follow-ups are logged stubs"""
+    e = Emu(); R = Rec(e); out = []
+    for off in (0x1119E, 0x05070, 0x22376, 0x129CC, 0x132E6, 0x042DC, 0x22108): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    e.stub(0x1061E, 'show', nargs=1); e.stub(0x10082, 'help', nargs=0)
+    for i in range(n):
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed); mon_state(e, rnd)
+            sb(e, -1316, rnd.choice([0, 1, 2, 3, 5, 8, 10, 11, rnd.randint(0, 255)])); sb(e, -1271, rnd.randint(0, 11)); sb(e, -4523, rnd.choice([0, 1, 1, 2]))
+            for k in range(11): sb(e, -24138 + k, rnd.getrandbits(8))
+        v = R.run(0x10118, (), setup, max_insn=3_000_000)
+        out.append({'seed': seed, **v})
+    return out
+
+UNITS6 = {'advance': gen_advance, 'sell': gen_sell, 'inspect': gen_inspect, 'undead': gen_undead, 'paygold': gen_pay('gold'), 'paygems': gen_pay('gems'), 'payfood': gen_pay('food'), 'sharegold': gen_share('gold'), 'sharegems': gen_share('gems'), 'sharefood': gen_share('food')}
 rules.UNITS.update(UNITS6)
 if __name__ == '__main__': rules.main()

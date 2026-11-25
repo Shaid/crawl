@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castUndead, payPool, shareGold, shareGems, shareFood } from '../rules6.ts';
+import { castUndead, payPool, shareGold, shareGems, shareFood, sellItem, inspectItem, monsterAdvance } from '../rules6.ts';
 
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 function disagree(V: any[], run: (m: StrictMem, v: any) => void): number {
@@ -77,4 +77,49 @@ describe('party pool: paying and sharing gold, gems and food (CODE+0x6ACE/0x6B9A
       expect(disagree(load('pay' + kind), (m, v) => payPool(m, kind, v.arg, { noFirst: true }))).toBeGreaterThan(0);
     });
   }
+});
+
+describe('shop: sell (CODE+0x1BC26) and the paid examine screen (CODE+0x1B6E0)', () => {
+  const run = (V: any[], f: (m: StrictMem, v: any) => number[]) => {
+    for (const v of V) {
+      const m = mem(v);
+      const msgs = f(m, v);
+      expect(msgs).toEqual(v.calls.map((c: any) => c[1][0]));
+      expect(m.changes()).toEqual(v.fin);
+    }
+  };
+  it('sell matches the game: refusals, the shown price paid out, the pack closes the gap', () => {
+    const V = load('sell');
+    expect(V.length).toBeGreaterThan(30);
+    run(V, (m, v) => sellItem(m, v.slot));
+    expect(V.some((v: any) => Object.keys(v.fin).length > 4)).toBe(true);
+  });
+  it('null control: not closing the pack gap disagrees', () => {
+    expect(disagree(load('sell'), (m, v) => sellItem(m, v.slot, { noRemove: true }))).toBeGreaterThan(0);
+  });
+  it('examine matches the game: gates, the fee, nothing else written', () => {
+    const V = load('inspect');
+    expect(V.length).toBeGreaterThan(30);
+    run(V, (m, v) => inspectItem(m, v.slot));
+    expect(V.some((v: any) => Object.keys(v.fin).length > 0)).toBe(true);
+  });
+  it('null control: a free examine disagrees', () => {
+    expect(disagree(load('inspect'), (m, v) => inspectItem(m, v.slot, { free: true }))).toBeGreaterThan(0);
+  });
+});
+
+describe('monster advance (CODE+0x10118)', () => {
+  const V = load('advance');
+  it('matches the game: swap with the first non-flagged slot, the actor follows, else call for help', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const m = mem(v);
+      expect(monsterAdvance(m)).toEqual(v.calls);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(V.some((v: any) => v.calls[0][0] === 'show') && V.some((v: any) => v.calls[0][0] === 'help')).toBe(true);
+  });
+  it('null control: not giving the actor the other slot data disagrees', () => {
+    expect(disagree(V, (m) => monsterAdvance(m, { noSwapBack: true }))).toBeGreaterThan(0);
+  });
 });

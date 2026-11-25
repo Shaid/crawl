@@ -24,7 +24,7 @@ for spec in cgslot:3000:30 cgflags:3000:50 cgroll:3000:50 cgbuild:3000:100 cgmak
   $PY rules5.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
 done
 # pass 5 (undead engine, party pool payments and sharing, more): rules6.py units  unit:count:subset-size
-for spec in undead:3000:120 paygold:3000:100 paygems:3000:100 payfood:3000:100 sharegold:3000:100 sharegems:3000:100 sharefood:3000:100 "$@"; do
+for spec in undead:3000:120 sell:3000:150 inspect:3000:150 advance:3000:120 paygold:3000:100 paygems:3000:100 payfood:3000:100 sharegold:3000:100 sharegems:3000:100 sharefood:3000:100 "$@"; do
   IFS=: read unit n sub flags <<<"$spec"
   $PY rules6.py $unit generated/$unit.json --n ${n:-2000}
   $PY rules6.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
