@@ -52,10 +52,11 @@ This repo hosts two first-person dungeon-crawler RE projects:
   `docs/mm2/amiga/game-rules.md` (read its "MM2 rules status" block first), method: `tools/mm2/rules_oracle/` (Unicorn
   single-routine harness on the retail `mm2`; venv with `unicorn` at `rules_oracle/.venv`; `gen_vectors.sh` writes full
   vector sets to the gitignored `generated/`, small subsets are committed in `vectors/`) -> `tools/mm2/rules.ts`,
-  `rules2.ts`, `rules3.ts`, `rules4.ts`, `rules5.ts` + `__tests__/rules*.test.ts`. ~175,000 vectors, null controls; roster HP/SP labels,
+  `rules2.ts`, `rules3.ts`, `rules4.ts`, `rules5.ts`, `rules6.ts` + `__tests__/rules*.test.ts`. ~200,000 vectors, null controls; roster HP/SP labels,
   the spell-book range and `spells.ts`'s gem/SP/item-boost decode are corrected (game-rules sections 8, 12.1, 13.8). Still open:
-  4 spell handlers (57, 87, 54, 93), the monster spell leaves, shop sell, party-pool payments/food/traps/skills, the party
-  command menu (TODO `mm2-rules-*`).
+  food outside rest, other traps/thief skills, the party command menu and main loop, exchange-stats and roster delete/full flows
+  (TODO `mm2-rules-*`). Pass 5 (2026-11-26, `rules6.py`/`rules6.ts`): all 96 spell handlers, the undead engine, monster leaves,
+  advance, shop sell/examine, party pool, Hall eligibility via a mid-function entry (game-rules section 15).
 
 - **Might & Magic III** (`data/mm3/{amiga,dosvga}/`, `docs/mm3/`, `scripts/mm3lib/`,
   `tools/mm3/`, `public/assets/mm3/`) — container/sprite/maze RE (see `docs/mm3/plan.md`).

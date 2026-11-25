@@ -17,6 +17,7 @@ npx vitest run tools/mm2/__tests__/rules.test.ts
 | `harness.py` | per-call recorder: input footprint, written bytes, return value, stub log |
 | `rules4.py` | pass 3 generators (spells, item use, equip, clock; merges its units into `rules.UNITS`, same CLI) |
 | `rules5.py` | pass 4 generators (overlay hunk: character creation, table loaders, attrib load; doors, shop, cast charge, 16 more non-combat spells; merges into `rules.UNITS`, same CLI) |
+| `rules6.py` | pass 5 generators (undead engine, monster leaves, advance, shop sell/examine, party pool, Hall loop via `Emu.call_range(frame=)` + `Rec.run(call_fn=)`; merges into `rules.UNITS`) |
 | `rules.py` | vector generators per unit (`rules.py UNIT OUT.json --n N`, `rules.py subset IN OUT.gz --n N`) |
 | `replay.py` | replay one recorded vector with a trace of `rand()` calls |
 | `resolve_asm.py`, `funcs.py`, `v.py`, `summ.py`, `lab.sh`, `show.sh` | listing helpers over the IRA disassembly (`data/mm2/amiga/mm2.asm`, gitignored; build it from the root hunks only: IRA rejects `HUNK_OVERLAY`, so `head -c $((0x28818)) mm2 > mm2root`, set `CODE $18 - $2593C` in the `.cnf`, then `resolve_asm.py`) |

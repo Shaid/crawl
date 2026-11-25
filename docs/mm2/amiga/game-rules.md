@@ -17,9 +17,9 @@ Logic foundation for a browser remake's rules core, derived from the game's own 
 
 Reproduce: `tools/mm2/rules_oracle/gen_vectors.sh` (needs a venv with `unicorn`; full vector sets go to the gitignored `tools/mm2/rules_oracle/generated/`, small committed subsets to `tools/mm2/rules_oracle/vectors/`); `npx vitest run tools/mm2/__tests__/rules.test.ts` uses the full sets when present and the committed subsets otherwise.
 
-## MM2 rules status (build guide, updated 2026-11-26, pass 4)
+## MM2 rules status (build guide, updated 2026-11-26, pass 5)
 
-What a remake rules core can take **as is**. Each unit is a real routine run in Unicorn and diffed against a TypeScript port with strict read/write-footprint parity and a null control; section numbers point to the rule text, vector counts are full sets (small subsets are committed in `tools/mm2/rules_oracle/vectors/`, about 175,000 vectors over 4 passes).
+What a remake rules core can take **as is**. Each unit is a real routine run in Unicorn and diffed against a TypeScript port with strict read/write-footprint parity and a null control; section numbers point to the rule text, vector counts are full sets (small subsets are committed in `tools/mm2/rules_oracle/vectors/`, about 200,000 vectors over 5 passes).
 
 | Area | Verified (harness) | Where |
 |---|---|---|
@@ -38,16 +38,15 @@ What a remake rules core can take **as is**. Each unit is a real routine run in 
 | Spell gates and data | SP cost, gem gate, SP gate, combat-class gate, location gate; spells.dat vs dispatch tables (retail data); **paying the cost after a cast** | 6, 12.4, 13.8, 14.5 |
 | **Overlay hunk (pass 4)** | mapped in the harness (A4 jump table already in DATA; file read and alloc stubbed); items/spells/monsters table loaders; **character creation** (free slot, class eligibility, stat roll, record build with HP/SP/age/food/start item, the whole race/alignment/sex/name dialogue); per-screen attrib record (source of the per-map bytes) | 14.1-14.3 |
 | **World (pass 4)** | door unlock and bash; shop price and buy; 16 more non-combat spell handlers (Detect Magic, Location, Jump, Beacon, Fly, Teleport, Recharge, Duplication, Etherealize, Enchant, Restore Alignment, Surface, Rejuvenate, Town Portal, Resurrection, Uncurse) | 14.4-14.6 |
+| **Pass 5** | Nature's Gate (57), Raise Dead (87); **undead engine** CODE+0xC028 for Turn Undead (54) and Holy Word (93) with the real monster_dies; the four monster spell leaves (spray1 0x1F414, hit1 0x1F632, cond 0x1F72E, cond2 0x1F896) with real damage/save/special; monster advance 0x10118; shop sell 0x1BC26 and paid examine 0x1B6E0; party pool payments (gold/gems/food 0x6ACE/0x6B9A/0x6C66) and sharing (0x7BBE/0x7CB0/0x7D3E); Hall of Training eligibility by a mid-function entry (CODE+0x20A54); null controls for every non-combat handler and every previously bare unit | 15 |
 
-**Open (not derived; smallest next step in 14.7 and `docs/mm2/TODO.md`):**
-- `mm2-rules-spell-effects` (remainder): non-combat 57 (Nature's Gate) and 87 (Raise Dead), combat 54 (Turn Undead) and 93 (Holy Word) with the engine CODE+0xC028 (read, not harnessed); the monster spell leaves `spray1` / `sprayAll` / `cond` / `cond2` (CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896) and `advance` CODE+0x10118.
-- `mm2-rules-equipment` (remainder): shop **sell** (CODE+0x1BC26) and the flat list (CODE+0x1B6E0) are located but not harnessed (price and buy are).
-- `mm2-rules-world`: the party-pool payments (gold/gems/food, CODE+0x6ACE/0x6B9A/0x6C66), food outside rest, traps beyond the door trap, thief skills other than the unlock roll, per-step ticks; the party command menu CODE+0x119C2 is still a stub.
-- `mm2-rules-chargen`: the exchange-stats command and the roster-full / delete flows; starting gold is **not** set by the creation routine (location open).
-- Training eligibility (`xp >= needed`, CODE+0x20988) is **code-read only**: that routine is the whole Hall UI loop (not a pure function) — `xp_needed` and `training_cost` are harness-verified.
+**Open after pass 5 (not derived; located facts in 15.5 and `docs/mm2/TODO.md`):**
+- `mm2-rules-world`: food outside rest, traps beyond the door trap, thief skills other than the unlock roll, the party command menu CODE+0x119C2 and the main command loop CODE+0xF1C (UI + key dispatch; its move command is `step handler LAB_036D(dir)` then `advance_time(1)`, so a per-step tick is the verified clock with 1 tick).
+- `mm2-rules-chargen`: exchange-stats OVL+0x201A, roster delete / roster-full flows; starting gold is not set by the creation routine (location open).
 - Party-attack target prompt (target 0xFF) and ranged/melee mode selection are UI.
+- Not a gap: every spell handler of the 96 is now harnessed (combat 53, non-combat 43).
 
-Corrections made in passes 2 to 4 are in sections 8, 11, 13 and 14 (`> **Correction (date):**`).
+Corrections made in passes 2 to 5 are in sections 8, 11, 13, 14 and 15 (`> **Correction (date):**`).
 
 ## 1. Status summary
 
@@ -562,3 +561,27 @@ Still OPEN: non-combat 57 (Nature's Gate, 0x0B0EA: a calendar table walk) and 87
 - Pools: CODE+0x6ACE / 0x6B9A / 0x6C66 pay gold / gems / food out of the whole party's pool (event costs: they are in the opcode jump table at CODE+0x25AC8..) and even the remainder out through CODE+0x7BBE / 0x7CB0 / 0x7D3E; located and read, not harnessed.
 - Food outside rest, traps beyond the door trap, thief skills other than the unlock roll, the per-step ticks and the party command menu CODE+0x119C2 are not traced.
 - The monster leaves CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896 and `advance` CODE+0x10118; training eligibility CODE+0x20988 (the Hall UI loop).
+
+## 15. Pass 5: undead engine, monster leaves, pool, shop sell, Hall eligibility (harness; `rules6.py` / `rules6.ts` / `__tests__/rules6.test.ts`)
+
+### 15.1 Spells
+- **Nature's Gate (57)** CODE+0xB0EA (harness: ~290 vectors through the real dispatcher, `ncspell2`): confirm; fails when `A4-22016` bit 6 or the mode word `A4-31158 != 9`; else the calendar word `A4-31180`: when its bit 0 is set the index walks the 13 thresholds `u16 A4-28956[i]` (signed, first `d < thr`), else 12; `d >= 0x96` sets the mode word to 8 and index 11; the gate is screen `A4-28930[i]`, position `A4-28917[i]` (x = low, y = high nibble), flags `A4-31056 = A4-31210 = 1`.
+- **Raise Dead (87)** CODE+0xC9B6 (~310 vectors): picked member must have condition exactly `0x81`; caster and target age 1 year; `d100 < 11` fails (a roll of 10 erases the body: `0xFF`); else condition 0 and HP (+0x5E) 1.
+- **Undead engine** CODE+0xC028 (`undead`, 3,000 vectors, real `monster_dies`): see `rules6.ts undeadEngine`. Turn Undead (0xBFEE) passes limit = level*16 (level < 16, byte) or the level, Holy Word (0xC72A) sets `A4-1312` and passes 0 (no roll: kills every undead). Per slot: unpack, undead flag `A4-4525`, roll `rand(1, limit)` (255 when no roll), kill when `roll >= A4-4574[slot]`, the slot is revisited after a kill (table compacts). Once per fight (`A4-1311`).
+- **Monster leaves** (`monleaf`, 3,000 vectors, real `damage_char`, saves and `monster_special`): `hit` 0x1F55E (damage halved by `A4-31130`, again by `A4-31131` unless ranged, flags `A4-22064/-22063/-22062` = luck / percentage / type for damage_char, then `A4-1270 = 1` and the special attack); `spray1` 0x1F414 (rand(1,4)+3 minus the dead, capped at party and >= 1; rotation table `A4-26110` start 0/8/16/24 by d100 thresholds 40/60/80); `hit1` 0x1F632 (ranged target pick then one hit); `cond` 0x1F72E (every member) and `cond2` 0x1F896 (one random living member) through 0x1F796 with the saves 0x1F64E (percentage `+0x16 + A4-31146`, luck save, resist byte `member[A4-22062] + A4-31145`; the effect bits are OR-ed into +0x26 when none held).
+- **Advance** CODE+0x10118 (`advance`, 3,000): swaps the actor's six per-slot values with the first other slot whose unpacked record has `A4-4523 == 0`, the actor follows (`A4-1271`); otherwise the reinforcement routine 0x10082 runs.
+
+### 15.2 Party pool (harness: 3,000 each)
+`pay_gold/gems/food` (0x6ACE/0x6B9A/0x6C66): the real members' (roster < 24) pooled gold (long +0x66) / gems (word +0x5C) / food (byte +0x25, byte-wide sum) must be `>=` the amount (unsigned, own width); the rest goes to the first real member, the others drop to 0, then `share_*` (0x7BBE/0x7CB0/0x7D3E) evens it out: gold among real members only, gems and food among everybody (hirelings included); the remainder lands on the first member. Returns 1/0 in `A4-31057`.
+
+### 15.3 Shop (harness: 3,000 each)
+`sell` CODE+0x1BC26: refused (message 8) with a condition on the buyer, message 6 for an empty slot; else the displayed price `A4-23094[slot]` is **added** to gold and the pack closes the gap (CODE+0x46F0; slot 5 cleared). `examine` 0x1B6E0 (the flat list's paid identify screen): same gates, then pays the displayed price (message 4 when short) and only draws.
+
+### 15.4 Hall of Training eligibility (harness: 3,000, mid-function entry)
+Entered at CODE+0x20A54 on a fake frame (`-6 = 1`, `-4 = member`) and run to the epilogue 0x20C2A with scripted keys: the member is eligible iff **XP (+0x62, unsigned long) >= xp_needed(level+1)**; the cost is computed for an eligible member only; `T` trains (5.4) and redraws, `1`-`6` pick a party slot, `G` shows the sheet (real characters), ESC leaves. `Emu.call_range(frame=...)` and `Rec.run(call_fn=...)` make this possible.
+
+### 15.5 Located, not harnessed
+The main command loop CODE+0xF1C dispatches the keys (move: step handler `LAB_036D(dir)` then `advance_time(1)` = the per-step tick, 14.x clock); `advance_time` is also called by door bash and rest only. Thief skills other than unlock, other traps and food use outside rest were not found as separable routines (reached from the key loop); exchange-stats OVL+0x201A and the roster delete/full flows are overlay UI loops that need the same mid-function method.
+
+> **Correction (2026-11-26):** the pass-4 vectors for the Beacon, Fly, Teleport and Town Portal handlers scripted a confirm key even when the cast skipped the confirm (`A4-16140 != 0`), so the *direction/spot key* those handlers read was the confirm key: their success paths were barely exercised. `ncspell2` now scripts the prompt only when it occurs; the ports passed unchanged.
+> **Correction (2026-11-26):** harness trap: Unicorn does not apply hooks added after a block was translated; a setup that ran game code left that code unrecorded (missing reads in the footprint). `Rec.run` now flushes translated blocks after the setup.
