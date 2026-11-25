@@ -30,7 +30,7 @@ for spec in undead:3000:120 hall:3000:150 monleaf:3000:160 sell:3000:150 inspect
   $PY rules6.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
 done
 # pass 6 (exchange stats, ...): rules7.py units  unit:count:subset-size
-for spec in cgxchg:3000:120 "$@"; do
+for spec in cgxchg:3000:120 partytoggle:3000:150 "$@"; do
   IFS=: read unit n sub flags <<<"$spec"
   $PY rules7.py $unit generated/$unit.json --n ${n:-2000}
   $PY rules7.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags

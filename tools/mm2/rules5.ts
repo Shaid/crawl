@@ -785,3 +785,41 @@ export function exchangeStats(m: Mem, idx: number, st: number, fl: number, nextK
   if (!o.noFlags) chargenFlags(m, st, fl);
   return true;
 }
+
+const inParty = (m: Mem, x: number): boolean => {
+  let k = 0;
+  for (; k < 8; k++) if (m.r16(g(-31082) + 2 * k) === (x & 0xffff)) break;
+  return k !== 8;
+};
+/** CODE+0x362C: remove roster entry `x` from the party table (8 words at A4-31082, 0xFFFF empty): the entries behind it move up, the last word is cleared, party size (A4-31066) decrements. */
+export function partyRemove(m: Mem, x: number, o: { noShift?: boolean } = {}): void {
+  if (!inParty(m, x)) return;
+  let k = -1;
+  for (;;) { k++; if (m.r16(g(-31082) + 2 * k) === (x & 0xffff)) break; }
+  m.w16(g(-31082) + 2 * k, 0xffff);
+  while (k < 7) { if (!o.noShift) m.w16(g(-31082) + 2 * k, m.r16(g(-31082) + 2 * (k + 1))); k++; }
+  m.w16(g(-31068), 0xffff);
+  m.w16(g(-31066), (m.r16(g(-31066)) - 1) & 0xffff);
+}
+/**
+ * CODE+0x6E0 roster screen toggle (idx 0..23 = characters, 24..47 = hirelings): a member of the party is removed; otherwise a character joins when the
+ * count of characters (u8 A4-24162) is below 6 and characters + hirelings (A4-24161) is not 8, a hireling when that total is not 8 and its slot flag
+ * `u8 A4-31115[idx-24]` is set. A joiner is appended at party[size], size++. (Screen output is UI.) Returns 1 when it changed the party.
+ */
+export function rosterToggle(m: Mem, idx: number, o: { sixLimit?: number; noHireFlag?: boolean } = {}): number {
+  let off = 0; idx = s16(idx);
+  if (idx >= 24) { off = 24; idx -= 24; }
+  if (inParty(m, idx + off)) { partyRemove(m, idx + off); return 1; }
+  let add = 0;
+  if (off === 0) {
+    if (m.r8(g(-24162)) < (o.sixLimit ?? 6) && m.r8(g(-24162)) + m.r8(g(-24161)) !== 8) add = 1;
+  } else {
+    add = m.r8(g(-24162)) + m.r8(g(-24161)) !== 8 ? 1 : 0;
+    if (add && !o.noHireFlag) add = m.r8(g(-31115) + idx) !== 0 ? 1 : 0;
+  }
+  if (!add) return 0;
+  const sz = m.r16(g(-31066));
+  m.w16(g(-31066), (sz + 1) & 0xffff);
+  m.w16(g(-31082) + 2 * s16(sz), idx + off);
+  return 1;
+}

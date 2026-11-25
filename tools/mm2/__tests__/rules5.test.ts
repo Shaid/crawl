@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats } from '../rules5.ts';
+import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter, exchangeStats, rosterToggle, partyRemove } from '../rules5.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -360,5 +360,34 @@ describe('character creation: exchange stats (OVL+0x201A)', () => {
       for (const v of V) { try { if (JSON.stringify(run(v, o)) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
       expect(bad).toBeGreaterThan(5);
     }
+  });
+});
+
+const partyRemoveNoShift = (m: any, idx: number) => {
+  // same entry point as rosterToggle but with the shift-down dropped: only meaningful when the entry is in the party
+  const inP = [...Array(8).keys()].some((k) => m.r16(0x167ffe - 31082 + 2 * k) === idx);
+  if (inP) partyRemove(m, idx, { noShift: true }); else rosterToggle(m, idx);
+};
+
+describe('roster screen: add / remove a party member (CODE+0x6E0, remove 0x362C)', () => {
+  const V = load('partytoggle');
+  it('matches the game: remove with shift-down, six-character limit, eight-member limit, hireling slot flag', () => {
+    for (const v of V) {
+      const m = mem(v);
+      rosterToggle(m, v.idx);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(V.some((v: any) => v.fin['4194305'] === undefined && Object.keys(v.fin).length === 0)).toBe(true);
+    expect(V.filter((v: any) => Object.keys(v.fin).length > 0).length).toBeGreaterThan(V.length / 4);
+  });
+  it('null controls: limit of 7 characters, no hireling flag, no shift disagree', () => {
+    for (const o of [{ sixLimit: 7 }, { noHireFlag: true }]) {
+      let bad = 0;
+      for (const v of V) { try { const m = mem(v); rosterToggle(m, v.idx, o); if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
+      expect(bad).toBeGreaterThan(3);
+    }
+    let bad = 0;
+    for (const v of V) { try { const m = mem(v); partyRemoveNoShift(m, v.idx); if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(3);
   });
 });
