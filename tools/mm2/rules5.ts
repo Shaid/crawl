@@ -386,7 +386,7 @@ export function buyItem(m: Mem, slot: number, o: { noPay?: boolean } = {}): numb
 
 const ESC = 0x1b;
 const done = (m: Mem) => m.w8(g(-31064), 1); // CODE+0xCADE 'spell done' (the UI text is not modelled)
-export const NC_SPELLS2 = [71, 72, 80, 91, 94, 95, 34, 37, 47, 38, 1, 5, 10, 12, 15, 30];
+export const NC_SPELLS2 = [71, 72, 80, 91, 94, 95, 34, 37, 47, 38, 1, 5, 10, 12, 15, 30, 57, 87];
 
 /**
  * CODE+0xB56E item picker used by Recharge / Duplication / Enchant / Uncurse: keys 'A'..'F' (case folded by CODE+0x2408E) pick one of the six pack slots of the caster
@@ -697,6 +697,53 @@ export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: numb
         }
       }
       if (!fail) done(m);
+      break;
+    }
+    case 57: { // Nature's Gate (0xB0EA): only on the overland map (A4-31158 == 9) and off no-teleport squares; the calendar word picks one of 13 gates
+      if (!ok()) break;
+      let fail = 0;
+      if (m.r8(g(-22016)) & 0x40) fail++;
+      else if (m.r16(g(-31158)) !== 9 && mut !== 'v57') fail++;
+      else {
+        const d = m.r16(g(-31180));
+        let i = 12;
+        if (d & 1) {
+          i = 0;
+          for (;;) {
+            if (s16(d) < s16(m.r16(g(-28956) + 2 * i))) break;
+            i++;
+            if (i >= 13) break;
+          }
+        }
+        if (s16(d) >= 0x96) {
+          m.w16(g(-31158), 8);
+          i = 11;
+        }
+        m.w8(g(-31218), m.r8(g(-28930) + i));
+        const b = m.r8(g(-28917) + i);
+        m.w8(g(-31217), b & 0xf);
+        m.w8(g(-31216), b >> 4);
+        m.w8(g(-31056), 1);
+        m.w8(g(-31210), 1);
+      }
+      if (!fail) done(m);
+      break;
+    }
+    case 87: { // Raise Dead (0xC9B6): the target must be dead (0x81); both age one year; d100 < 11 fails (a 10 erases the body: 0xFF); else condition 0 and 1 hit point
+      const k = pickMemberNc(m, io, calls);
+      if (k === ESC) break;
+      const c = charPtr(m, k);
+      if (m.r8(c + 0x26) !== 0x81) break;
+      ageAdd(caster(), 1);
+      if (mut !== 'v87') ageAdd(c, 1);
+      const r = s16(randRange(m, 1, 100));
+      if (r < 11) {
+        if (r === 10) m.w8(c + 0x26, 0xff);
+        break;
+      }
+      m.w8(c + 0x26, 0);
+      m.w16(c + 0x5e, 1);
+      done(m);
       break;
     }
     default:

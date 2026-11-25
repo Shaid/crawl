@@ -18,8 +18,14 @@ for spec in castdisp:0:206 anywhere:2000:40 dicedmg:2000:50 maxtargets:2000:40 c
   $PY rules4.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
 done
 # pass 4 (overlay hunk: character creation + table loaders; world rules): rules5.py units  unit:count:subset-size
-for spec in cgslot:3000:30 cgflags:3000:50 cgroll:3000:50 cgbuild:3000:100 cgmake:3000:300 loaders:60:9 unlock:3000:400 bash:3000:300 attrib:400:40 charge:1500:80 price:3000:150 buy:3000:200 ncspell2:4500:500 "$@"; do
+for spec in cgslot:3000:30 cgflags:3000:50 cgroll:3000:50 cgbuild:3000:100 cgmake:3000:300 loaders:60:9 unlock:3000:400 bash:3000:300 attrib:400:40 charge:1500:80 price:3000:150 buy:3000:200 ncspell2:5400:560 "$@"; do
   IFS=: read unit n sub flags <<<"$spec"
   $PY rules5.py $unit generated/$unit.json --n ${n:-2000}
   $PY rules5.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
+done
+# pass 5 (undead engine, party pool payments and sharing, more): rules6.py units  unit:count:subset-size
+for spec in undead:3000:120 paygold:3000:100 paygems:3000:100 payfood:3000:100 sharegold:3000:100 sharegems:3000:100 sharefood:3000:100 "$@"; do
+  IFS=: read unit n sub flags <<<"$spec"
+  $PY rules6.py $unit generated/$unit.json --n ${n:-2000}
+  $PY rules6.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
 done

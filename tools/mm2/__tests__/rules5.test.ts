@@ -296,7 +296,7 @@ describe('shop buy command (CODE+0x1BE44, payment 0x1BDD6)', () => {
   });
 });
 
-describe('remaining non-combat spell handlers (1 5 10 12 15 30 34 37 38 47 71 72 80 91 94 95)', () => {
+describe('remaining non-combat spell handlers (1 5 10 12 15 30 34 37 38 47 57 71 72 80 87 91 94 95)', () => {
   const V = load('ncspell2');
   it('match the game through the real dispatcher: pickers, item picker, ageing, teleports, item edits', () => {
     for (const v of V) {
@@ -337,4 +337,6 @@ describe('remaining non-combat spell handlers (1 5 10 12 15 30 34 37 38 47 71 72
   nullCase('Surface ignoring a zero recall coordinate disagrees', { mut: 'v72' }, [72]);
   nullCase('Town Portal ignoring the no-teleport bit disagrees', { mut: 'v91' }, [91]);
   nullCase('Uncurse accepting 0xFF flags disagrees', { mut: 'v95' }, [95]);
+  nullCase("Nature's Gate ignoring the overland-mode word disagrees", { mut: 'v57' }, [57]);
+  nullCase('Raise Dead not ageing the target disagrees', { mut: 'v87' }, [87]);
 });

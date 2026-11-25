@@ -274,7 +274,7 @@ def gen_buy(n, rnd):
     return out
 
 # ---------------------------------------------------------------- pass 4: the remaining non-combat spell handlers
-NC2_PROG = [71, 72, 80, 91, 94, 95, 34, 37, 47, 38, 1, 5, 10, 12, 15, 30]
+NC2_PROG = [71, 72, 80, 91, 94, 95, 34, 37, 47, 38, 1, 5, 10, 12, 15, 30, 57, 87]
 
 def gen_ncspell2(n, rnd):
     """non-combat handlers 71/72/80/91/94/95/34/37/47/38 through the non-combat dispatcher (pickers real; key input CODE+0x42AA and the item picker's key CODE+0x22586 scripted)"""
@@ -290,9 +290,9 @@ def gen_ncspell2(n, rnd):
         seed = rnd.getrandbits(32)
         mk = rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x1b, 0x31]); ck = rnd.choice([0x0d, 0x0d, 0x1b, 0x20])
         pp = []; silent = rnd.choice([0, 1, 1]); lead = [] if silent else [ck]   # a confirm prompt (a key pick) happens only when A4-16140 == 0
-        if spell in (71, 80, 94): pp = [mk, ck]
+        if spell in (71, 80, 94, 87): pp = [mk, ck]
         elif spell == 91: pp = lead + [rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x1b])]
-        elif spell in (72, 38): pp = [ck]
+        elif spell in (72, 38, 57): pp = [ck]
         elif spell in (10, 5, 1): pp = [ck]
         elif spell in (12, 15, 30): pp = lead + [rnd.choice([0x31, 0x32, 0x31, 0x32, 0x33, 0x34, 0x35, 0x39, 0x1b])]
         else: pp = [ck]
@@ -300,6 +300,7 @@ def gen_ncspell2(n, rnd):
         def setup(e):
             picks[:] = pp; ikeys[:] = ik
             sl(e, SEED, seed)
+            sorted_th = sorted(rnd.randint(0, 0x1a0) for _ in range(13))
             setup_party(e, rnd, rnd.choice([1, 1, 2, 3, 4, 5, 6]))
             sz = e.r16(g(-31066)); idxs = [e.r16(g(-31082) + 2 * k) for k in range(8)]
             ch = g(-10814) + 130 * idxs[rnd.randrange(sz)]; sl(e, -18380, ch)
@@ -308,6 +309,11 @@ def gen_ncspell2(n, rnd):
             for k in range(256): e.w8(g(-21946) + k, rnd.choice([0, 0, 0, 0x55, 0xaa, rnd.getrandbits(8)])); e.w8(g(-21690) + k, rnd.choice([0, 0, 0x55, rnd.getrandbits(8)]))
             info['z'] = (e.r8(g(-22020)), e.r8(g(-22016)), e.r8(g(-16140)))
             sb(e, -21976, rnd.choice([0x03, 0x0c, 0x30, 0xc0, 0xff, 0xaa, rnd.getrandbits(8)])); sb(e, -31202, rnd.choice([0, 0, 1, 2])); sb(e, -31128, rnd.getrandbits(8)); sb(e, -31127, rnd.getrandbits(8))
+            if spell == 57:   # Nature's Gate: the calendar word A4-31180, the mode word A4-31158 and the gate tables A4-28956 / -28930 / -28917
+                sw(e, -31180, rnd.choice([rnd.getrandbits(16), rnd.randint(0, 0x1ff), rnd.randint(0x80, 0x120) | 1, rnd.randint(0x80, 0x120) & ~1])); sw(e, -31158, rnd.choice([9, 9, 9, 8, rnd.randint(0, 12)]))
+                if rnd.random() < .5:
+                    for k in range(13): sw(e, -28956 + 2 * k, sorted_th[k])
+                    for k in range(13): sb(e, -28930 + k, rnd.getrandbits(8)); sb(e, -28917 + k, rnd.getrandbits(8))
             sb(e, -31153, rnd.choice([0x45, 0x4e, 0x53, 0x57])); sb(e, -31216, rnd.randint(0, 15)); sb(e, -31217, rnd.randint(0, 15)); sb(e, -31218, rnd.randint(0, 59))
             sb(e, -31064, rnd.getrandbits(8)); sb(e, -31208, rnd.getrandbits(8)); sb(e, -31210, rnd.getrandbits(8)); sb(e, -31204, rnd.getrandbits(8)); sb(e, -31056, rnd.getrandbits(8))
             sw(e, -16138, rnd.getrandbits(16)); sw(e, -16136, rnd.getrandbits(16))
@@ -315,6 +321,7 @@ def gen_ncspell2(n, rnd):
                 if idxs[k] == 0xffff or k >= sz: continue
                 c = g(-10814) + 130 * idxs[k]
                 e.w8(c + 38, rnd.choice([0, 0, 0x10, 0x80, 0x81, 0xff, rnd.getrandbits(8)])); e.w8(c + 39, rnd.choice([0, 1, 2, 17, rnd.getrandbits(8)]))
+                if spell == 87: e.w8(c + 38, rnd.choice([0x81, 0x81, 0x81, 0x80, 0, 0xff]))
                 e.w8(c + 33, rnd.choice([0, 10, 17, 18, 19, 30, 195, 199, 200, 250, rnd.getrandbits(8)])); e.w8(c + 13, rnd.getrandbits(8)); e.w8(c + 106, rnd.getrandbits(8))
                 e.w8(c + 115, rnd.getrandbits(8)); e.w8(c + 113, rnd.randint(1, 20)); e.w16(c + 88, rnd.choice([0, 49, 50, 100, 300, rnd.getrandbits(16)]))
                 for j in range(6):
