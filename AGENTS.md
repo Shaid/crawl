@@ -70,10 +70,10 @@ This repo hosts two first-person dungeon-crawler RE projects:
   `npx tsx tools/mm3/rules-tables.ts` exports them with the 77 spells to `rules-tables.json`. Open: shops/creation/skills/doors/traps; surprise/flee/morale are absent as far as searched (`mm3-rules-*` in `docs/mm3/TODO.md`).
 
 - **Might & Magic I (DOS/EGA)** (`docs/mm1/dosega/game-rules.md`,
-  `tools/mm1/rules_oracle/`, `tools/mm1/rules.ts`) — rules pass 1: Unicorn
+  `tools/mm1/rules_oracle/`, `tools/mm1/rules.ts`) — rules passes 1-2: Unicorn
   8086 harness over `MM.EXE` (symbols from `MM.RSM`), RNG, character creation,
   training, melee/damage, saving throws, resistances and monster touch effects
-  harness-verified. Open: spells, post-combat loot, world (`mm1-rules-*`).
+  harness-verified; pass 2 adds combat spells, monster abilities, treasure/XP/encounter generation and round-loop pieces (`tools/mm1/spells.ts`, `after.ts`). Open: qcast, world, surprise (`mm1-rules-*`).
 
 Both games share the generic `@seer-project/dungeon` walker package, which
 lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).
