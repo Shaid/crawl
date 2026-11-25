@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { castUndead, payPool, shareGold, shareGems, shareFood, sellItem, inspectItem, monsterAdvance } from '../rules6.ts';
+import { castUndead, payPool, shareGold, shareGems, shareFood, sellItem, inspectItem, monsterAdvance, monsterSpray, monsterHitOne, monsterCondAll, monsterCondOne } from '../rules6.ts';
 
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
 function disagree(V: any[], run: (m: StrictMem, v: any) => void): number {
@@ -121,5 +121,30 @@ describe('monster advance (CODE+0x10118)', () => {
   });
   it('null control: not giving the actor the other slot data disagrees', () => {
     expect(disagree(V, (m) => monsterAdvance(m, { noSwapBack: true }))).toBeGreaterThan(0);
+  });
+});
+
+describe('monster spell leaves: spray1 (CODE+0x1F414), hit1 (0x1F632), cond (0x1F72E), cond2 (0x1F896) with the real damage, save and special routines', () => {
+  const V = load('monleaf');
+  const run = (m: StrictMem, v: any, o: { noSave?: boolean; noHalve?: boolean } = {}) => {
+    if (v.which === 'spray1') monsterSpray(m);
+    else if (v.which === 'hit1') monsterHitOne(m, o);
+    else if (v.which === 'cond') monsterCondAll(m, v.arg, o);
+    else monsterCondOne(m, v.arg, o);
+  };
+  it('match the game: target walk, halvings, saves, condition bits, flags re-armed', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const m = mem(v);
+      run(m, v);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(new Set(V.map((v: any) => v.which)).size).toBe(4);
+  });
+  it('null control: no damage halving on a single hit disagrees', () => {
+    expect(disagree(V.filter((v: any) => v.which === 'hit1'), (m, v) => run(m, v, { noHalve: true }))).toBeGreaterThan(0);
+  });
+  it('null control: conditions that skip the saves disagree', () => {
+    expect(disagree(V.filter((v: any) => v.which === 'cond' || v.which === 'cond2'), (m, v) => run(m, v, { noSave: true }))).toBeGreaterThan(0);
   });
 });

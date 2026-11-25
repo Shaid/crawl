@@ -4,9 +4,9 @@
  * see docs/mm2/amiga/game-rules.md section 15. Conventions as in rules.ts.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { charPtr, randRange, unpackMonster } from './rules.ts';
+import { charPtr, damageChar, luckSave, randRange, unpackMonster } from './rules.ts';
 import { confirmAll } from './rules4.ts';
-import { monsterDies } from './rules3.ts';
+import { monsterDies, monsterSpecial, pickTargetRanged } from './rules3.ts';
 
 /**
  * CODE+0xC028 `undead_engine(limit)`: the engine of combat spells 54 (Turn Undead, 0xBFEE) and 93 (Holy Word, 0xC72A).
@@ -266,4 +266,122 @@ export function monsterAdvance(m: Mem, o: { noSwapBack?: boolean } = {}): Calls 
   }
   if (moved === 0) calls.push(['help', []]);
   return calls;
+}
+
+/* ------------------------------------------------------------------ monster spell leaves */
+
+const P_LUCK = -22064; // flags the monster attack routines hand to damage_char / the save: luck save (pB), percentage save (pA), damage type / resist byte (pC)
+const P_PCT = -22063;
+const P_TYPE = -22062;
+
+/**
+ * CODE+0x1F55E `hit(member A4-1272)`: the monster's spell damage A4-3852 is halved once for A4-31130 and once more for A4-31131 (not for ranged, A4-24114),
+ * handed to damage_char (4.3) with the three flags, A4-1270 is set and the monster's special attack (CODE+0x0FD8C) runs; the damage word is restored afterwards.
+ */
+export function monsterHitMember(m: Mem, o: { noHalve?: boolean } = {}): void {
+  const dmg = m.r16(g(-3852));
+  if (m.r8(g(-31130)) !== 0 && !o.noHalve) m.w16(g(-3852), m.r16(g(-3852)) >>> 1);
+  if (m.r8(g(-24114)) === 0 && m.r8(g(-31131)) !== 0 && !o.noHalve) m.w16(g(-3852), m.r16(g(-3852)) >>> 1);
+  damageChar(m, charPtr(m, m.r8(g(-1272))), m.r16(g(-3852)), g(P_LUCK), g(P_PCT), g(P_TYPE));
+  m.w8(g(-1270), 1);
+  monsterSpecial(m);
+  m.w16(g(-3852), dmg);
+}
+
+/**
+ * CODE+0x1F414 `spray1`: hits several members. The count is rand(1,4)+3 minus the dead (condition >= 0x80), capped at the party size and at least 1; a d100 picks
+ * the starting offset into the rotation table A4-26110 (8 per threshold passed of 40 / 60 / 80), the three flags are re-armed for every hit; the walk takes the
+ * table entry as the member slot, skipping slots outside the party or dead members (a UI refresh only), and A4-1272 is restored.
+ */
+export function monsterSpray(m: Mem): void {
+  const saved = m.r8(g(-1272));
+  let n = (randRange(m, 1, 4) + 3) & 0xff;
+  const count = m.r8(g(-31065));
+  for (let i = 0; i < count; i++) if (m.r8(charPtr(m, i) + 38) >= 0x80) n = (n - 1) & 0xff;
+  if (n > count) n = count;
+  if (n === 0) n = 1;
+  const r = randRange(m, 1, 100) & 0xff;
+  let off = ((r >= 0x28 ? 1 : 0) + (r >= 0x3c ? 1 : 0) + (r >= 0x50 ? 1 : 0)) * 8;
+  const f = [m.r8(g(P_LUCK)), m.r8(g(P_PCT)), m.r8(g(P_TYPE))];
+  if (off > 0x18) off = 0;
+  for (let i = 0; i < n; i++) {
+    m.w8(g(-1272), m.r8(g(-26110) + off));
+    if (m.r8(g(-1272)) < count && m.r8(charPtr(m, m.r8(g(-1272))) + 38) < 0x80) monsterHitMember(m);
+    off = (off + 1) & 0xff;
+    m.w8(g(P_LUCK), f[0]);
+    m.w8(g(P_PCT), f[1]);
+    m.w8(g(P_TYPE), f[2]);
+  }
+  m.w8(g(-1272), saved);
+}
+
+/** CODE+0x1F632 `hit1`: the ranged target pick (CODE+0x10332, 11.2) then one hit; A4-1272 restored. */
+export function monsterHitOne(m: Mem, o: { noHalve?: boolean } = {}): void {
+  const saved = m.r8(g(-1272));
+  pickTargetRanged(m);
+  monsterHitMember(m, o);
+  m.w8(g(-1272), saved);
+}
+
+/**
+ * CODE+0x1F64E `monster_save(member)`: the saves a condition spell must beat, in the three flag bytes. d100 `r`: the percentage save (member +0x16 + A4-31146 as a byte)
+ * holds when it is `>= r`, which leaves the flag set; otherwise it is cleared and the luck save (4.4) result becomes the luck flag; if that fails it is cleared and the
+ * resist byte `member[A4-22062] + A4-31145` (byte) holds when `>= r`, else the flag is cleared.
+ */
+export function monsterSave(m: Mem, ch: number): void {
+  const r = randRange(m, 1, 100) & 0xff;
+  if (m.r8(g(P_PCT)) !== 0) {
+    const b = (m.r8(ch + 22) + m.r8(g(-31146))) & 0xff;
+    if (!(b < r)) return;
+  }
+  m.w8(g(P_PCT), 0);
+  if (m.r8(g(P_LUCK)) !== 0) {
+    m.w8(g(P_LUCK), luckSave(m, ch) & 0xff);
+    if (m.r8(g(P_LUCK)) !== 0) return;
+  }
+  m.w8(g(P_LUCK), 0);
+  if (m.r8(g(P_TYPE)) !== 0) {
+    const b = (m.r8(ch + m.r8(g(P_TYPE))) + m.r8(g(-31145))) & 0xff;
+    if (!(b < r)) return;
+  }
+  m.w8(g(P_TYPE), 0);
+}
+
+/** CODE+0x1F796 `condition_on(member A4-1272, bits)`: a dead member (>= 0x80) is simply unaffected; else the saves; when none held the condition bits are OR-ed into +0x26. */
+export function monsterCondMember(m: Mem, bits: number, o: { noSave?: boolean } = {}): void {
+  const ch = charPtr(m, m.r8(g(-1272)));
+  if (m.r8(ch + 38) >= 0x80) m.w8(g(P_PCT), 1);
+  else if (!o.noSave) monsterSave(m, ch);
+  if (m.r8(g(P_PCT)) !== 0) return;
+  if (m.r8(g(P_LUCK)) !== 0 || m.r8(g(P_TYPE)) !== 0) return;
+  m.w8(ch + 38, m.r8(ch + 38) | (bits & 0xff));
+}
+
+/** CODE+0x1F72E `cond(bits)`: the condition goes on every member in turn (flags re-armed for each), A4-1272 restored. */
+export function monsterCondAll(m: Mem, bits: number, o: { noSave?: boolean } = {}): void {
+  const saved = m.r8(g(-1272));
+  const p = m.r8(g(P_PCT));
+  const t = m.r8(g(P_TYPE));
+  const l = m.r8(g(P_LUCK));
+  for (let i = 0; i < m.r8(g(-31065)); i++) {
+    m.w8(g(-1272), i);
+    monsterCondMember(m, bits, o);
+    m.w8(g(P_LUCK), l);
+    m.w8(g(P_PCT), p);
+    m.w8(g(P_TYPE), t);
+  }
+  m.w8(g(-1272), saved);
+}
+
+/** CODE+0x1F896 `cond2(bits)`: the condition goes on one random living member (rand(1, party) - 1, then forward with wrap past the dead); A4-1272 restored. */
+export function monsterCondOne(m: Mem, bits: number, o: { noSave?: boolean } = {}): void {
+  const saved = m.r8(g(-1272));
+  m.w8(g(-1272), (randRange(m, 1, m.r16(g(-31066))) - 1) & 0xff);
+  for (;;) {
+    if (m.r8(charPtr(m, m.r8(g(-1272))) + 38) < 0x80) break;
+    m.w8(g(-1272), (m.r8(g(-1272)) + 1) & 0xff);
+    if (!(m.r8(g(-1272)) < m.r8(g(-31065)))) m.w8(g(-1272), 0);
+  }
+  monsterCondMember(m, bits, o);
+  m.w8(g(-1272), saved);
 }

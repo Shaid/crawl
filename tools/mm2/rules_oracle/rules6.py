@@ -134,6 +134,40 @@ def gen_advance(n, rnd):
         out.append({'seed': seed, **v})
     return out
 
-UNITS6 = {'advance': gen_advance, 'sell': gen_sell, 'inspect': gen_inspect, 'undead': gen_undead, 'paygold': gen_pay('gold'), 'paygems': gen_pay('gems'), 'payfood': gen_pay('food'), 'sharegold': gen_share('gold'), 'sharegems': gen_share('gems'), 'sharefood': gen_share('food')}
+MONLEAF = {'spray1': (0x1F414, 0), 'hit1': (0x1F632, 0), 'cond': (0x1F72E, 1), 'cond2': (0x1F896, 1)}
+COND_BITS = (1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x81, 0x0c)
+
+def gen_monleaf(n, rnd):
+    """the four monster spell leaves CODE+0x1F414 (spray1), 0x1F632 (hit1), 0x1F72E (cond), 0x1F896 (cond2) with the real hit/save/special routines; UI quiet"""
+    e = Emu(); R = Rec(e); out = []
+    for off in sorted(set(QUIET_UI) | set(rules4.QUIET3)): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    for i in range(n):
+        which = ['spray1', 'hit1', 'cond', 'cond2'][i % 4] if i < 400 else rnd.choice(list(MONLEAF))
+        off, na = MONLEAF[which]
+        seed = rnd.getrandbits(32); arg = rnd.choice(COND_BITS)
+        def setup(e):
+            sl(e, SEED, seed); synth_monsters(e, rnd)
+            size = rnd.choice([1, 2, 3, 4, 5, 6, 6]); idxs = setup_party(e, rnd, size); sb(e, -31065, size)
+            alive = rnd.randrange(size)
+            for k in range(size):
+                a = g(-10814) + 130 * e.r16(g(-31082) + 2 * k)
+                for q in range(130): e.w8(a + q, rnd.getrandbits(8) if rnd.random() < .5 else rnd.choice([0, 1, 2, 50, 100, 200, 255]))
+                e.w8(a + 38, 0 if k == alive and which == 'cond2' else rnd.choice([0, 0, 0, 0, 4, 0x10, 0x40, 0x80, 0x81, rnd.getrandbits(8)]))
+                e.w8(a + 32, rnd.randint(1, 40)); e.w16(a + 94, rnd.randint(0, 300)); e.w16(a + 116, rnd.randint(0, 300))
+                for q in (0x16, 0x17, 0x18, 0x1c, 0x1e): e.w8(a + q, rnd.choice([0, 1, 30, 50, 90, 100, 255, rnd.getrandbits(8)]))
+            sb(e, -1272, rnd.randint(0, size - 1)); slot = rnd.randint(0, 10); sb(e, -1271, slot); sb(e, -4574 + slot, rnd.getrandbits(8))
+            for d in range(-4562, -4562 + 0x38): sb(e, d, rnd.getrandbits(8))
+            sb(e, -4537, rnd.choice([0, rnd.randint(1, 31), rnd.randint(1, 31), rnd.getrandbits(8)])); sb(e, -4536, rnd.randint(0, 1))
+            sb(e, -1270, rnd.choice([0, 0, 1])); sb(e, -24114, rnd.choice([0, 0, 1])); sb(e, -24141, rnd.randint(0, 7))
+            sw(e, -3852, rnd.choice([rnd.randint(0, 60), rnd.randint(0, 500), rnd.getrandbits(16)]))
+            for d in (-31130, -31131): sb(e, d, rnd.choice([0, 0, 1, 2]))
+            for d in (-31146, -31145): sb(e, d, rnd.choice([0, 5, 20, 60, 100, rnd.getrandbits(8)]))
+            sb(e, -22064, rnd.choice([0, 1, 1])); sb(e, -22063, rnd.choice([0, 1, 1])); sb(e, -22062, rnd.choice([0, 0x16, 0x17, 0x18, 0x1c, 0x1e, 1, 2, 3, rnd.randint(0, 0x7f), 0xff]))
+            sb(e, -16140, rnd.getrandbits(8)); sb(e, -31141, rnd.getrandbits(8))
+        v = R.run(off, (arg,) if na else (), setup, max_insn=3_000_000)
+        out.append({'seed': seed, 'which': which, 'arg': arg, **v})
+    return out
+
+UNITS6 = {'monleaf': gen_monleaf, 'advance': gen_advance, 'sell': gen_sell, 'inspect': gen_inspect, 'undead': gen_undead, 'paygold': gen_pay('gold'), 'paygems': gen_pay('gems'), 'payfood': gen_pay('food'), 'sharegold': gen_share('gold'), 'sharegems': gen_share('gems'), 'sharefood': gen_share('food')}
 rules.UNITS.update(UNITS6)
 if __name__ == '__main__': rules.main()
