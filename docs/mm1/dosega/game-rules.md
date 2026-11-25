@@ -37,7 +37,8 @@ cited by offset; ScummVM's (GPL) MM1 engine was **not** used as a source.
 | Per-map special-cell event table (55 overlays, 816 dispatched cells, 628 handlers, 55 miss paths) | `tools/mm1/export-events.ts` -> `public/assets/mm1/dosega/data/ovr-events.json` | harness exploration (85.8 % of reachable handler instructions executed) + TS re-derivation of dispatch / texts / destinations / flag cross-check (0 disagreements) |
 | Town services run from the game's bytes: food 0x1DF3, general store `blacks` 0x2196, temple 0x1F2D, tavern 0x2544, training hall 0x1B08, trap effect 0x3D65 | `x86.ts` replay (`runTown`) | harness (200-300 vectors each, strict reads/writes/UI log; null controls) |
 | Loader pieces: screen key `loadmaze` 0xD71, cell loader `draw` 0xF45..0xFA3 (cell id quirk, dark rule) | `ovr.ts` `screenKey`, `cellLoad` | harness (100 / 600) |
-| Still open: thievery/skills beyond lock/bash/search, the chest-open flow 0x3752, class-specific rules beyond the inventory in section 5, internals of the terminal screens (`statue` 0x276C, `loadnext` chain, `encounter` 0x2F87 wrapper, `getinfo` 0x46CB, `gatgold` 0x7636), handlers' unreached 14 % | **open** | `mm1-rules-world`, `mm1-ovr-code` |
+| Chest-open flow 0x3740/0x3749 -> 0x3752 (trap roll, open / find-remove trap / detect, payout, class gate `trap` 0x3BE7) | `x86.ts` replay (`runTown`), section 6.1 | harness (3000 + 300 vectors; null controls) |
+| Still open: thievery/skills beyond lock/bash/search, class-specific rules beyond the inventory in section 5, internals of the terminal screens (`statue` 0x276C, `loadnext` chain, `encounter` 0x2F87 wrapper, `getinfo` 0x46CB, `gatgold` 0x7636), handlers' unreached 14 % | **open** | `mm1-rules-world`, `mm1-ovr-code` |
 
 ### Build guide (what a remake takes from this)
 
@@ -167,3 +168,22 @@ Monster `+0x1B` is read in exactly two places in MM.EXE: `monbon` (CODE+0xA60F: 
 ### 5.5 Class-dependent code inventory (`mm1-rules-world`, partial)
 
 Sites that read the class byte (+0x14, `mov bp,0x14`): `training` 0x1BE2 (cmp 7), `right6` 0x2AA2, `right7` 0x2EAB, `trap` 0x3BE7 (class 2), `viewall` 0x5D9D, `quickr` 0x68D4, `okrest` 0x7202/0x7224 (classes 4/5, 2), `equip` 0x7B0E, `qcast` 0x8844 (3/5), `frommiss` 0x9CFC, `attackp` 0xA3B3/0xA448/0xA54D (4/3), `savechar` 0xA670 (class 2 +20), `poption` 0xBEC0, `comcast` 0xC852 (3/5), `goz34` 0xD603. The ones with rules content (spell lists, save bonus, rest, attack) are ported; `trap` (disarm), `equip` (class restriction masks), `frommiss` and `poption` are not analysed yet.
+
+## 6. Pass 5 findings (chest flow, class sites, thief skills, terminal screens, gated handlers)
+
+Grades as in section 3; "x86 replay" as in section 5. Sections are appended unit by unit.
+
+### 6.1 The chest flow CODE+0x3740 / 0x3749 -> 0x3752 (`mm1-rules-world`, closed; also closes the `trap` 0x3BE7 class site)
+
+Run whole from the game's bytes: 3000 vectors for the flow (`chest`, entry 0x3740) and 300 for the bare trap entry (`chesttrap`, 0x3749 = trap effect 0x3D65 + `chkall`), random party / chest state / key script, strict reads, writes, UI call log, registers; null controls (key script shifted by one, ADC without carry-in) fail. (harness; replay by `runTown`). The vectors reach the open, disarm, detect, trap-fires, gold/gem/item distribution, no-room and party-wipe (`alldead`) paths (900 distinct instruction addresses over 600 sampled runs).
+
+State bytes: chest state `DS:3C78` (0 not rolled, 1 trapped, 2 no trap), chest level `DS:3C79` (0 = cloth sack), three item ids `3C7A..3C7C`, gold word `3C7D/3C7E`, gem byte `3C7F`; overlay byte `getod(0x30)` is the map's trap-sense modifier. The party table is `DS:3CA8` (word pointers).
+
+- **Trap roll on first sight** (state 0): `thr = min(255, 8*level + getod(0x30))` (the `shl ah` leaves `8*level` in AH, 8-bit); state becomes 1 (trapped) when `random(100) < thr`, else 2. The chest picture and the level-th 13-byte name from the table at `DS:0x1A3D` are shown.
+- **Menu**: `1` open it, `2` find/remove trap, `3` detect magic/trap, ESC leaves (clear text, `chkall`, redraw).
+- **Who tries** (0x3CC6): a one-member party uses member 1; otherwise the prompt asks for `1..n`, ESC returns to the menu; a member with `(condition +0x3F) & 0xE1 != 0` (dead/stoned/paralysed/... bit set) is refused with a noise and the prompt repeats.
+- **`1` open** (0x3BAB): only a trapped chest (state 1) can bite: the trap fires (trap effect 0x3D65 then `chkall`) when `random(t + 5) < t` with `t = getod(0x30) + (AH << 3) + carry`, where AH is whatever the preceding code left in it (the code reads the level into AL by mistake where the first roll loads AH - **quirk: not a pure function of the level**, it is the stale AH of the member prompt, so the chance is high). Then the loot is paid out whether or not the trap fired (state is not tested again).
+- **`2` find/remove trap** (0x3821): only for state 1: skill `s = member +0x6C`; `s < 100`: the trap fires when `random(100) >= s`; `s >= 100`: fires when `random(s + 5) >= s`. A disarm that does not fire the trap falls into the same loot payout ("it opens").
+- **`3` detect** (0x3BE4 -> 0x3BE7): class byte +0x14 equal to 2 or 4 prints the bad-class message (noise 2, delay) and returns to the menu; otherwise a member with both spell-point bytes (+0x2B, +0x2C) zero gets the no-spell-points message; else one spell point is taken (16-bit decrement), the screen shows "magic / trap" with a `Y` marker at column 12 when any of items / gold / gems is non-zero and a `Y` at column 22 when the state is 1, then the menu is redrawn (nothing is opened).
+- **Payout** (0x3864): gold = `3C7D/3C7E` divided by the party size by a 32-iteration shift-subtract loop (0x3B49), each member gets the quotient added to its 24-bit gold (+0x39, top byte saturates at 0xFF), the remainder is discarded and the chest gold zeroed; gems go whole to one random member (16-bit +0x31, high byte saturating); the first non-zero chest item goes to the first member (party order) with a free slot in +0x46..+0x4B, with `getinfo`'s charge rule (a charged item gets `random(..)` charges in the parallel byte slot +0x0C+k, else 0); the item id is cleared from the chest *before* the search, so when nobody has room the item is gone. Then the screen delay and `chkall`.
+- Delay helper 0x3FEA is `bx * DS:0x1938` into `machdelay` (stubbed, logged).

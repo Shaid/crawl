@@ -12,7 +12,8 @@ TOWN_LEAVES = {'ph2': (0x40e1, lambda e: [e.rw(0x3bd4), e.rb(0x3bc3), e.rb(0x3bc
                'pnames': (0x4118, None), 'resgrph': (0x45f7, None), 'delay': (0x2461, lambda e: [e.regs()['bx']]), 'delayt': (0x8377, None), 'dl1': (0x837a, lambda e: [e.regs()['bx']]),
                'gatgold': (0x7636, None), 'btmview': (0x6cfd, None), 'namestxt': (0x83f0, None), 'clr13to19': (0x439b, None),
                'machdelay': (0x661, None), 'puttoscr': (0xc5ad, lambda e: [e.regs()['ax'] & 255, e.regs()['cx'], e.regs()['dx']]),
-               'loadgo': (0x511f, None), 'ddal': (0x6d1b, None), 'treaspix': (0xdc19, lambda e: [e.regs()['bx']]), 'treas': (0xc3ad, None)}
+               'loadgo': (0x511f, None), 'ddal': (0x6d1b, None), 'treaspix': (0xdc19, lambda e: [e.regs()['bx']]), 'treas': (0xc3ad, None),
+               'alldead': (0x6555, None)}
 
 def town_stubs(e, keys):
     e.stubs.clear()
@@ -62,3 +63,47 @@ def mk_flow(name):
             out.append(v)
         return out
 for _n in ENTRY: mk_flow(_n)
+
+
+# ---- chest flow (CODE+0x3740 search / 0x3749 trap -> 0x3752): disarm, open, force, cast; chest state DS:3C78 (0 unknown, 1 trapped-known, 2 trap off),
+#      level 3C79, three item ids 3C7A..7C, gold word 3C7D/7E, gems 3C7F ----
+def chest_state(e, r):
+    town_state(e, r)
+    e.wb(DB + 0x30, r.choice([0, 0, 5, 20, 60, 100, 200, r.getrandbits(8)]))
+    e.wb(0x3c79, r.choice([0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, r.getrandbits(8)]))
+    e.wb(0x3c78, r.choice([0, 0, 0, 1, 1, 2]))
+    items = [r.choice([0, 0, r.randint(1, 254)]) for _ in range(3)]
+    e.wbytes(0x3c7a, items); e.ww(0x3c7d, r.choice([0, 0, r.randint(1, 300), r.getrandbits(16)])); e.wb(0x3c7f, r.choice([0, 0, r.randint(1, 20), r.getrandbits(8)]))
+    n = e.rb(NPARTY)
+    for i in range(n):
+        a = e.rw(PARTYTAB + 2 * i)
+        if r.random() < 0.7: e.wb(a + 0x3f, 0)
+        if r.random() < 0.5: e.wbytes(a + 0x2b, r.getrandbits(16).to_bytes(2, 'little'))
+        if r.random() < 0.3: e.wb(a + 0x14, r.choice([2, 4]))
+        if r.random() < 0.5: e.wb(a + 0x6c, r.choice([0, 20, 60, 99, 100, 140, 200, r.getrandbits(8)]))
+    e.wb(0x3cee, r.choice([0, 0, 1]))
+    for k in range(0x3c95, 0x3c9b): e.wb(k, r.choice([0, 0, 0, 30, 60, 100, r.getrandbits(8)]))
+
+def chest_keys(r):
+    ks = []
+    for _ in range(r.randint(1, 4)):
+        ks += [r.choice([0x31, 0x32, 0x33, 0x32, 0x31, 0x1b, 0x0d])] + [r.choice([0x31, 0x32, 0x33, 0x34, 0x1b]) for _ in range(r.randint(0, 2))]
+    return ks + [0x1b] * 3
+
+def _chest(entry, name):
+    @unit(name)
+    def _(n, rnd):
+        e = Emu(); Rc = Rec(e); out = []; tries = 0
+        while len(out) < n and tries < n * 6:
+            tries += 1
+            keys = chest_keys(rnd); seed = rnd.getrandbits(32); box = {}
+            def setup(e):
+                chest_state(e, random.Random(seed)); box['w'] = town_stubs(e, keys); e.scratch.clear()
+            try: v = run_vec(Rc, e, entry, setup, regs_fn=lambda: {})
+            except Exception as ex: continue
+            if e.scratch.get('abort'): continue
+            v['args'] = {'keys': box['w'].used}
+            out.append(v)
+        return out
+_chest(0x3740, 'chest')
+_chest(0x3749, 'chesttrap')

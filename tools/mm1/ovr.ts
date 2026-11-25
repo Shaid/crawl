@@ -109,14 +109,14 @@ export function screenKey(m: Mem, al: number, bl: number, bp: number): { screen:
 }
 
 // ---- town service flows (food 0x1DF3, blacks 0x2196, temple 0x1F2D, tavern 0x2544, training 0x1B08): same stub set as units_shops.py ----
-export const TOWN_ENTRY = { trapfx: 0x3d65, blacks: 0x2196, food: 0x1df3, temple: 0x1f2d, tavern: 0x2544, training: 0x1b08 } as const;
+export const TOWN_ENTRY = { trapfx: 0x3d65, blacks: 0x2196, food: 0x1df3, temple: 0x1f2d, tavern: 0x2544, training: 0x1b08, chest: 0x3740, chesttrap: 0x3749 } as const;
 export function townStubs(keys: number[]): Map<number, StubDef> {
   const s = new Map<number, StubDef>();
   const put = (off: number, name: string, args?: (m: M) => number[]) => s.set(off, { name, args });
   put(0x40e1, 'ph2', t3); put(0x4009, 'ptext', m => [m.r16(0x3bd4), m.r8(0x3bdc), m.r8(0x3bdd)]);
   put(0x3fff, 'cout', m => [m.ax & 255]); put(0x4030, 'pdec', m => [m.r8(0x3c14)]); put(0x1ab3, 'noises', m => [m.ax & 255]); put(0x1ad6, 'dosound', m => [m.ax]);
   for (const [o, n] of [[0x43ba, 'clrtext4'], [0x4384, 'clr40'], [0x4361, 'clrall7'], [0x43fd, 'setgraph'], [0x4118, 'pnames'], [0x45f7, 'resgrph'], [0x8377, 'delayt'], [0x7636, 'gatgold'],
-    [0x6cfd, 'btmview'], [0xc3ad, 'treas'], [0x83f0, 'namestxt'], [0x439b, 'clr13to19'], [0x661, 'machdelay'], [0x511f, 'loadgo'], [0x6d1b, 'ddal']] as [number, string][]) put(o, n);
+    [0x6cfd, 'btmview'], [0xc3ad, 'treas'], [0x83f0, 'namestxt'], [0x439b, 'clr13to19'], [0x661, 'machdelay'], [0x511f, 'loadgo'], [0x6d1b, 'ddal'], [0x6555, 'alldead']] as [number, string][]) put(o, n);
   put(0x2461, 'delay', m => [m.bx]); put(0xdc19, 'treaspix', m => [m.bx]); put(0x837a, 'dl1', m => [m.bx]); put(0xc5ad, 'puttoscr', m => [m.ax & 255, m.cx, m.dx]);
   let ki = 0;
   s.set(0x4582, { name: 'wait_', args: () => [keys[ki++] ?? 0x1b], fn: m => { m.ax = (m.ax & 0xff00) | m.calls[m.calls.length - 1][1][0]; } });
