@@ -167,6 +167,81 @@ def gen_cbspell(n, rnd):
         out.append({'seed': seed, 'spell': spell, 'kills': ks, 'keys': kk, 'picks': pp, **({'keep': True} if i < len(CB_PROG) and v['fin'] else {}), **v})
     return out
 
-UNITS4 = {'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
+NC_PROG = [0, 49, 4, 52, 7, 11, 13, 19, 23, 29, 59, 63, 66, 67, 69, 79, 83, 89, 51, 53, 55, 64, 70, 78, 81]
+
+def gen_ncspell(n, rnd):
+    """non-combat handlers (party buffs, awaken, heals, cures) through the non-combat dispatcher"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3 + (0x044E0, 0x06798, 0x06FB8, 0x042DC): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    picks = []
+    e.stub(0x042AA, 'pick', nargs=2, fn=lambda e, sp: picks.pop(0) if picks else 0x1b)
+    out = []
+    for i in range(n):
+        spell = NC_PROG[i % len(NC_PROG)] if i < 6 * len(NC_PROG) else rnd.choice(NC_PROG)
+        seed = rnd.getrandbits(32)
+        mk = rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x1b, 0x31]); ck = rnd.choice([0x0d, 0x0d, 0x1b, 0x20])
+        pp = [mk, ck] if spell in (51, 53, 55, 64, 70, 78, 81) else [ck]
+        def setup(e):
+            picks[:] = pp
+            sl(e, SEED, seed); ch = pe_state(e, rnd)
+            sb(e, -16140, rnd.choice([0, 1, 1])); sw(e, -1342, 0); sb(e, -31154, rnd.choice([0, 1, 2, 2]))
+            sb(e, -21974, rnd.choice([0, 0, 0, 2, 3, rnd.getrandbits(8)])); sb(e, -31064, rnd.getrandbits(8))
+            sw(e, -16138, rnd.getrandbits(16)); sw(e, -16136, rnd.getrandbits(16))
+            for d in (-31147, -31136, -31135, -31144, -31142, -31084, -31146, -31145, -31143, -31139, -31137, -31140, -31138, -31208, -31210, -31204):
+                sb(e, d, rnd.choice([0, 0, 1, 0xf9, 0xfa, 0xfb, 0xfd, 0xfe, 0xff, 0xea, 0xeb, 0xec, rnd.getrandbits(8)]))
+            setup_party(e, rnd, rnd.choice([1, 1, 2, 3, 4, 5, 6]))
+            sz = e.r16(g(-31066)); idxs = [e.r16(g(-31082) + 2 * k) for k in range(8)]
+            for k in range(8):
+                if idxs[k] == 0xffff or k >= sz: continue
+                c = g(-10814) + 130 * idxs[k]
+                for off, f in ((38, lambda: rnd.choice([0, 0, 0x04, 0x08, 0x10, 0x7f, 0x80, 0x82, 0x40, 0xc0, 0xff, rnd.getrandbits(8)])), (37, lambda: rnd.choice([0, 0x20, 0x27, 0x28, 0x29, rnd.getrandbits(8)])), (113, lambda: rnd.randint(1, 20))):
+                    e.w8(c + off, f())
+                e.w16(c + 94, rnd.choice([rnd.randint(0, 400), rnd.getrandbits(16)])); e.w16(c + 116, rnd.randint(0, 500))
+            if rnd.random() < .6: sl(e, -18380, g(-10814) + 130 * rnd.choice([i for i in idxs[:sz]]))
+        v = R.run(DISP_NC, (spell,), setup, max_insn=3_000_000)
+        out.append({'seed': seed, 'spell': spell, 'picks': pp, **({'keep': True} if i < len(NC_PROG) and v['fin'] else {}), **v})
+    return out
+
+MON_LEAVES = {0x1F414: ('spray1', 0), 0x1F632: ('sprayAll', 0), 0x1F72E: ('cond', 1), 0x1F896: ('cond2', 1), 0x1F912: ('v140E', 0), 0x1F94E: ('v140F', 0), 0x1F988: ('v1412', 0), 0x1F9CC: ('v1416', 0), 0x1FA3E: ('v141B', 0)}
+
+def gen_monspell(n, rnd):
+    """CODE+0x1FB4E monster spell dispatcher: spell -> effect verbs; leaf verbs are logged stubs, the dice routine (0x1F6DC) is real"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3: e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    leaf141f = int(os.popen('./lab.sh LAB_141F').read().strip(), 16)
+    for off, (nm, na) in list(MON_LEAVES.items()) + [(leaf141f, ('v141F', 0))]: e.stub(off, nm, nargs=na)
+    out = []
+    for i in range(n):
+        spell = (i % 36) if i < 360 else rnd.choice([rnd.randint(0, 33), rnd.getrandbits(8)])
+        seed = rnd.getrandbits(32)
+        def setup(e):
+            sl(e, SEED, seed); synth_monsters(e, rnd)
+            sb(e, -1271, rnd.randint(0, 10)); sb(e, -31141, rnd.choice([0, 1, 0xfe, 0xff]))
+            for k in range(11): sb(e, -4574 + k, rnd.choice([rnd.randint(0, 255), rnd.randint(0, 0xb2), rnd.randint(0xb3, 255)])); sw(e, -1338 + 2 * k, rnd.choice([0, 1, 2, 3, rnd.randint(1, 3000)]))
+            sw(e, -3852, rnd.getrandbits(16))
+        v = R.run(0x1FB4E, (spell,), setup, max_insn=3_000_000)
+        out.append({'seed': seed, 'spell': spell, **v})
+    return out
+
+def gen_itemuse(n, rnd):
+    """CODE+0x137E0 (backpack item) / 0x13896 (equipped item) use: charges, removal, then cast or stat boost"""
+    e = Emu(); R = Rec(e)
+    for off in QUIET3: e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    e.stub(0x1374A, 'msg', nargs=1); e.stub(0x13AE2, 'cast', nargs=3)
+    out = []
+    for i in range(n):
+        kind = rnd.choice(['pack', 'equip']); slot = rnd.randint(0, 5)
+        ch = g(-10814) + 130 * rnd.randint(0, 47); iid = rnd.randint(1, 255); rec = g(-16126) + 20 * iid
+        def setup(e):
+            e.uc.mem_write(g(-16126), bytes(rnd.getrandbits(8) for _ in range(256 * 20)))
+            e.w8(rec + 15, rnd.choice([0, 0x05, 0x13, 0x25, 0x7f, 0x80, 0x81, 0xc0, 0xff, rnd.getrandbits(8)]))
+            for off in range(0x28, 0x4c): e.w8(ch + off, rnd.choice([0, 1, 2, 0xff, rnd.getrandbits(8)]))
+            for off in (0x6a, 0x6b, 0x6e, 0x6f, 0x71, 0x72, 0x75, 0x58): e.w8(ch + off, rnd.choice([0, 100, 250, 254, 255, rnd.getrandbits(8)]))
+            sb(e, -16140, rnd.getrandbits(8))
+        v = R.run(0x137E0 if kind == 'pack' else 0x13896, ((ch, 4), (rec, 4), slot), setup, max_insn=2_000_000)
+        out.append({'kind': kind, 'ch': ch, 'rec': rec, 'slot': slot, **v})
+    return out
+
+UNITS4 = {'itemuse': gen_itemuse, 'monspell': gen_monspell, 'ncspell': gen_ncspell, 'cbspell': gen_cbspell, 'castdisp': gen_castdisp, 'anywhere': gen_anywhere, 'dicedmg': gen_dicedmg, 'maxtargets': gen_maxtargets, 'castroute': gen_castroute, 'partyeffect': gen_partyeffect}
 rules.UNITS.update(UNITS4)
 if __name__ == '__main__': rules.main()

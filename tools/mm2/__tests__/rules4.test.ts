@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { anywhereSpell, castCombat, CB_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
+import { anywhereSpell, useItem, monsterSpellVerb, castCombat, castNonCombat, CB_SPELLS, NC_SPELLS, castSpell, diceDamage, dispatchSpell, maxTargets, partyEffect, SPELL_HANDLER_CB, SPELL_HANDLER_NC } from '../rules4.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -154,6 +154,90 @@ describe('combat spell handlers (CODE+0xB644..0xC72A, via the combat dispatcher)
       try {
         const r = run(v, { noRangeCheck: true });
         if (JSON.stringify(r) !== JSON.stringify({ calls: v.calls, ch: v.fin })) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('non-combat spell handlers (CODE+0xA812..0xC9B6, via the non-combat dispatcher)', () => {
+  const V = load('ncspell');
+  const run = (v: any) => {
+    const m = mem(v);
+    const calls = castNonCombat(m, v.spell, { keys: [], picks: [...v.picks], kills: [] });
+    return { calls, ch: m.changes() };
+  };
+  it('matches the game for the party-state spells: buffs, awaken, heals, cures', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) {
+      const r = run(v);
+      expect({ spell: v.spell, calls: r.calls }).toEqual({ spell: v.spell, calls: v.calls });
+      expect({ spell: v.spell, ch: r.ch }).toEqual({ spell: v.spell, ch: v.fin });
+    }
+    expect(new Set(V.map((v: any) => v.spell)).size).toBe(NC_SPELLS.length);
+  });
+  it('null control: ignoring the antimagic square disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        const c = castNonCombat(m, v.spell, { keys: [], picks: [...v.picks], kills: [] }, { noAntimagic: true });
+        if (JSON.stringify(c) !== JSON.stringify(v.calls) || JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('monster spell dispatcher (CODE+0x1FB4E)', () => {
+  const V = load('monspell');
+  it('matches the game: breath damage, verb table, dice, counters', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) {
+      const m = mem(v);
+      const calls = monsterSpellVerb(m, v.spell);
+      expect({ spell: v.spell, calls }).toEqual({ spell: v.spell, calls: v.calls });
+      expect({ spell: v.spell, ch: m.changes() }).toEqual({ spell: v.spell, ch: v.fin });
+    }
+  });
+  it('null control: no breath halving disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        const c = monsterSpellVerb(m, v.spell, { noHalve: true });
+        if (JSON.stringify(c) !== JSON.stringify(v.calls) || JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('item use (CODE+0x137E0 / 0x13896, stat boost CODE+0x13B80)', () => {
+  const V = load('itemuse');
+  const run = (v: any, o = {}) => {
+    const m = mem(v);
+    const calls = useItem(m, v.kind, v.ch, v.rec, v.slot, o);
+    return { calls, ch: m.changes() };
+  };
+  it('matches the game: charges, removal at zero, free cast or stat boost', () => {
+    expect(V.length).toBeGreaterThan(100);
+    for (const v of V) expect(run(v)).toEqual({ calls: v.calls, ch: v.fin });
+    const names = new Set(V.flatMap((x: any) => x.calls.map((c: any) => c[0])));
+    expect(names.has('cast') && names.has('msg')).toBe(true);
+    expect(V.some((v: any) => v.kind === 'equip') && V.some((v: any) => v.kind === 'pack')).toBe(true);
+  });
+  it('null control: not spending a charge disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        if (JSON.stringify(run(v, { noCharge: true })) !== JSON.stringify({ calls: v.calls, ch: v.fin })) bad++;
       } catch {
         bad++;
       }

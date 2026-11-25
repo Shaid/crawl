@@ -4,7 +4,7 @@
  * (tools/mm2/rules_oracle/rules4.py); see docs/mm2/amiga/game-rules.md section 13. Conventions as in rules.ts.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { charPtr, randRange, unpackMonster } from './rules.ts';
+import { charPtr, monsterSpellDamage, randRange, unpackMonster } from './rules.ts';
 
 const s16 = (v: number) => ((v & 0xffff) << 16) >> 16;
 import { spellCombatGate, spellLocationGate } from './rules3.ts';
@@ -407,5 +407,270 @@ export function castCombat(m: Mem, spell: number, io: CastIo, o: { noRangeCheck?
     default:
       throw new Error('spell ' + spell + ' not modelled');
   }
+  return calls;
+}
+
+/* ------------------------------------------- non-combat spell handlers */
+
+/** CODE+0xCCE8 confirm: A4-16140 != 0 accepts silently, else the player answers a prompt (CODE+0x42AA, accepted by key 13); the antimagic flag (A4-21974 bit 1) then refuses with the 'fizzle' message. */
+export function confirmNc(m: Mem, io: CastIo, calls: Calls, noAntimagic = false): number {
+  let ok: number;
+  if (m.r8(g(-16140)) !== 0) ok = 1;
+  else {
+    const k = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+    calls.push(['pick', [13, 13]]);
+    if (k === 13) {
+      m.w8(g(-31064), 1);
+      ok = 1;
+    } else {
+      m.w8(g(-31064), 0);
+      ok = 0;
+    }
+  }
+  if (ok && !noAntimagic && m.r8(g(-21974)) & 2) ok = 0;
+  return ok;
+}
+
+/** CODE+0xCC18 pick a party member for a non-combat spell; cancelling (0x1b) zeroes the pending SP and gem costs A4-16138 / A4-16136 so the cast is free. */
+export function pickMemberNc(m: Mem, io: CastIo, calls: Calls): number {
+  m.w8(g(-31064), 0);
+  let k: number;
+  if (m.r16(g(-31066)) === 1) k = confirmNc(m, io, calls) ? 0x31 : ESC;
+  else {
+    k = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+    calls.push(['pick', [0x31, (m.r16(g(-31066)) + 0x30) & 0xff]]);
+  }
+  if (k === ESC) {
+    m.w16(g(-16138), 0);
+    m.w16(g(-16136), 0);
+  } else {
+    k = (k - 0x31) & 0xffff;
+    m.w8(g(-31064), 1);
+  }
+  if (m.r8(g(-31064)) !== 0 && m.r8(g(-21974)) & 2) k = ESC;
+  return k & 0xffff;
+}
+
+/** CODE+0xCA58 heal(amount): the chosen member (not dead/stoned: condition < 0x80) loses condition bits 0xD0, gains `amount` HP up to the maximum (+0x74). */
+function healMember(m: Mem, io: CastIo, calls: Calls, amount: number): void {
+  const k = pickMemberNc(m, io, calls);
+  if (k === ESC) return;
+  const c = charPtr(m, k);
+  if (m.r8(c + 38) >= 0x80) return; // fizzle message
+  m.w8(c + 38, m.r8(c + 38) & 0x2f);
+  m.w16(c + 94, m.r16(c + 94) + (amount & 0xffff));
+  if (m.r16(c + 94) > m.r16(c + 116)) m.w16(c + 94, m.r16(c + 116));
+  if (c === m.r32(g(-18380))) m.w8(g(-31208), 1);
+  flag(m); // CODE+0xCADE
+}
+
+export const NC_SPELLS = [0, 49, 4, 52, 7, 11, 13, 19, 23, 29, 59, 63, 66, 67, 69, 79, 83, 89, 51, 53, 55, 64, 70, 78, 81];
+
+/** The non-combat dispatcher's handlers (CODE+0xA812..0xC9B6) that only touch party state. CODE+0xCADE ('done') sets A4-31064 = 1. */
+export function castNonCombat(m: Mem, spell: number, io: CastIo, o: { noAntimagic?: boolean } = {}): Calls {
+  const calls: Calls = [];
+  const level = () => m.r8(m.r32(g(-18380)) + 113);
+  const ok = () => confirmNc(m, io, calls, o.noAntimagic);
+  const buff = (d: number, cap: number, flags: [number, number][]) => {
+    if (!ok()) return;
+    if (m.r8(g(d)) < cap) m.w8(g(d), m.r8(g(d)) + 1);
+    for (const [a, v] of flags) m.w8(g(a), v);
+    flag(m);
+  };
+  const setb = (d: number, v: number | (() => number), flags: [number, number][]) => {
+    if (!ok()) return;
+    m.w8(g(d), typeof v === 'function' ? v() : v);
+    for (const [a, x] of flags) m.w8(g(a), x);
+    flag(m);
+  };
+  const cure = (and: number | null, only?: number) => {
+    const k = pickMemberNc(m, io, calls);
+    if (k === ESC) return;
+    const c = charPtr(m, k);
+    const cd = m.r8(c + 38);
+    if (only !== undefined) {
+      if (cd !== only) return;
+      m.w8(c + 38, 0);
+      flag(m);
+      return;
+    }
+    if (cd >= 0x80) return;
+    if (and === null) m.w8(c + 38, 0);
+    else m.w8(c + 38, cd & and);
+    if (c === m.r32(g(-18380))) m.w8(g(-31208), 1);
+    flag(m);
+  };
+  switch (spell) {
+    case 0: case 49: { // Awaken
+      if (!ok()) break;
+      for (let i = 0; i < s16(m.r16(g(-31066))); i++) {
+        const c = charPtr(m, i);
+        const cd = m.r8(c + 38);
+        if (cd < 0x80) m.w8(c + 38, cd & 0x6f);
+      }
+      m.w8(g(-31208), 1);
+      flag(m);
+      break;
+    }
+    case 4: case 52: buff(-31147, 0xfe, [[-31204, 1], [-31210, 1]]); break; // Light
+    case 7: case 19: { // Eagle Eye, Wizard Eye: a counter above 0xFA is clamped to 0xFF, then +5 per caster level while it is below 0xFA
+      if (!ok()) break;
+      const d = spell === 7 ? -31136 : -31135;
+      let lv = level();
+      if (m.r8(g(d)) > 0xfa) m.w8(g(d), 0xff);
+      while (lv !== 0) {
+        lv = (lv - 1) & 0xff;
+        if (m.r8(g(d)) < 0xfa) m.w8(g(d), m.r8(g(d)) + 5);
+      }
+      m.w8(g(-31210), 1);
+      m.w8(g(-31204), 0);
+      flag(m);
+      break;
+    }
+    case 11: buff(-31144, 0xff, [[-31210, 1], [-31204, 0]]); break; // Levitate
+    case 23: buff(-31142, 0xff, [[-31210, 1], [-31204, 0]]); break; // Guard Dog
+    case 29: buff(-31084, 0xff, [[-31210, 1], [-31204, 0]]); break; // Shelter
+    case 13: setb(-31146, () => (level() + 10) & 0xff, [[-31210, 1], [-31204, 0]]); break;
+    case 59: setb(-31145, () => (level() + 20) & 0xff, [[-31210, 1], [-31204, 0]]); break;
+    case 66: { // Lasting Light: +20 to the light counter, 255 when it would overflow
+      if (!ok()) break;
+      if (m.r8(g(-31147)) > 0xeb) m.w8(g(-31147), 0xff);
+      else m.w8(g(-31147), m.r8(g(-31147)) + 0x14);
+      m.w8(g(-31204), 1);
+      m.w8(g(-31210), 1);
+      flag(m);
+      break;
+    }
+    case 63: { // +8 to the caster's byte +0x25 below 0x28
+      if (!ok()) break;
+      const ch = m.r32(g(-18380));
+      if (m.r8(ch + 37) >= 0x28) break;
+      m.w8(ch + 37, m.r8(ch + 37) + 8);
+      flag(m);
+      m.w8(g(-31208), 1);
+      break;
+    }
+    case 67: setb(-31143, 1, [[-31210, 1], [-31204, 0]]); break;
+    case 69: setb(-31139, 1, []); break;
+    case 79: setb(-31137, 1, []); break;
+    case 83: setb(-31140, 1, []); break;
+    case 89: setb(-31138, 1, []); break;
+    case 51: healMember(m, io, calls, 8); break; // First Aid
+    case 55: healMember(m, io, calls, 15); break; // Cure Wounds
+    case 53: { // Power Cure: sum of rand(1,10) over the caster's level
+      let sum = 0;
+      let lv = level();
+      while (lv !== 0) {
+        lv = (lv - 1) & 0xff;
+        sum = (sum + randRange(m, 1, 10)) & 0xffff;
+      }
+      healMember(m, io, calls, sum);
+      break;
+    }
+    case 64: cure(0x77); break; // Cure Poison
+    case 70: cure(0x7b); break; // Cure Disease
+    case 78: cure(null); break; // Remove Condition
+    case 81: cure(null, 0x82); break; // Stone to Flesh
+    default:
+      throw new Error('spell ' + spell + ' not modelled');
+  }
+  return calls;
+}
+
+/* ------------------------------------------------ monster spell verbs */
+
+/**
+ * CODE+0x1FB4E monster_spell(spell): copies three per-spell bytes (A4-26218/-26186/-26154 [spell], the last minus 0x11) to the
+ * message state A4-22064..-22062, then applies the verb. Spells 0-1, 3-8, 0x18 and 0x1F are breaths: damage = the caster's HP,
+ * halved when its record index is below 0xB3 (at least 1), to one party member ('spray1'). The others are a jump table over
+ * spell 2..30: 2 counts up A4-31141 (max 255); the rest call leaf verbs: `spray1` / `sprayAll` (damage to one / every member,
+ * `A4-3852` = damage), `cond(c)` / `cond2(c)` (a condition applied to the party), `v140E`..`v141F` (other effects, not yet derived).
+ */
+export function monsterSpellVerb(m: Mem, spell: number, o: { noHalve?: boolean } = {}): Calls {
+  const calls: Calls = [];
+  spell &= 0xff;
+  m.w8(g(-22064), m.r8(g(-26218) + spell));
+  m.w8(g(-22063), m.r8(g(-26186) + spell));
+  m.w8(g(-22062), (m.r8(g(-26154) + spell) - 0x11) & 0xff);
+  let breath = 0;
+  if (spell < 2) breath++;
+  if (spell >= 3 && spell <= 8) breath++;
+  if (spell === 0x18 || spell === 0x1f) breath++;
+  if (breath) {
+    const cur = m.r8(g(-1271));
+    m.w16(g(-3852), m.r16(g(-1338) + 2 * cur));
+    if (m.r8(g(-4574) + cur) < 0xb3 && !o.noHalve) m.w16(g(-3852), m.r16(g(-3852)) >>> 1);
+    if (m.r16(g(-3852)) === 0) m.w16(g(-3852), 1);
+    calls.push(['spray1', []]);
+    return calls;
+  }
+  switch (spell) {
+    case 2: if (m.r8(g(-31141)) !== 0xff) m.w8(g(-31141), m.r8(g(-31141)) + 1); break;
+    case 9: calls.push(['v140E', []]); break;
+    case 10: calls.push(['cond', [0x82]]); break;
+    case 11: calls.push(['v140F', []]); break;
+    case 12: calls.push(['v1412', []]); break;
+    case 13: calls.push(['v1416', []]); break;
+    case 14: calls.push(['v141B', []]); break;
+    case 15: monsterSpellDamage(m, 6); calls.push(['sprayAll', []]); break;
+    case 16: calls.push(['cond', [0x10]]); break;
+    case 17: case 18: monsterSpellDamage(m, 6); calls.push(['spray1', []]); break;
+    case 19: calls.push(['cond2', [0x81]]); break;
+    case 20: calls.push(['cond2', [0xff]]); break;
+    case 21: monsterSpellDamage(m, 0x28); calls.push(['sprayAll', []]); break;
+    case 22: monsterSpellDamage(m, 0xc); calls.push(['spray1', []]); break;
+    case 23: monsterSpellDamage(m, 0x32); calls.push(['sprayAll', []]); break;
+    case 25: m.w16(g(-3852), 1000); calls.push(['sprayAll', []]); break;
+    case 26: monsterSpellDamage(m, 0x14); calls.push(['spray1', []]); break;
+    case 27: m.w16(g(-3852), randRange(m, 1, 15) + 1); calls.push(['sprayAll', []]); break;
+    case 28: calls.push(['cond', [2]]); break;
+    case 29: calls.push(['v141F', []]); break;
+    case 30: calls.push(['cond', [0x20]]); break;
+    default: break;
+  }
+  return calls;
+}
+
+/* ---------------------------------------------------------- item use */
+
+/** stat byte offsets an item's use power selects with bits 4-6 (CODE+0x13B80 jump table): +0x75, might working copy, speed, accuracy, +0x6A, level, spell level, SP */
+export const ITEM_BOOST_STAT = [0x75, 0x6b, 0x6e, 0x6f, 0x6a, 0x71, 0x72, 0x58] as const;
+
+/** CODE+0x13B80 + CODE+0x4552: a non-spell use power adds (the slot's enchant byte + low nibble) to the selected byte of the character, saturating at 255. */
+export function itemBoost(m: Mem, ch: number, power: number, slot: number, o: { noEnchant?: boolean } = {}): void {
+  let amt = slot < 6 ? m.r8(ch + 0x34 + slot) : m.r8(ch + 0x46 + slot - 6);
+  if (o.noEnchant) amt = 0;
+  amt = (amt + (power & 0x0f)) & 0xff;
+  const p = ch + ITEM_BOOST_STAT[(power >> 4) & 7];
+  if (m.r8(p) > 255 - amt) m.w8(p, 0xff);
+  else m.w8(p, m.r8(p) + amt);
+}
+
+/**
+ * CODE+0x137E0 (backpack, ids +0x3A, charges +0x40, flags +0x46) and CODE+0x13896 (equipped, ids +0x28, charges +0x2E, flags +0x34)
+ * use an item: no charges -> message 0x10; otherwise one charge is spent and at zero the item vanishes (id 0xFF, flag 0); then
+ * the items.dat record's `+0x0F` use power: >= 0x80 casts spell (power & 0x7F) - 1 through the cast command CODE+0x13AE2 (which leaves A4-16140 = A4-31064; no message), below 0x80 is the stat boost above, then message 0x11 and A4-16140 = 1.
+ */
+export function useItem(m: Mem, kind: 'pack' | 'equip', ch: number, rec: number, slot: number, o: { noCharge?: boolean } = {}): Calls {
+  const calls: Calls = [];
+  const chg = ch + (kind === 'pack' ? 0x40 : 0x2e) + slot;
+  if (m.r8(chg) === 0) {
+    calls.push(['msg', [0x10]]);
+    return calls;
+  }
+  if (!o.noCharge) m.w8(chg, m.r8(chg) - 1);
+  if (m.r8(chg) === 0) {
+    m.w8(ch + (kind === 'pack' ? 0x3a : 0x28) + slot, 0xff);
+    m.w8(ch + (kind === 'pack' ? 0x46 : 0x34) + slot, 0);
+    if (kind === 'equip') return calls; // quirk: an equipped item's last charge just destroys it, no effect
+  }
+  const power = m.r8(rec + 15);
+  if (power >= 0x80) {
+    calls.push(['cast', [ch >>> 16, ch & 0xffff, power]]);
+    return calls;
+  }
+  itemBoost(m, ch, power, kind === 'pack' ? slot + 6 : slot);
+  calls.push(['msg', [0x11]]);
+  m.w8(g(-16140), 1);
   return calls;
 }
