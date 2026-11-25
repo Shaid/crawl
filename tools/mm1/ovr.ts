@@ -64,8 +64,9 @@ const t3 = (m: M) => [m.r16(0x3bd4), m.r8(0x3bc3), m.r8(0x3bc4)];
 export function stubTable(keys: number[], kbk: number): Map<number, StubDef> {
   const s = new Map<number, StubDef>();
   const put = (off: number, d: StubDef) => s.set(off, d);
-  put(0x40e1, A('ph2', t3)); put(0x40d6, A('ph2one', m => [m.ax & 255, m.r8(0x3bc3), m.r8(0x3bc4)]));
+  put(0x4009, A('ptext', m => [m.r16(0x3bd4), m.r8(0x3bdc), m.r8(0x3bdd)])); put(0x40e1, A('ph2', t3)); put(0x40d6, A('ph2one', m => [m.ax & 255, m.r8(0x3bc3), m.r8(0x3bc4)]));
   put(0x1ab3, A('noises', m => [m.ax & 255])); put(0x1ad6, A('dosound', m => [m.ax]));
+  put(0xdc19, A('treaspix', m => [m.bx])); put(0xdc16, A('loadcas')); put(0xdc1c, A('monstpix', m => [m.bx]));
   for (const [n, o] of [['clrbtm2', 0x43a8], ['clrall7', 0x4361], ['setgraph', 0x43fd], ['pnames', 0x4118], ['draw', 0xf45], ['resgrph', 0x45f7], ['clrtext4', 0x43ba], ['home', 0x43e6],
     ['clr13to19', 0x439b], ['delayt', 0x8377], ['loadgo', 0x511f], ['blacks', 0x2196], ['food', 0x1df3], ['tavern', 0x2544], ['temple', 0x1f2d], ['training', 0x1b08], ['encounter', 0x2f87],
     ['wait1', 0x4cd6]] as [string, number][]) put(o, A(n));

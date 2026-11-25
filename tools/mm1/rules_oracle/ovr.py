@@ -13,12 +13,15 @@ CB, DB = 0xf48f, 0xc940            # overlay code load offset (CS), data load of
 DISPATCH = 0xf4a1                  # the dispatcher entry installed in DS:0x134 (identical in every overlay with a table)
 
 class Ovr:
+    FAST = False
     def __init__(self, name):
         d = open(os.path.join(DATA_DIR, name + '.OVR'), 'rb').read()
         self.name = name
         (self.magic, self.cbase, self.csz, self.dbase, self.dsz, self.bss, self.entry) = struct.unpack_from('<7H', d, 0)
         assert self.magic == 0xf2 and self.cbase == CB and self.dbase == DB and 14 + self.csz + self.dsz == len(d)
         self.code = d[14:14 + self.csz]; self.data = d[14 + self.csz:]
+        if Ovr.FAST:      # exploration only (never for recorded vectors): shorten the pure busy-wait idiom `mov bp,0xff / dec bp / and bp,0xff / jne` (sound spacing)
+            self.code = self.code.replace(b'\xbd\xff\x00\x4d\x81\xe5\xff\x00\x75\xf9', b'\xbd\x01\x00\x4d\x81\xe5\xff\x00\x75\xf9')
 
     def load(self, e):
         e.uc.mem_write(CS_BASE + CB, self.code)
@@ -29,10 +32,11 @@ class Ovr:
 # ---- stub table: name -> (CS offset, args lambda).  Leaves are UI/IO; terminals end the handler's flow (shops, loadnext ...). ----
 def _t(e): return [e.rw(0x3bd4), e.rb(0x3bc3), e.rb(0x3bc4)]
 LEAVES = {
-    'ph2': (0x40e1, _t), 'ph2one': (0x40d6, lambda e: [e.regs()['ax'] & 255, e.rb(0x3bc3), e.rb(0x3bc4)]),
+    'ptext': (0x4009, lambda e: [e.rw(0x3bd4), e.rb(0x3bdc), e.rb(0x3bdd)]), 'ph2': (0x40e1, _t), 'ph2one': (0x40d6, lambda e: [e.regs()['ax'] & 255, e.rb(0x3bc3), e.rb(0x3bc4)]),
     'noises': (0x1ab3, lambda e: [e.regs()['ax'] & 255]), 'dosound': (0x1ad6, lambda e: [e.regs()['ax']]),
     'clrbtm2': (0x43a8, None), 'clrall7': (0x4361, None), 'setgraph': (0x43fd, None), 'pnames': (0x4118, None), 'draw': (0xf45, None),
     'resgrph': (0x45f7, None), 'clrtext4': (0x43ba, None), 'home': (0x43e6, None), 'clr13to19': (0x439b, None), 'delayt': (0x8377, None),
+    'treaspix': (0xdc19, lambda e: [e.regs()['bx']]), 'loadcas': (0xdc16, None), 'monstpix': (0xdc1c, lambda e: [e.regs()['bx']]),
 }
 TERMINALS = {      # name -> (offset, args)
     'loadnext': (0x509d, lambda e: [e.regs()['ax'] & 255, e.regs()['bx'], e.regs()['bp'], e.rb(0x3c38), e.rb(0x3c39)]),
@@ -65,11 +69,20 @@ class WaitKeys:
     def fn(self, em):
         em.uc.reg_write(UC_X86_REG_AX, (em.uc.reg_read(UC_X86_REG_AX) & 0xff00) | em.scratch.get('key', 0x1b))
 
+def _advance(addr, strptr_off=0x3bd4):
+    def fn(em):       # exploration only: the real printer moves the cursor column by the string length (loops such as `print until column >= n` need it)
+        p = em.rw(strptr_off); n = 0
+        while n < 80 and em.rb((p + n) & 0xffff) != 0: n += 1
+        em.uc.mem_write(DS_BASE + addr, bytes([(em.rb(addr) + n) & 255]))
+    return fn
+
 def install_stubs(e, keys, with_wait=True, kbk=1):
     kb = KbHit(e, kbk); e.stub(0x306, 'mykbhit', kb.fn, kb.args)
     for n, (off, a) in {**LEAVES, **TERMINALS}.items(): e.stub(off, n, None, a)
+    if Ovr.FAST:
+        e.stub(0x40e1, 'ph2', _advance(0x3bc4), _t); e.stub(0x4009, 'ptext', _advance(0x3bdc), LEAVES['ptext'][1])
     if with_wait:
-        w = WaitKeys(e, keys); e.stub(0x4582, 'wait_', w.fn, w.args); return w
+        w = WaitKeys(e, keys, tail=(0x59, 0x0d, 0x1b, 0x20, 0x4e, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30) if Ovr.FAST else (0x59, 0x0d, 0x1b)); e.stub(0x4582, 'wait_', w.fn, w.args); return w
 
 def ov_state(e, r, ov, party=True, perturb=()):
     """a plausible game state with the overlay loaded: random party / map state (units_world.qworld), real overlay data, optional mutated bytes"""
@@ -77,21 +90,26 @@ def ov_state(e, r, ov, party=True, perturb=()):
     if party: qworld(e, r)
     ov.load(e)
     e.ww(0x132, DB); e.ww(0x134, DISPATCH); e.wb(0xda6, 0)
-    for (a, v) in perturb: e.wb(a, v)
+    for (a, v) in perturb:
+        if a >= 0x10000:      # party-record field: 0x10000+off = every member, 0x20000+off = member 0 only (story-flag / item gates live in the character record)
+            n = e.rb(0x3bc0)
+            for i in range(1 if a >= 0x20000 else n):
+                e.wb(e.rw(0x3ca8 + 2 * i) + (a & 0xffff), v)
+        else: e.wb(a, v)
     e.wb(0x3c10, e.rb(0x3c10) | 0x80)
 
 def keyset(r):
     pool = [0x59, 0x4e, 0x0d, 0x1b, 0x20] + list(range(0x30, 0x3a)) + list(range(0x41, 0x5b))
     return [r.choice(pool) for _ in range(r.choice([0, 1, 2, 3, 5, 8]))]
 
-def explore_run(e, ov, ip, r, keys, kbk, perturb=(), regs=None, cell=None, mask=None, state=True, max_insn=40_000):
+def explore_run(e, ov, ip, r, keys, kbk, perturb=(), regs=None, cell=None, mask=None, state=True, max_insn=400_000):
     """one run of `ip` (handler or dispatcher) -> dict(log, regs, covered, reads_ov, keys_used) ; raises on emulator error / runaway"""
     e.reset_state(); e.log.clear(); e.scratch.clear(); e.stubs.clear()
     ov_state(e, r, ov, perturb=perturb)
     if cell is not None: e.wb(0x3c3a, cell)
     if mask is not None: e.wb(0x3c3d, mask)
     w = install_stubs(e, keys, kbk=kbk)
-    cov = set(); rd = set()
+    cov = set(); rd = set(); crd = set()
     from unicorn import UC_HOOK_MEM_READ
     def ch(uc, addr, size, ud):
         o = addr - CS_BASE
@@ -99,13 +117,14 @@ def explore_run(e, ov, ip, r, keys, kbk, perturb=(), regs=None, cell=None, mask=
     def mr(uc, access, addr, size, value, ud):
         o = addr - DS_BASE
         if DB <= o < DB + ov.dsz + ov.bss: rd.add(o - DB)
+        elif ROSTER <= o < ROSTER + 18 * CH: crd.add((o - ROSTER) % CH)
     h1 = e.uc.hook_add(UC_HOOK_CODE, ch); h2 = e.uc.hook_add(UC_HOOK_MEM_READ, mr)
     try:
         out = e.call(ip, regs or {}, max_insn=max_insn)
     finally:
         e.uc.hook_del(h1); e.uc.hook_del(h2)
     if e.scratch.get('abort'): raise RuntimeError('runaway wait loop')
-    return dict(log=[[n, list(a)] for n, a in e.log], regs=out, covered=cov, reads=rd, keys=w.used)
+    return dict(log=[[n, list(a)] for n, a in e.log], regs=out, covered=cov, reads=rd, creads=crd, keys=w.used)
 
 import capstone
 MD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_16); MD.detail = True

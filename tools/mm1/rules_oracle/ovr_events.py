@@ -63,24 +63,36 @@ def run_with_writes(e, ov, ip, r, keys, kbk, perturb):
 
 def explore_handler(e, ov, addr, nruns, seed):
     r = random.Random(seed ^ addr)
-    outcomes = {}; cov = set(); pool = {}; errors = 0
+    outcomes = {}; cov = set(); pool = {}; errors = 0; cpool = {}
+    consts = {0, 1, 0x80, 0xff}                      # immediates of the handler's own compares / masks: the values its gates test for
+    for x in static_reach(ov, addr):
+        ins = next(MD.disasm(ov.code[x - CB: x - CB + 8], x))
+        if ins.mnemonic in ('cmp', 'and', 'or', 'test', 'sub', 'add'):
+            for part in ins.op_str.split(','):
+                part = part.strip()
+                if part.startswith('0x') and int(part, 16) < 256: consts.add(int(part, 16)); consts.add((int(part, 16) + 1) & 255)
     for i in range(nruns):
         keys = keyset(r); kbk = r.choice([0, 1, 2, 3])
         pert = []
         if i % 3 and pool:
             for _ in range(r.choice([1, 1, 2, 3])):
-                o = r.choice(sorted(pool)); pert.append((DB + o, r.choice([0, 1, 2, 3, 4, 0x80, 0xff, r.getrandbits(8)])))
+                o = r.choice(sorted(pool)); pert.append((DB + o, r.choice([0, 1, 2, 3, 4, 0x80, 0xff, r.getrandbits(8)] + sorted(consts) + [ov.data[q] for q in r.sample(sorted(pool), min(3, len(pool))) if q < len(ov.data)])))
+        if i % 2 and cpool:                          # character-record gates (story flags, items, class): mutate fields the handler read
+            for _ in range(r.choice([1, 2, 3])):
+                o = r.choice(sorted(cpool)); vals = sorted(consts) + [ov.data[q] for q in r.sample(sorted(pool), min(3, len(pool))) if q < len(ov.data)] if pool else sorted(consts)
+                pert.append(((0x10000 if r.random() < 0.6 else 0x20000) + o, r.choice(vals)))
         try:
             res, ovw, pos, ch, flagw = run_with_writes(e, ov, addr, r, keys, kbk, pert)
         except Exception as ex:
             errors += 1; continue
         cov |= res['covered']
         for o in res['reads']: pool[o] = 1
+        for o in res['creads']: cpool[o] = 1
         extra = [sorted(pos.items()), ch, flagw]
         s = sig_of(res, ovw, extra, pos)
         o = outcomes.get(s)
         if o is None:
-            o = outcomes[s] = dict(trace=trace_of(res['log'], pos), ovWrites=ovw, pos=pos, charFields=ch, flagWrites=flagw, n=0, onKeys=set(), keys=res['keys'], perturb=[(a - DB, v) for a, v in pert], kbk=kbk)
+            o = outcomes[s] = dict(trace=trace_of(res['log'], pos), ovWrites=ovw, pos=pos, charFields=ch, flagWrites=flagw, n=0, onKeys=set(), keys=res['keys'], perturb=[((a - DB) if a < 0x10000 else a, v) for a, v in pert], kbk=kbk)
         o['n'] += 1
         if res['keys']: o['onKeys'].add(res['keys'][0])
     return outcomes, cov, errors
@@ -195,7 +207,7 @@ def compact_to_gz(res, path):
             h['outcomes'] = h['outcomes'][:12]
             ptrs = []
             for oc in h['outcomes']:
-                for k in ('perturb', 'kbk', 'keys'): oc.pop(k, None)
+                for k in ('perturb', 'kbk', 'keys', 'onKeys'): oc.pop(k, None)   # no key script of any outcome is stored (a typed-word gate must not leak)
                 for c in oc['trace']:
                     if c[0] == 'ph2' and c[1][0] not in ptrs: ptrs.append(c[1][0])
             h.pop('texts', None); h['textPtrs'] = ptrs
@@ -204,8 +216,14 @@ def compact_to_gz(res, path):
     with gzip.GzipFile(path, 'wb', mtime=0) as g: g.write(json.dumps(res, separators=(',', ':'), sort_keys=True).encode())
 
 if __name__ == '__main__':
+    Ovr.FAST = True
     a = sys.argv
     if a[1] == '--compact': compact_to_gz(json.load(open(a[2])), a[3]); sys.exit(0)
+    if a[1] == '--refine':      # --refine IN.json OUT.json [RUNS]: re-explore only the overlays whose handlers / miss path still have unreached code (more runs), splice into IN
+        res = json.load(open(a[2])); nr = int(a[4]) if len(a) > 4 else 300
+        gaps = {n for n, o in res.items() if any(h['coverage'][0] < h['coverage'][1] for h in list(o['handlers'].values()) + ([o['missPath']] if o.get('missPath') else []))}
+        sub = build(gaps, nr); add_miss_paths(sub, nr)
+        res.update(sub); json.dump(res, open(a[3], 'w'), separators=(',', ':')); sys.exit(0)
     if a[1] == '--miss': r = json.load(open(a[2])); add_miss_paths(r); json.dump(r, open(a[3], 'w'), separators=(',', ':')); sys.exit(0)
     runs = int(a[a.index('--runs') + 1]) if '--runs' in a else 120
     only = set(a[a.index('--only') + 1].split(',')) if '--only' in a else None
