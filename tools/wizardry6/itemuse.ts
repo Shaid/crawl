@@ -107,14 +107,23 @@ export function swapParty(c: Ctx, a: number, b: number, fx: Effect[]): void {
  * LAB_0A03 (CODE+0x17814): after a fight (and after the encounter banner), sort the party ascending by record byte +417
  * (condition: 0 healthy .. higher worse), then decide the outcome: every member at condition >= 2 sets game state 8
  * (the party is lost); otherwise a member flagged 2 in the combat struct (+43, a successful run) sets state 0x17.
- * Both write the flag -15130 = 1. Portrait redraws (LAB_09BA, LAB_0A02) are recorded.
+ * Both write the flag -15130 = 1. This version records LAB_09BA and LAB_0A02 as stubbed (the pass-5 vectors); the real
+ * routines are ported in endcombat.ts (`postCombatFull`). > Correction (2026-11-25, pass 6): LAB_09BA is not a portrait
+ * redraw but the per-member upkeep (regeneration, poison, death), see endcombat.ts.
  */
 export function postCombat(c: Ctx, fx: Effect[]): void {
   const { m, a4 } = c;
   const np = s16(m.u16(a4 - 15306));
-  const P = (i: number): number => a4 - 17922 + i * 0x1b0;
   for (let i = 0; i < np; i++) if (m.u8(member(c, 0, i) + 34) < 3) fx.push(['LAB_09BA', hex16(0)]);
   for (let i = 0; i < np; i++) fx.push(['LAB_0A02', hex16(i)]);
+  sortAndOutcome(c);
+}
+
+/** The tail of LAB_0A03 (CODE+0x1790c..): sort the party by condition, then decide wiped (state 8) or fled (0x17). */
+export function sortAndOutcome(c: Ctx): void {
+  const { m, a4 } = c;
+  const np = s16(m.u16(a4 - 15306));
+  const P = (i: number): number => a4 - 17922 + i * 0x1b0;
   for (let i = 0; i < np - 1; i++) {
     for (let j = i + 1; j < np; j++) {
       if (m.u8(P(i) + 417) > m.u8(P(j) + 417)) {

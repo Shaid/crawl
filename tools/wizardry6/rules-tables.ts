@@ -9,6 +9,7 @@
  * game's disassembly only.
  */
 import spellRecipes from './spell-recipes.json' with { type: 'json' };
+import spellCases from './spell-cases.json' with { type: 'json' };
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { readBinary, writeJson } from '@seer-project/pipeline';
@@ -194,6 +195,7 @@ export function extractRulesTables(dataDir: string) {
     realms: realmNames,
     spells,
     spellTierLevels: [...SPELL_TIER_LEVELS],
+    spellDirectCases: { _doc: 'Per spell id: the state-writing cases of the dispatcher LAB_0F06 as ordered operations (op meanings under `ops`, amounts [constant, perPower, perHalf]); the same file spells.ts runs, verified by the spell parity vectors. Spells not listed here or in spellEffectRecipes: 26, 28, 29, 44, 54, 69, 74, 79 (code in spells.ts) and the summons 45, 59, 71.', ...spellCases },
     spellEffectRecipes: { _doc: 'Per spell id: the engine calls the dispatcher LAB_0F06 makes, as affine words in [1, power, d, tg, ti, ag, ai, side] (derived by fitting the game call log; see game-rules section 8).', ...spellRecipes },
     roundActions: { 0: 'attack', 1: 'heal/rest', 2: 'equip', 3: 'cast', 4: 'use item', 5: 'swap', 6: 'hide', 7: 'run', 8: 'breath' },
     groupTrailer: { '396..401': 'shield/buff bytes (fire, cold, ?, air, all-element, anti-magic)', '402..405': 'cloud durations (firestorm, poison gas, toxic vapors, acid)', '406..409': 'cloud trigger ticks', '413': 'member count' },

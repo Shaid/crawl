@@ -28,9 +28,12 @@ This repo hosts two first-person dungeon-crawler RE projects:
   `itemuse.ts`, `randenc.ts`): use item, party swap, post-combat outcome, the per-step world
   tick (hunger, regen, poison, forced camp, wipe), camp, wandering encounters (0.5%/step) and
   the encounter pick, and the chest-disarm decision are harness-verified; "call for help" was a
-  banner and `+412` an identified-name flag (corrected). Still open: HP-based monster morale
-  (none found), surprise, loot award, searching/thief skills, trap effects, the scripted-spot
-  trigger (TODO `w6-combat-ai-items`, `w6-world-rules`, `w6-encounter-trigger`).
+  banner and `+412` an identified-name flag (corrected). Pass 6 (2026-11-25, game-rules §11,
+  `oracle/combat5.py`, `scripted.ts`, `endcombat.ts`, `spell-cases.json`): the scripted-spot trigger,
+  zone code, end-of-fight chain (upkeep, compaction, decay, XP split, treasure roll) are harness-verified;
+  monster flee/morale/surprise are established absent (writer census). Still open: item divvy screen,
+  thief skills other than disarm, trap-effect harness, other entity kinds (TODO `w6-world-rules`,
+  `w6-combat-ai-items`).
 - **Might & Magic II** (`data/mm2/amiga/`, `docs/mm2/`, `tools/mm2/`,
   `public/assets/mm2/amiga/`) — integrated 2026-08-12 as a **port from a
   finished ground-truth RE** (Vairn/MM2, https://github.com/Vairn/MM2): crawl's

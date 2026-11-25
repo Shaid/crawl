@@ -10,8 +10,15 @@ Makers (all through combat.Combat.run_call / combat4.run_mid, same footprint met
   kind4     entity kind 4 handler LAB_062F (CODE+0xcf1c): scripted encounter from the entity's operand byte
   kind5     entity kind 5, the inline case of LAB_06B6 (CODE+0xea30..0xeb42): scripted encounter, state 0x12
   zone      the zone-indicator code after LAB_08BD (CODE+0x13f1c..0x13fde)
+  upkeep    LAB_09BA(group, member, a, b) (CODE+0x1693e): the end-of-combat member upkeep (regeneration, poison, death, counters)
+  compact   LAB_09C8(group) (CODE+0x16be2): upkeep of the survivors and compaction of a group, with the real LAB_09BA inside
+  decay     LAB_0AA2 (CODE+0x19144): group buff and cloud decay at the end of a fight
+  writeback LAB_0A02(member) (CODE+0x1775e): combat struct -> character record
+  xpsplit   LAB_1D9A (CODE+0x5031a): the victory XP split
+  loot      LAB_1D76 from CODE+0x4fe28: the treasure roll, gold / bonus-XP split and item list
+  postfull  LAB_0A03 (CODE+0x17814) with the real LAB_09BA and LAB_0A02
 
-Usage: combat5.py <region|entry|loop|kind4|kind5|zone> OUT.json [--n N] [--seed S]
+Usage: combat5.py <region|entry|loop|kind4|kind5|zone|upkeep|compact|decay|writeback|xpsplit|loot|postfull> OUT.json [--n N] [--seed S]
 """
 import json, os, struct, sys
 import random as pyrandom
@@ -215,6 +222,277 @@ def make_zone_vectors(n, seed):
 
 
 MAKERS['zone'] = make_zone_vectors
+
+
+from combat3 import build_world, ensure_living   # noqa: F401
+
+UPKEEP = 0x1693e
+COMPACT = 0x16be2
+DECAY = 0x19144
+WRITEBACK = 0x1775e
+XPSPLIT = 0x5031a
+LOOT = 0x4fe28          # LAB_1D7A: after the chest pre-step
+LOOT_FULL = 0x4fdd0
+POSTFULL = 0x17814
+
+
+def randomize_members(fx, rng, A4, groups, nmax=9):
+    """Random end-of-combat state in every member struct of the given groups (the layout of combat.py's fixtures)."""
+    for g in groups:
+        base = MEM_BASE + g * MEM_STRIDE
+        for i in range(nmax):
+            o = base + i * 44
+            mx = rng.randrange(1, 80)
+            w16(fx, o + 4, mx); w16(fx, o + 2, rng.choice([mx, rng.randrange(-3, mx + 1), 1, 0, 2]))
+            smx = rng.randrange(0, 60); w16(fx, o + 8, smx); w16(fx, o + 6, rng.choice([smx, rng.randrange(-2, smx + 1), 0]))
+            w8(fx, o + 16, rng.choice([0, 0, 1, 5, 12]))
+            for k in range(14, 24): w8(fx, o + k, rng.choice([0, 0, 0, 1, 2, 7, 255]))
+            w8(fx, o + 34, rng.choice([0, 0, 0, 1, 2, 3]))
+            w8(fx, o + 35, rng.choice([0, 0, 1, 3, 9]))
+            w8(fx, o + 36, rng.choice([0, 0, 1, 4]))
+            w8(fx, o + 41, rng.choice([0, 0, 1, 5, 0xff, 0xfb]))
+            w8(fx, o + 42, rng.choice([0xff, 0xff, rng.randrange(0, 46)]))
+            w8(fx, o + 43, rng.choice([0, 0, 1, 2, 3]))
+
+
+def make_upkeep_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 6), party=rng.randrange(1, 5))
+        randomize_members(fx, rng, A4, range(0, 7))
+        for g in range(1, 7):
+            r = REC_MON_BASE + g * REC_MON_STRIDE
+            w8(fx, r + 220, rng.randrange(0, 8)); w8(fx, r + 218, rng.randrange(0, 200))
+        g = rng.choice([0, 0, 1, 2, 3, 4, 5, 6]); i = rng.randrange(0, 9)
+        a = rng.choice([0, 0, 1, 3, 20, 50]); b = rng.choice([0, 0, 1, 2, 5])
+        if rng.random() < .3: w8(fx, MEM_BASE + g * MEM_STRIDE + i * 44 + 35, rng.choice([2, 9, 30]))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(UPKEEP, [g, i, a, b], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'g': g, 'i': i, 'a': a, 'b': b, 'ret': res['ret']}))
+    return out
+
+
+MAKERS['upkeep'] = make_upkeep_vectors
+
+
+def make_compact_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 6), party=rng.randrange(1, 5))
+        randomize_members(fx, rng, A4, range(0, 7))
+        for g in range(1, 7):
+            r = REC_MON_BASE + g * REC_MON_STRIDE
+            w8(fx, r + 220, rng.randrange(0, 8)); w8(fx, r + 218, rng.randrange(0, 200)); w8(fx, r + 215, rng.choice([0, 0, 1, 4, 12]))
+        g = rng.choice([1, 2, 3, 4, 5, 6])
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(COMPACT, [g], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'g': g}))
+    return out
+
+
+MAKERS['compact'] = make_compact_vectors
+
+
+def make_decay_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=rng.randrange(1, 6), party=rng.randrange(1, 5))
+        for g in range(7):
+            base = MEM_BASE + g * MEM_STRIDE
+            for k in range(396, 402): w8(fx, base + k, rng.choice([0, 0, 1, 5, 9, 10, 19, 30, 100, 200]))
+            for k in range(402, 406): w8(fx, base + k, rng.choice([0, 0, 1, 3, 20]))
+        w16(fx, A4 - 18122, rng.choice([-1, 0, 1, 2])); w16(fx, A4 - 18120, rng.choice([-2, 0, 1, 5]))
+        w8(fx, MEM_BASE + 400, rng.choice([0, 3, 9]))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(DECAY, [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3}))
+    return out
+
+
+MAKERS['decay'] = make_decay_vectors
+
+
+def make_writeback_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    c._stub(c_off('LAB_0A02'), 'LAB_0A02', log=2); c.disabled.add(c_off('LAB_0A02'))
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        randomize_members(fx, rng, A4, [0])
+        i = rng.randrange(0, 6)
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(WRITEBACK, [i], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'i': i}))
+    return out
+
+
+MAKERS['writeback'] = make_writeback_vectors
+
+
+def party_conditions(fx, rng, A4, np_):
+    for i in range(6):
+        r = A4 - 17922 + i * 0x1b0
+        w8(fx, r + 417, rng.choice([0, 0, 0, 1, 2, 3, 4, 5, 8]))
+        w8(fx, r + 418, rng.choice([0, 0, 1, 3])); w8(fx, r + 419, rng.choice([0, 0, 1, 2, 6]))
+
+
+def make_xpsplit_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    c._stub(c_off('LAB_1BE6'), 'LAB_1BE6', log=0)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        np_ = rng.randrange(1, 7)
+        w16(fx, A4 - 15306, np_)
+        party_conditions(fx, rng, A4, np_)
+        pool = rng.choice([0, 1, 7, 100, 4321, 99999, 1234567])
+        fx.writes.append((A4 - 15300, struct.pack('>I', pool)))
+        for i in range(6): fx.writes.append((A4 - 17910 + i * 0x1b0, struct.pack('>I', rng.choice([0, 500, 70000]))))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(XPSPLIT, [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3, 'pool': pool}))
+    return out
+
+
+MAKERS['xpsplit'] = make_xpsplit_vectors
+
+
+def run_mid_big(c, entry, seed, frame, sp_gap=512):
+    """combat4.run_mid with a deeper stack gap so the routine's locals (up to sp_gap bytes below A5) survive its pushes."""
+    from unicorn.m68k_const import UC_M68K_REG_A5, UC_M68K_REG_A7, UC_M68K_REG_A4, UC_M68K_REG_D0
+    c.effects = []; c.written = {}; c.foot = {}; c.rargs = []
+    c.seed(*seed)
+    a5 = E.STACK_TOP - 0x800
+    c.w32(a5, 0); c.w32(a5 + 4, E.RET_MAGIC)
+    c.uc.reg_write(UC_M68K_REG_A5, a5); c.uc.reg_write(UC_M68K_REG_A7, a5 - sp_gap); c.uc.reg_write(UC_M68K_REG_A4, c.A4)
+    for off, data in frame: c.uc.mem_write(a5 + off, bytes(data))
+    c.tracking = True
+    try:
+        c.uc.emu_start(CODE_BASE + entry, E.RET_MAGIC + 0x100, count=200_000_000)
+    finally:
+        c.tracking = False
+    diffs = {a: c.uc.mem_read(a, 1)[0] for a in c.written}
+    return {'foot': c.foot, 'diff': diffs, 'effects': c.effects, 'rng': list(c.state()), 'rargs': [], 'ret': c.uc.reg_read(UC_M68K_REG_D0) & 0xffff}
+
+
+def treasure_record(c, rng, real_cache={}):
+    kind = rng.random()
+    if kind < .45:                                      # a real record
+        if 'buf' not in real_cache: real_cache['buf'] = c.alloc(64)
+        rid = rng.randrange(0, 200)
+        c.call(0x9fc, [7, (real_cache['buf'], 4), rid, 0])
+        return bytes(c.uc.mem_read(real_cache['buf'], 40))
+    out = bytearray(40)
+    for k in range(6):
+        t = rng.choice([0, 1, 1, 2, 2, 4, 3])
+        if t == 1: A = rng.randrange(1, 900); B = rng.randrange(0, A + 1)
+        elif t == 2: A = rng.randrange(1, 400); B = rng.randrange(1, 6)
+        elif t == 4: A = rng.randrange(1, 50); B = rng.randrange(1, 30)
+        else: A = rng.randrange(0, 20); B = rng.randrange(0, 20)
+        out[6 * k:6 * k + 2] = struct.pack('>H', A); out[6 * k + 2:6 * k + 4] = struct.pack('>H', B)
+        out[6 * k + 4] = t; out[6 * k + 5] = rng.choice([0, 20, 50, 80, 100, 100])
+    return bytes(out)
+
+
+def make_loot_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    c._stub(c_off('LAB_1BE6'), 'LAB_1BE6', log=0); c._stub(c_off('LAB_1D2D'), 'LAB_1D2D', log=0)
+    c._stub(c_off('LAB_1B5B'), 'LAB_1B5B', log=0); c._stub(c_off('LAB_1B62'), 'LAB_1B62', log=2)
+    c._stub(c_off('LAB_1D52'), 'LAB_1D52', log=0)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=4)
+        np_ = rng.randrange(1, 7)
+        w16(fx, A4 - 15306, np_)
+        party_conditions(fx, rng, A4, np_)
+        if rng.random() < .15:
+            for i in range(6): w8(fx, A4 - 17922 + i * 0x1b0 + 417, rng.choice([1, 2, 3]))
+        for i in range(6):
+            fx.writes.append((A4 - 17910 + i * 0x1b0, struct.pack('>I', rng.choice([0, 500, 70000]))))
+            fx.writes.append((A4 - 17902 + i * 0x1b0, struct.pack('>I', rng.choice([0, 20, 5000]))))
+        w16(fx, A4 - 18608, rng.choice([0xf, 0x15]))
+        rec = treasure_record(c, rng)
+        ids = set()
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = run_mid_big(c, LOOT, seed3, [(-44, rec)])
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        # item records the routine asked for: replay ReadSection(1, id) for every id in the item list it built
+        cnt = struct.unpack('>h', bytes(c.uc.mem_read(A4 - 3114, 2)))[0]
+        items = {}
+        for k in range(max(0, min(cnt, 6))):
+            iid = struct.unpack('>h', bytes(c.uc.mem_read(A4 - 5446 + 2 * k, 2)))[0]
+            items[str(iid)] = item_bytes(c, iid).hex()
+        out.append(pack(c, res, {'seed': seed3, 'rec': rec.hex(), 'items': items}))
+    return out
+
+
+from combat4 import item_bytes   # noqa: E402
+MAKERS['loot'] = make_loot_vectors
+
+
+def make_postfull_vectors(n, seed):
+    rng = pyrandom.Random(seed); c = Combat(); out = []
+    A4 = c.A4
+    c._stub(c_off('LAB_0A1E'), 'LAB_0A1E', log=2)
+    while len(out) < n:
+        fx, ng, counts = build_world(c, rng, ngroups=1, party=rng.randrange(1, 7))
+        np_ = rng.randrange(1, 7)
+        w16(fx, A4 - 15306, np_)
+        g0 = MEM_BASE
+        w8(fx, g0 + 413, np_)
+        randomize_members(fx, rng, A4, [0], 6)
+        for i in range(6):
+            r = A4 - 17922 + i * 0x1b0
+            w8(fx, r + 417, rng.choice([0, 0, 0, 1, 2, 3, 4, 5, 8]) if rng.random() < .7 else rng.choice([2, 3, 5]))
+            w8(fx, r + 418, rng.choice([0, 0, 1, 4])); w8(fx, r + 419, rng.choice([0, 0, 1, 2, 9]))
+            w8(fx, r + 416, rng.randrange(0, 6)); w8(fx, r + 414, rng.randrange(0, 6))
+        for k in range(6):
+            w16(fx, A4 - 15330 + 2 * k, rng.randrange(0, 500)); w16(fx, A4 - 15318 + 2 * k, rng.randrange(0, 500))
+        w16(fx, A4 - 18608, rng.choice([0, 5, 0x12])); w16(fx, A4 - 15130, rng.choice([0, 0, 1]))
+        c.apply(fx.writes)
+        seed3 = [rng.randrange(1, 30000) for _ in range(3)]
+        c.apply([(RNG_ADDR, bytes(6))])
+        try:
+            res = c.run_call(POSTFULL, [], seed3)
+        except RuntimeError as e:
+            print('skip', str(e)[-90:], file=sys.stderr); continue
+        out.append(pack(c, res, {'seed': seed3}))
+    return out
+
+
+MAKERS['postfull'] = make_postfull_vectors
 
 
 if __name__ == '__main__':

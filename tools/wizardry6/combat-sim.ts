@@ -21,6 +21,7 @@ import { castAction, loadSpellTable, makeEngines } from './spellrun.ts';
 import { castEffect } from './spells.ts';
 import { removeItem } from './inventory.ts';
 import { postCombat, swapParty, useItem, type ItemRec } from './itemuse.ts';
+import { compactGroup, decayBuffs, lootRoll, postCombatFull, xpSplit, type LootItem } from './endcombat.ts';
 import { hide, run as runAway } from './flee.ts';
 import { breath } from './breath.ts';
 import { startEncounter, type EncounterIO } from './encounter.ts';
@@ -371,6 +372,28 @@ export class CombatWorld {
     const { a4 } = LAYOUT;
     postCombat({ m: this.mem, rng: this.rng, a4 }, []);
     return this.mem.u16(a4 - 18608) === 0x17;
+  }
+
+  /**
+   * The game's end-of-fight sequence (LAB_0AB0, CODE+0x192c2, then the victory handler LAB_1DA1), composed of harness-verified
+   * pieces: the party's upkeep, deaths and sort (postCombatFull), regeneration, poison and the dead dropped from every monster
+   * group (compactGroup 1..5 and the ally group 6), buff and cloud decay, then on a victory the XP pool split among the living
+   * and the treasure roll (gold and bonus XP split, item list). Not ported: LAB_09DC's group renumbering and the mist
+   * transformation bookkeeping (open, w6-victory-flow). The fight is a victory when no monster group has a living member.
+   */
+  finishFight(treasure?: { rec: Uint8Array; item: (id: number) => LootItem }): { victory: boolean; fx: Effect[] } {
+    const { a4 } = LAYOUT;
+    const c = { m: this.mem, rng: this.rng, a4 };
+    const fx: Effect[] = [];
+    postCombatFull(c, fx);
+    for (let g = 1; g <= 6; g++) compactGroup(c, g);
+    decayBuffs(c);
+    const victory = this.groupSizes.every((_, k) => this.living(k + 1).length === 0) && this.living(0).length > 0;
+    if (victory) {
+      if ((this.mem.u32(a4 - 15300) | 0) > 0) xpSplit(c, fx);
+      if (treasure) lootRoll(c, treasure.rec, treasure.item, fx);
+    }
+    return { victory, fx };
   }
 
   /** Fight with {@link gameRound} until one side is gone (the round driver ends combat itself by leaving state 0xd). */

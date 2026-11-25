@@ -1,0 +1,434 @@
+{
+ "note": "The spell cases of the dispatcher LAB_0F06 (Bane CODE+0x24ea0) that write state directly instead of calling an engine, as data. Each spell id maps to an ordered list of operations; amounts are [constant, perPower, perHalf] with half = (power - 1) / 2 + 1 (signed division). Groups: caster = the actor group -15138(A4), target = the byte at action+31; 'who' of a member op: target = member action+32 of the target group, caster = member -15136(A4) of the caster group. Counters use the buff helper LAB_0EBA (mode 0 buff: raise to the amount; mode 1 debuff: lower by it, floor at minus the amount). Verified against the game by the spell parity vectors (spells.test.ts, 82 of 82 ids). Cases that still have code in spells.ts because they depend on engine results or several unrelated writes: 26 (poison and disease together), 28 (dispel clouds), 29, 44, 54, 69, 74, 79 and the summons 45, 59, 71.",
+ "ops": {
+  "groupByte": "group trailer byte at +off of the caster or target group: buff(amount, current, mode)",
+  "globalAdd": "word at A4+addr += amount",
+  "globalBuff": "word at A4+addr = buff(amount, current word, mode)",
+  "memberSigned": "signed member byte +off of the target member: buff(amount, value, mode)",
+  "membersAll": "for every member of the caster or target group (aliveOnly: state < 3), each listed signed byte +off: buff(amount, value, mode)",
+  "heal": "member HP (+2 up to +4) or stamina (+6 up to +8) of the target or caster member gains the dice69 roll dice = [count, sides, bonus] (each an amount); refreshes the party record when the member is in group 0",
+  "healCasterBoth": "caster member: stamina by the dice roll, then HP by the dice roll (each capped at its maximum); refreshes the record when the caster is in group 0",
+  "healPools": "when the caster is in group 0: each of the six spell pools (cur +40+4k, max +42+4k) gains the dice roll, capped",
+  "cure": "target member bytes at +off each fall by amount (floor 0); refreshes the party record when the target is in group 0",
+  "cloud": "after the engine recipe: group trailer +402+k (the cloud duration) becomes max(power, current) + 1 and +406+k the trigger tick + 1",
+  "typeOnly": "engine recipe with argument 5 replaced: spell strength + 3 * word difference when the target record byte +208 equals type, else -100"
+ },
+ "cases": {
+  "3": [
+   {
+    "op": "groupByte",
+    "group": "caster",
+    "off": 396,
+    "amt": [
+     0,
+     15,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "16": [
+   {
+    "op": "groupByte",
+    "group": "caster",
+    "off": 397,
+    "amt": [
+     0,
+     15,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "21": [
+   {
+    "op": "groupByte",
+    "group": "caster",
+    "off": 398,
+    "amt": [
+     0,
+     15,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "23": [
+   {
+    "op": "groupByte",
+    "group": "caster",
+    "off": 399,
+    "amt": [
+     0,
+     15,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "70": [
+   {
+    "op": "groupByte",
+    "group": "caster",
+    "off": 400,
+    "amt": [
+     0,
+     10,
+     0
+    ],
+    "mode": 0
+   },
+   {
+    "op": "globalAdd",
+    "when": "casterIsParty",
+    "addr": -18122,
+    "amt": [
+     0,
+     50,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "when": "casterIsParty",
+    "addr": -18120,
+    "amt": [
+     0,
+     10,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "72": [
+   {
+    "op": "groupByte",
+    "group": "target",
+    "off": 401,
+    "amt": [
+     0,
+     2,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "37": [
+   {
+    "op": "memberSigned",
+    "off": 38,
+    "amt": [
+     0,
+     1,
+     0
+    ],
+    "mode": 1
+   }
+  ],
+  "49": [
+   {
+    "op": "membersAll",
+    "group": "caster",
+    "offs": [
+     38,
+     39
+    ],
+    "amt": [
+     0,
+     0,
+     1
+    ],
+    "mode": 1
+   }
+  ],
+  "14": [
+   {
+    "op": "membersAll",
+    "group": "caster",
+    "aliveOnly": true,
+    "offs": [
+     41
+    ],
+    "amt": [
+     0,
+     2,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "30": [
+   {
+    "op": "globalAdd",
+    "addr": -18118,
+    "amt": [
+     0,
+     5,
+     0
+    ]
+   }
+  ],
+  "38": [
+   {
+    "op": "globalAdd",
+    "addr": -18138,
+    "amt": [
+     0,
+     100,
+     0
+    ]
+   }
+  ],
+  "41": [
+   {
+    "op": "globalAdd",
+    "addr": -18134,
+    "amt": [
+     0,
+     50,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "addr": -18132,
+    "amt": [
+     0,
+     0,
+     1
+    ],
+    "mode": 0
+   }
+  ],
+  "53": [
+   {
+    "op": "globalAdd",
+    "addr": -18130,
+    "amt": [
+     0,
+     50,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "addr": -18128,
+    "amt": [
+     70,
+     5,
+     0
+    ],
+    "mode": 0
+   }
+  ],
+  "68": [
+   {
+    "op": "globalAdd",
+    "addr": -18126,
+    "amt": [
+     0,
+     35,
+     0
+    ]
+   },
+   {
+    "op": "globalBuff",
+    "addr": -18124,
+    "amt": [
+     0,
+     0,
+     1
+    ],
+    "mode": 0
+   }
+  ],
+  "10": [
+   {
+    "op": "heal",
+    "who": "target",
+    "pool": "stamina",
+    "dice": [
+     [
+      0,
+      2,
+      0
+     ],
+     [
+      8,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  ],
+  "64": [
+   {
+    "op": "heal",
+    "who": "target",
+    "pool": "hp",
+    "dice": [
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      7,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  ],
+  "80": [
+   {
+    "op": "healCasterBoth",
+    "stamina": [
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      8,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "hp": [
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  ],
+  "81": [
+   {
+    "op": "healPools",
+    "dice": [
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      10,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  ],
+  "15": [
+   {
+    "op": "cure",
+    "offs": [
+     17
+    ],
+    "amt": [
+     0,
+     25,
+     0
+    ]
+   }
+  ],
+  "57": [
+   {
+    "op": "cure",
+    "offs": [
+     21
+    ],
+    "amt": [
+     0,
+     25,
+     0
+    ]
+   }
+  ],
+  "51": [
+   {
+    "op": "cure",
+    "offs": [
+     15,
+     16,
+     18,
+     22,
+     23
+    ],
+    "amt": [
+     0,
+     2,
+     0
+    ]
+   }
+  ],
+  "7": [
+   {
+    "op": "cloud",
+    "k": 0
+   }
+  ],
+  "25": [
+   {
+    "op": "cloud",
+    "k": 1
+   }
+  ],
+  "31": [
+   {
+    "op": "cloud",
+    "k": 2
+   }
+  ],
+  "43": [
+   {
+    "op": "cloud",
+    "k": 3
+   }
+  ],
+  "67": [
+   {
+    "op": "typeOnly",
+    "type": 20
+   }
+  ],
+  "75": [
+   {
+    "op": "typeOnly",
+    "type": 21
+   }
+  ]
+ }
+}
