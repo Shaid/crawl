@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { resolve } from 'node:path';
 import { StrictMem } from '../rules-mem.ts';
-import { damageChar, rest, train, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
+import { damageChar, spellGemGate, spellSpCost, spellSpGate, rest, train, xpAward, learnSpellLevel, killReward, monsterSpellDamage, monsterUsesAbility, partyAttack, partyPower, syncStats, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
 
 const DIR = resolve('tools/mm2/rules_oracle');
 export function load(name: string): any[] {
@@ -265,6 +265,28 @@ describe('party rest (CODE+0x19B28)', () => {
   it('null control: resting without the food requirement disagrees', () => {
     let bad = 0;
     for (const v of V) { const m = mem(v); try { rest(m, { noFoodGate: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; } }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('spell cost gates (CODE+0x4BBC SP cost, 0x795C gems, 0x79A0 SP)', () => {
+  const V = load('spellcost');
+  it('matches the game for cost, gem gate and SP gate', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const kind of ['cost', 'gems', 'sp']) expect(V.some((v: any) => v.kind === kind)).toBe(true);
+    for (const v of V) {
+      const m = mem(v);
+      if (v.kind === 'cost') { spellSpCost(m, v.char, v.rec); expect(m.changes()).toEqual(v.fin); }
+      else if (v.kind === 'gems') { const r = spellGemGate(m, v.char, v.rec); expect(r.ok).toBe(v.ret); expect(r.calls).toEqual(v.calls); expect(m.changes()).toEqual(v.fin); }
+      else { const r = spellSpGate(m, v.char); expect(r.ok).toBe(v.ret); expect(r.calls).toEqual(v.calls); }
+    }
+  });
+  it('null control: capping the monster count for the two special records too disagrees', () => {
+    let bad = 0;
+    for (const v of V.filter((x: any) => x.kind === 'cost')) {
+      const m = mem(v);
+      try { spellSpCost(m, v.char, v.rec, { capAll: true }); if (!same(m.changes(), v.fin)) bad++; } catch { bad++; }
+    }
     expect(bad).toBeGreaterThan(0);
   });
 });

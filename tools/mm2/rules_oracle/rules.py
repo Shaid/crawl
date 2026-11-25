@@ -15,6 +15,7 @@ def sl(e, d, v): e.w32(g(d), v)
 SEED = -24802
 F_RAND16, F_SRAND, F_RANDR = 0x24048, 0x2407C, 0x22BC6
 F_MONUNPACK = 0x4C8E
+LAB_03F1 = 0x64F8   # UI message routine (stubbed by the spell-gate vectors); see lab.sh
 P_MONBUF = -30658
 
 def mondata():
@@ -332,7 +333,39 @@ def gen_rest(n, rnd):
         out.append({'seed': seed, **R.run(0x19B28, (), setup)})
     return out
 
-UNITS = {'rest': gen_rest, 'train': gen_train, 'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
+def gen_spellcost(n, rnd):
+    e = Emu(); R = Rec(e); out = []
+    e.stub(LAB_03F1, 'msg', nargs=1)
+    for i in range(n):
+        idx = rnd.choice([42, 46, rnd.randint(0, 95), rnd.randint(0, 95)])
+        rec = g(-11006) + 2 * idx
+        a = g(-10814) + rnd.randint(0, 47) * 130
+        def setup(e):
+            e.w8(rec, rnd.getrandbits(8)); e.w8(rec + 1, rnd.getrandbits(8))
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            e.w8(a + 113, rnd.randint(1, 60)); e.w16(a + 92, rnd.choice([0, rnd.randint(0, 120), rnd.getrandbits(16)])); e.w16(a + 88, rnd.choice([0, rnd.randint(0, 120), rnd.getrandbits(16)]))
+            sb(e, -30654, rnd.choice([0, rnd.randint(1, 11), rnd.getrandbits(8)])); sw(e, -16138, rnd.getrandbits(16)); sw(e, -16136, rnd.getrandbits(16))
+        k = rnd.choice(['cost', 'gems', 'sp'])
+        if k == 'cost': v = R.run(0x4BBC, ((a, 4), (rec, 4)), setup)
+        elif k == 'gems': v = R.run(0x795C, ((a, 4), (rec, 4)), setup)
+        else:
+            # SP gate reads the cost computed earlier: run it right after a cost call in the same state
+            def setup2(e):
+                setup(e); e.call(0x4BBC, ((a, 4), (rec, 4)))
+            v = R.run(0x79A0, ((a, 4),), setup2)
+        out.append({'kind': k, 'char': a, 'rec': rec, **v})
+    # directed: the two special records with a monster count above the usual cap of 10, variable cost (flat nibble 0, mult 0)
+    for j in range(6):
+        idx = (42, 46)[j % 2]; rec = g(-11006) + 2 * idx; a = g(-10814) + rnd.randint(0, 47) * 130
+        def setup(e, rec=rec, a=a):
+            e.w8(rec, rnd.getrandbits(8)); e.w8(rec + 1, rnd.choice([0x00, 0x40, 0xC0, 0x80]))
+            for k in range(130): e.w8(a + k, rnd.getrandbits(8))
+            sb(e, -30654, rnd.randint(12, 40)); sw(e, -16138, rnd.getrandbits(16))
+        v = R.run(0x4BBC, ((a, 4), (rec, 4)), setup)
+        out.append({'kind': 'cost', 'char': a, 'rec': rec, 'keep': True, **v})
+    return out
+
+UNITS = {'spellcost': gen_spellcost, 'rest': gen_rest, 'train': gen_train, 'xpaward': gen_xpaward, 'spelllevel': gen_spelllevel, 'monspecial': gen_monspecial, 'killreward': gen_killreward, 'partystrength': gen_partystrength, 'mspelldmg': gen_mspelldmg, 'sync': gen_sync, 'pmelee': gen_pmelee, 'bonus': gen_bonus, 'luck': gen_luck, 'dmgchar': gen_dmgchar, 'melee': gen_melee, 'rng': gen_rng, 'monunpack': gen_monunpack}
 
 def main():
     a = sys.argv[1:]

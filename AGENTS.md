@@ -44,6 +44,14 @@ This repo hosts two first-person dungeon-crawler RE projects:
   `npm run mm2:data` (dat → JSON) and `npm run mm2:gfx` (.32/.anm → PNG). Note
   `.dat` records are little-endian on disk (graphics are big-endian).
 
+  **MM2 game rules** (RNG, monster unpack, melee rolls, damage, training, rest, XP, spell gates) live in
+  `docs/mm2/amiga/game-rules.md`, method: `tools/mm2/rules_oracle/` (Unicorn single-routine harness on
+  the retail `mm2`; `gen_vectors.sh` writes full vector sets to the gitignored `generated/`, small
+  subsets are committed in `vectors/`) -> `tools/mm2/rules.ts` + `__tests__/rules.test.ts`. 36,726
+  vectors, null controls; roster HP/SP field labels are corrected there (game-rules section 8). Still
+  open: initiative, encounter generation, monster specials, spell effects, equipment, world (TODO
+  `mm2-rules-*`).
+
 Both games share the generic `@seer-project/dungeon` walker package, which
 lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).
 

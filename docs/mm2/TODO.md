@@ -12,6 +12,17 @@ this file only tracks what's verified vs open, never restates format facts.
 | mm2-env-from-attrib | open | Drive the walker environment from `attrib` `tileset_id`/`surface` instead of a screen-range table; meaning of `map_category` 5-8 and tileset -> sheet for screens 41-44 (elemental planes) and 45-59 (tileset `0x53` "dungeon" drawn with `castle`; screen 52 `0x33`) | `amiga/data-structure.md` § `attrib.dat`; `docs/mm2/audit-2026-11-13.md` finding 8 | 2026-11-18 game-re |
 | mm-coll-bits-0x02-0x08 | open | Identify collision-page bits `0x02` and `0x08` (MM1 + MM2; not per-direction dark) | `docs/mm1/dosega/data-structure.md` § Correction (bit layout) | 2026-11-18 game-re |
 | mm2-dos-eventsi-shape | open | Try the offset-table + LZW shape (as `MAP.DAT`) on `EVENTSI.DAT` (71 x u32 offsets, first `0x11C`), `EVENTSO.DAT`, `SPELLS.DAT` | `dosega/data-structure.md` | 2026-11-18 game-re |
+| mm2-rules-initiative | open | Turn order (`A4-1294[slot]`, party initiative) and the round loop (CODE+0x12A22 / 0x12C6E); flee and surprise odds (CODE+0x12EE0) | `amiga/game-rules.md` sections 7, 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-monster-special | open | Monster special attacks/status effects: CODE+0xFD8C sabil roll (`u8[16]` at `A4-28422`), CODE+0x1F27E set-condition, group-ability handlers; condition-bit meanings | `amiga/game-rules.md` 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-monster-damage | open | Damage application to monsters (CODE+0x10EAC), death/compaction (0x10E5E, 0x10CCE), `resolve` CODE+0x11040 | `amiga/game-rules.md` 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-encounter | open | Encounter generation: group count CODE+0x11D0C, pick/reinforcement CODE+0x11F0A | `amiga/game-rules.md` 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-spell-effects | open | Per-spell effects (monster dispatcher CODE+0x1FB4E, party handlers ~0x1AB0C/0x1AC94), combat/outdoor gates (0x78A8/0x790E), spell list vs `tools/mm2/spells.ts` | `amiga/game-rules.md` 6, 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-training-gate | open | XP needed per level and the caller of `train` (CODE+0x20232): event VM / hall scripts | `amiga/game-rules.md` 5.4, 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-equipment | open | Derivation of `+0x4C..+0x4F` weapon bytes and `+0x24` AC from items; item use/charges; the `+0x4C..+0x57` overlap with the documented spell-book range | `amiga/game-rules.md` 8, 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-treasure | open | Treasure roll CODE+0x123B0 from the tier recorded by the kill reward | `amiga/game-rules.md` 4.6, 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-world | open | Traps, door bash/unlock, food use, skills (overland passability is `mm2-overland-passability-0x9424`) | `amiga/game-rules.md` 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-chargen | open | Character creation and the overlay hunk (15.5 KB, not loaded by the harness) | `amiga/game-rules.md` 9 | 2026-11-25 rules pass 1 |
+| mm2-rules-pass1 | **harness** | RNG, monster unpack, monster/party melee rolls, damage_char, luck save, stat bonus/sync, spell level + SP, training, rest, XP award, kill reward, party power, monster spell dice, SP/gem gates: 36,726 vectors, null controls | `amiga/game-rules.md`, `tools/mm2/rules.ts`, `tools/mm2/rules_oracle/` | 2026-11-25 rules pass 1 |
 
 ## Verification ledger (not open work)
 

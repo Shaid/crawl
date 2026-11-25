@@ -635,3 +635,47 @@ export function rest(m: Mem, opts: { noFoodGate?: boolean } = {}): { calls: [str
   }
   return { calls };
 }
+
+/* ------------------------------------------------------------ spell gate */
+
+/** In-memory spell table: 2-byte records at A4-11006 (index = sorcerer 0..47, cleric 48..95). */
+export const SPELL_TABLE = -11006;
+export const SPELL_COST_SLOT = -16138; // u16 SP cost left by spell_sp_cost
+export const SPELL_GEMS_SLOT = -16136; // u16 gem cost left by spell_gem_gate
+
+/**
+ * CODE+0x04BBC spell SP cost for record `rec` (byte1: bits 5-4 = per-level multiplier, bit 6 =
+ * "10" variant, low nibble = flat cost): flat if non-zero; else multiplier * level (+0x71);
+ * else 8 (10 with bit 6) + the number of monsters (A4-30654, capped at 10 except for the two
+ * special records A4-10922 / A4-10914). Result in A4-16138.
+ */
+export function spellSpCost(m: Mem, ch: number, rec: number, opts: { capAll?: boolean } = {}): void {
+  const b1 = m.r8(rec + 1);
+  const mult = (b1 & 0x30) >> 4;
+  let n = m.r8(g(-30654));
+  if (n > 10) n = 10;
+  if ((rec === g(-10922) || rec === g(-10914)) && !opts.capAll) n = m.r8(g(-30654));
+  m.w16(g(SPELL_COST_SLOT), b1 & 0x0f);
+  if (m.r16(g(SPELL_COST_SLOT)) !== 0) return;
+  if (mult === 0) {
+    m.w16(g(SPELL_COST_SLOT), 8);
+    if (b1 & 0x40) m.w16(g(SPELL_COST_SLOT), 10);
+    m.w16(g(SPELL_COST_SLOT), m.r16(g(SPELL_COST_SLOT)) + n);
+  } else {
+    m.w16(g(SPELL_COST_SLOT), (m.r8(ch + 113) * mult) & 0xffff);
+  }
+}
+
+/** CODE+0x0795C gem gate: gems needed = byte0 & 0x3F (> 50 means 100); fails when +0x5C is lower (UI message 5). */
+export function spellGemGate(m: Mem, ch: number, rec: number): { ok: number; calls: [string, number[]][] } {
+  m.w16(g(SPELL_GEMS_SLOT), m.r8(rec) & 0x3f);
+  if (m.r16(g(SPELL_GEMS_SLOT)) > 0x32) m.w16(g(SPELL_GEMS_SLOT), 100);
+  if (m.r16(ch + 92) < m.r16(g(SPELL_GEMS_SLOT))) return { ok: 0, calls: [['msg', [5]]] };
+  return { ok: 1, calls: [] };
+}
+
+/** CODE+0x079A0 SP gate: current SP (+0x58) must cover the cost computed by spell_sp_cost (UI message 6 otherwise). */
+export function spellSpGate(m: Mem, ch: number): { ok: number; calls: [string, number[]][] } {
+  if (m.r16(ch + 88) < m.r16(g(SPELL_COST_SLOT))) return { ok: 0, calls: [['msg', [6]]] };
+  return { ok: 1, calls: [] };
+}
