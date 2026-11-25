@@ -12,7 +12,7 @@ Logic foundation for a browser remake's rules core, derived from the game's own 
 
 **Evidence grades.** **harness** = diffed against the game's real routine in Unicorn with null controls; **code** = read from the disassembly at the stated address, not executed; **hyp** = inference; **open** = not derived.
 
-## MM3 rules status (build guide, 2026-11-26, pass 3 = closing pass)
+## MM3 rules status (build guide, 2026-11-26, pass 4)
 
 What a remake rules core can take **as is** (harness-verified; full vector sets are generated into the gitignored `tools/mm3/rules_oracle/generated/`, small subsets are committed in `tools/mm3/rules_oracle/vectors/`; about 124,000 full vectors, 44 units). Pass 1 is `tools/mm3/rules.ts`, pass 2 `rules2.ts`, pass 3 `rules3.ts` (+ `rules-tables.ts`).
 
@@ -31,11 +31,12 @@ What a remake rules core can take **as is** (harness-verified; full vector sets 
 | **Cast command and 75 of the 77 spell handlers (pass 3)** | `OV8+0x252E`: target/element pickers with refund, heal helper, buffs, condition cures, raise dead, the seven map-gated world spells, the combat table, battle refusals | 17.1-17.3 |
 | **Combat spell engine and spell vs monster (pass 3)** | `OV4+0xE6EA` (rank/group walk, arrow form) and `OV4+0x13282` mode != 0 (magic resistance, kind lists, status/kill/holy word/turn undead/mass distortion/disintegrate) | 17.2, 17.3 |
 | **World clock (pass 3)** | `OV4+0xFE5C` minutes -> day (0..99) -> year, monthly refresh and bank interest `OV4+0xC9D4`, **time passing `OV4+0x10386`** (ageing tick, counters, saves, day/night) | 17.5 |
+| **World rules (pass 4)** | rest `R+0xFEA6`; item price `OV7+0x3CC` and price text `OV7+0x7E0`; training eligibility `OV5+0x1C70` and level-up block `OV5+0x1EEE`; trap damage `OV4+0xED8E`; thievery skill `OV4+0xE65C`; per-step tick `OV4+0x108EC`; map object/monster loader `OV4+0x14348`; the player's **run command `R+0x11ECC`** | 18 |
 | Monster tables, spell table | all 22 `Mon*.dat` tables byte-exact in DATA; 60 rule tables + 77 spells exported to `rules-tables.json` | 3, 16 |
 
-**Code-read only (not harnessed):** the rest command `R+0xFEA6` (17.6), the encounter-start volley (`R+0xC5FA`, 10.4), the monster loader `OV4+0x14348` and visible-group builder (17.4), the training level-up application (`OV5+0x1EEE`), door unlock/bash text sites, the OV7 item-overlay spells (Detect Magic, Recharge, Duplication, Enchant Item via `OV7+0xF1C`), the two UI-only spells (24 Identify Monster, 37 Detect Monster).
+**Code-read only (not harnessed):** the encounter-start volley (`R+0xC5FA`, 10.4), the lock-pick/event function `OV4+0xE16E` (18.4), shop buy/sell flows in the OV7 item command (`OV7+0x4500..0x4B7E`, 18.2), the OV7 item-overlay spells (`OV7+0xF1C`), the two UI-only spells (24, 37).
 
-**Open (ids in `docs/mm3/TODO.md`):** surprise (no code or message string found), flee/morale/monster spells/call-for-help (**absent**: not in `R+0xA1DC`, no string in the executable), shop buy/sell price, character creation, skill use, door/trap mechanics, food ageing beyond rest, OV7 item spells, per-step ticks; class names remain hyp.
+**Open (ids in `docs/mm3/TODO.md`):** character creation (not located), door bash, map/attrib header bytes beyond the loader, composing the item generator inside the damage unit, `R+0x122DE`, `OV7+0xF1C` internals, 24/37. Surprise, morale, monster spells and call-for-help: no code found (18.5, a search result, not a proof); the **player's run command exists** and is verified.
 
 Corrections made while writing are in section 8.
 
@@ -147,3 +148,25 @@ Pre-check: any member with any of the seven attributes at 0 -> prompt "Some Char
 ### 17.7 Located but not derived
 Door unlock text ("Unlock Door" `OV4+0xC36D`, "picks the lock" `OV4+0xE607`, "unable to pick" `OV4+0xE634`), skill names (root `0xF103`), shop "Sell/Buy %s for %lu gold?" (`OV7+0x4D10` / `0x4D95`), the TRAPDOOR text (root `0xF46E`). Shop prices, skill checks, bash/trap damage and character creation (`create.raw` screen) are open.
 
+
+## 18. Pass 4 - world rules, run command, loader (harness unless stated)
+
+Harness `tools/mm3/rules_oracle/rules4.py`, port `tools/mm3/rules4.ts`, tests `__tests__/rules4.test.ts` (strict footprint parity, null control per unit; UI leaves logged stubs). `emu.call` gained `regs=`/`stops=` to start inside a routine (used for the level-up block).
+
+### 18.1 Rest `R+0xFEA6` (harness, 3,000)
+Refused ("Too dangerous to rest here!") when walk test `OV4+0x57C(x,y,4)` is non-zero or the map's rest byte `A4-0xDE + map*0x340 + 0x30E` is 0. A member with any attribute `< 1` prompts "Some Chars may die. Rest anyway?" (no ends the command). All fall asleep, mode 5; ten ticks of `OV4+0x108EC` (an interruption restores the mode and leaves sleepers asleep); mode 12 skips the ticks. Time `0x17C` min when `A4-0x3305 != 0`, else `0x1D6` (`0x1E0` from mode 12). Per member: wake; with food `u16 A4-0x1318 != 0` and worst condition outside 0xD..0xF: food -1, buffs `+0x102..0x105` and `+0x11F` cleared, HP/SP = maxima; food 0 flags "starving". Message `%d food consumed` + restored/starving text; then the wipe test. The per-step tick `OV4+0x108EC`: nothing if `A4-0x3307`; clock +1 min (+10 if `A4-0x3305`), rebuild the monster view `R+0x98CA` if `A4-0x32E0`, set it to 3.
+
+### 18.2 Item price `OV7+0x3CC(char, slot, mode, flags)` (harness, 3,000; text `OV7+0x7E0`, 1,500)
+Ids 0..0x49, 0x4B (2,000), 0x52 (1,000) are priced, others 0. Base `u16 A4-0x293A[id]`, scaled by the `+0xB6` kind (1: /10, 2: /4, 3: /2, 4: x3/4, else `* s8 A4-0x299B[kind]`); enchantment terms x100: `u8 A4-0x2A05[+0xA3]`, `s8 A4-0x2984[+0xC9]`, `u16 A4-0x26A4[+0xEF]`. Modes 1/2 return `sum / u8 A4-0x3C95[flags & 0x7F]` (sell caller passes `0x80 | (+0x2F == 0)`: the divisor table gives 1 or 2); broken/cursed (`+0x90 & 0xC0`) with the sell flag is worth 0; modes 3..6 return charges `+0x90 & 0x3F`; mode 0 is 0; mode >= 7 returns an uninitialised local (not modelled). Code-read: Sell needs id < 0x46 and no bit 6 in `+0x90` ("We have no need of this %s!"), confirms "Sell %s for %lu gold?", then adds the price to gold `A4-0x1308` and clears the slot (`OV4+0xF08A`, `0xEFBA`); Buy confirms, pays `R+0x8964(0, price, 0)` and copies the six item bytes to the buyer; repair is `R+0x8964(0, price, 0)` then clears bit 7 of `+0x90`.
+
+### 18.3 Training (harness)
+`OV5+0x1C70` returns the XP shortfall while `level < cap` (`u8 A4-0x3AFB + currentMap`, a **per-hall level cap**), 1 when the cap is reached, 0 = may train (offer text with `10*level^2` gold). The level-up block `OV5+0x1EEE`: refused when the shortfall is non-zero, the cast gate blocks, or the gold payment fails; else `XP' = XP - (B7EC(L) - (R+0x88FC - XP))`, level+1, first level-up of each member per visit advances the clock one day (`0x5A0`), HP/SP to maxima.
+
+### 18.4 Traps, thievery, locks
+Trap damage `OV4+0xED8E(dmg, kind, target)` (harness, 3,000): kinds 0..7 select cue and element timer (`A4-0x1322/-0x1320/-0x131E/-0x131C` for kinds 2..5); non-zero kinds save with `OV4+0x82DC(char, kind)` repeatedly, each success halving; Power Shield `+0x103` subtracted; kind 7 kills (damage = HP, `+0x120 = 1`). Byte `A4+0x70E0` selects targets: 0 whole party, 1 the given member, 2 the first two members not in 0xC..0xF. **Quirk:** `82DC` with type >= 7 never loads its bonus and uses the caller's `D4` (the victim index) as the save value. Thievery `OV4+0xE65C` (harness): `2*level` + 15 (class 6) / 30 (class 5) + race (1,3: +10; 2: +5; 4: -10) + equipment bonus 10, 0 when `+0x27` is clear, floor 0. Code-read (`OV4+0xE16E`, caller `OV4+0xAED6`): picking a lock chooses a member (`OV4+0xC222`); `rand(1,4) == 1` triggers trap damage (`A4-0xDE+map*0x340+0x31E`, `rand(0,6)`); the pick fails when `thievery + rand(1,20) < byte map+0x312` ("unable to pick the lock"), success gives XP `level * difficulty * 10`.
+
+### 18.5 Run, loader, absence search
+**Run command `R+0x11ECC`** (harness, 2,000; battle command 4 and quick-action 3): `rand(1,100) < u8 A4-0xDE+map*0x340+0x307` removes that member from the battle (`A4-0xC81[actor] = 0xFF`, `A4+0x1F74 -= 1`, compaction, turn order rebuilt); when the battle ends the caller discards loot (`R+0x11792`). Command table at `R+0x116xx..0x119BE`: 0 quick action by `+0x7C` (`R+0x11D2C`: attack / cast / block / run), 1 cast, 2 shoot (`OV4+0x13282`), 3 use item (`OV7+0xF1C`), 4 run, 5 block (`R+0x11F28`: sets `A4+0x1F76[actor]`, the defending flag of 10), 6.. delay/order commands, 0xA.. target group. **Battles start automatically** when `OV4+0` finds monster groups in view (modes 1 and 5, `A4-0x33A9 == 0`); there is no random encounter roll. Map loader `OV4+0x14348(map)` (harness, 150): files `maze%02u.bin` (monster x,y,type+facing, terminator 0xFF, 5 resource bytes, 3-byte object records), `.evt`, `text%02u.maz`; type `(b>>2)+0x28` or the per-map default `A4-0x3E9B[map*3+facing]`; start timer `rand(0, A4-0x4210[type])`; HP `A4-0x6120[type]`. Not modelled: > 0xAA monsters, > 0x50 objects, state save of the previous map.
+**Absence search:** executable strings (all hunks), the DATA hunk and the decompressed `.cc` text assets contain no surprise/flee/bribe/morale/surrender/reinforce message (hits are lore text only); the only `mode := 1` writers are the battle driver, monster turn, encounter start and loader; no monster routine does anything but `R+0xA1DC`. Status: **absent as far as searched**, not proven (data-driven code reached only through computed jumps was not enumerated). Monster summon/call-for-help/reinforcement: none found.
+
+> **Correction (2026-11-26, pass 4):** 17.4 and TODO said "the player's own run/flee command is not located" and 10.4 hinted flee was absent: the **party** run command exists (18.5); only monster-side flee/morale remain unfound. 17.6 said rest uses `0x1D6` "when `A4-0x3305` is 0": confirmed, and `0x17C` when set. The `A4-0x33A9` flag is the opening-volley gate, not a surprise flag.

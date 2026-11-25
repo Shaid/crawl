@@ -140,3 +140,25 @@ describe('traps, thievery, per-step tick', () => {
     expect(exact('steptick', (m) => ({ calls: R.stepTick(m) }), { min: 10 })).toBeGreaterThan(10);
   });
 });
+
+describe('map object / monster loader OV4+0x14348', () => {
+  const ld = (o: R.LoaderOpts = {}): Run => (m, v) => ({ calls: R.loadMap(m, v.args[0], { loads: v.loads }, o) });
+  it('matches the game: monster records, type defaults, timers, name bytes, object records, resource calls', () => {
+    expect(exact('loader', ld(), { min: 5 })).toBeGreaterThan(5);
+  });
+  it('null controls differ: facing mask, object timer', () => {
+    differs('loader', ld({ noFacingMask: true }));
+    differs('loader', ld({ noObjectRand: true }));
+  });
+});
+
+describe('run command R+0x11ECC', () => {
+  it('matches the game: chance roll, member leaves, order rebuilt', () => {
+    expect(exact('runcmd', (m) => { R.runCommand(m); return { calls: [] }; }, { min: 10 })).toBeGreaterThan(10);
+    expect(load('runcmd').some((v: any) => v.fin[String(A4V + 0x1f74)] !== undefined)).toBe(true);
+  });
+  it('null controls differ', () => {
+    differs('runcmd', (m) => { R.runCommand(m, { noRoll: true }); return { calls: [] }; });
+    differs('runcmd', (m) => { R.runCommand(m, { keepMember: true }); return { calls: [] }; });
+  });
+});

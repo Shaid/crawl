@@ -60,15 +60,15 @@ This repo hosts two first-person dungeon-crawler RE projects:
 
 - **Might & Magic III** (`data/mm3/{amiga,dosvga}/`, `docs/mm3/`, `scripts/mm3lib/`,
   `tools/mm3/`, `public/assets/mm3/`) — container/sprite/maze RE (see `docs/mm3/plan.md`).
-  **Game rules (Amiga, passes 1-3, 2026-11-25/26):** `docs/mm3/amiga/game-rules.md` (status block at the top),
+  **Game rules (Amiga, passes 1-4, 2026-11-25/26):** `docs/mm3/amiga/game-rules.md` (status block at the top),
   method = the MM2 one: single routines of the retail executable in Unicorn (`tools/mm3/rules_oracle/`,
   root + 8 overlay hunks, overlay stubs patched to `JMP abs.l`) -> committed vector subsets
-  (`vectors/`) -> `tools/mm3/rules.ts` + `rules2.ts` + `rules3.ts` + `__tests__/rules*.test.ts` with strict read/write-footprint
+  (`vectors/`) -> `tools/mm3/rules.ts` + `rules2.ts` + `rules3.ts` + `rules4.ts` + `__tests__/rules*.test.ts` with strict read/write-footprint
   parity and null controls (`npx vitest run tools/mm3`). Verified: RNG, stat engine, max HP/SP/AC, XP thresholds,
   saves, damage to characters, monster-hits-character, **the monster's turn (target choice, own hit chance)**,
   turn order, party to-hit/damage/melee round, **damage to a monster with kill rewards, item generator, spell cast
   gate/costs, training payment/thresholds**, XP split, **75 of 77 spell handlers + combat spell engine + spell vs monster, the battle round loop, world clock/ageing**; the 22 `Mon*` tables are in the Amiga DATA hunk and
-  `npx tsx tools/mm3/rules-tables.ts` exports them with the 77 spells to `rules-tables.json`. Open: shops/creation/skills/doors/traps; surprise/flee/morale are absent as far as searched (`mm3-rules-*` in `docs/mm3/TODO.md`).
+  `npx tsx tools/mm3/rules-tables.ts` exports them with the 77 spells to `rules-tables.json`. Pass 4 adds rest, item prices, training, traps, thievery, the party run command and the map loader. Open: creation, door bash, item generator in the damage unit; monster-side surprise/flee/morale are absent as far as searched (`mm3-rules-*` in `docs/mm3/TODO.md`).
 
 - **Might & Magic I (DOS/EGA)** (`docs/mm1/dosega/game-rules.md`,
   `tools/mm1/rules_oracle/`, `tools/mm1/rules.ts`) — rules passes 1-2: Unicorn

@@ -267,3 +267,156 @@ export function stepTick(m: Mem): Call[] {
   m.w8(g(-0x32e0), 3);
   return calls;
 }
+
+// ---------------------------------------------------------------- map object / monster loader (overlay 4)
+const OV4 = 0x2000000 + 4 * 0x100000;
+/** pointer encoding of the harness (rules4.py ptr): root code offset, 0x1000000 + A4 displacement, 0x2000000 + seg * 0x100000 + overlay offset */
+const enc = (v: number) => {
+  if (v >= 0x100000 && v < 0x120000) return v - 0x100000;
+  if (v >= 0x200000 && v < 0x210000) return 0x1000000 + (v - 0x207ffe);
+  for (let sg = 1; sg <= 8; sg++) if (v >= 0x300000 + sg * 0x20000 && v < 0x320000 + sg * 0x20000) return 0x2000000 + sg * 0x100000 + (v - 0x300000 - sg * 0x20000);
+  return v;
+};
+export interface LoaderIo { loads: [number, number][] }
+export interface LoaderOpts { noFacingMask?: boolean; defaultTypeFromMap?: boolean; noObjectRand?: boolean }
+/** R+0xC898 bit test on the flag array: bit `id` (0x80 >> (id & 7) of byte id >> 3). */
+export const flagSet = (m: Mem, base: number, id: number) => ((0x80 >> (id & 7)) & s8(m.r8(base + (id >> 3)))) !== 0;
+/**
+ * OV4+0x14348 `(map)` loads one map's monster and object placement: the file `maze%02u.bin` (map + 1), then `maze%02u.evt` and `text%02u.maz`
+ * (map + 2 in the code's own counter), the monster/animation resources and the object list. Written arrays (A4 offsets): monster x `+0xF42`, y `+0xDEE`,
+ * facing `+0x11EA` (byte & 3), start timer `+0x1096 = rand(0, u8 A4-0x4210[type])`, status `+0x188E = 0`, `+0x133E = 0`, hit points `+0x1492 = u16 A4-0x6120[type]`, id `+0x173A`,
+ * count `+0x1F72`; a record's byte 3 is the type: `(b >> 2) + 0x28` when `b >> 2` is non-zero, else the map default `A4-0x3E9B[(map == 0x68 ? 0x40 : map) * 3 + facing]`.
+ * The 5 bytes after the 0xFF terminator select five `.pic` resources (byte 0x2A is replaced by 0x3E for three maps when a quest flag is set); the rest of the file is 3-byte object records
+ * (x, y, kind) stored into the 12-byte records at A4-0x1042 (+2 x, +0 y, +4 kind, +8 `s8 A4-0x1280[kind]`, +6 `rand(0, u8 A4-0x3EDA[+8])`, and the *next* record's +10 cleared), count `A4+0x3344`.
+ * Not modelled (throws): the previous map's state save (A4+0xCB6 non-zero), more than 0xAA monsters, more than 0x50 objects, files above the buffer sizes.
+ */
+export function loadMap(m: Mem, map: number, io: LoaderIo, opts: LoaderOpts = {}): Call[] {
+  const calls: Call[] = [];
+  const buf = 0x1000000 - 0x1154;
+  const d7in = s16(map);
+  if (m.r32(g(0xcb6)) !== 0 && m.r8(g(-0x3398)) !== 0) throw new Error('map state save not modelled');
+  m.w32(g(0xcb6), 0); m.w32(g(0xcba), 0); m.w8(g(0x3344), 0); m.w8(g(0x1f72), 0);
+  let loadIdx = 0;
+  const load = (fmt: number, arg: number, memBuf: number, size: number, text: boolean) => {
+    calls.push(['sprintf', [buf, OV4 + fmt, arg]]);
+    calls.push([text ? 'loadtext' : 'load', [buf]]);
+    const [p, len] = io.loads[loadIdx++];
+    m.w32(g(-0x1686), len);
+    for (let i = 0; i < size; i++) m.w8(g(memBuf) + i, 0);
+    for (let i = 0; i < len; i++) m.w8(g(memBuf) + i, m.r8(p + i));
+    calls.push(['free', []]);
+    if (len > size) throw new Error('file larger than its buffer');
+    return len;
+  };
+  let len16 = 0;
+  load(0x148de, d7in + 1, 0x334e, 0x1020, false);
+  m.w32(g(0xcb6), g(0x334e));
+  len16 = (m.r32(g(-0x1686)) & 0xffff);
+  m.w16(g(0x334c), len16);
+  const cb = () => m.r32(g(0xcb6));
+  let d4 = 0, d5 = 0;
+  for (;;) {
+    if (m.r8(cb() + s16(d5)) === 0xff) break;
+    m.w16(g(0xf42) + 2 * d4, m.r8(cb() + s16(d5))); d5++;
+    m.w16(g(0xdee) + 2 * d4, m.r8(cb() + s16(d5))); d5++;
+    let d6 = (m.r8(cb() + s16(d5))) >> 2;
+    if (d6 !== 0) d6 += 0x28;
+    const facing = opts.noFacingMask ? m.r8(cb() + s16(d5)) : m.r8(cb() + s16(d5)) & 3;
+    d5++;
+    m.w16(g(0x11ea) + 2 * d4, facing);
+    let a3: number;
+    if (d6 !== 0) a3 = d6;
+    else {
+      const base = (d7in === 0x68 ? 0x40 : d7in) * 3;
+      a3 = m.r8(g(-0x3e9b) + base + m.r16(g(0x11ea) + 2 * d4));
+    }
+    const r = randRange(m, 0, m.r8(g(-0x4210) + s16(a3)));
+    m.w16(g(0x1096) + 2 * d4, r & 0xff);
+    m.w16(g(0x188e) + 2 * d4, 0);
+    m.w16(g(0x133e) + 2 * d4, 0);
+    m.w16(g(0x1492) + 2 * d4, m.r16(g(-0x6120) + 2 * s16(a3)));
+    m.w16(g(0x173a) + 2 * d4, a3 & 0xff);
+    d4++;
+    m.w8(g(0x1f72), m.r8(g(0x1f72)) + 1);
+  }
+  if (m.r8(g(0x1f72)) > 0xaa) throw new Error('more than 0xAA monsters not modelled');
+  for (d4 = 0; d4 < 5; d4++) {
+    d5++;
+    const b = m.r8(cb() + s16(d5));
+    m.w8(g(-0x1280) + d4, b);
+    if (b === 0x2a) {
+      const ids: Record<number, number> = { 0x29: 0x41, 0x2f: 0x4e, 0x38: 0x5b };
+      if (ids[d7in] !== undefined && flagSet(m, g(-0x12fc), ids[d7in])) m.w8(g(-0x1280) + d4, 0x3e);
+    }
+  }
+  d5++; d4 = 0;
+  const cnt = Math.trunc((len16 - s16(d5)) / 3);
+  if (cnt > 0x50) throw new Error('more than 0x50 objects not modelled');
+  while (s16(d5) < m.r16(g(0x334c))) {
+    const rec = g(-0x1042) + 12 * d4;
+    m.w16(rec + 2, s8(m.r8(cb() + s16(d5))) & 0xffff); d5++;
+    m.w16(rec, s8(m.r8(cb() + s16(d5))) & 0xffff); d5++;
+    m.w16(rec + 4, s8(m.r8(cb() + s16(d5))) & 0xffff); d5++;
+    m.w16(rec + 8, s8(m.r8(g(-0x1280) + m.r16(rec + 4))) & 0xffff);
+    const hi = m.r8(g(-0x3eda) + m.r16(rec + 8));
+    const r = opts.noObjectRand ? 0 : randRange(m, 0, hi);
+    m.w16(rec + 6, r & 0xffff);
+    d4++;
+    m.w16(g(-0x1042) + 12 * d4 + 10, 0);
+    m.w8(g(0x3344), m.r8(g(0x3344)) + 1);
+  }
+  m.w32(g(0xcb6), 0);
+  if (flagSet(m, g(-0x12fc), 0x6e) && d7in === 0x2d) { m.w16(g(-0xfb0), 5); m.w16(g(-0xfb2), 2); }
+  let d7 = d7in + 1;
+  load(0x14940, d7, 0x334e, 0x1020, false);
+  m.w32(g(0xcb6), g(0x334e));
+  m.w16(g(0x334c), m.r32(g(-0x1686)) & 0xffff);
+  load(0x14962, d7, 0x436e, 0x1828, true);
+  m.w32(g(0xcba), g(0x436e));
+  m.w16(g(0x3348), m.r32(g(-0x1686)) & 0xffff);
+  calls.push(['ov4_8158', []]);
+  let handle = 0x1000;
+  for (let d6 = 0; d6 < 5; d6++) {
+    const v = m.r8(g(-0x1280) + d6);
+    if (v === 0xff) continue;
+    const name = m.r32(g(-0x46a6) + s8(v) * 4);
+    calls.push(['sprintf', [buf, OV4 + 0x14984, enc(name)]]);
+    calls.push(['resource', [buf]]);
+    m.w32(g(0xc4a) + 4 * d6, ++handle);
+  }
+  if (d7 === 0x69) d7 = 0x41;
+  if (d7 < 0x42) {
+    for (let d6 = 0; d6 < 3; d6++) {
+      const i = d7 * 3 + d6;
+      const v = m.r8(g(-0x3e9b) + i - 3);
+      if (v === 0xff) continue;
+      const name = m.r32(g(-0x4d2e) + v * 4);
+      calls.push(['sprintf', [buf, OV4 + 0x1498b, enc(name)]]);
+      calls.push(['resource', [buf]]);
+      m.w32(g(0xc5e) + 4 * d6, ++handle);
+    }
+  }
+  return calls;
+}
+
+// ---------------------------------------------------------------- the player's run command
+import { compactParty } from './rules3.ts';
+import { initiative } from './rules2.ts';
+/**
+ * R+0x11ECC the Run command of a party member (battle command 4, also quick-action 3 in `+0x7C`). `rand(1,100) < u8 A4-0xDE + map*0x340 + 0x307`
+ * (a per-map escape chance, percent) makes *that member* leave the battle: its party-order slot `A4-0xC81[actor]` becomes 0xFF, the battle party size `A4+0x1F74`
+ * drops by one, the order table is compacted (R+0x12206), the turn order rebuilt (OV4+0x1307C), the turn pointer `A4-0x3308` steps back and the actor `A4-0x3309` is cleared.
+ * A failed roll costs the turn and nothing else. When the battle then ends (mode 1: nobody left) the caller discards gold, gems and item loot (R+0x11792).
+ */
+export function runCommand(m: Mem, opts: { noRoll?: boolean; keepMember?: boolean } = {}): void {
+  const roll = randRange(m, 1, 100);
+  const chance = m.r8(g(-0xde) + s8(m.r8(g(0xdb9))) * 0x340 + 0x307);
+  if (!(s16(roll) < chance) && !opts.noRoll) return;
+  const actor = s8(m.r8(g(-0x3309)));
+  if (!opts.keepMember) m.w8(g(-0xc81) + actor, 0xff);
+  m.w8(g(0x1f74), m.r8(g(0x1f74)) - 1);
+  compactParty(m);
+  initiative(m);
+  m.w8(g(-0x3308), m.r8(g(-0x3308)) - 1);
+  m.w8(g(-0x3309), 0xff);
+}

@@ -228,6 +228,77 @@ keepwrap('trapdmg', lambda v: (v['args'][1], len(v['calls']) > 0))
 keepwrap('thievery', lambda v: v['ret'] == 0)
 keepwrap('steptick', lambda v: tuple(c[0] for c in v['calls']))
 
+# ---------------------------------------------------------------- map object / monster loader OV4+0x14348(map)
+F_LOADER = OV4(0x14348)
+def gen_loader(n, rnd):
+    e = Emu(); Rc = Rec(e); install_ui(e, skip=('13c10', 'bef6', 'c934', '81a8', '5eb2'))
+    e.files = []; e.loadlog = []
+    def mkload(e2, sp):
+        data = e2.files.pop(0)
+        a = e2.alloc(len(data) + 16); e2.uc.mem_write(a, bytes(data))
+        e2.w32(g(-0x1686), len(data)); e2.loadlog.append([a, len(data)])
+        return a
+    e.stub(R(0x5B68), 'load', fn=mkload, argfn=lambda e2, sp: [ptr(e2, e2.r32(sp))])
+    e.stub(R(0x5C3A), 'loadtext', fn=mkload, argfn=lambda e2, sp: [ptr(e2, e2.r32(sp))])
+    e.stub(R(0x81A8), 'free', argfn=lambda e2, sp: [])
+    e.stub(R(0x13C10), 'sprintf', argfn=lambda e2, sp: [ptr(e2, e2.r32(sp)), ptr(e2, e2.r32(sp + 4)), ptr(e2, e2.r32(sp + 8)) if e2.r32(sp + 8) > 0x10000 else e2.r32(sp + 8)])
+    e.handle = [0x1000]
+    def res(e2, sp): e2.handle[0] += 1; return e2.handle[0]
+    e.stub(R(0x5EB2), 'resource', fn=res, argfn=lambda e2, sp: [ptr(e2, e2.r32(sp))])
+    e.stub(OV4(0x8158), 'ov4_8158', argfn=lambda e2, sp: [])
+    out = []
+    while len(out) < n:
+        info = {}
+        mp = rnd.choice([rnd.randint(0, 0x6f), rnd.randint(0, 0x42), 0x29, 0x2f, 0x38, 0x2d, 0x68, 0x69, 0x41, 0])
+        def setup(e):
+            e.heap = 0x600000; e.handle[0] = 0x1000; e.loadlog.clear()
+            nm = rnd.choice([0, 1, 2, 3, 5, 9, 14])
+            f1 = bytearray()
+            for _ in range(nm):
+                tb = rnd.choice([0, rnd.getrandbits(8), rnd.randint(0, 3), rnd.randint(4, 60) * 4 + rnd.randint(0, 3)])
+                f1 += bytes([rnd.randint(0, 31), rnd.randint(0, 31), tb])
+            f1 += b'\xff'
+            names = [rnd.choice([0xff, rnd.randint(0, 0x4f), 0x2a, 0x2a]) for _ in range(5)]
+            f1 += bytes(names)
+            okk = [i for i in range(5) if names[i] != 0xff]       # an object kind must name a real entry: a 0xFF would index outside the DATA window
+            for _ in range(rnd.choice([0, 1, 2, 4, 7]) if okk else 0):
+                f1 += bytes([rnd.getrandbits(8), rnd.getrandbits(8), rnd.choice(okk)])
+            f2 = bytes(rnd.getrandbits(8) for _ in range(rnd.choice([0, 12, 60, 400])))
+            f3 = bytes(rnd.getrandbits(8) for _ in range(rnd.choice([0, 30, 300])))
+            e.files[:] = [f1, f2, f3]; info['files'] = [list(f1), len(f2), len(f3)]
+            sl(e, SEED, rnd.getrandbits(32)); sl(e, 0xcb6, 0); sl(e, 0xcba, 0xdead)
+            # quest flag bits (A4-0x12fc) the special-map branches test
+            for i in range(0x10): sb(e, -0x12fc + 0x40 // 8 * 0 + i * 0, e.r8(g(-0x12fc + i)))
+            for i in range(0x20): sb(e, -0x12fc + i, rnd.choice([0, 0xff, rnd.getrandbits(8)]))
+            info['f2'] = list(f2); info['f3'] = list(f3)
+        try: v = Rc.run(F_LOADER, (mp,), setup, max_insn=3_000_000)
+        except RuntimeError: continue
+        out.append({'args': [mp], **info, 'loads': [list(x) for x in e.loadlog], **v})
+    return out
+B.UNITS['loader'] = gen_loader
+
+# ---------------------------------------------------------------- the player's run command R+0x11ECC
+from rules3 import battle_state, GRP
+def gen_run(n, rnd):
+    e = Emu(); Rc = Rec(e); install_ui(e); out = []
+    for _ in range(n):
+        def setup(e):
+            pn = battle_state(e, rnd); sl(e, SEED, rnd.getrandbits(32))
+            groups = sum(1 for a in GRP[:3] if e.r8(g(a)))
+            tot = pn + groups
+            perm = list(range(tot)); rnd.shuffle(perm)
+            for i in range(12): sb(e, 0x331e + i, perm[i] if i < tot else 0xff)
+            order = list(range(8)); rnd.shuffle(order)
+            for k in range(8): sb(e, -0xc81 + k, order[k])
+            sb(e, -0x3309, rnd.randint(0, 7)); sb(e, -0x3308, rnd.choice([0, rnd.randint(0, 11), 0xff]))
+            sb(e, 0xdb9, rnd.randint(0, 3))
+            for m in range(4): e.w8(g(-0xde) + 0x340 * m + 0x307, rnd.choice([0, 1, 30, 50, 75, 100, rnd.getrandbits(8)]))
+            for i in range(10): sw(e, 0x173a + 2 * i, rnd.randint(0, 89))
+        out.append({'args': [], **Rc.run(R(0x11ECC), (), setup)})
+    return out
+B.UNITS['runcmd'] = gen_run
+keepwrap('runcmd', lambda v: str(0x1f74 + 0x207ffe) in v['fin'])
+
 UNITS = B.UNITS
 if __name__ == '__main__':
     B.main()

@@ -26,7 +26,7 @@ UI_QUIET = {'bfda': R(0xBFDA), 'bf7e': R(0xBF7E), 'bfae': R(0xBFAE), 'c038': R(0
 def install_ui(e, anim=0, skip=()):
     for n, a in UI_QUIET.items():
         if n not in skip: quiet(e, a, n)
-    quiet(e, R(0x5EB2), '5eb2', ret=anim)
+    if '5eb2' not in skip: quiet(e, R(0x5EB2), '5eb2', ret=anim)
     e.keys = []
     def keyfn(e2, sp):
         return e2.keys.pop(0) if e2.keys else 0x1b
