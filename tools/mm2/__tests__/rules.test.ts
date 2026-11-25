@@ -1,0 +1,143 @@
+/**
+ * Diffs tools/mm2/rules.ts against vectors recorded from the retail MM2 executable
+ * running under Unicorn (tools/mm2/rules_oracle/rules.py). Small subsets are committed
+ * (tools/mm2/rules_oracle/vectors/); the full sets are regenerated into the gitignored
+ * tools/mm2/rules_oracle/generated/ and used when present. Null controls: each check is
+ * repeated with a deliberately wrong rule and must fail.
+ */
+import { describe, expect, it } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
+import { resolve } from 'node:path';
+import { StrictMem } from '../rules-mem.ts';
+import { damageChar, luckSave, monsterMelee, statBonus, rand15, randRange, srand, unpackMonster } from '../rules.ts';
+
+const DIR = resolve('tools/mm2/rules_oracle');
+export function load(name: string): any[] {
+  const full = resolve(DIR, 'generated', `${name}.json`);
+  if (existsSync(full)) return JSON.parse(readFileSync(full, 'utf8'));
+  const gz = resolve(DIR, 'vectors', `${name}.json.gz`);
+  return JSON.parse(gunzipSync(readFileSync(gz)).toString('utf8'));
+}
+const mem = (v: any) => new StrictMem(v.init, v.wpre);
+
+describe('RNG (CODE+0x24048 rand15, 0x2407C srand, 0x22BC6 rand(lo,hi))', () => {
+  const V = load('rng');
+  const run = (v: any, bad = false) => {
+    const m = mem(v);
+    let ret: number;
+    if (v.kind === 'r16') ret = rand15(m);
+    else if (v.kind === 'srand') { srand(m, v.args[0]); ret = v.ret; }
+    else ret = randRange(m, v.args[0], bad ? v.args[1] + 1 : v.args[1]);
+    return { ret, ch: m.changes() };
+  };
+  it('matches the game on every vector (return value and seed bytes)', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const o = run(v);
+      expect(o.ret & 0xffff).toBe(v.ret);
+      expect(o.ch).toEqual(v.fin);
+    }
+  });
+  it('covers the range quirk: rand(lo,hi) can return hi+1', () => {
+    const over = V.filter((v: any) => v.kind === 'range' && v.args[1] > v.args[0] && ((v.ret << 16) >> 16) > v.args[1]);
+    expect(over.length).toBeGreaterThan(0);
+  });
+  it('null control: an off-by-one range disagrees', () => {
+    const ranges = V.filter((v: any) => v.kind === 'range' && v.args[1] > v.args[0]);
+    expect(ranges.some((v: any) => run(v, true).ret !== v.ret)).toBe(true);
+  });
+});
+
+describe('monster record unpack (CODE+0x4C8E)', () => {
+  const V = load('monunpack');
+  it('matches the game for every record tested, all 56 working bytes', () => {
+    expect(V.length).toBeGreaterThan(20);
+    for (const v of V) {
+      const m = mem(v);
+      unpackMonster(m, v.slot);
+      expect(m.changes(), `monster ${v.id}`).toEqual(v.fin);
+    }
+  });
+  it('null control: a port without the 250 cap (or without x10) on damage/initiative disagrees', () => {
+    for (const opts of [{ capX10: false }, { noX10: true }]) {
+      let bad = 0;
+      for (const v of V) {
+        const m = mem(v);
+        unpackMonster(m, v.slot, opts);
+        if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      }
+      expect(bad).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('monster melee roll (CODE+0x10478)', () => {
+  const V = load('melee');
+  const run = (v: any, o = {}) => {
+    const m = mem(v);
+    const r = monsterMelee(m, o);
+    return { ch: m.changes(), calls: r.calls };
+  };
+  it('matches the game: RNG draws, hit count, damage, status halvings', () => {
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const o = run(v);
+      expect(o.calls).toEqual(v.calls);
+      expect(o.ch).toEqual(v.fin);
+    }
+  });
+  it('null controls: no status-3 halving, or a flat threshold of 5, both disagree', () => {
+    for (const o of [{ noHalve: true }, { ac5: true }]) {
+      let bad = 0;
+      for (const v of V) {
+        try {
+          const r = run(v, o);
+          if (JSON.stringify(r.ch) !== JSON.stringify(v.fin)) bad++;
+        } catch { bad++; }
+      }
+      expect(bad).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('stat bonus (CODE+0x4442), luck save (0x48BA), damage_char (0x4952)', () => {
+  it('stat bonus matches for every stat value 0..255', () => {
+    const V = load('bonus');
+    expect(V.length).toBe(256);
+    for (const v of V) {
+      const m = mem(v);
+      expect(statBonus(m, v.arg)).toBe(v.ret & 0xff);
+    }
+  });
+  it('luck save matches (RNG draws included)', () => {
+    const V = load('luck');
+    expect(V.length).toBeGreaterThan(30);
+    for (const v of V) {
+      const m = mem(v);
+      expect(luckSave(m, v.char)).toBe(v.ret);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    let bad = 0;
+    for (const v of V) {
+      const m = mem(v);
+      try { if (luckSave(m, v.char, { noAuto: true }) !== v.ret || JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++; } catch { bad++; }
+    }
+    expect(bad).toBeGreaterThan(0); // null control: no 5%/95% auto results
+  });
+  it('damage_char matches: saves, halving/quartering, unconscious/dead transitions', () => {
+    const V = load('dmgchar');
+    expect(V.length).toBeGreaterThan(30);
+    const run = (v: any, o = {}) => {
+      const m = mem(v);
+      damageChar(m, v.char, v.dmg, v.pB, v.pA, v.pC, o);
+      return m.changes();
+    };
+    for (const v of V) expect(run(v)).toEqual(v.fin);
+    let bad = 0;
+    for (const v of V) {
+      try { if (JSON.stringify(run(v, { noQuarter: true })) !== JSON.stringify(v.fin)) bad++; } catch { bad++; }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
