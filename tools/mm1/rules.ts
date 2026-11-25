@@ -360,7 +360,7 @@ export function rollDamage(m: Mem): void {
 }
 
 /** CODE+0xC263 `setmony`: DS:38B2 := index (0..15) of the monster slot whose address equals DS:3CB4 (15 = not found) */
-function setMony(m: Mem): number {
+export function setMony(m: Mem): number {
   const p = m.r16(0x3cb4);
   let idx = 0;
   while (idx < 15 && p !== MONBASE + 0x20 * idx) idx++;
@@ -508,7 +508,7 @@ export function applyDamageChar(m: Mem): { calls: Call[] } {
 
 /** CODE+0xC2B0 `resmon2`: remove dead monsters (condition 0xFF) from the turn-order pointer table by shifting it down, decrementing
  *  the count (DS:3C1D) each time; rescans from the top until no dead entry remains or the count reaches 0. */
-function resMon2(m: Mem): void {
+export function resMon2(m: Mem): void {
   for (;;) {
     let bl = 0;
     let dead = false;
