@@ -12,149 +12,32 @@ Logic foundation for a browser remake's rules core, derived from the game's own 
 
 **Evidence grades.** **harness** = diffed against the game's real routine in Unicorn with null controls; **code** = read from the disassembly at the stated address, not executed; **hyp** = inference; **open** = not derived.
 
-## MM3 rules status (build guide, 2026-11-26, pass 2)
+## MM3 rules status (build guide, 2026-11-26, pass 3 = closing pass)
 
-What a remake rules core can take **as is** (harness-verified; full vector sets are generated into the gitignored `tools/mm3/rules_oracle/generated/`, small subsets are committed in `tools/mm3/rules_oracle/vectors/`; 96,608 full vectors, 33 units). Pass 1 is `tools/mm3/rules.ts`, pass 2 is `tools/mm3/rules2.ts` (+ `rules-tables.ts`).
+What a remake rules core can take **as is** (harness-verified; full vector sets are generated into the gitignored `tools/mm3/rules_oracle/generated/`, small subsets are committed in `tools/mm3/rules_oracle/vectors/`; about 124,000 full vectors, 44 units). Pass 1 is `tools/mm3/rules.ts`, pass 2 `rules2.ts`, pass 3 `rules3.ts` (+ `rules-tables.ts`).
 
 | Area | Verified (harness) | Where |
 |---|---|---|
 | RNG | `rand15` LCG, `srand`, `rand(lo,hi)` (hi+1 overshoot, lo-first args) | 2 |
-| Character stats | bracket bonus table, level, age, equipment bonus sum, condition (status) modifier, **effective attribute**, **max HP**, **armour class**, **max SP** | 4 |
+| Character stats | bracket bonus table, level, age, equipment bonus sum, condition (status) modifier, effective attribute, max HP, armour class, max SP | 4 |
 | Level thresholds, training | XP at next level; level threshold `OV4+0xB7EC`, shortfall `R+0x88CA`, payment pools `R+0x8964`; training cost `10*level^2` gold (code) | 4.6, 15 |
 | Saves | luck save and the six category/element saves (`OV4+0x82DC`), simple `x/(x+50)` check | 5.1 |
-| Damage to a character | HP word, unconscious / dead thresholds, item breakage on death | 5.2 |
-| **Monster hits a character** | dice, resistance subtraction, repeated-save halving, 16 special-attack effects (the condition counters) | 5.3 |
-| **The monster's turn** | target choice by `AttP` (all / random by party size / class or race preference, incapacitated members skipped or replaced), **the monster's own hit chance** (auto-hit for `DmgT != 0` or an asleep target, d20 with natural 20/1, `HitB` die, AC + 10 or level/2 + 15), attacks per turn `NumA`, party-wiped flags | 10 |
-| **Turn order** | speed sort (party Speed attribute, monster `Spd`), ties by index, current actor kept | 11 |
-| **Party member hits a monster** | weapon select + damage dice, to-hit roll, damage per hit, swings per round, element resistance scaling (spell kinds return 0) | 6 |
-| **Damage to a monster** | physical resistance, element add-on, spell save halving, animation cues, kill: XP split, gold, gems, loot roll, group slot clearing | 12 |
-| **Item generator** | item id by d100 x d100, 1-3 enchantment kinds, grade tables | 13 |
-| **Spell cast gate** | cast-blocking conditions, SP cost (negative table value = x caster level), gem cost, payment/refund, spell price | 14 |
-| Monster tables, spell table | all 22 DOS `Mon*.dat` tables byte-exact in DATA; 60 rule tables + 77 spell names exported to `rules-tables.json` | 3, 16 |
+| Damage to a character, monster hits a character | HP word, thresholds, breakage; dice, resistance, repeated-save halving, 16 special-attack effects | 5.2, 5.3 |
+| The monster's turn | target choice, own hit chance, attacks per turn, party-wiped flags | 10 |
+| Turn order | speed sort, ties by index, current actor kept | 11.1 |
+| **Battle round loop (pass 3)** | party-wiped test `R+0xC7F8`, round-over `R+0x12150`, all-down `R+0x12276`, party-order compaction `R+0x12206`, **the loop `R+0x11FA0`** (actor advance, skipping downed members, monster turns, command requests, round rollover, battle end) | 17.4 |
+| Party member hits a monster, damage to a monster, item generator | weapon, to-hit, swings, resistance scaling; resistances, spell save, kill rewards, loot; item id/enchantments | 6, 12, 13 |
+| Spell cast gate | blocking conditions, SP/gem cost, payment/refund, price | 14.1 |
+| **Cast command and 75 of the 77 spell handlers (pass 3)** | `OV8+0x252E`: target/element pickers with refund, heal helper, buffs, condition cures, raise dead, the seven map-gated world spells, the combat table, battle refusals | 17.1-17.3 |
+| **Combat spell engine and spell vs monster (pass 3)** | `OV4+0xE6EA` (rank/group walk, arrow form) and `OV4+0x13282` mode != 0 (magic resistance, kind lists, status/kill/holy word/turn undead/mass distortion/disintegrate) | 17.2, 17.3 |
+| **World clock (pass 3)** | `OV4+0xFE5C` minutes -> day (0..99) -> year, monthly refresh and bank interest `OV4+0xC9D4`, **time passing `OV4+0x10386`** (ageing tick, counters, saves, day/night) | 17.5 |
+| Monster tables, spell table | all 22 `Mon*.dat` tables byte-exact in DATA; 60 rule tables + 77 spells exported to `rules-tables.json` | 3, 16 |
 
-**Code-read only (not harnessed):** the combat round loop (`R+0x11FA0`, 11.2), combat spell resolution against monsters (`OV4+0x13282` mode != 0, 14.3), encounter-start monster volley (`R+0xC5FA`, 10.4), the training level-up application (`OV5+0x1EEE`, 15).
+**Code-read only (not harnessed):** the rest command `R+0xFEA6` (17.6), the encounter-start volley (`R+0xC5FA`, 10.4), the monster loader `OV4+0x14348` and visible-group builder (17.4), the training level-up application (`OV5+0x1EEE`), door unlock/bash text sites, the OV7 item-overlay spells (Detect Magic, Recharge, Duplication, Enchant Item via `OV7+0xF1C`), the two UI-only spells (24 Identify Monster, 37 Detect Monster).
 
-**Open (smallest next steps in section 9 and `docs/mm3/TODO.md`, ids `mm3-rules-*`):** monster surprise and encounter generation (group sizes, reinforcements), flee/morale (**no monster flee/morale or monster spell casting exists in the monster-turn routine `R+0xA1DC`; not located elsewhere**), per-spell effects (77 handlers in OV8, dispatched through a jump table), ranged `Rang` (read only by the position code `R+0x9754`), clock/ageing/food/doors/traps/skills, character creation, shop prices.
+**Open (ids in `docs/mm3/TODO.md`):** surprise (no code or message string found), flee/morale/monster spells/call-for-help (**absent**: not in `R+0xA1DC`, no string in the executable), shop buy/sell price, character creation, skill use, door/trap mechanics, food ageing beyond rest, OV7 item spells, per-step ticks; class names remain hyp.
 
 Corrections made while writing are in section 8.
-
-## 1. Status summary
-
-Vector counts (full sets): rng 4,008; bracket 600; level 2,000; age 2,000; condmod 3,000; equip 4,000; getstat 4,000; maxhp 3,000; ac 3,000; maxsp 3,000; xpnext 3,000; check 2,000; save 4,000; dmgchar 3,000; monattack 4,000; weapon 3,000; partyhit 4,000; element 2,000; dmghit 2,000; meleeround 3,000; xpsplit 2,000 = 60,608 (pass 1); pass 2: monturn 3,000; initiative 3,000; mondmg 3,000; item 3,000; castpay 3,000; castrefund 3,000; castblock 3,000; spellsp 3,000; spellprice 3,000; levelthr 3,000; shortfall 3,000; pay 3,000 = 36,000 (96,608 total; the `element` set was regenerated with spell kinds). All 53 vitest cases pass with the committed subsets (`npx vitest run tools/mm3`), plus the table export check.  Null controls: off-by-one `rand` range, wrong `level`, flag-flipped `getstat`/`ac`, biased save, missing halving, missing exploding-20, truncated swing count, skipped dead members in the XP split, missing Druid/Ranger second SP pass — each disagrees with the vectors.
-
-## 2. Foundations (harness)
-
-**RNG** — `R+0x12EA8` `rand15()`: `seed = seed*0x41C64E6D + 0x3039 (mod 2^32)`, result `(seed >> 16) & 0x7FFF`; the seed is the `u32` at `A4-0x2104`. `R+0x12EA0` `srand(long)` stores it. This is the SAS/C runtime generator, identical to MM2's.
-
-**`rand(lo, hi)`** — `R+0x64D4`, called 99 times (43 in the root, 26 in OV4, 15 in OV5, ...). **Argument order differs from MM2: `lo` is pushed first** (`rand(1,20)` is `push 1; push 20`). If `hi <= lo` (signed 16-bit) return `lo` **without drawing**; else `r = rand15()`, `n = hi-lo+1`, `k = 0x7FFF / n` (signed 32-bit divide `R+0x14C48`... truncating), result `(lo + r / k) & 0xFFFF`. Because `k` is truncated, the result can exceed `hi` (returns `hi+1`) whenever `r >= k*n`; MM2 used `0x8000` as the numerator, MM3 uses `0x7FFF`. Verified with 8 directed seeds per run whose first draw is >= 32760. Precondition inherited from the code: `n <= 0x7FFF` (larger divides by zero).
-
-Helper arithmetic in the root: `R+0x14168` unsigned 32x32 multiply, `R+0x14BFA` signed divide (quotient), `R+0x14C22` signed remainder, `R+0x14C48` signed divide (quotient, sets flags).
-
-## 3. Monster stat tables (harness: byte-exact data match, 22/22)
-
-The Amiga port **does** carry the DOS `Mon*.dat` tables — compiled into the DATA hunk as 90-entry arrays indexed by monster id (the DOS-side note "the Amiga port has no `Mon*.dat`" in `docs/mm3/TODO.md` `mm3-mon-stats` is wrong). Widths: `HP` and `Gems` u16, `Exp` and `Gold` u32 (big-endian), all others u8. `tools/mm3/rules_oracle/montables.py` finds each DOS table (converted to big-endian) byte-for-byte in the executable: 22/22. `A4` displacements and DATA offsets (also in `vectors/montables.json`):
-
-| Table | A4 disp | Table | A4 disp | Table | A4 disp |
-|---|---|---|---|---|---|
-| HP (u16) | -24864 | AC | -24684 | Spd (initiative) | -24594 |
-| DmgN (dice count) | -24504 | DmgS (die sides) | -24414 | NumA (attacks) | -24324 |
-| Exp (u32) | -24234 | DmgT (damage type) | -23874 | AttP (attack preference) | -23784 |
-| Spec (special attack) | -23694 | Rang (ranged) | -23604 | HitB | -23514 |
-| Trea (treasure id) | -23424 | Gold (u32) | -23334 | Gems (u16) | -22974 |
-| Magi | -22794 | Fire | -22704 | Elec | -22614 |
-| Cold | -22524 | Acid | -22434 | Ener | -22344 |
-| Phys | -22254 | | | | |
-
-Use in code (**harness** for DmgN/DmgS/DmgT/Spec in 5.3, **code** for the rest): `DmgN`/`DmgS` give the dice, `DmgT` (0..6) the resisted category, `Spec` (0..16) the special effect, `AC` the monster armour class in the to-hit roll (6), `Fire/Elec/Cold/Acid/Ener/Magi/Phys` are per-monster **resistance percentages** used by the weapon-element scaling (6.3), `Exp`/`Gold`/`Gems`/`Trea` the kill reward (the monster-death block `OV4+0x1390x..0x13A60`, code: XP -> 6.4, gold added to `A4+0x70A0` (u32), gems to `A4+0x709C` (u16), treasure id `Trea` -> `rand(1,100) <= u8 A4-0x3518[id-1]` yields one loot item, at most 10), `Spd` the monster initiative in the turn-order builder (`OV4+0x130C0`, code). The DOS bestiary id -> name map (`scripts/mm3lib/mm3_monster_names.json`) therefore applies to the Amiga ids unchanged for the 61 confirmed names.
-
-Monster instance state (in battle) lives in `A4` arrays indexed by the battle slot: `u16 A4+0x173A[slot]` = monster id, `u16 A4+0x188E[slot]` = status word (non-zero = disabled: `+20` to be hit; `7` is cleared when hit, `OV4+0x136FA`), `A4-0x3F2B` (u8) = the slot currently targeted.
-
-## 4. Characters (harness)
-
-**Record layout** (0x130 bytes, `A4-0xC78 + slot*0x130`, big-endian). Offsets below are the ones the verified routines read; names are the role the code gives them (**code**) or **hyp** where marked.
-
-| Offset | Meaning |
-|---|---|
-| +0x11 | race (u8; index into the signed byte tables `A4-0x53A1` (HP) and `A4-0x53AB` (SP)) |
-| +0x13 | class (u8 0..9; hyp order Knight, Paladin, Archer, Cleric, Sorcerer, Robber, Ninja, Barbarian, Druid, Ranger — consistent with the class tables: Sorcerer/Archer cast from Intellect, Druid/Ranger from both) |
-| +0x14..+0x21 | seven attribute pairs (base u8, temp u8): idx 0..6 = Might, Intellect, Personality, Endurance, Speed, Accuracy, Luck (hyp names; roles confirmed: Might -> damage, Endurance -> HP, Speed -> AC, Accuracy -> to-hit, Luck -> save, Int/Pers -> SP) |
-| +0x22 | AC term (u8) |
-| +0x23 / +0x24 | level (u8) / temporary level bonus (u8); `level = +0x23 + +0x24` (`R+0xD03E`) |
-| +0x26 | extra age in years (u8) |
-| +0x27.. | per-class flags (u8 each), `+0x27+0xC / +0xD / +0x2` select the +2 SP bonus (hyp: spell-school bits) |
-| +0x2A | u8 flag: +1 HP per level |
-| +0x7A | u8: non-zero = has spell points |
-| +0x7D..+0x8E | 18 item slots: equip/slot code (u8; **1 or 13 = melee weapon, 4 = ranged**; 0 = empty) |
-| +0x90..+0xA2 | 18 item flag bytes: `0x40` / `0x80` set = item ignored by the stat bonuses (hyp: cursed / broken) |
-| +0xA3 / +0xB6 / +0xC9 | three 18-byte attribute arrays per item (element / magnitude / stat-kind selectors; tables `A4-0x2A2A`, `A4-0x29B2`/`-0x29E0`/`-0x29C9`, `A4-0x2984`) |
-| +0xDC..+0xEE | 18 item ids (u8) |
-| +0xEF.. | per-item second element byte (read into `A4+0x330F`) |
-| +0x102 / +0x103 | AC bonus / damage reduction (u8) |
-| +0x104 / +0x105 | weapon damage bonus / hit bonus added to the equipped weapon |
-| +0x107..+0x112 | six (u8,u8) resistance pairs, added to the equipment bonus for the category saves (5.1) |
-| +0x113..+0x122 | **16 condition counters** (u8). Order matches MM3's 16 conditions (hyp names): Cursed, Heart Broken, Weak, Poisoned, Diseased, Insane, In Love, Drunk, Asleep, Depressed, Confused, Paralyzed, **Unconscious (+0x11F), Dead (+0x120), Stone (+0x121), Eradicated (+0x122)** — the last four are the ones `damage` and the special attacks set |
-| +0x126 | current HP (s16) |
-| +0x128 | current SP (u16) |
-| +0x12A | birth year (u16; current year `u16 A4-0x1326`) |
-| +0x12C | experience (u32) |
-
-**Differences from MM2** (everything else in the MM2 record layout is unrelated): 304-byte record (MM2: 130), 7 attribute pairs and 16 counters instead of MM2's status byte, HP is a *signed* word with a death threshold at `-10`/buffer (5.2), 18 item slots in six parallel arrays, level is `u8 + u8`, XP is at +0x12C.
-
-### 4.1 Bracket bonus — `R+0xCE5C` (harness 600)
-`bracket(v)`: `i` = first index with `u16 A4-0x42F0[i] > v` (unsigned); result `s8 A4-0x567B[i]`. Turns an attribute value into a bonus/penalty.
-
-### 4.2 Age — `R+0xCE8E(char, flag)` (harness 2,000)
-`age = s16(year - birth)` capped at 0xFE (signed); `flag == 0` adds `+0x26`.
-
-### 4.3 Equipment bonus — `R+0xCEF0(char, kind)` (harness 4,000)
-Sums over the 18 slots that have a non-zero slot code (`+0x7D`) and no `0x40/0x80` flag: for `kind < 0xB` and `kind != 3` the `+0xC9` selector `a` contributes `s8 A4-0x2984[a]` when `c7d2(a) (+1 if > 2) == kind` (`c7d2` = first index with `a <= u8 A4-0x53EC[i]`); for `kind > 0xA` the `+0xA3` selector contributes `u8 A4-0x2A2A[a]` when `c7ac(a) + 0xB == kind` (`A4-0x53DC` table); `kind == 9` (AC) also adds `u8 A4-0x27C9[item id]` and, when `+0xB6` is non-zero, `s8 A4-0x29B2[+0xB6]` (skipped for slot codes 1, 4, 13 unless the item id is 0x2A). Kinds seen: stat idx 0..6, 7 = HP, 8 = SP, 9 = AC, 0xB..0x10 = the six save categories.
-
-### 4.4 Condition modifier — `R+0x94FA(char, idx)` (harness 3,000)
-Zero when Dead/Stone/Eradicated counters (`+0x120/121/122`) are set. Otherwise each non-zero counter `n` adds to / subtracts from the seven attribute indices: Cursed (`+0x113`) -n on Luck; Poisoned (`+0x116`) -n on Might, Speed, Accuracy; Diseased (`+0x117`) -n on Int, Pers, Endurance; Insane (`+0x118`) +n on Might and Speed, -n on Int, Pers, Accuracy; Heart Broken (`+0x114`) and Weak (`+0x115`) -n on all; In Love (`+0x119`) +n on all; Drunk (`+0x11A`) -n on all but Personality and Luck, +n on those (the exact attribute-index assignment is in `condMod`; **hyp** for the names).
-
-### 4.5 Effective attribute — `R+0xD064(char, idx, flag)` (harness 4,000)
-`v = base + ageBracket + equipBonus(idx) + condMod(idx) + temp`, 16-bit, returned as `max(v, 0)` (anything `< 1` returns 0). `ageBracket` is added for idx 1, 2 (row 1 of `u16 A4-0x5432`) and idx 0, 3, 4, 5 (row 0; row stride 0x14 bytes = 10 age brackets, bracket = first `i` with `age < u16 A4-0x540A[i]`); Luck (idx 6) has none. **`flag != 0` skips both the condition modifier and the temp byte** (`+0x15`+2*idx), not just the modifier.
-
-### 4.6 Max HP, AC, max SP, XP thresholds (harness)
-- **Max HP** `R+0xAD56` (3,000): `h = u8 A4-0x25EE[class] + bracket(Endurance) + s8 A4-0x53A1[race] + (+0x2A ? 1 : 0)`, min 1; `h *= level`; `h += equipBonus(kind 7)`; min 0.
-- **AC** `R+0xADE6(char, flag)` (3,000): `bracket(Speed) + equipBonus(kind 9)`, plus `+0x102 + +0x22` unless `flag`; min 0.
-- **Max SP** `R+0xAC46` (3,000): 0 unless `+0x7A`. Classes 2 and 4 use stat 1 (Intellect) and flag byte `+0x27+0xD`; other classes stat 2 (Personality) and `+0x27+0xC`; classes 8 and 9 use `+0x27+2`. `s = bracket(stat) + 3 + s8 A4-0x53AB[race*2 + stat - 1] (+2 if the flag byte is set)`, min 1, `s *= level`, halved unless the class is 3, 4 or 8; classes 8 and 9 run the formula twice (stat 2 then stat 1) and average (`(a + b) >> 1`); then `+ equipBonus(kind 8)`; min 0.
-- **XP at next level** `R+0x88FC` (3,000): `XP + need`, with `L = +0x23`: `L == 1` -> `XP` (need 0); `L` in 2..12 -> `need = u16 A4-0x3FCA[class] << (L-2)`; `L > 12` -> `need = (L-12)*0xFA000 + (u16 A4-0x3FCA[class] << 10)`; the shift is the 68k mod-64 shift (level 0 shifts everything out). The level-up in the training hall (`OV5+0x1EEE`, **code**) costs `10 * level^2` gold (`R+0x8964` pays), then sets `XP = threshold - B7EC(char)`, `level += 1`, and refills `HP = maxHP`, `SP = maxSP` (`+0x126`, `+0x128`).
-
-## 5. Saves and damage to characters
-
-### 5.1 Saving throw — `OV4+0x82DC(char, type)` (harness 4,000)
-`type 0` (luck): `x = level + bracket(2*Luck)`; `roll = rand(1, x+0x14)`; **success = roll <= x**. `type 1..6` (categories, hyp: physical/fire/cold/electric/poison/energy order unknown): `x = equipBonus(kind) + two resistance bytes`, `roll = rand(1, x+0x28)`, success = roll <= x; the (kind, byte pair) per type is 1:(0x10,+0x111/112) 2:(0xB,+0x107/108) 3:(0xC,+0x10B/10C) 4:(0xD,+0x109/10A) 5:(0xE,+0x10D/10E) 6:(0xF,+0x10F/110). Types above 6 read uninitialised registers (not modelled). `OV4+0x82B0(x)` (harness 2,000): `rand(1, x+0x32) <= x`.
-
-### 5.2 Damage to a character — `OV4+0xECE8(char, dmg)` (harness 3,000)
-`HP(+0x126) -= dmg` (16 bit). If `HP < 1`: `buf = maxHP + HP` (`R+0xAD56`); `buf < 1` -> **Dead** (`+0x120 = 1`, `HP = 0`), otherwise **Unconscious** (`+0x11F = 1`, HP stays negative, down to `maxHP` below zero). Dead, or `HP <= -10` on entry, also sets flag `0x80` on the first item with id `0x22..0x29` that is carried. So a character falls unconscious at 0 HP and dies at `-maxHP`.
-
-### 5.3 Monster hits a character — `R+0x9E02(char, slot, monster)` (harness 4,000)
-`slot` (0..7) only chooses the hit animation position. The routine (with `UI 971C`, draw `945E` and `OV4+0xECE8` as logged stubs):
-1. `+0x11B = 0` (clears the Asleep counter — hyp).
-2. `dmg = sum of DmgN[mon] draws of rand(1, DmgS[mon])` (16-bit).
-3. If `DmgT[mon] != 0` (type 1..6): one luck save (5.1) halves `dmg`; then types 2..5 subtract the party-wide resistance word `u16 A4-0x1322 / -0x1320 / -0x131E / -0x131C`; then **repeatedly** `while (save(char, type) && dmg != 0) dmg >>= 1` (arithmetic shift; a negative `dmg` never reaches 0). The UI sound/animation id is 4, 0xD, 0xE, 0xF, 0x11 depending on the type.
-4. `dmg -= +0x103` (damage reduction), floor 0.
-5. If `dmg != 0`, `Spec[mon] != 0` and a luck save **fails**, the special effect runs (one of 16, below).
-6. The damage goes to `OV4+0xECE8` (5.2).
-
-There is **no to-hit roll here**; the monster's hit chance is decided by the caller, `R+0xA1DC` (section 10).
-
-Special effects `Spec` 1..16 (counters saturate at 255, i.e. wrap 0 -> 0xFF; `ui` = animation id logged): 1 Poisoned `+0x116`++; 2 Asleep `+0x11B`++; 3 Insane `+0x118`++; 4 Diseased `+0x117`++; 5 Confused `+0x11D`++; 6 Cursed `+0x113`++; 7 first carried item with id `0x22..0x29` gets flag `0x80`; 8 Weak `+0x115`++; 9 SP = 0 (`+0x128`); 10 Paralyzed `+0x11E`++; 11 age `+0x26 += 5`; 12 Unconscious `+0x11F`++ and HP = 0; 13 Eradicated `+0x122`++, every item with id `< 0x48` flagged `0x80`, HP = 0; 14 Stone `+0x121`++, HP = 0; 15 Dead `+0x120`++, HP = 0; 16 every item with id `< 0x46` gets flag `0x40`. (Counter names **hyp**, from the MM3 condition list; offsets and effects **harness**.) The 16 condition counters are mapped in order `+0x113 + n`.
-
-## 6. Party attacks (harness)
-
-### 6.1 Weapon damage — `R+0x11DA6(char, mode)` (harness 3,000)
-Clears `A4+0x330A..0x3310`, then scans the 18 slots; `mode 0` accepts slot codes 1 and 13, `mode != 0` code 4. **Every** accepting slot overwrites the globals and rolls its dice, so with several accepted slots the last one wins but all of them draw the RNG: `A4+0x3310 = +0xA3[slot]` (element), `+0x330F = +0xEF[slot]`, hit bonus `s8 A4-0x29E0[+0xB6[slot]] + +0x105` -> `A4+0x330E`, damage `s8 A4-0x29C9[+0xB6[slot]] + +0x104` -> `s16 A4+0x330C`, `nDice = u8 A4-0x2780[id]`, `sides = u8 A4-0x2737[id]`, then `nDice` times `damage += rand(1, sides)`; finally `damage < 1 -> 0`.
-
-### 6.2 To-hit — `OV4+0x12C38(char, mode)` (harness 4,000)
-After 6.1: `x = bracket(Accuracy) + s8 A4+0x330E`; `x += level / div[class]` with `div = 1,2,2,3,4,2,2,1,3,2` (class 0..9); `x += d20` where **a natural 20 adds and rolls again** (loop `while roll == 20`); `x -= +0x113` (the Cursed counter); `+20` if the target's status word `A4+0x188E[target]` is non-zero; hit **iff `x >= 10 + AC[monster id]`**. (The monster id is `u16 A4+0x173A[target]`, target `u8 A4-0x3F2B`.)
-
-### 6.3 Damage — `OV4+0x13048` (harness 2,000) and element scaling `OV4+0x12D56` (harness 2,000)
-Per hit: `dmg = max(0, bracket(Might) + s16 A4+0x330C)` (the weapon damage of 6.1). Element scaling (kinds 0 and 3 only): `base = u8 A4-0x2A05[el]`; resist = the monster's table chosen by `el` (`< 9` Fire, `< 0x10` Elec, `< 0x15` Cold, `< 0x1A` Acid, `< 0x22` Ener, else Magi; `el == 0` none); `resist == 0` keeps `base`, `100` gives 0, else `base * (100 - resist) / 100` (truncating). The caller is `OV4+0x136E2` (section 12): it is called for every mode and for spell kinds returns 0.
-
-### 6.4 Melee round and XP — `OV4+0x13282` (harness 3,000), `OV4+0x12FB0` (harness 2,000)
-Mode 0: `swings = level / div2[class] + 1` with `div2 = 5,6,6,7,8,6,5,4,7,6`; each swing is 6.2 and each hit adds 6.3's damage; the total goes to `OV4+0x136E2(char, total, 0)` (monster damage, logged stub) then `OV4+0x1307C`. **XP split**: every party member — dead or not, the condition switch is vacuous — gets `award / partyCount` added to `+0x12C` (`partyCount` = `u8 A4-0x1672`, or `u8 A4+0x1F74` indices from `A4-0xC81` when `u8 A4-0x104A == 2`). Integer division; the remainder is lost.
 
 ## 7. What a rules core can take from this
 Everything in the status table is expressed as pure functions over the character record and the `A4` tables in `tools/mm3/rules.ts`; the unit tests are the specification. Tables (`A4-0x42F0` ... ) are read from the executable's DATA hunk — a remake takes the extracted table file (section 16).
@@ -167,6 +50,9 @@ Everything in the status table is expressed as pure functions over the character
 > **Correction (2026-11-26):** the status block said `Rang` was a ranged-attack flag used by the monster turn, and `Spd` was read by `OV4+0x130C0`. `Rang` is read once, by the position routine `R+0x9754`; `Spd` is read by the turn-order builder `OV4+0x1307C` (the initiative code starts there, `0x130C0` is mid-function). `OV4+0x12D56` returns 0 for spell kinds (section 12); the pass-1 `element` vectors only exercised kinds 0 and 3 and are regenerated with the other kinds.
 > **Correction (2026-11-26):** gems from a kill are added to a **u32** at `A4+0x709C` (not a u16); gold to the u32 `A4+0x70A0`. The loot chance table is `A4-0x3518[Trea-1]` (1, 2, 5, 10, 20, 100 % for treasure ids 1..6, 0 beyond).
 > **Correction (2026-11-26):** the level-up rewrite of the experience (section 4.6) is `XP' = R+0x88FC - OV4+0xB7EC` (section 15), not a plain `threshold - B7EC`; `R+0x88FC` is a total-XP equivalent, not the threshold.
+
+> **Correction (2026-11-26, pass 3):** the overlay jump-table stubs `BSR.W ovlmgr ; .w seg<<8|flag ; .w off` have a **flag in the low byte that adds 0x10000 to the offset**: 0x2B6, 0x386, 0x8EC, 0x922, 0x1754, 0x1FF2, 0x26E2, 0x307C, 0x3282, 0x3B36, 0x3C2E, 0x3D44, 0x3E14, 0x4348, 0x4992, 0x4AB4, 0x4B04 of OV4 really sit at `+0x10000`. The label `OV4_3282` in listings is `OV4+0x13282`, `OV4_307C` is `OV4+0x1307C`, `OV4_4348` is `OV4+0x14348`. Sections 6.4/10-14 already used the right numbers; the emulator (`emu.py`) ignored the flag and is fixed (all earlier vectors regenerated identical).
+> **Correction (2026-11-26, pass 3):** section 14.2 said the spell effects were "not harnessed"; 75 of 77 now are (17). Section 10.4 and the status block called `A4+0x1F4E` an encounter-start (surprise-like) list: it is the **ranged-attack list** of monsters with line of sight (17.4), not a surprise mechanic. `A4-0x1665` (section 12 step 7, "no-reward test mode") is the **current map id**; `0x6A` is the map where kills give no gold or gems. `OV4+0` is the viewport redraw (UI), so "group compaction" is display only.
 
 ## 9. Open (ids in `docs/mm3/TODO.md`)
 - `mm3-rules-monster-ai` — surprise and the origin of the encounter-start list `A4+0x1F4E` / mode 5 (10.4); encounter generation (group sizes, reinforcements); flee/morale and monster spells **do not exist in `R+0xA1DC`** (not found elsewhere: search the round loop callees if the remake needs them); ranged `Rang`; `R+0x122DE` (monster id 0x19 melee reaction); a harness for the round loop `R+0x11FA0` (needs the player-command stub).
@@ -232,3 +118,32 @@ Area modes (`A4+0x332A == 1`) loop over the party; otherwise a magic-resistance 
 
 ## 16. Tables for the remake
 `npx tsx tools/mm3/rules-tables.ts` writes `public/assets/mm3/amiga/data/rules-tables.json` (gitignored like all assets): 60 tables with `a4` displacement, width, role and values (rules tables, 22 monster tables, the combat-spell monster lists), the 77 spells with SP and gem cost, the three trailing name strings (`None Ready`, `None`, `Fountain Head`) and a few constants. `tools/mm3/__tests__/rules-tables.test.ts` checks every exported byte against the bytes the verified routines read (> 5,000 matched bytes). Class names are **hyp**.
+
+## 17. Pass 3 — spells, combat engine, round loop, clock (harness unless stated)
+
+Harness: `tools/mm3/rules_oracle/rules3.py`, port `tools/mm3/rules3.ts`, tests `tools/mm3/__tests__/rules3.test.ts`. UI leaves (cues, redraw, key reads, number prompts, animations, walk tests) are logging stubs with scripted answers; everything else is the real game code.
+
+### 17.1 Cast command `OV8+0x252E(d7)` (harness, 6,000 vectors, every ported spell exercised)
+`d7 != 0` is the pre-chosen path used by the battle driver. Caster = `char[order[A4-0x3309]]`, spell = `+0x7B`. The mode `A4-0x104A` is saved, set to 3, `A4-0x32E0` cleared, the cost paid (14.1, `OV8+0x534`), then on success the caster pointer goes to `A4+0x3270`, the mode is restored and the handler runs; spells `>= 0x4D` do nothing. **In battle (previous mode 2) the spells 17, 23, 33, 41, 45, 50, 53, 61 are refused with a refund** (the world spells). Returns 1 = cast. Pickers: `OV8+0x2E4` (member: keys `0xC9..0xD0` = member `key-0xC9` if below the party count `A4-0x1672`; `0x1B` cancels and refunds), `OV8+0x18C` (element menu: `0..3` or `F/E/C/A` -> 2..5; ESC cancels with refund). Heal helper `OV8+0x8C(char, amt)`: nothing when the worst condition is 0xD..0xF; HP += amt clamped to max only when HP <= max; HP > 0 clears `+0x11F`.
+Handler groups (all in `HANDLERS`, `rules3.ts`): buff flags (`+0x102` Blessed, `+0x103` Power Shield, `+0x104` Holy Bonus, `+0x105` Heroism); condition cures (suppress poison/disease: counter < 4 -> 1 else -3); healers (Cure Wounds family with `rand(.)*level` amounts, Moon Ray heals everybody `rand(1,30)`); Raise Dead / Resurrect / Half for Me / Divine Intervention; Protection from Elements (`2*level+5`, cap 200, into the element timer `A4-0x1322..`); the combat table (17.2); the map-gated **world spells**: permission byte `A4-0xDE + map(A4+0xDB9)*0x340 + 0x30E..0x31A` (0x314 Teleport, 0x315 Lloyd's Beacon, 0x316 Time Distortion, 0x317 Super Shelter, 0x318 Town Portal, 0x319 Nature's Gate, 0x31A Etherealize); Teleport is blocked iff the walk answer equals `(A4-0x3305 ? 0 : 0x1111)` (argument `0x70` or `0x7777`). Spells 4, 55, 57, 66 hand over to the item overlay `OV7+0xF1C(char, 3/4/5/6)` (logged, internals open). Not ported: 24 Identify Monster and 37 Detect Monster (display lists). Evidence: every other spell has at least one successful cast in the committed subset; null controls: heals off, no refund on cancel, combat area off by one, no battle refusal.
+
+### 17.2 Combat spell table and engine `OV4+0xE6EA` (harness, 600 vectors)
+Table `COMBAT_SPELLS` in `rules3.ts` holds (damage, kind, area, cue, animation) per spell: damage is a constant, `rand(a,b) * level`, `level * k` or fixed; area 0 = first group head only, 1 = front-rank groups, 2 = all ranks. Kinds: 0 physical, 2 fire, 3 electricity, 4 cold, 5 acid, 6 energy, 7 sleep, 8 immobilize, 9 feeble mind, 0xA paralyse, 0xB finger of death, 0xC holy word, 0xD mass distortion, 0xE turn undead, 0xF disintegrate, 0x10 silence. Spells 49 and 68 read cue/animation from the tables at `A4-0x3D1B` / `A4-0x3D17` indexed by kind; spell 63 picks `kind = rand(0,6)` with damage 0x50. The engine walks the visible ranks (`A4+0x1F73/-0x1BA/-0x1B9` with `A4+0x3264/3259/3252`, `3261/3258/3251`, `325E/3255/3250`); ranks 2..4 are reached only while the animation resource `A4+0xDCA` is non-zero; the arrow form (animation 0xB) needs a shooter. Null controls: no ranks behind the first, stop after the first group.
+
+### 17.3 Spell against a monster `OV4+0x13282`, mode != 0 (harness, 3,000 vectors)
+Arrow form when `A4+0x332A == 1`; otherwise a **magic-resistance roll `rand(1, casterLevel + 100) < Magi[id]` cancels the spell**; a fixed damage `A4+0x3330` is applied as is; with `3330 == 0` the kind lists at `A4-0x3C5A`, `-0x3C55`, `-0x3C48`, `-0x3C3B`, `-0x3C23`, `-0x3C6A`, `-0x3C0D` select the effect: status kinds set the monster's status word unless the monster save `OV4+0x82B0` succeeds; finger of death kills (HP, mode 2); Holy Word takes max HP from the HP table (mode 2); Turn Undead deals 25; Mass Distortion halves HP (min 1); Disintegrate uses the HP table and above 0x96 becomes 0x32 with kind 6. The result goes to `OV4+0x136E2` (section 12) then `OV4+0x1307C` (11.1). Null controls: no magic resistance roll, monsters never save.
+
+### 17.4 Round loop and encounters (harness for the loop, code for the rest)
+- **Harness (3,000 each, roundloop 1,227):** `R+0xC7F8` wipe test sets `A4-0x3307` to 1 only when every member is in a condition 0xB..0xF (asleep 8 and the confusion types 9, 0xA still count as alive); `R+0x12150` (round over); `R+0x12276` (all down: every member asleep or 0xB..0xF; 9 and 0xA can still be commanded); `R+0x12206` compaction of the party order table with the done flags; `R+0x11FA0` itself with the player command `R+0xC166(actor)` and the monster turn `R+0xA1DC(0)` as logged stubs and the real turn-order builder (11.1). Behaviour: no groups or no party -> mode 1; mark the previous actor done, advance `A4-0x3308` modulo (party size + groups), take `A4-0x3309 = order[...]`; if the round is over and every member is down, rebuild the order, reset both indices to 0xFF and clear the 12 done flags; downed members lose their turn; a monster actor calls the monster turn and a wiped party ends the battle. Random inconsistent states can make the game's own loop spin forever (vectors skip those). Null controls: wiped party does not stop, downed members not skipped, plus constant/absent results for each helper.
+- **Code:** monsters come from the map file through the loader `OV4+0x14348(map)`: records x, y, a type byte (`>> 2` plus 0x28, else the default table `A4-0x3E9B[(map == 0x68 ? 0x40 : map)*3 + flags]`) and facing; HP from the table `A4-0x6120`; a timer `rand(0, A4-0x4210[type])`; at most 0xAA monsters (count `A4+0x1F72`; arrays `A4+0xF42` x, `A4+0xDEE` y, `A4+0x173A` id, `A4+0x188E` status, `A4+0x1492` HP). **Groups are positional, not size-based:** the visible-group builder (`OV4+0x84B8..0x92BE`) makes the group heads from the monsters in the 3 x 4 squares ahead, so "group size" is however many map monsters stand on those squares. The list `A4+0x1F4E[36]` filled by `R+0xC51x` registers monsters with line of sight (`R+0xC3EA`) for the opening volley (10.4): **ranged attacks, not surprise**. Mode 5 is set at `R+0xFF72` (rest) and mode 2 at `R+0x11506` (battle start).
+- **Absent (searched):** no routine for surprise, flee, morale, monster spell casting, call-for-help or reinforcements was found in the monster turn, the round loop or the start code, and the executable holds no message string for surprise/flee/bribe/surrender/reinforce. The player's own run/flee command is not located. Status: **absent as far as searched**, not proven absent in code that is reached only through data.
+
+### 17.5 World clock (harness: clock 2,000, interest 1,000, time passing 2,000)
+`OV4+0xFE5C(minutes)`: `A4-0x131A` (u16) accumulates minutes; every 0x5A0 (1,440) a day passes (`A4-0x1327`, u8); **100 days make a year** (`A4-0x1326`, u16) and then the flags `0x6F..0x75` of the set at `A4-0x12FC` are cleared through `R+0xC8D2`; on a day change with `day % 10 == 1` (or more than a day added) the world refreshes (`R+0xC1E6`) and the banks earn **1 % interest** (`OV4+0xC9D4`: gold u32 `A4-0x1310`, gems u32 `A4-0x130C`, unsigned `x/100`); a day/night redraw happens at minute 0x12C. `OV4+0x10386(minutes)`: when the 480-minute bucket (`/0x1E0`) of the accumulator changes, every member ages one tick: a living member with any attribute at 0 dies (`+0x120 = 1`); `+0x114` counts to 10 then sets `+0x11C`; `+0x116` / `+0x117` double each tick, with a 1-in-10 chance of a save (`OV4+0x82DC(char, 3|4)`) that clears them; `+0x118`, `+0x119` (>10 -> clear, `+0x114 = 1`), the dead/stone/eradicated counters `+0x120..0x122` (++, wrap to 0xFF), `+0x11C` (mod 4); `+0x11D/+0x11B/+0x11E/+0x115` clear, `+0x115` takes `+0x11A`. After the clock, `+0x11D` counts down on a 1-in-3 chance (save clears it) and `+0x11E` on 1-in-5; finally `OV4+0x10346` (night?) and the day/night state (`min >= 0x12C && min < 0x4EC`) differing from `A4+0x715E` triggers `OV4+0xBFB2(map)`. Null controls: no 100-day year, no interest, gold-only interest, no ageing tick, no countdowns.
+
+### 17.6 Rest `R+0xFEA6` (code)
+Pre-check: any member with any of the seven attributes at 0 -> prompt "Some Chars may die. Rest anyway?" (no aborts). Every member falls asleep (`+0x11B = 1`), mode 5; ten ticks of the encounter check `OV4+0x8EC` (mode back to 1 = interrupted, abort), then time passes (`0x17C`, or `0x1D6` when `A4-0x3305` is 0, or `0x1E0` from mode 0xC). Per member: asleep cleared; if the party food `u16 A4-0x1318` is non-zero and the member is not in 0xD..0xF, **food -1**, buffs `+0x102..0x105` and `+0x11F` clear, HP (`R+0xAD56`) and SP (`R+0xAC46`) are restored; otherwise "no food" is flagged. Message "Hit Pts and Spell Pts restored." Not harnessed.
+
+### 17.7 Located but not derived
+Door unlock text ("Unlock Door" `OV4+0xC36D`, "picks the lock" `OV4+0xE607`, "unable to pick" `OV4+0xE634`), skill names (root `0xF103`), shop "Sell/Buy %s for %lu gold?" (`OV7+0x4D10` / `0x4D95`), the TRAPDOOR text (root `0xF46E`). Shop prices, skill checks, bash/trap damage and character creation (`create.raw` screen) are open.
+

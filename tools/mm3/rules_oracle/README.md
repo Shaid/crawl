@@ -25,3 +25,5 @@ Do not commit `.venv/` or `generated/` (ignored here).
 Pass 2 (`rules2.py`, same recorder): monster turn / turn order / damage to a monster / item generator / spell cast gate / training. `rules2.py UNIT OUT.json --n N`;
 `xrefpc.py SEG HEX` lists PC-relative call sites of an overlay or root routine (the jump-table xrefs are `xref.py`). Tables are exported by
 `npx tsx tools/mm3/rules-tables.ts` into `public/assets/mm3/amiga/data/rules-tables.json` (gitignored).
+
+Pass 3 (`rules3.py`): cast command + 75 spell handlers (`cast`), combat spell engine (`engine`), spell vs monster (`spellhit`), battle round loop (`wipecheck`, `roundover`, `alldown`, `compact`, `roundloop`), world clock (`clock`, `interest`, `timepasses`). `rules3.py UNIT OUT.json --n N`, `rules3.py subset IN OUT.gz --n N`. `emu.py` honours the +0x10000 flag in the overlay stubs' low byte.

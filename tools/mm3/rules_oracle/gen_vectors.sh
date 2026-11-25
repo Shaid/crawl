@@ -17,3 +17,9 @@ for spec in monturn:3000:60 initiative:3000:50 mondmg:3000:60 item:3000:40 castp
   $PY rules2.py $unit generated/$unit.json --n $n
   $PY rules2.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
 done
+# pass 3 units (rules3.py): cast command + 75 spell handlers, combat spell engine, spell vs monster, battle round loop, clock / time passing
+for spec in cast:6000:150 engine:600:60 spellhit:3000:300 wipecheck:3000:40 roundover:3000:40 alldown:3000:40 compact:3000:40 roundloop:2500:60 interest:1000:30 clock:2000:60 timepasses:2000:50 "$@"; do
+  IFS=: read unit n sub <<<"$spec"
+  $PY rules3.py $unit generated/$unit.json --n $n
+  $PY rules3.py subset generated/$unit.json vectors/$unit.json.gz --n $sub
+done

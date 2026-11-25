@@ -67,7 +67,7 @@ def jt_target(X, disp):
     if d[o:o + 2] == b'\x4e\xf9': return 'F_%X' % struct.unpack_from('>I', d, o + 2)[0]
     if d[o:o + 2] == b'\x61\x00':
         sg, off = struct.unpack_from('>HH', d, o + 4)
-        return 'OV%d_%X' % (sg >> 8, off)
+        return 'OV%d_%X' % (sg >> 8, off + ((sg & 0xff) << 16))
     return 'data'
 
 class Emu:
@@ -89,7 +89,7 @@ class Emu:
                 o = JT_START
                 while img[o:o + 2] == b'\x61\x00':
                     sg, off = struct.unpack_from('>HH', img, o + 4)
-                    img[o:o + 8] = b'\x4e\xf9' + struct.pack('>I', OV_BASE[sg >> 8] + off) + b'\x4e\x71'
+                    img[o:o + 8] = b'\x4e\xf9' + struct.pack('>I', OV_BASE[sg >> 8] + off + ((sg & 0xff) << 16)) + b'\x4e\x71'
                     o += 8
             uc.mem_write(base, bytes(img))
         for s, code in X['ov'].items(): uc.mem_write(OV_BASE[s], code)
