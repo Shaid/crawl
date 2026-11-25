@@ -1,0 +1,112 @@
+{
+ "AC": {
+  "width": 1,
+  "a4disp": -24684,
+  "dataOff": 8082
+ },
+ "Acid": {
+  "width": 1,
+  "a4disp": -22434,
+  "dataOff": 10332
+ },
+ "AttP": {
+  "width": 1,
+  "a4disp": -23784,
+  "dataOff": 8982
+ },
+ "Cold": {
+  "width": 1,
+  "a4disp": -22524,
+  "dataOff": 10242
+ },
+ "DmgN": {
+  "width": 1,
+  "a4disp": -24504,
+  "dataOff": 8262
+ },
+ "DmgS": {
+  "width": 1,
+  "a4disp": -24414,
+  "dataOff": 8352
+ },
+ "DmgT": {
+  "width": 1,
+  "a4disp": -23874,
+  "dataOff": 8892
+ },
+ "Elec": {
+  "width": 1,
+  "a4disp": -22614,
+  "dataOff": 10152
+ },
+ "Ener": {
+  "width": 1,
+  "a4disp": -22344,
+  "dataOff": 10422
+ },
+ "Exp": {
+  "width": 4,
+  "a4disp": -24234,
+  "dataOff": 8532
+ },
+ "Fire": {
+  "width": 1,
+  "a4disp": -22704,
+  "dataOff": 10062
+ },
+ "Gems": {
+  "width": 2,
+  "a4disp": -22974,
+  "dataOff": 9792
+ },
+ "Gold": {
+  "width": 4,
+  "a4disp": -23334,
+  "dataOff": 9432
+ },
+ "HP": {
+  "width": 2,
+  "a4disp": -24864,
+  "dataOff": 7902
+ },
+ "HitB": {
+  "width": 1,
+  "a4disp": -23514,
+  "dataOff": 9252
+ },
+ "Magi": {
+  "width": 1,
+  "a4disp": -22794,
+  "dataOff": 9972
+ },
+ "NumA": {
+  "width": 1,
+  "a4disp": -24324,
+  "dataOff": 8442
+ },
+ "Phys": {
+  "width": 1,
+  "a4disp": -22254,
+  "dataOff": 10512
+ },
+ "Rang": {
+  "width": 1,
+  "a4disp": -23604,
+  "dataOff": 9162
+ },
+ "Spd": {
+  "width": 1,
+  "a4disp": -24594,
+  "dataOff": 8172
+ },
+ "Spec": {
+  "width": 1,
+  "a4disp": -23694,
+  "dataOff": 9072
+ },
+ "Trea": {
+  "width": 1,
+  "a4disp": -23424,
+  "dataOff": 9342
+ }
+}

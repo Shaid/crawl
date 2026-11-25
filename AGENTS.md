@@ -56,6 +56,17 @@ This repo hosts two first-person dungeon-crawler RE projects:
   20 spell handlers (13.4 OPEN rows), the monster spell leaves, shops, the spells.dat/items.dat overlay loader (blocked:
   SAS/C overlay needs libc stubs), world (doors/traps/food/skills), chargen, the party command menu (TODO `mm2-rules-*`).
 
+- **Might & Magic III** (`data/mm3/{amiga,dosvga}/`, `docs/mm3/`, `scripts/mm3lib/`,
+  `tools/mm3/`, `public/assets/mm3/`) — container/sprite/maze RE (see `docs/mm3/plan.md`).
+  **Game rules (Amiga, pass 1, 2026-11-25):** `docs/mm3/amiga/game-rules.md` (status block at the top),
+  method = the MM2 one: single routines of the retail executable in Unicorn (`tools/mm3/rules_oracle/`,
+  root + 8 overlay hunks, overlay stubs patched to `JMP abs.l`) -> committed vector subsets
+  (`vectors/`) -> `tools/mm3/rules.ts` + `__tests__/rules.test.ts` with strict read/write-footprint parity
+  and null controls (`npx vitest run tools/mm3`). Verified: RNG, stat engine, max HP/SP/AC, XP thresholds,
+  saves, damage to characters, monster-hits-character (dice, resist saves, 16 special effects),
+  party to-hit/damage/melee round, XP split; the 22 `Mon*` tables are in the Amiga DATA hunk. Open:
+  monster AI, monster damage/death/loot, spells, world (`mm3-rules-*` in `docs/mm3/TODO.md`).
+
 Both games share the generic `@seer-project/dungeon` walker package, which
 lives in `~/Development/seer/packages/dungeon/` (linked via `file:../seer/...`).
 
