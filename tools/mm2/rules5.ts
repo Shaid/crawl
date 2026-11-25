@@ -5,7 +5,8 @@
  * Overlay offsets are `OVL+0xNNNN`. Conventions as in rules.ts.
  */
 import { type Mem, g } from './rules-mem.ts';
-import { randRange } from './rules.ts';
+import { charPtr, randRange } from './rules.ts';
+import { type CastIo, type Calls, confirmNc, pickMemberNc } from './rules4.ts';
 
 const s16 = (v: number) => ((v & 0xffff) << 16) >> 16;
 const s8 = (v: number) => ((v & 0xff) << 24) >> 24;
@@ -300,4 +301,415 @@ export function loadAttribRecord(m: Mem, file: number[], o: { noTable?: boolean 
   const tbl = m.r32(g(-31222));
   if (tbl !== 0 && !o.noTable) for (let k = 0; k < 64; k++) m.w8(dst + k, m.r8(tbl + off + k));
   else for (let k = 0; k < Math.min(64, file.length); k++) m.w8(dst + k, file[k]);
+}
+
+/* ------------------------------------------------------------ paying for a cast */
+
+/**
+ * CODE+0x6DC6: after a spell resolves the caster (pointer A4-18380) pays: gems (+0x5C, 16 bit, may wrap) lose A4-16136 unconditionally; spell points (+0x58) lose
+ * A4-16138 only when `SP >= cost` (unsigned); both cost words are cleared; unless A4-31210 is set the 'redraw' flag A4-31208 becomes 1.
+ * (The costs are computed before the cast by CODE+0x4BEC / 0x7960 / 0x79A0, section 12.4; the gate for gems is `gems >= cost`, so the unconditional gem charge never wraps in play.)
+ */
+export function chargeCast(m: Mem, o: { sameGate?: boolean } = {}): void {
+  const ch = m.r32(g(-18380));
+  m.w16(ch + 0x5c, m.r16(ch + 0x5c) - m.r16(g(-16136)));
+  const sp = m.r16(ch + 0x58);
+  if (sp >= m.r16(g(-16138)) || o.sameGate) m.w16(ch + 0x58, m.r16(ch + 0x58) - m.r16(g(-16138)));
+  m.w16(g(-16138), 0);
+  m.w16(g(-16136), 0);
+  if (m.r8(g(-31210)) === 0) m.w8(g(-31208), 1);
+}
+
+/* ------------------------------------------------------------ shop prices */
+
+/**
+ * CODE+0x1BF16 item price of shop slot `slot` (0-5; A4-23052[slot] = stocked, A4-23070[slot] & 0x3F = enchant/plus count, A4-23046[slot] = item record pointer,
+ * A4-23102 = the buyer, A4-23248 = shop mode). Returns the price in gold (32 bit):
+ * - not stocked: 0. Mode 6 (flat list): 10 when the plus count is 0, else count * 100.
+ * - otherwise base = items.dat gold word (+0x12); a non-zero plus count first doubles it (and spends one count), every further count adds 1000.
+ * - the buyer 'matches' when CODE+0x45C4 finds `10` in the low or high nibble of its byte +0x50 (matches = number of nibbles equal to 10, 0..2).
+ *   Mode 5 (selling to the shop): price / 2, and halved again when the buyer does NOT match. Any other mode: halved when the buyer matches.
+ */
+export function shopPrice(m: Mem, slot: number, o: { noMatchHalf?: boolean } = {}): number {
+  const s = s16(slot);
+  if (m.r8(g(-23052) + s) === 0) return 0;
+  let n = m.r8(g(-23070) + s) & 0x3f;
+  const mode = s16(m.r16(g(-23248)));
+  let price: number;
+  if (mode === 6) return n === 0 ? 10 : (n * 100) >>> 0;
+  price = m.r16(m.r32(g(-23046) + 4 * s) + 18);
+  if (n !== 0) { price = (price * 2) >>> 0; n--; }
+  while (n !== 0) { price = (price + 1000) >>> 0; n--; }
+  const b = m.r32(g(-23102));
+  const nib = m.r8(b + 0x50);
+  const matches = ((nib & 0xf) === 10 ? 1 : 0) + ((nib >> 4) === 10 ? 1 : 0);
+  const half = (v: number) => Math.trunc(v / 2) >>> 0;
+  if (mode === 5) {
+    price = half(price);
+    if (matches === 0 && !o.noMatchHalf) price = half(price);
+  } else if (matches !== 0) price = half(price);
+  return price;
+}
+
+/**
+ * CODE+0x1BE44 buy shop slot `slot`: the buyer is A4-23102. Refused (message 8) when its condition byte +0x26 is set; the first free pack slot is the first of the six bytes at
+ * +0x3A that is 0 (none: message 2); the price is the displayed price table entry A4-23094[slot] (a long filled by CODE+0x1BF16 whenever the shop is drawn -- so a price is
+ * paid as shown, not recomputed) and CODE+0x1BDD6 pays it only when the buyer's gold (long, +0x66) is `>=` it (else message 4); on success the stock byte A4-23052[slot] (item id),
+ * A4-23064[slot] (charges) and A4-23070[slot] (flags, incl. the plus count) are copied to pack slot k's id (+0x3A), charges (+0x40) and flags (+0x46), message 0.
+ * The messages go through the stubbed CODE+0x1C432.
+ */
+export function buyItem(m: Mem, slot: number, o: { noPay?: boolean } = {}): number[] {
+  const msgs: number[] = [];
+  const buyer = m.r32(g(-23102));
+  if (m.r8(buyer + 0x26) !== 0) return [8];
+  let k = 0;
+  for (;;) {
+    if (m.r8(m.r32(g(-23102)) + 0x3a + k) === 0) break;
+    k++;
+    if (k >= 6) break;
+  }
+  if (k === 6) return [2];
+  const price = m.r32(g(-23094) + 4 * s16(slot));
+  const who = m.r32(g(-23102));
+  const gold = m.r32(who + 0x66);
+  if (gold < price) return [4];
+  if (!o.noPay) m.w32(who + 0x66, gold - price);
+  const b2 = m.r32(g(-23102));
+  m.w8(b2 + 0x3a + k, m.r8(g(-23052) + s16(slot)));
+  m.w8(b2 + 0x40 + k, m.r8(g(-23064) + s16(slot)));
+  m.w8(b2 + 0x46 + k, m.r8(g(-23070) + s16(slot)));
+  msgs.push(0);
+  return msgs;
+}
+
+/* ------------------------------------------------------------ the remaining non-combat spell handlers (13.4 OPEN rows) */
+
+const ESC = 0x1b;
+const done = (m: Mem) => m.w8(g(-31064), 1); // CODE+0xCADE 'spell done' (the UI text is not modelled)
+export const NC_SPELLS2 = [71, 72, 80, 91, 94, 95, 34, 37, 47, 38, 1, 5, 10, 12, 15, 30];
+
+/**
+ * CODE+0xB56E item picker used by Recharge / Duplication / Enchant / Uncurse: keys 'A'..'F' (case folded by CODE+0x2408E) pick one of the six pack slots of the caster
+ * (A4-18380, ids at +0x3A); only a slot holding an item is accepted, other keys are ignored and the prompt repeats; ESC cancels (returns 0x1B and zeroes the SP/gem costs
+ * A4-16138/-16136). A pick sets the 'done' flag A4-31064 (for the cast command) and returns the slot 0..5. On an anti-magic square (A4-21974 bit 1) it returns ESC anyway.
+ */
+export function pickItemSlot(m: Mem, keys: number[]): number {
+  let k: number;
+  for (;;) {
+    const raw = keys.length ? keys.shift()! : ESC;
+    const b = raw & 0xff;
+    k = b > 0x60 && b <= 0x7a ? b - 0x20 : b;
+    if (k === ESC) break;
+    if (k >= 0x41 && k <= 0x46 && m.r8(m.r32(g(-18380)) + (k - 0x41) + 0x3a) !== 0) break;
+  }
+  if (k !== ESC) {
+    k -= 0x41;
+    m.w8(g(-31064), 1);
+  } else {
+    m.w16(g(-16138), 0);
+    m.w16(g(-16136), 0);
+  }
+  if (m.r8(g(-21974)) & 2) k = ESC;
+  return k;
+}
+
+/**
+ * The ten handlers (spell numbers as in 13.4):
+ * 71 Restore Alignment (0xB26A): the picked member's alignment byte +0x6A := its base +0x0D.
+ * 72 Surface (0xB2B2): confirm; fails when A4-22016 bit 6 is set or the recall coordinate A4-22020 (attrib +0x16) is 0; else x = A4-22020 & 15, y = A4-22020 >> 4, screen = A4-22018 (attrib +0x18), reload flags A4-31204 = A4-31210 = 1.
+ * 80 Rejuvenate (0xB332): picked member; r1 = rand(1,10), r2 = rand(1,100): when r2 < 50 and age (+0x21) >= 18 the age drops by r1 (byte), otherwise it rises by r1 (cap 200, CODE+0x4C60) and the spell fails.
+ * 91 Town Portal (0xB3E6): confirm, not in a no-teleport square (A4-22016 bit 6), key '1'-'5' = town screen: A4-31218 = key - 0x31, position (0xFF, 0xFF), reload flags.
+ * 94 Resurrection (0xB492): picked member must be dead (+0x26 >= 0x80); the caster ages 1 year and the target 5; the target's Endurance (+0x27) must be > 0 and drops by one (into +0x73 as well); condition cleared.
+ * 95 Uncurse Item (0xB524): item picker; an item whose flag byte (+0x40+slot) is 0xFF is not uncursable, otherwise it becomes 1.
+ * 34 Recharge Item (0xAEAC): item picker; the slot's charge byte (+0x40) must be non-zero; it gains rand(1,6) (byte).
+ * 37 Duplication (0xAF02): item picker; the item id must be < 0xD0, there must be a free pack slot (first zero id byte); id, charges and flags are copied there; on success A4-31208 = 1.
+ * 47 Enchant Item (0xB050): item picker; flag byte (+0x46+slot): plus count = low 6 bits, high bits kept; SP cost = 50 * count -> A4-16138 (the cast command charges it) and the caster needs `SP >= cost`; the count rises by one.
+ * 38 Etherealize (0xAFFA): confirm; fails when A4-22016 bit 5 is set; else the party steps one square in its facing (A4-31153 'E' x+1, 'N' y+1, 'S' y-1, 'W' x-1; both coordinates & 15).
+ */
+export function castNonCombat2(m: Mem, spell: number, io: CastIo & { ikeys: number[] }, o: { noAge?: boolean; noEndurance?: boolean } = {}): Calls {
+  const calls: Calls = [];
+  const caster = () => m.r32(g(-18380));
+  const ok = () => confirmNc(m, io, calls);
+  const ageAdd = (c: number, n: number) => {
+    m.w8(c + 0x21, m.r8(c + 0x21) + n);
+    if (m.r8(c + 0x21) > 0xc8) m.w8(c + 0x21, 0xc8);
+  };
+  switch (spell) {
+    case 71: {
+      const k = pickMemberNc(m, io, calls);
+      if (k === ESC) break;
+      const c = charPtr(m, k);
+      m.w8(c + 0x6a, m.r8(c + 0x0d));
+      done(m);
+      if (m.r32(g(-18380)) === c) m.w8(g(-31208), 1);
+      break;
+    }
+    case 72: {
+      if (!ok()) break;
+      let fail = 0;
+      if (m.r8(g(-22016)) & 0x40) fail++;
+      else if (m.r8(g(-22020)) === 0) fail++;
+      else {
+        m.w8(g(-31217), m.r8(g(-22020)) & 0xf);
+        m.w8(g(-31216), m.r8(g(-22020)) >> 4);
+        m.w8(g(-31218), m.r8(g(-22018)));
+        m.w8(g(-31204), 1);
+        m.w8(g(-31210), 1);
+      }
+      if (!fail) done(m);
+      break;
+    }
+    case 80: {
+      const k = pickMemberNc(m, io, calls);
+      if (k === ESC) break;
+      const c = charPtr(m, k);
+      const r1 = randRange(m, 1, 10) & 0xff;
+      const r2 = randRange(m, 1, 100) << 16 >> 16;
+      if (r2 < 50 && m.r8(c + 0x21) >= 0x12 && !o.noAge) {
+        m.w8(c + 0x21, m.r8(c + 0x21) - r1);
+        done(m);
+      } else ageAdd(c, r1);
+      break;
+    }
+    case 91: {
+      if (!ok()) break;
+      let fail = 0;
+      if (m.r8(g(-22016)) & 0x40) fail++;
+      else {
+        const p = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+        calls.push(['pick', [0x31, 0x35]]);
+        if (p === ESC) fail++;
+        else {
+          m.w8(g(-31218), p - 0x31);
+          m.w8(g(-31216), 0xff);
+          m.w8(g(-31217), 0xff);
+          m.w8(g(-31204), 1);
+          m.w8(g(-31210), 1);
+        }
+      }
+      if (!fail) done(m);
+      break;
+    }
+    case 94: {
+      const k = pickMemberNc(m, io, calls);
+      if (k === ESC) break;
+      const c = charPtr(m, k);
+      if (m.r8(c + 0x26) < 0x80) break;
+      ageAdd(caster(), 1);
+      ageAdd(c, 5);
+      let en = m.r8(c + 0x27);
+      if (en === 0 && !o.noEndurance) break;
+      en = (en - 1) & 0xff;
+      m.w8(c + 0x73, en);
+      m.w8(c + 0x27, en);
+      m.w8(c + 0x26, 0);
+      done(m);
+      break;
+    }
+    case 95: {
+      const k = pickItemSlot(m, io.ikeys);
+      if (k === ESC) break;
+      const c = caster() + k;
+      if (m.r8(c + 0x40) === 0xff) break;
+      m.w8(c + 0x40, 1);
+      done(m);
+      break;
+    }
+    case 34: {
+      const k = pickItemSlot(m, io.ikeys);
+      if (k === ESC) break;
+      const c = caster() + k;
+      if (m.r8(c + 0x40) === 0) break;
+      m.w8(c + 0x40, m.r8(c + 0x40) + (randRange(m, 1, 6) & 0xff));
+      done(m);
+      break;
+    }
+    case 37: {
+      const k = pickItemSlot(m, io.ikeys);
+      let fail = 0;
+      if (k !== ESC) {
+        const base = caster();
+        if (m.r8(base + k + 0x3a) === 0) fail++;
+        else {
+          let j = 0;
+          for (;;) {
+            if (m.r8(caster() + j + 0x3a) === 0) break;
+            j++;
+            if (j >= 6) break;
+          }
+          if (j === 6) fail++;
+          else {
+            const id = m.r8(caster() + k + 0x3a);
+            if (id >= 0xd0) fail++;
+            else {
+              m.w8(caster() + j + 0x3a, id);
+              m.w8(caster() + j + 0x40, m.r8(caster() + k + 0x40));
+              m.w8(caster() + j + 0x46, m.r8(caster() + k + 0x46));
+            }
+          }
+        }
+      }
+      if (!fail && k !== ESC) { done(m); m.w8(g(-31208), 1); }
+      break;
+    }
+    case 47: {
+      const k = pickItemSlot(m, io.ikeys);
+      if (k === ESC) break;
+      const c = caster() + k;
+      const hi = m.r8(c + 0x46) & 0xc0;
+      let lo = m.r8(c + 0x46) & 0x3f;
+      const cost = (lo * 50) & 0xffff;
+      m.w16(g(-16138), cost);
+      if (m.r16(caster() + 0x58) < cost) break;
+      if (lo <= 0x3f) lo++;
+      lo = (lo | hi) & 0xff;
+      m.w8(c + 0x46, lo);
+      done(m);
+      break;
+    }
+    case 38: {
+      if (!ok()) break;
+      if (m.r8(g(-22016)) & 0x20) break;
+      const d = m.r8(g(-31153));
+      let dx = 0, dy = 0;
+      if (d === 0x45) dx = 1;
+      else if (d === 0x4e) dy = 1;
+      else if (d === 0x53) dy = 0xff;
+      else if (d === 0x57) dx = 0xff;
+      m.w8(g(-31217), (m.r8(g(-31217)) + dx) & 0xf);
+      m.w8(g(-31216), (m.r8(g(-31216)) + dy) & 0xf);
+      m.w8(g(-31210), 1);
+      m.w8(g(-31204), 0);
+      done(m);
+      break;
+    }
+    case 1: { // Detect Magic: confirm, show the pack charges, wait for any key (0 = no key yet), done
+      if (!ok()) break;
+      for (;;) {
+        const k = io.ikeys.length ? io.ikeys.shift()! : ESC;
+        if ((k & 0xffff) !== 0) break;
+      }
+      done(m);
+      break;
+    }
+    case 5: // Location: confirm, show the position screen (CODE+0x223A, UI), reload flags; no 'done' flag
+      if (!ok()) break;
+      m.w8(g(-31210), 1);
+      m.w8(g(-31204), 0);
+      break;
+    case 10: { // Jump: two squares forward over a wall-less step: cell and target must be open
+      if (!ok()) break;
+      let fail = 0;
+      const mask = () => m.r8(g(-21976));
+      const idx = (y: number, x: number) => (y << 4) + x;
+      if (m.r8(g(-31202)) === 1) fail++;
+      else if ((m.r8(g(-21946) + idx(m.r8(g(-31216)), m.r8(g(-31217)))) & mask()) !== 0) fail++;
+      else if ((m.r8(g(-21974)) & mask() & 0x55) !== 0) fail++;
+      let x1 = 0, y1 = 0, dx = 0, dy = 0;
+      if (!fail) {
+        [dx, dy] = dirVec(m);
+        x1 = (m.r8(g(-31217)) + dx) & 0xf;
+        y1 = (m.r8(g(-31216)) + dy) & 0xf;
+        if ((m.r8(g(-21946) + idx(y1, x1)) & mask()) !== 0) fail++;
+        else if ((m.r8(g(-21690) + idx(y1, x1)) & mask() & 0x55) !== 0) fail++;
+      }
+      if (!fail) {
+        m.w8(g(-31204), 1);
+        m.w8(g(-31210), 1);
+        done(m);
+        m.w8(g(-31217), (x1 + dx) & 0xf);
+        m.w8(g(-31216), (y1 + dy) & 0xf);
+      }
+      break;
+    }
+    case 12: { // Lloyd's Beacon: key 1 sets the beacon (screen A4-31128, position A4-31127), key 2 returns to it
+      if (!ok()) break;
+      let fail = 0;
+      if (m.r8(g(-22016)) & 0x40) fail++;
+      else {
+        const k = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+        calls.push(['pick', [0x31, 0x32]]);
+        if (k === ESC) fail++;
+        else if (k === 0x31) {
+          m.w8(g(-31128), m.r8(g(-31218)));
+          m.w8(g(-31127), ((m.r8(g(-31216)) << 4) + m.r8(g(-31217))) & 0xff);
+        } else {
+          m.w8(g(-31218), m.r8(g(-31128)));
+          m.w8(g(-31217), m.r8(g(-31127)) & 0xf);
+          m.w8(g(-31216), m.r8(g(-31127)) >> 4);
+          m.w8(g(-31204), 1);
+          m.w8(g(-31210), 1);
+        }
+      }
+      if (!fail) done(m);
+      break;
+    }
+    case 15: { // Fly: letter A-E (region) then 1-4 (spot): screen A4-28976[(region*4) + spot]
+      if (!ok()) break;
+      let fail = 0;
+      if (m.r8(g(-22016)) & 0x40) fail++;
+      else {
+        let k: number;
+        for (;;) {
+          const raw = (io.ikeys.length ? io.ikeys.shift()! : ESC) & 0xff;
+          k = raw > 0x60 && raw <= 0x7a ? raw - 0x20 : raw;
+          if (k === ESC || (k >= 0x41 && k <= 0x45)) break;
+        }
+        if (k === ESC) fail++;
+        else {
+          const p = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+          calls.push(['pick', [0x31, 0x34]]);
+          if (p === ESC) fail++;
+          else {
+            m.w8(g(-31216), 0xff);
+            m.w8(g(-31217), 0xff);
+            m.w8(g(-31218), m.r8(g(-28976) + (k - 0x41) * 4 + (p - 0x31)));
+            m.w8(g(-31204), 1);
+            m.w8(g(-31210), 1);
+          }
+        }
+      }
+      if (!fail) done(m);
+      break;
+    }
+    case 30: { // Teleport: key 1-9 = squares ahead (no wall test; refused on A4-22016 bit 4 squares); reload flags only on success
+      if (!ok()) break;
+      let fail = 0;
+      if (m.r8(g(-22016)) & 0x10) fail++;
+      else {
+        const p = (io.picks.length ? io.picks.shift()! : ESC) & 0xff;
+        calls.push(['pick', [0x31, 0x39]]);
+        if (p === ESC) fail++;
+        else {
+          // the 68k keeps the count in a 16-bit word: a key below '0' wraps to ~65,000 one-square steps. Both coordinates are taken & 15 every
+          // step, so only the count mod 16 matters (the walk is done in one go; the bytes are written even for a zero count, as the game's last step would).
+          const n = (p - 0x30) & 0xffff;
+          const [dx, dy] = dirVec(m);
+          const steps = n % 16;
+          const sd = (v: number) => (v === 0xff ? -1 : v);
+          if (n !== 0) {
+            m.w8(g(-31217), (m.r8(g(-31217)) + sd(dx) * steps) & 0xf);
+            m.w8(g(-31216), (m.r8(g(-31216)) + sd(dy) * steps) & 0xf);
+          }
+          m.w8(g(-31204), 1);
+          m.w8(g(-31210), 1);
+        }
+      }
+      if (!fail) done(m);
+      break;
+    }
+    default:
+      throw new Error('spell ' + spell + ' not modelled');
+  }
+  return calls;
+}
+
+/** CODE+0x5692: the facing byte A4-31153 ('E' 0x45, 'N' 0x4E, 'S' 0x53, 'W' 0x57) to the (dx, dy) byte step; any other value leaves the caller's locals untouched (not modelled). */
+function dirVec(m: Mem): [number, number] {
+  const d = m.r8(g(-31153));
+  if (d === 0x45) return [1, 0];
+  if (d === 0x4e) return [0, 1];
+  if (d === 0x53) return [0, 0xff];
+  if (d === 0x57) return [0xff, 0];
+  throw new Error('facing byte not E/N/S/W');
 }

@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StrictMem } from '../rules-mem.ts';
 import { load } from './vectors.ts';
-import { loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter } from '../rules5.ts';
+import { castNonCombat2, NC_SPELLS2, buyItem, shopPrice, chargeCast, loadAttribRecord, bashDoor, unlockDoor, loadTable, buildCharacter, chargenFlags, chargenRoll, chargenSlot, createCharacter } from '../rules5.ts';
 
 vi.setConfig({ testTimeout: 120000 });
 const mem = (v: any) => new StrictMem(v.init, v.wpre);
@@ -218,4 +218,106 @@ describe('per-screen attrib record (CODE+0x923E): where A4-22025 / -22029 / -220
     }
     expect(bad).toBeGreaterThan(20);
   });
+});
+
+describe('paying for a cast (CODE+0x6DC6)', () => {
+  const V = load('charge');
+  it('matches the game: gems always, SP only when affordable, costs cleared', () => {
+    for (const v of V) {
+      const m = mem(v);
+      chargeCast(m);
+      expect(m.changes()).toEqual(v.fin);
+    }
+  });
+  it('null control: charging SP without the gate disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        chargeCast(m, { sameGate: true });
+        if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('shop item price (CODE+0x1BF16)', () => {
+  const V = load('price');
+  it('matches the game: base, plus counts, mode 5/6, buyer nibble match', () => {
+    for (const v of V) {
+      const m = mem(v);
+      expect(shopPrice(m, v.slot)).toBe(v.ret);
+      expect(m.changes()).toEqual(v.fin);
+    }
+    expect(V.some((v: any) => v.ret > 2000)).toBe(true);
+  });
+  it('null control: no second halving when selling disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        if (shopPrice(mem(v), v.slot, { noMatchHalf: true }) !== v.ret) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('shop buy command (CODE+0x1BE44, payment 0x1BDD6)', () => {
+  const V = load('buy');
+  it('matches the game: condition refusal, full pack, gold check and payment, copy of id/charges/flags', () => {
+    for (const v of V) {
+      const m = mem(v);
+      const msgs = buyItem(m, v.slot);
+      expect(m.changes()).toEqual(v.fin);
+      expect(msgs).toEqual(v.calls.map((c: any) => c[1][0]));
+    }
+    expect(new Set(V.map((v: any) => v.calls[0][1][0])).size).toBe(4);
+  });
+  it('null control: not deducting the gold disagrees', () => {
+    let bad = 0;
+    for (const v of V) {
+      try {
+        const m = mem(v);
+        buyItem(m, v.slot, { noPay: true });
+        if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+      } catch {
+        bad++;
+      }
+    }
+    expect(bad).toBeGreaterThan(0);
+  });
+});
+
+describe('remaining non-combat spell handlers (1 5 10 12 15 30 34 37 38 47 71 72 80 91 94 95)', () => {
+  const V = load('ncspell2');
+  it('match the game through the real dispatcher: pickers, item picker, ageing, teleports, item edits', () => {
+    for (const v of V) {
+      const m = mem(v);
+      const c = castNonCombat2(m, v.spell, { keys: [], picks: [...v.picks], kills: [], ikeys: [...v.ikeys] });
+      expect(m.changes()).toEqual(v.fin);
+      expect(c.map((x) => x[0])).toEqual(v.calls.map((x: any) => x[0]).filter((x: string) => x !== 'ikey'));
+    }
+    expect(new Set(V.map((v: any) => v.spell)).size).toBe(NC_SPELLS2.length);
+  });
+  const nullCase = (name: string, o: any, spells: number[]) =>
+    it('null control: ' + name, () => {
+      let bad = 0;
+      for (const v of V.filter((x: any) => spells.includes(x.spell))) {
+        try {
+          const m = mem(v);
+          castNonCombat2(m, v.spell, { keys: [], picks: [...v.picks], kills: [], ikeys: [...v.ikeys] }, o);
+          if (JSON.stringify(m.changes()) !== JSON.stringify(v.fin)) bad++;
+        } catch {
+          bad++;
+        }
+      }
+      expect(bad).toBeGreaterThan(0);
+    });
+  nullCase('Rejuvenate ignoring the age floor disagrees', { noAge: true }, [80]);
+  nullCase('Resurrection without the endurance check disagrees', { noEndurance: true }, [94]);
 });

@@ -17,9 +17,9 @@ Logic foundation for a browser remake's rules core, derived from the game's own 
 
 Reproduce: `tools/mm2/rules_oracle/gen_vectors.sh` (needs a venv with `unicorn`; full vector sets go to the gitignored `tools/mm2/rules_oracle/generated/`, small committed subsets to `tools/mm2/rules_oracle/vectors/`); `npx vitest run tools/mm2/__tests__/rules.test.ts` uses the full sets when present and the committed subsets otherwise.
 
-## MM2 rules status (build guide, updated 2026-11-25, pass 3)
+## MM2 rules status (build guide, updated 2026-11-26, pass 4)
 
-What a remake rules core can take **as is**. Each unit is a real routine run in Unicorn and diffed against a TypeScript port with strict read/write-footprint parity and a null control; section numbers point to the rule text, vector counts are full sets (small subsets are committed in `tools/mm2/rules_oracle/vectors/`, 131,432 vectors over 3 passes).
+What a remake rules core can take **as is**. Each unit is a real routine run in Unicorn and diffed against a TypeScript port with strict read/write-footprint parity and a null control; section numbers point to the rule text, vector counts are full sets (small subsets are committed in `tools/mm2/rules_oracle/vectors/`, about 175,000 vectors over 4 passes).
 
 | Area | Verified (harness) | Where |
 |---|---|---|
@@ -35,17 +35,19 @@ What a remake rules core can take **as is**. Each unit is a real routine run in 
 | Characters | stat bonus/sync, luck save, spell level/SP, training HP, XP needed per level, training cost, rest, **world clock and ageing** | 5, 12.2, 13.7 |
 | Equipment | equip/unequip, AC; **equip command (class mask, alignment, cursed flag, 0xF0), compatibility, item use (charges, free cast, stat boost)** | 12.1, 13.6 |
 | Treasure | treasure count, item roll, charges, use power | 12.3 |
-| Spell gates and data | SP cost, gem gate, SP gate, combat-class gate, location gate; spells.dat vs dispatch tables (retail data) | 6, 12.4, 13.8 |
+| Spell gates and data | SP cost, gem gate, SP gate, combat-class gate, location gate; spells.dat vs dispatch tables (retail data); **paying the cost after a cast** | 6, 12.4, 13.8, 14.5 |
+| **Overlay hunk (pass 4)** | mapped in the harness (A4 jump table already in DATA; file read and alloc stubbed); items/spells/monsters table loaders; **character creation** (free slot, class eligibility, stat roll, record build with HP/SP/age/food/start item, the whole race/alignment/sex/name dialogue); per-screen attrib record (source of the per-map bytes) | 14.1-14.3 |
+| **World (pass 4)** | door unlock and bash; shop price and buy; 16 more non-combat spell handlers (Detect Magic, Location, Jump, Beacon, Fly, Teleport, Recharge, Duplication, Etherealize, Enchant, Restore Alignment, Surface, Rejuvenate, Town Portal, Resurrection, Uncurse) | 14.4-14.6 |
 
-**Open (not derived; smallest next step in 13.9 and `docs/mm2/TODO.md`):**
-- `mm2-rules-spell-effects` (remainder, 20 spells marked OPEN in the 13.4 table, e.g. Detect Magic, Location, Teleport-class movers, Identify/Recharge/Enchant item pickers, Raise Dead, Turn Undead/Holy Word engine CODE+0xC028); the monster spell leaves `spray1` / `sprayAll` / `cond` / `cond2` (CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896) and `advance` CODE+0x10118; who charges the SP and gem cost after a cast; the `spells.dat` / `items.dat` overlay loader (**blocked**: SAS/C overlay needing libc stubs).
-- `mm2-rules-equipment` (remainder): shop buy/sell prices (**not located**).
-- `mm2-rules-world`: door bash CODE+0x9B48 (read: Might sum of the first two members + a `rand(10,109)/10` roll against the door strength `A4-22024`; **code**, not harnessed), unlock CODE+0x20D6E, traps, food outside rest, skills, per-map bytes `A4-22025` / `-22029` / `-22030..-22032` (hyp: map header). The party command menu CODE+0x119C2 is still a stub.
-- `mm2-rules-chargen`: character creation (overlay code) — **not started**.
+**Open (not derived; smallest next step in 14.7 and `docs/mm2/TODO.md`):**
+- `mm2-rules-spell-effects` (remainder): non-combat 57 (Nature's Gate) and 87 (Raise Dead), combat 54 (Turn Undead) and 93 (Holy Word) with the engine CODE+0xC028 (read, not harnessed); the monster spell leaves `spray1` / `sprayAll` / `cond` / `cond2` (CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896) and `advance` CODE+0x10118.
+- `mm2-rules-equipment` (remainder): shop **sell** (CODE+0x1BC26) and the flat list (CODE+0x1B6E0) are located but not harnessed (price and buy are).
+- `mm2-rules-world`: the party-pool payments (gold/gems/food, CODE+0x6ACE/0x6B9A/0x6C66), food outside rest, traps beyond the door trap, thief skills other than the unlock roll, per-step ticks; the party command menu CODE+0x119C2 is still a stub.
+- `mm2-rules-chargen`: the exchange-stats command and the roster-full / delete flows; starting gold is **not** set by the creation routine (location open).
 - Training eligibility (`xp >= needed`, CODE+0x20988) is **code-read only**: that routine is the whole Hall UI loop (not a pure function) — `xp_needed` and `training_cost` are harness-verified.
 - Party-attack target prompt (target 0xFF) and ranged/melee mode selection are UI.
 
-Corrections made in passes 2 and 3 are in sections 8, 11 and 13 (`> **Correction (date):**`).
+Corrections made in passes 2 to 4 are in sections 8, 11, 13 and 14 (`> **Correction (date):**`).
 
 ## 1. Status summary
 
@@ -368,21 +370,21 @@ Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5
 | # | Spell | Class | Handler | Effect (grade harness unless OPEN) |
 |---|---|---|---|---|
 | 0 | Awaken | anywhere | 0x0C740 | Awaken: clear 0x90 bits of every living member |
-| 1 | Detect Magic | outside | 0x0A812 | OPEN |
+| 1 | Detect Magic | outside | 0x0A812 | harness (pass 4, 14.6) |
 | 2 | Energy Blast | combat | 0x0B644 | dice(5,1) x L, 1 group, e0 |
 | 3 | Flame Arrow | combat | 0x0B684 | rand(1,5)+3, 1 monster, e1 |
 | 4 | Light | outside | 0x0A8CA | Light counter A4-31147 +1 |
-| 5 | Location | outside | 0x0A8FA | OPEN |
+| 5 | Location | outside | 0x0A8FA | harness (pass 4, 14.6) |
 | 6 | Sleep | combat | 0x0B6CC | cond 4 (sleep), maxTargets groups, e5 |
 | 7 | Eagle Eye | outside | 0x0A91C | Eagle Eye counter A4-31136 += 5/L (cap 250/255) |
 | 8 | Electric Arrow | combat | 0x0B718 | rand(1,9)+7, 1, e2 |
 | 9 | Identify Monster | combat | 0x0B760 | show monster record (key wait) |
-| 10 | Jump | outside | 0x0A974 | OPEN |
+| 10 | Jump | outside | 0x0A974 | harness (pass 4, 14.6) |
 | 11 | Levitate | outside | 0x0AAAE | Levitate counter A4-31144 +1 |
-| 12 | Lloyd's Beacon | outside | 0x0AADC | OPEN |
+| 12 | Lloyd's Beacon | outside | 0x0AADC | harness (pass 4, 14.6) |
 | 13 | Protection from Magic | anywhere | 0x0C7A2 | A4-31146 = level + 10 |
 | 14 | Acid Stream | combat | 0x0B982 | dice(5,3), 1, e4 |
-| 15 | Fly | outside | 0x0ABCC | OPEN |
+| 15 | Fly | outside | 0x0ABCC | harness (pass 4, 14.6) |
 | 16 | Invisibility | combat | 0x0B9C4 | party flag A4-31132 +1 |
 | 17 | Lightning Bolt | combat | 0x0B9EE | dice(5,1), 4 groups, e2 |
 | 18 | Web | combat | 0x0BA30 | cond 5, maxTargets, e6; target >= melee group |
@@ -397,15 +399,15 @@ Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5
 | 27 | Fingers of Death | combat | 0x0BBFA | cond 8, 3 groups, e6 |
 | 28 | Sand Storm | combat | 0x0BC3A | dice(7,1), 10 groups, e0 |
 | 29 | Shelter | outside | 0x0ADA8 | Shelter counter A4-31084 +1 |
-| 30 | Teleport | outside | 0x0ADD6 | OPEN |
+| 30 | Teleport | outside | 0x0ADD6 | harness (pass 4, 14.6) |
 | 31 | Disintegration | combat | 0x0BC7A | cond 9, 3 groups, e0 |
 | 32 | Entrapment | combat | 0x0BCB8 | party flag A4-1314 +1 (refused when A4-22016 bit 0) |
 | 33 | Fantastic Freeze | combat | 0x0BCE4 | dice(0,10) = 10/L, 3, e3; target >= melee group |
-| 34 | Recharge Item | outside | 0x0AEAC | OPEN |
+| 34 | Recharge Item | outside | 0x0AEAC | harness (pass 4, 14.6) |
 | 35 | Super Shock | combat | 0x0BD34 | dice(0,20) = 20/L, 1, e2 |
 | 36 | Dancing Sword | combat | 0x0BD74 | dice(11,1), all, e0 |
-| 37 | Duplication | outside | 0x0AF02 | OPEN |
-| 38 | Etherealize | outside | 0x0AFFA | OPEN |
+| 37 | Duplication | outside | 0x0AF02 | harness (pass 4, 14.6) |
+| 38 | Etherealize | outside | 0x0AFFA | harness (pass 4, 14.6) |
 | 39 | Prismatic Light | combat | 0x0BDA6 | cond rand(1,9) (7 also sets A4-1313 = rand(1,4)), all, e0 |
 | 40 | Incinerate | combat | 0x0BE02 | dice(21,19), 1, e1 |
 | 41 | Mega Volts | combat | 0x0BE44 | dice(9,7), all, e2 |
@@ -414,7 +416,7 @@ Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5
 | 44 | Implosion | combat | 0x0BEE4 | 1000 dmg, 1, e0 |
 | 45 | Inferno | combat | 0x0BF1C | dice(16,4), all, e1 |
 | 46 | Star Burst | combat | 0x0BF50 | rand(1,161)+39, all (extends past 10), e0 |
-| 47 | Enchant Item | outside | 0x0B050 | OPEN |
+| 47 | Enchant Item | outside | 0x0B050 | harness (pass 4, 14.6) |
 | 48 | Apparition | combat | 0x0BF92 | cond 3, all, e6 |
 | 49 | Awaken | anywhere | 0x0C740 | Awaken (same handler) |
 | 50 | Bless | combat | 0x0BFC4 | party flag A4-31133 +1 |
@@ -438,8 +440,8 @@ Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5
 | 68 | Acid Spray | combat | 0x0C2AE | rand(1,49)+11, 3, e4; target >= melee group |
 | 69 | Air Transmutation | outside | 0x0B250 | flag A4-31139 = 1 |
 | 70 | Cure Disease | anywhere | 0x0C8BC | cure bit 0x04 |
-| 71 | Restore Alignment | outside | 0x0B26A | OPEN |
-| 72 | Surface | outside | 0x0B2B2 | OPEN |
+| 71 | Restore Alignment | outside | 0x0B26A | harness (pass 4, 14.6) |
+| 72 | Surface | outside | 0x0B2B2 | harness (pass 4, 14.6) |
 | 73 | Holy Bonus | combat | 0x0C308 | party flag A4-31129 += level/2 |
 | 74 | Air Encasement | combat | 0x0C332 | cond 7 effect 1 (lingering), 1, e0 |
 | 75 | Deadly Swarm | combat | 0x0C376 | rand(1,33)+7, all, e0 |
@@ -447,7 +449,7 @@ Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5
 | 77 | Paralyze | combat | 0x0C462 | cond 5, all, e6 |
 | 78 | Remove Condition | anywhere | 0x0C916 | clear condition |
 | 79 | Earth Transmutation | outside | 0x0B318 | flag A4-31137 = 1 |
-| 80 | Rejuvenate | outside | 0x0B332 | OPEN |
+| 80 | Rejuvenate | outside | 0x0B332 | harness (pass 4, 14.6) |
 | 81 | Stone to Flesh | anywhere | 0x0C96E | Stone to Flesh (cond 0x82 -> 0) |
 | 82 | Water Encasement | combat | 0x0C494 | cond 7 effect 2, 1, e3 |
 | 83 | Water Transmutation | outside | 0x0B3B2 | flag A4-31140 = 1 |
@@ -458,11 +460,11 @@ Element ids are the `partyEffect` element (1 fire, 2 electric, 3 cold, 4 acid, 5
 | 88 | Fire Encasement | combat | 0x0C620 | cond 7 effect 4, 1, e1 |
 | 89 | Fire Transmutation | outside | 0x0B3CC | flag A4-31138 = 1 |
 | 90 | Mass Distortion | combat | 0x0C666 | half of the target group HP, 2 groups, e0 |
-| 91 | Town Portal | outside | 0x0B3E6 | OPEN |
+| 91 | Town Portal | outside | 0x0B3E6 | harness (pass 4, 14.6) |
 | 92 | Divine Intervention | combat | 0x0C6AE | once per fight (A4-1306): caster ages 5 years, everyone cond 0 (0xFF kept) and full HP |
 | 93 | Holy Word | combat | 0x0C72A | OPEN (CODE+0xC028 with A4-1312 = 1) |
-| 94 | Resurrection | outside | 0x0B492 | OPEN |
-| 95 | Uncurse Item | outside | 0x0B524 | OPEN |
+| 94 | Resurrection | outside | 0x0B492 | harness (pass 4, 14.6) |
+| 95 | Uncurse Item | outside | 0x0B524 | harness (pass 4, 14.6) |
 
 ### 13.5 Monster spells — CODE+0x1FB4E `monster_spell(verb)` (harness 2,000)
 
@@ -484,8 +486,79 @@ The verb is the monster's pabil/sabil spell number. It copies three per-verb byt
 
 `spells.ts` was corrected against the executable: **gems = `byte0 & 0x3F`, above 50 = 100** (retail values 0..10, 20 for Star Burst and Divine Intervention, 50 for Enchant Item and Uncurse Item, 63 = 100 for Duplication; the old "bit 0x10 special, low nibble" read mis-decoded those five), the SP multiplier is bits 5-4 only (bit 6 selects the monster-scaled base 10 instead of 8), and the item use selectors 4 (alignment) and 7 (SP) were missing. The spell order of `spells.ts` is confirmed by the behaviour of all 96 handlers.
 
-### 13.9 Open after pass 3 (TODO ids)
+### 13.9 Open after pass 3 (TODO ids) — superseded by 14.7; the overlay loader and the 18 OPEN rows' non-combat part were closed in pass 4
 
 - `mm2-rules-spell-effects` (remainder): the 20 OPEN rows of 13.4 — non-combat 1 (Detect Magic), 5 (Location), 10, 12, 15, 30, 34, 37, 38, 47, 57, 71, 72, 80, 87, 91, 94, 95 and combat 54 (Turn Undead), 93 (Holy Word) with the CODE+0xC028 engine; the monster leaves of 13.5; `advance` CODE+0x10118; the spell cost charge after the handler (the code that reads `A4-16138` / `A4-16136`). Smallest next step: copy `gen_ncspell` for 71 / 72 / 38 (pickers already real) and add stubs for CODE+0x5692 and the item picker CODE+0xB56E.
 - Overlay loader (`spells.dat` / `items.dat` read in the overlay hunk): **blocked** — the overlay is SAS/C code that calls the root hunk's libc through the A4 jump table (open/read/close/AllocMem); a harness needs those stubs and the overlay entry points. The tables were checked instead against the real files (spells.dat class bits vs the dispatchers, class/alignment tables vs `items.ts`).
 - `mm2-rules-equipment` (remainder): shop buy/sell prices were **not** located in this pass.
+
+## 14. The overlay hunk, character creation and world rules (pass 4)
+
+Written 2026-11-26. The overlay is **not** loaded by the old harness; this pass maps it (`emu.Emu.load_overlay`, file `0x28854`, `0xF2E` longs, position independent, no relocations, mapped at `0x300000`; overlay offsets are written `OVL+0xNNNN`). It is the startup / main-menu / character-creation module: one huge startup function `OVL+0x242..0xF04` (libraries, screen, buffers, the table loaders, str.dat unpack, a copy-protection screen at `OVL+0x1288` that this document does not describe), the menu strings and the creation screen. It reaches the root hunk's libc **through the A4 jump table**, which the DATA hunk already holds (`JMP abs.l`), so nothing needs linking; only the root routines that talk to AmigaDOS/exec are replaced by Python models (`Emu.stub_libc`: `read_file(name, buf, offset, len)` CODE+0x2117E = Open/Seek/Read/Close, `alloc(len)` CODE+0x23E5C). UI callees are logged stubs as before. Port: `tools/mm2/rules5.ts`; tests `tools/mm2/__tests__/rules5.test.ts`; generators `tools/mm2/rules_oracle/rules5.py`.
+
+### 14.1 Table loaders (harness: 60 vectors, 3 kinds)
+
+Fragments of the startup function run with the libc layer stubbed (`Emu.call_range`):
+- `items.dat` OVL+0x6C4: `read_file("items.dat", A4-0x3EFE, 0, 0x1400)` (256 records x 20 B), then for every record the two bytes of the word at `+0x12` are swapped through CODE+0x8192 (the file is little-endian there: this **is** the gold word, `items.ts` field `gold`, which cross-confirms the shop price below).
+- `spells.dat` OVL+0x712: `read_file("spells.dat", A4-0x2AFE, 0, 0xC0)` raw (96 x 2 B).
+- `monsters.dat` OVL+0xD1C: `alloc(0x1A00)` (256 x 26 B), pointer stored at `A4-30658`, `read_file` into it, raw.
+(attrib/map/event are read the same way under memory-size gates `A4-0x618C >= 0x20/0x3E/0x9C...`; str.dat is XOR-unpacked at OVL+0x7F4 and already covered by `str.ts`.)
+
+### 14.2 Character creation (harness: slot 3,000, eligibility 3,000, roll 3,000, build 3,000, whole dialogue 3,000)
+
+Stat order in the working array (and the record bytes it fills): `s[0]=+0x6B, s[1]=+0x6C, s[2]=+0x6D, s[3]=+0x73, s[4]=+0x6E, s[5]=+0x6F, s[6]=+0x70` (the order the game also uses for its race-modifier table; the on-disk Might/Intellect/... mapping is `roster.ts`).
+- **First free slot** OVL+0x181E: 24 records of 0x82 B at `A4-10814`, in use = byte `+0x0B != 0`; 0xFFFF when full (the dialogue does not check this: a full roster would write at record -1; the menu entry (OVL+0x1C0E) prints `*** Roster is Full ***` and the creation key loop calls the slot test before OVL+0x214E).
+- **Eligibility** OVL+0x1DF4 (signed byte compares): class 0 `s0>=15`; 1 `s0,s2,s3>=13`; 2 `s1,s5>=13`; 3 `s2>=13`; 4 `s1>=13`; 5 `s6>=13`; 6 `s4,s5>=13`; 7 `s3>=15` (class numbering as the roster `+0x0F`).
+- **Roll** OVL+0x1F84: clear 7 bytes, then **three** passes over the 7 stats each adding `rand(10,79)/10` (low byte, unsigned divide), i.e. every stat is the sum of three 1..7 draws, 3..21. Then the eligibility flags and the display.
+- **Build** OVL+0x185A `build_character(class, race, alignment, sex, name*, stats*)`: clears record `slot` (0x82 B), copies the 11 name bytes, `+0x0B = 1`, `+0x0C` sex, `+0x0E` race, `+0x0F` class, `+0x0D` and `+0x6A` alignment, the 7 stats to both their `+0x10..+0x15,+0x27` and working `+0x6B..+0x73` slots, level `+0x71 = +0x20 = 1`, eight per-race bytes `+0x16..+0x1D = tab[A4-0x77A2 + 5*i + race]`, `+0x1E = tab[A4-0x777A + class]` (the thief-skill seed the unlock command reads, 14.4), **HP** `+0x5E = +0x60 = +0x74 = u16[A4-0x7772 + 2*class] + u16[A4-0x7762 + 2*(s3-2)]` (class base + the endurance bonus word; the same bonus table indexes the luck-based starting item), Paladin/Cleric-type casters (classes 3 and 4): spell level `+0x72 = +0x23 = 1`, **SP** `+0x58 = +0x5A = u16[A4-0x7736 + 2*(stat-2)]` with `stat = s2` for class 3 and `s1` for class 4 and the first spell byte `+0x51 = 0x5C` (class 3) / `0x3A` (class 4); age `+0x21 = 0x12` (18), AC-ish byte `+0x24 = tab[A4-0x770A + (s4-1)]`, food `+0x25 = 10`, starting item `+0x3A = 1` when `bonus(luck) == 0` else `tab[A4-0x76F4 + (bonus-1)*8 + class]`, condition `+0x26 = 0`. (The routine also writes a UI scratch word `A4-31054 = ((rec[0x0B]<<7)*rec[0x25]>>2) + rec[0x21] = 338`; the name-length cost the dialogue subtracts from it, 23 per character, is a menu parameter, not gold: **starting gold is not set here**.)
+- **Dialogue** OVL+0x214E: backup the stats; if `flags[class]` is 0 do nothing; race key `'1'..'5'` (ESC aborts) and add that race's 7 stat modifiers (`byte tab[A4-0x7698 + 7*race + i]`); alignment `'1'..'3'`; sex `'1'..'2'`; name (an empty name aborts; a name is padded with blanks to 10). Success builds the record and **rerolls** the stats for the next character; any abort after the modifiers restores the 7 stats from the backup.
+- Not harnessed: the exchange-stats command OVL+0x201A (UI around a two-byte swap of two stats) and the copy-protection screen.
+
+> **Correction (2026-11-26):** game-rules 13.9 and the TODO said the overlay hunk was "blocked on libc stubs". It needed only two stubbed root routines (file read, alloc): the A4 jump table is in the DATA hunk, which the harness already loaded.
+
+### 14.3 Per-screen bytes: where `A4-22025`, `-22029`, `-22030..-22032` come from (harness: 400)
+
+CODE+0x923E copies the 64-byte `attrib.dat` record of screen `A4-31218` (record = `screen << 6`) to `A4-22042`, from the resident table `A4-31222` or, when that pointer is 0, from the file. So the globals are attrib record bytes: `A4-22032 = +0x0A` (monster-count limit, 10.1), `-22031 = +0x0B` (tier ceiling), `-22030 = +0x0C` (tier floor), `-22029 = +0x0D` (run chance %, also a member's chance of running), `-22025 = +0x11` (bribe threshold), `-22024 = +0x12` door strength, `-22023 = +0x13` door trap. The "hyp: map header" of pass 2 is therefore **confirmed**, and `data-structure.md`'s "observed only" attrib bytes `0x0A..0x0D` and `0x11` now have roles. The per-map bytes `A4-22016` (+0x1A flags: bit 4 no teleport, bit 5 no etherealize, bit 6 no jump/portal/surface), `-22020` (+0x16 recall coord) and `-22018` (+0x18 recall screen) arrive the same way.
+
+### 14.4 Doors (harness: unlock 3,000, bash 3,000)
+
+Both read the facing map cell `A4-21946 + (y<<4) + x` (`y = A4-31216`, `x = A4-31217`) through the mask `A4-21976` and shift `A4-21975`; the effect picker (CODE+0x1A9A6), the damage application (0x1A90E) and the redraw are stubs, the open-door edit CODE+0x4B06 and the message routine CODE+0x5918 (which sets `A4-31205`) are real.
+- **Unlock** CODE+0x20CA2 (not 0x20D6E, which is its trap half): needs `A4-31202 == 0`, door field `(cell & mask) >> shift == 2` (locked) and `((cell & mask) >> 1) & A4-21974 != 0` (message 3 otherwise). A member is picked (ESC cancels); `d = rand(1,100)`; the door opens (0x4B06, message 4) when **`d < 0x60` and the member's `+0x1E >= d`** (the thief skill byte; creation seeds it per class). Otherwise `d2 = rand(1,100)`: **trap strength `A4-22023 < d2` springs the trap** (effect picker, apply, `A4-31056 = 3`), else message 2.
+- **Bash** CODE+0x9B48: refused (message 0xF2 + one tick) unless `A4-31202 != 1`, door field `(cell >> shift) & 3 != 0` and `(A4-21974 & mask & 0x55) != 0`. A field other than 2 gives message 1. Strength = Might (`+0x6B`) of the first two members (byte sum) `+ q`, `q = rand(10,109)/10`; **`q == 5` always breaks the door**, otherwise it breaks when `sum >= A4-22024`; no break = message 2. A broken door: `rand(1,100) < 0x33` springs the trap, else it opens (0x4B06) and costs a tick.
+
+### 14.5 Paying for a cast (harness: 1,500) and the shop (price 3,000, buy 3,000)
+
+- CODE+0x6DC6: after the handler the caster `A4-18380` loses gems `+0x5C -= A4-16136` unconditionally and SP `+0x58 -= A4-16138` only when `SP >= cost`; both cost words are cleared. It is called by the cast menu (CODE+0x6E08..0x6EA0) and by the combat cast (0x11AEC) **only when the cast set `A4-31064`** (the 'spell took effect' byte every handler's `done` sets), which is why a cancelled or refused cast is free. (The costs themselves are computed before: 12.4.)
+- **Shop price** CODE+0x1BF16 `price(slot)`: not stocked (`A4-23052[slot]` = item id 0) = 0; mode 6 (`A4-23248`, flat list) = 10 or `count*100`; else the items.dat gold word (`+0x12`), doubled when the stock's plus count (`A4-23070[slot] & 0x3F`) is non-zero (one count spent), +1000 per remaining count; the buyer's `+0x50` nibbles are compared with 10 (CODE+0x45C4, 0..2 matches): mode 5 (selling) halves, and halves again when there is **no** match; every other mode halves when there is a match. The shop draws this table into `A4-23094` (6 longs) whenever it is shown.
+- **Buy** CODE+0x1BE44: the buyer is `A4-23102`; condition `+0x26 != 0` refuses (message 8); the first zero of the six pack ids at `+0x3A` is the free slot (none: message 2); the price **paid is the displayed table entry** `A4-23094[slot]`; gold is the long at `+0x66`, paid only when `gold >= price` (CODE+0x1BDD6; else message 4); the stock id (`A4-23052`), charges (`A4-23064`) and flags (`A4-23070`) are copied to `+0x3A/+0x40/+0x46 + k` (message 0). Sell (CODE+0x1BC26) and the flat list (CODE+0x1B6E0) are located, not harnessed.
+
+### 14.6 The remaining non-combat spell handlers (harness: 4,500 vectors through the real dispatcher)
+
+Pickers are real (member pick CODE+0xCC18 and confirm CODE+0xCCE8 as in 13.4); key input (CODE+0x42AA) and the item picker's key (CODE+0x22586) are scripted. The item picker CODE+0xB56E takes `A..F` (case folded) naming a non-empty pack slot of the caster, ESC cancels and zeroes both costs.
+
+| # | Spell | Handler | Effect |
+|---|---|---|---|
+| 1 | Detect Magic | 0x0A812 | confirm, show the charges, any key, done |
+| 5 | Location | 0x0A8FA | confirm, show position (CODE+0x223A, UI), reload flags; no done flag |
+| 10 | Jump | 0x0A974 | fails when `A4-31202 == 1`, the current cell is walled/blocked or the next cell's wall layer (`A4-21946`, `A4-21690`) blocks; else moves 2 squares forward |
+| 12 | Lloyd's Beacon | 0x0AADC | key 1 stores screen `A4-31128` and position `A4-31127`; key 2 returns to it; refused when `A4-22016` bit 6 |
+| 15 | Fly | 0x0ABCC | letter `A..E` then `1..4`: screen = `A4-28976[(letter*4) + n]`, position (0xFF,0xFF) |
+| 30 | Teleport | 0x0ADD6 | key `1..9` squares ahead, no wall test; refused when `A4-22016` bit 4; reload flags only on success |
+| 34 | Recharge Item | 0x0AEAC | item picker; charges (`+0x40`) must be non-zero; `+= rand(1,6)` (byte, can wrap) |
+| 37 | Duplication | 0x0AF02 | item picker; id `< 0xD0`; copies id/charges/flags into the first free pack slot |
+| 38 | Etherealize | 0x0AFFA | refused when `A4-22016` bit 5; steps one square in the facing |
+| 47 | Enchant Item | 0x0B050 | item picker; plus count (flags `+0x46` low 6 bits) +1 (a count of 0x3F wraps into bit 6); cost `50*count` -> `A4-16138`, needs `SP >=` it |
+| 71 | Restore Alignment | 0x0B26A | picked member's `+0x6A := +0x0D` |
+| 72 | Surface | 0x0B2B2 | recall to `A4-22020` (x = low nibble, y = high nibble) on screen `A4-22018`; refused when `A4-22016` bit 6 or the coordinate is 0 |
+| 80 | Rejuvenate | 0x0B332 | `r1 = rand(1,10)`, `r2 = rand(1,100)`: `r2 < 50` and age `>= 18` = age `-= r1`; else age `+= r1` (cap 200) and the spell fails |
+| 91 | Town Portal | 0x0B3E6 | key `1..5` = screen `key-0x31`, position (0xFF,0xFF); refused when `A4-22016` bit 6 |
+| 94 | Resurrection | 0x0B492 | target must be dead (`+0x26 >= 0x80`); caster ages 1, target 5; Endurance `+0x27` must be non-zero and drops by 1 (also `+0x73`); condition cleared |
+| 95 | Uncurse Item | 0x0B524 | item picker; flag byte `+0x40+slot == 0xFF` fails, else becomes 1 |
+
+Still OPEN: non-combat 57 (Nature's Gate, 0x0B0EA: a calendar table walk) and 87 (Raise Dead, 0x0C9B6); combat 54 (Turn Undead 0x0BFEE) and 93 (Holy Word 0x0C72A) with the engine CODE+0xC028 (unpack each monster, undead flag `A4-4525`, `rand(1,chance)` against the slot's record index `A4-4574`, kill via CODE+0x10E5E: read, not harnessed).
+
+### 14.7 Open after pass 4
+
+- Pools: CODE+0x6ACE / 0x6B9A / 0x6C66 pay gold / gems / food out of the whole party's pool (event costs: they are in the opcode jump table at CODE+0x25AC8..) and even the remainder out through CODE+0x7BBE / 0x7CB0 / 0x7D3E; located and read, not harnessed.
+- Food outside rest, traps beyond the door trap, thief skills other than the unlock roll, the per-step ticks and the party command menu CODE+0x119C2 are not traced.
+- The monster leaves CODE+0x1F414 / 0x1F632 / 0x1F72E / 0x1F896 and `advance` CODE+0x10118; training eligibility CODE+0x20988 (the Hall UI loop).

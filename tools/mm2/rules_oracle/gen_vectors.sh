@@ -18,7 +18,7 @@ for spec in castdisp:0:206 anywhere:2000:40 dicedmg:2000:50 maxtargets:2000:40 c
   $PY rules4.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags
 done
 # pass 4 (overlay hunk: character creation + table loaders; world rules): rules5.py units  unit:count:subset-size
-for spec in cgslot:3000:30 cgflags:3000:50 cgroll:3000:50 cgbuild:3000:100 cgmake:3000:300 loaders:60:9 unlock:3000:400 bash:3000:300 attrib:400:40 "$@"; do
+for spec in cgslot:3000:30 cgflags:3000:50 cgroll:3000:50 cgbuild:3000:100 cgmake:3000:300 loaders:60:9 unlock:3000:400 bash:3000:300 attrib:400:40 charge:1500:80 price:3000:150 buy:3000:200 ncspell2:4500:500 "$@"; do
   IFS=: read unit n sub flags <<<"$spec"
   $PY rules5.py $unit generated/$unit.json --n ${n:-2000}
   $PY rules5.py subset generated/$unit.json vectors/$unit.json.gz --n $sub $flags

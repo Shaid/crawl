@@ -219,6 +219,110 @@ def gen_attrib(n, rnd):
         e.heap = HEAP
     return out
 
-UNITS5 = {'cgslot': gen_slot, 'cgflags': gen_flags, 'cgroll': gen_roll, 'cgbuild': gen_build, 'cgmake': gen_make, 'loaders': gen_loaders, 'unlock': gen_unlock, 'bash': gen_bash, 'attrib': gen_attrib}
+def gen_charge(n, rnd):
+    """CODE+0x6DC6 pay for a cast: gems (+0x5C) -= A4-16136 unconditionally, SP (+0x58) -= A4-16138 only if SP >= cost; both costs cleared; flag A4-31208 = 1 unless A4-31210"""
+    e = new_emu(); R = Rec(e); out = []
+    for i in range(n):
+        def setup(e):
+            ch = g(-10814) + 130 * rnd.randint(0, 47); sl(e, -18380, ch)
+            e.w16(ch + 0x5c, rnd.choice([0, 3, 50, 100, rnd.getrandbits(16)])); e.w16(ch + 0x58, rnd.choice([0, 5, 20, 300, rnd.getrandbits(16)]))
+            sw(e, -16136, rnd.choice([0, 1, 5, 50, 100, rnd.getrandbits(16)])); sw(e, -16138, rnd.choice([0, 1, 5, 20, 300, rnd.getrandbits(16)]))
+            sb(e, -31210, rnd.choice([0, 0, 1])); sb(e, -31208, rnd.getrandbits(8))
+        out.append(R.run(0x6DC6, (), setup))
+    return out
+
+def gen_price(n, rnd):
+    """CODE+0x1BF16 shop item price(slot 0-5): item gold word (+0x12), per-slot enchant count (A4-23070, & 0x3F), shop mode A4-23248 (5 sell, 6 flat list), buyer's +0x50 nibbles vs 10"""
+    e = new_emu(); R = Rec(e); out = []
+    for i in range(n):
+        slot = rnd.choice([0, 1, 2, 3, 4, 5, 5, rnd.randint(0, 5)])
+        def setup(e):
+            for k in range(6):
+                sb(e, -23052 + k, rnd.choice([0, 1, 1, 1]) if rnd.random() < .9 else rnd.getrandbits(8))
+                sb(e, -23070 + k, rnd.choice([0, 0, 1, 2, 3, 5, 9, 0x3f, 0x40, rnd.getrandbits(8)]))
+                iid = rnd.randint(0, 255); sl(e, -23046 + 4 * k, g(-16126) + 20 * iid)
+                e.w16(g(-16126) + 20 * iid + 0x12, rnd.choice([0, 1, 10, 200, 1000, 20000, 65535, rnd.getrandbits(16)]))
+            sw(e, -23248, rnd.choice([0, 1, 2, 3, 4, 5, 5, 6, 6, 7])); ch = g(-10814) + 130 * rnd.randint(0, 47); sl(e, -23102, ch)
+            e.w8(ch + 0x50, rnd.choice([0xaa, 0xa0, 0x0a, 0x00, 0xab, 0x5a, rnd.getrandbits(8)]))
+        v = R.run(0x1BF16, (slot,), setup, ret_bits=32)
+        out.append({'slot': slot, **v})
+    return out
+
+def gen_buy(n, rnd):
+    """CODE+0x1BE44 buy shop slot: refused when the buyer's condition (+0x26) is set (msg 8), pack full (6 slots at +0x3A, msg 2), cannot pay (msg 4: gold long at +0x66 >= price, CODE+0x1BDD6 deducts); else the item id / charges / flags are copied into the free pack slot (msg 0)"""
+    e = new_emu(); R = Rec(e)
+    for off in (0x42DC, 0x22108, 0x2249C): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    e.stub(0x1C432, 'msg', nargs=1)
+    out = []
+    for i in range(n):
+        slot = rnd.randint(0, 5)
+        def setup(e):
+            ch = g(-10814) + 130 * rnd.randint(0, 47); sl(e, -23102, ch)
+            e.w8(ch + 0x26, rnd.choice([0, 0, 0, 0, 1, 0x80]))
+            fill = rnd.choice([0, 1, 3, 5, 6, 6])
+            for k in range(6): e.w8(ch + 0x3a + k, rnd.randint(1, 255) if k < fill else 0)
+            for k in range(6): e.w8(ch + 0x40 + k, rnd.getrandbits(8)); e.w8(ch + 0x46 + k, rnd.getrandbits(8))
+            e.w32(ch + 0x66, rnd.choice([0, 100, 5000, 70000, rnd.getrandbits(32), rnd.randint(0, 3000)]))
+            for k in range(6):
+                sb(e, -23052 + k, rnd.choice([0, rnd.randint(1, 255), rnd.randint(1, 255)])); sb(e, -23064 + k, rnd.getrandbits(8)); sb(e, -23070 + k, rnd.choice([0, 0, 1, 2, rnd.getrandbits(8)]))
+                iid = rnd.randint(0, 255); sl(e, -23046 + 4 * k, g(-16126) + 20 * iid)
+                e.w16(g(-16126) + 20 * iid + 0x12, rnd.choice([0, 1, 10, 200, 1000, 20000, 65535, rnd.randint(0, 3000)]))
+            sw(e, -23248, rnd.choice([0, 1, 2, 3, 4, 5, 6])); e.w8(ch + 0x50, rnd.getrandbits(8))
+            for k in range(6): sl(e, -23094 + 4 * k, rnd.choice([0, 10, 100, 5000, 70000, rnd.randint(0, 4000)]))   # the displayed price table: BUY pays this, not a recomputed price
+        v = R.run(0x1BE44, (slot,), setup)
+        out.append({'slot': slot, **v})
+    return out
+
+# ---------------------------------------------------------------- pass 4: the remaining non-combat spell handlers
+NC2_PROG = [71, 72, 80, 91, 94, 95, 34, 37, 47, 38, 1, 5, 10, 12, 15, 30]
+
+def gen_ncspell2(n, rnd):
+    """non-combat handlers 71/72/80/91/94/95/34/37/47/38 through the non-combat dispatcher (pickers real; key input CODE+0x42AA and the item picker's key CODE+0x22586 scripted)"""
+    import rules4
+    e = new_emu(); R = Rec(e)
+    for off in rules4.QUIET3 + (0x044E0, 0x06798, 0x06FB8, 0x042DC, 0x0223A): e.stub(off, 'q%x' % off, nargs=0, quiet=True)
+    picks, ikeys = [], []
+    e.stub(0x042AA, 'pick', nargs=2, fn=lambda e, sp: picks.pop(0) if picks else 0x1b)
+    e.stub(0x22586, 'ikey', nargs=0, fn=lambda e, sp: ikeys.pop(0) if ikeys else 0x1b)
+    out = []
+    for i in range(n):
+        spell = NC2_PROG[i % len(NC2_PROG)] if i < 8 * len(NC2_PROG) else rnd.choice(NC2_PROG)
+        seed = rnd.getrandbits(32)
+        mk = rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x1b, 0x31]); ck = rnd.choice([0x0d, 0x0d, 0x1b, 0x20])
+        pp = []
+        if spell in (71, 80, 94): pp = [mk, ck]
+        elif spell == 91: pp = [ck, rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x1b])]
+        elif spell in (72, 38): pp = [ck]
+        elif spell in (10, 5, 1): pp = [ck]
+        elif spell in (12, 15, 30): pp = [ck, rnd.choice([0x31, 0x32, 0x33, 0x34, 0x35, 0x39, 0x1b])]
+        else: pp = [ck]
+        ik = [rnd.choice([0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x61, 0x62, 0x1b, 0x20, 0x47, rnd.getrandbits(8)]) for _ in range(5)]
+        def setup(e):
+            picks[:] = pp; ikeys[:] = ik
+            sl(e, SEED, seed)
+            setup_party(e, rnd, rnd.choice([1, 1, 2, 3, 4, 5, 6]))
+            sz = e.r16(g(-31066)); idxs = [e.r16(g(-31082) + 2 * k) for k in range(8)]
+            ch = g(-10814) + 130 * idxs[rnd.randrange(sz)]; sl(e, -18380, ch)
+            sb(e, -16140, rnd.choice([0, 1, 1])); sb(e, -31154, rnd.choice([2, 2, 0, 1])); sb(e, -21974, rnd.choice([0, 0, 0, 2, 3, rnd.getrandbits(8)]))
+            sb(e, -22016, rnd.choice([0, 0, 0x10, 0x20, 0x40, 0x60, 0x70, rnd.getrandbits(8)])); sb(e, -22020, rnd.choice([0, 0x34, 0x77, rnd.getrandbits(8)])); sb(e, -22018, rnd.randint(0, 59))
+            for k in range(256): e.w8(g(-21946) + k, rnd.choice([0, 0, 0, 0x55, 0xaa, rnd.getrandbits(8)])); e.w8(g(-21690) + k, rnd.choice([0, 0, 0x55, rnd.getrandbits(8)]))
+            sb(e, -21976, rnd.choice([0x03, 0x0c, 0x30, 0xc0, 0xff, 0xaa, rnd.getrandbits(8)])); sb(e, -31202, rnd.choice([0, 0, 1, 2])); sb(e, -31128, rnd.getrandbits(8)); sb(e, -31127, rnd.getrandbits(8))
+            sb(e, -31153, rnd.choice([0x45, 0x4e, 0x53, 0x57])); sb(e, -31216, rnd.randint(0, 15)); sb(e, -31217, rnd.randint(0, 15)); sb(e, -31218, rnd.randint(0, 59))
+            sb(e, -31064, rnd.getrandbits(8)); sb(e, -31208, rnd.getrandbits(8)); sb(e, -31210, rnd.getrandbits(8)); sb(e, -31204, rnd.getrandbits(8)); sb(e, -31056, rnd.getrandbits(8))
+            sw(e, -16138, rnd.getrandbits(16)); sw(e, -16136, rnd.getrandbits(16))
+            for k in range(8):
+                if idxs[k] == 0xffff or k >= sz: continue
+                c = g(-10814) + 130 * idxs[k]
+                e.w8(c + 38, rnd.choice([0, 0, 0x10, 0x80, 0x81, 0xff, rnd.getrandbits(8)])); e.w8(c + 39, rnd.choice([0, 1, 2, 17, rnd.getrandbits(8)]))
+                e.w8(c + 33, rnd.choice([0, 10, 17, 18, 19, 30, 195, 199, 200, 250, rnd.getrandbits(8)])); e.w8(c + 13, rnd.getrandbits(8)); e.w8(c + 106, rnd.getrandbits(8))
+                e.w8(c + 115, rnd.getrandbits(8)); e.w8(c + 113, rnd.randint(1, 20)); e.w16(c + 88, rnd.choice([0, 49, 50, 100, 300, rnd.getrandbits(16)]))
+                for j in range(6):
+                    e.w8(c + 58 + j, rnd.choice([0, 0, rnd.randint(1, 0xcf), rnd.randint(1, 255), 0xd0, 0xd1]))
+                    e.w8(c + 64 + j, rnd.choice([0, 0, 1, 3, 0xff, rnd.getrandbits(8)])); e.w8(c + 70 + j, rnd.choice([0, 1, 0x3f, 0x40, 0xc1, 0x05, rnd.getrandbits(8)]))
+        v = R.run(rules4.DISP_NC, (spell,), setup, max_insn=3_000_000)
+        out.append({'seed': seed, 'spell': spell, 'picks': pp, 'ikeys': ik, **({'keep': True} if i < len(NC2_PROG) and v['fin'] else {}), **v})
+    return out
+
+UNITS5 = {'cgslot': gen_slot, 'cgflags': gen_flags, 'cgroll': gen_roll, 'cgbuild': gen_build, 'cgmake': gen_make, 'loaders': gen_loaders, 'unlock': gen_unlock, 'bash': gen_bash, 'attrib': gen_attrib, 'charge': gen_charge, 'price': gen_price, 'buy': gen_buy, 'ncspell2': gen_ncspell2}
 rules.UNITS.update(UNITS5)
 if __name__ == '__main__': rules.main()
