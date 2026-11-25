@@ -6,6 +6,7 @@
 import { type Mem } from './rules-mem.ts';
 import { random, resetAc, BDW_TEXT, CHARP, type Call } from './rules.ts';
 import { Caster, Exit, SPD_FLAGS, SPD_COST } from './spells.ts';
+import { divide } from './after.ts';
 
 const u8 = (v: number) => v & 0xff;
 export const QCAST_TABLE = 0x2beb;
@@ -1119,5 +1120,269 @@ export class Rest extends TailCaster {
       }
     }
     m.w8(c + 0x2d, m.r8(0x3c6d)); m.w8(c + 0x2e, m.r8(0x3c6e));
+  }
+}
+
+export type StepWrong = 'stepIgnoreDoorLayer' | 'stepNoEncounterRoll' | 'stepTurnSwap' | 'stepEdgeWrap';
+
+/** One step of the party in the maze: forward CODE+0x4D7E, back 0x4E81, turn 0x4F43 / 0x4F7A. DS:3C3C = wall byte of the cell (2 bits per side, W,S,E,N from the low bits),
+ *  DS:3C10 = second layer (doors), DS:3C3D..3C40 = side masks front/right/back/left (0xC0 N, 0x30 E, 0x0C S, 0x03 W), DS:3C38/3C39 = x/y, DS:3C18 = encounter flag. */
+export class Step extends Caster {
+  w: StepWrong | undefined;
+  constructor(m: Mem, w?: StepWrong) { super(m, []); this.w = w; }
+  private stop(a: number): never { throw new Exit(a); }
+  private noises(a: number) { this.ui('noises', [a]); }
+  run(entry: number): { stop: number; calls: Call[] } {
+    try {
+      if (entry === 0x4d7e) this.forward();
+      else if (entry === 0x4e81) this.back();
+      else if (entry === 0x4f43) this.turn(true);
+      else this.turn(false);
+    } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
+    throw new Error('step fell through');
+  }
+  /** CODE+0x4DE9 / 0x4EA5: clear DS:3C78.., roll the random-encounter flag (1 in getod(0x1D)) */
+  private roll() {
+    const m = this.m;
+    for (let i = 0; i < 8; i++) m.w8(0x3c78 + i, 0);
+    if (this.w === 'stepNoEncounterRoll') return;
+    const n = this.getod(0x1d);
+    const r = random(m, n);
+    if (r === (this.getod(0x1d) & 0xff)) m.w8(0x3c18, 1);
+  }
+  private forward() {
+    const m = this.m;
+    const front = m.r8(0x3c3c) & m.r8(0x3c3d);
+    if (front !== 0) {
+      if ((m.r8(0x3c10) & 0x55 & m.r8(0x3c3d)) !== 0 && this.w !== 'stepIgnoreDoorLayer') this.stop(0x4734);
+      let bx: number;
+      if ((m.r8(0x3c3c) & m.r8(0x3c3d) & 0x55) === 0) bx = 1;
+      else if ((m.r8(0x3c3c) & m.r8(0x3c3d) & 0xaa) === 0) bx = 0;
+      else bx = 2;
+      if (this.getod(bx + 0x1e) === 4 && m.r8(0x3c9f) === 0) {
+        this.noises(1); this.text(0x2107); this.stop(0x4fbf);
+      }
+    } else if ((m.r8(0x3c10) & 0x55 & m.r8(0x3c3d)) !== 0) {
+      this.text(0x1eed); this.noises(1); this.stop(0x4fbf);
+    }
+    this.roll();
+    this.move(true);
+  }
+  private back() {
+    const m = this.m;
+    if (m.r8(0x3c3c) & m.r8(0x3c40)) { this.noises(1); this.stop(0x4cd6); }
+    if (m.r8(0x3c10) & 0x55 & m.r8(0x3c40)) { this.noises(1); this.stop(0x4cd6); }
+    this.roll();
+    this.move(false);
+  }
+  /** step one cell along the facing (forward) or against it (back); crossing the map edge leaves for the exit loader */
+  private move(fwd: boolean) {
+    const m = this.m;
+    const d = m.r8(0x3c3d);
+    const ax = (a: number, inc: boolean, hi: number, lo: number) => {
+      const v = m.r16(a) & 0xff;
+      if (inc) { if (v >= 0xf) this.stop(hi); m.w8(a, m.r8(a) + 1); }
+      else { if (v === 0) this.stop(lo); m.w8(a, m.r8(a) - 1); }
+      this.stop(DRAW);
+    };
+    // forward: N = y+1, E = x+1, S = y-1, W = x-1; back reverses
+    if (d === 0xc0) return ax(0x3c39, fwd, 0x4ff8, 0x504c);
+    if (d === 0x30) return ax(0x3c38, fwd, 0x5022, 0x5076);
+    if (d === 0x0c) return ax(0x3c39, !fwd, 0x4ff8, 0x504c);
+    return ax(0x3c38, !fwd, 0x5022, 0x5076);
+  }
+  private turn(right: boolean) {
+    const m = this.m;
+    if (right) {
+      let bl = m.r8(0x3c3f);
+      m.w8(0x3c3f, m.r8(0x3c3d)); m.w8(0x3c3d, m.r8(0x3c3e)); m.w8(0x3c3e, m.r8(0x3c40)); m.w8(0x3c40, bl);
+      bl = m.r8(0x3c43);
+      m.w8(0x3c43, m.r8(0x3c41)); m.w8(0x3c41, m.r8(0x3c42)); m.w8(0x3c42, m.r8(0x3c44)); m.w8(0x3c44, bl);
+    } else {
+      let bl = m.r8(0x3c3e);
+      m.w8(0x3c3e, m.r8(0x3c3d)); m.w8(0x3c3d, m.r8(0x3c3f)); m.w8(0x3c3f, m.r8(0x3c40)); m.w8(0x3c40, bl);
+      bl = m.r8(0x3c42);
+      m.w8(0x3c42, m.r8(0x3c41)); m.w8(0x3c41, m.r8(0x3c43)); m.w8(0x3c43, m.r8(0x3c44)); m.w8(0x3c44, bl);
+    }
+    this.stop(DRAW);
+  }
+}
+
+export type PoolWrong = 'poolFoodNoCap' | 'poolGoldNoSat' | 'poolShareNoRemainder';
+
+/** Party pooling: `gather` CODE+0x74BC (everyone's gems / gold / food into the current member) and `share` CODE+0x7763 (split evenly, remainder to the current member).
+ *  Gems = 16 bit (+0x31,+0x32), gold = 24 bit (+0x39..+0x3B), food = 8 bit (+0x3E, cap 40 when gathering). The overflow of a sum saturates its top byte at 0xFF. */
+export class Pool extends Caster {
+  w: PoolWrong | undefined;
+  constructor(m: Mem, keys: number[], w?: PoolWrong) { super(m, keys); this.w = w; }
+  private stop(a: number): never { throw new Exit(a); }
+  run(entry: 'gather' | 'share'): { stop: number; calls: Call[] } {
+    try { if (entry === 'gather') this.gather(); else this.share(); } catch (e) { if (e instanceof Exit) return { stop: e.stop, calls: this.calls }; throw e; }
+    throw new Error('pool fell through');
+  }
+  private ddal(): never { this.ptext(); this.ui('noises', [2]); this.ui('delayt'); return this.stop(BACKVIEW); }
+  private esctext() { const m = this.m; m.w8(0x3bdd, 0x18); m.w8(0x3bdc, 0); this.text(0x2b05); this.ptext(); }
+  /** CODE+0x833F pall: the three "(1) .. (3) .." prompt lines */
+  private pall() {
+    const m = this.m;
+    m.w8(0x3bdd, 0x14); m.w8(0x3bdc, 0x14); this.text(0x2b16); this.ptext();
+    this.inc(0x3bdd); m.w8(0x3bdc, 0x14); this.text(0x2b1e); this.ptext();
+    this.inc(0x3bdd); m.w8(0x3bdc, 0x14); this.text(0x2b26); this.ptext();
+  }
+  private head(row: number, col: number, text: number) {
+    const m = this.m;
+    this.ui('clrtext4'); m.w8(0x3bdd, 0x14); m.w8(0x3bdc, col); this.text(text); this.ptext(); this.pall(); this.esctext();
+    void row;
+  }
+  private n(): number { return this.m.r8(NPARTY); }
+  private cp(i: number): number { return this.m.r16(PARTYTAB + 2 * i); }
+  private cur(): number { return this.m.r16(CHARP); }
+  /** `walk`: the game keeps its pointer into the party table in a DS word and bumps it by 2 per member; the final word values are part of the footprint */
+  private walk(ptr: number, f: (c: number) => boolean | void) {
+    const m = this.m;
+    m.w16(ptr, PARTYTAB);
+    let bl = 0;
+    do {
+      const c = m.r16(m.r16(ptr));
+      const stop = f(c);
+      if (stop === true) return;
+      m.w16(ptr, m.r16(ptr) + 1); m.w16(ptr, m.r16(ptr) + 1);
+      bl = u8(bl + 1);
+    } while (bl < this.n());
+  }
+  private maxf(): never {
+    const m = this.m;
+    this.ui('clrtext4'); m.w8(0x3bdd, 0x15); m.w8(0x3bdc, 0xb); this.text(0x293f);
+    return this.ddal();
+  }
+  private gather() {
+    const m = this.m;
+    this.head(0x14, 7, 0x2b2e);
+    for (;;) {
+      const k = this.wait();
+      if (k === 0x1b) this.stop(BACKVIEW);
+      if (k === 0x31) { this.gatherGems(); return this.stop(BACKVIEW); }
+      if (k === 0x32) { this.gatherGold(); return this.stop(BACKVIEW); }
+      if (k === 0x33) { this.gatherFood(); return this.stop(BACKVIEW); }
+    }
+    void m;
+  }
+  private gatherFood() {
+    const m = this.m;
+    m.w16(0x290e, PARTYTAB);
+    m.w8(0x3c86, 0);
+    let overflow = false;
+    this.walk(0x290a, (c) => {
+      const s = m.r8(c + 0x3e) + m.r8(0x3c86);
+      m.w8(0x3c86, s);
+      if (s > 0xff || (u8(s) >= 0x29 && this.w !== 'poolFoodNoCap')) { overflow = true; return true; }
+    });
+    if (overflow) this.maxf();
+    this.walk(0x290e, (c) => { m.w8(c + 0x3e, 0); });
+    m.w8(this.cur() + 0x3e, m.r8(0x3c86));
+  }
+  private gatherGems() {
+    const m = this.m;
+    m.w8(0x3c86, 0); m.w8(0x3c87, 0);
+    this.walk(0x2920, (c) => { const s = m.r8(c + 0x31) + m.r8(0x3c86); m.w8(0x3c86, s); if (s > 0xff) m.w8(0x3c87, m.r8(0x3c87) + 1); });
+    let sat = false;
+    this.walk(0x291e, (c) => { const s = m.r8(c + 0x32) + m.r8(0x3c87); m.w8(0x3c87, s); if (s > 0xff) { m.w8(0x3c87, 0xff); sat = true; return true; } });
+    void sat;
+    this.walk(0x291c, (c) => { m.w8(c + 0x31, 0); });
+    this.walk(0x291a, (c) => { m.w8(c + 0x32, 0); });
+    m.w8(this.cur() + 0x31, m.r8(0x3c86)); m.w8(this.cur() + 0x32, m.r8(0x3c87));
+  }
+  private gatherGold() {
+    const m = this.m;
+    m.w8(0x3c86, 0); m.w8(0x3c87, 0); m.w8(0x3c88, 0);
+    this.walk(0x2918, (c) => {
+      const s = m.r8(c + 0x39) + m.r8(0x3c86); m.w8(0x3c86, s);
+      if (s > 0xff) { m.w8(0x3c87, m.r8(0x3c87) + 1); if (m.r8(0x3c87) === 0) m.w8(0x3c88, m.r8(0x3c88) + 1); }
+    });
+    this.walk(0x2916, (c) => { const s = m.r8(c + 0x3a) + m.r8(0x3c87); m.w8(0x3c87, s); if (s > 0xff) m.w8(0x3c88, m.r8(0x3c88) + 1); });
+    this.walk(0x2914, (c) => { const s = m.r8(c + 0x3b) + m.r8(0x3c88); m.w8(0x3c88, s); if (s > 0xff && this.w !== 'poolGoldNoSat') { m.w8(0x3c88, 0xff); return true; } });
+    this.walk(0x290c, (c) => { m.w8(c + 0x39, 0); });
+    this.walk(0x2910, (c) => { m.w8(c + 0x3a, 0); });
+    this.walk(0x2912, (c) => { m.w8(c + 0x3b, 0); });
+    const c = this.cur();
+    m.w8(c + 0x39, m.r8(0x3c86)); m.w8(c + 0x3a, m.r8(0x3c87)); m.w8(c + 0x3b, m.r8(0x3c88));
+  }
+  private share() {
+    this.head(0x14, 8, 0x2953);
+    for (;;) {
+      const k = this.wait();
+      if (k === 0x1b) this.stop(BACKVIEW);
+      if (k === 0x31) { this.shareGems(); return this.stop(BACKVIEW); }
+      if (k === 0x32) { this.shareGold(); return this.stop(BACKVIEW); }
+      if (k === 0x33) { this.shareFood(); return this.stop(BACKVIEW); }
+    }
+  }
+  private div() {
+    const m = this.m;
+    m.w8(0x3c8c, m.r8(NPARTY)); m.w8(0x3c8d, 0);
+    divide(m);
+  }
+  private shareFood() {
+    const m = this.m;
+    for (let i = 0; i < 4; i++) m.w8(0x3c86 + i, 0);
+    this.walk(0x2908, (c) => { const s = m.r8(c + 0x3e) + m.r8(0x3c86); m.w8(0x3c86, s); if (s > 0xff) m.w8(0x3c87, m.r8(0x3c87) + 1); });
+    this.div();
+    this.walk(0x2906, (c) => { m.w8(c + 0x3e, m.r8(0x3c86)); });
+    if (this.w !== 'poolShareNoRemainder') m.w8(this.cur() + 0x3e, m.r8(0x3c8a) + m.r8(this.cur() + 0x3e));
+  }
+  private shareGems() {
+    const m = this.m;
+    for (let i = 0; i < 4; i++) m.w8(0x3c86 + i, 0);
+    m.w16(0x2904, PARTYTAB); m.w16(0x2902, PARTYTAB);
+    let bl = 0;
+    do {
+      const c1 = m.r16(m.r16(0x2904));
+      let s = m.r8(c1 + 0x31) + m.r8(0x3c86); m.w8(0x3c86, s);
+      if (s <= 0xff) { /* no carry */ } else { m.w8(0x3c87, m.r8(0x3c87) + 1); if (m.r8(0x3c87) === 0) m.w8(0x3c88, m.r8(0x3c88) + 1); }
+      const c2 = m.r16(m.r16(0x2902));
+      s = m.r8(c2 + 0x32) + m.r8(0x3c87); m.w8(0x3c87, s);
+      if (s > 0xff) m.w8(0x3c88, m.r8(0x3c88) + 1);
+      m.w16(0x2904, m.r16(0x2904) + 1); m.w16(0x2904, m.r16(0x2904) + 1);
+      m.w16(0x2902, m.r16(0x2902) + 1); m.w16(0x2902, m.r16(0x2902) + 1);
+      bl = u8(bl + 1);
+    } while (bl < this.n());
+    this.div();
+    this.walk(0x2900, (c) => { m.w8(c + 0x31, m.r8(0x3c86)); });
+    this.walk(0x28fe, (c) => { m.w8(c + 0x32, m.r8(0x3c87)); });
+    const c = this.cur();
+    const s = m.r8(0x3c8a) + m.r8(c + 0x31);
+    m.w8(c + 0x31, s);
+    if (s > 0xff) m.w8(c + 0x32, m.r8(c + 0x32) + 1);
+  }
+  private shareGold() {
+    const m = this.m;
+    m.w16(0x295e, PARTYTAB); m.w16(0x2960, PARTYTAB); m.w16(0x2962, PARTYTAB);
+    for (let i = 0; i < 4; i++) m.w8(0x3c86 + i, 0);
+    let bl = 0;
+    for (;;) {
+      let c = m.r16(m.r16(0x295e));
+      let s = m.r8(c + 0x39) + m.r8(0x3c86); m.w8(0x3c86, s);
+      if (s > 0xff) { m.w8(0x3c87, m.r8(0x3c87) + 1); if (m.r8(0x3c87) === 0) { m.w8(0x3c88, m.r8(0x3c88) + 1); if (m.r8(0x3c88) === 0) m.w8(0x3c89, m.r8(0x3c89) + 1); } }
+      c = m.r16(m.r16(0x2960));
+      s = m.r8(c + 0x3a) + m.r8(0x3c87); m.w8(0x3c87, s);
+      if (s > 0xff) { m.w8(0x3c88, m.r8(0x3c88) + 1); if (m.r8(0x3c88) === 0) m.w8(0x3c89, m.r8(0x3c89) + 1); }
+      c = m.r16(m.r16(0x2962));
+      s = m.r8(c + 0x3b) + m.r8(0x3c88); m.w8(0x3c88, s);
+      if (s > 0xff) m.w8(0x3c89, m.r8(0x3c89) + 1);
+      for (const p of [0x295e, 0x2960, 0x2962]) { m.w16(p, m.r16(p) + 1); m.w16(p, m.r16(p) + 1); }
+      bl = u8(bl + 1);
+      if (bl >= this.n()) break;
+    }
+    this.div();
+    this.walk(0x2964, (c) => { m.w8(c + 0x39, m.r8(0x3c86)); });
+    this.walk(0x2966, (c) => { m.w8(c + 0x3a, m.r8(0x3c87)); });
+    this.walk(0x2968, (c) => { m.w8(c + 0x3b, m.r8(0x3c88)); });
+    const cc = this.cur();
+    let s = m.r8(0x3c8a) + m.r8(cc + 0x39);
+    m.w8(cc + 0x39, s);
+    if (s > 0xff) {
+      s = m.r8(cc + 0x3a) + 1; m.w8(cc + 0x3a, s);
+      if (s > 0xff) m.w8(cc + 0x3b, m.r8(cc + 0x3b) + 1);
+    }
   }
 }

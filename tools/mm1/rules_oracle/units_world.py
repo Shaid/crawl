@@ -297,3 +297,69 @@ def _(n, rnd):
         k = (d['out']['stop'], len(d['fin']) // 40)
         if k not in seen: seen.add(k); d['keep'] = True
     return res
+
+STEPSTOPS = (0xf45, 0x4734, 0x4fbf, 0x4ff8, 0x5022, 0x504c, 0x5076, 0x4cd6)
+STUI = [uistub('noises', 0x1ab3)]
+STUI = [('noises', 0x1ab3, None, lambda e: [e.regs()['ax'] & 255])]
+
+@unit('step')
+def _(n, rnd):
+    """CODE+0x4D7E move forward, 0x4E81 move back, 0x4F43 / 0x4F7A turn: walls, doors, map edges (exits), random-encounter flag DS:3C18"""
+    entries = [0x4d7e, 0x4d7e, 0x4e81, 0x4e81, 0x4f43, 0x4f7a]
+    res = []
+    e = Emu(); Rc = Rec(e)
+    for _ in range(n):
+        ip = rnd.choice(entries)
+        def setup(em, ip=ip):
+            r = rnd
+            rnd_state(em, r)
+            em.ww(0x132, 0xc940)
+            for i in range(0x80): em.wb(0xc940 + i, r.choice([0, 1, 2, 3, 4, 4, 5, 20, 100, r.getrandbits(8)]))
+            em.wb(0xc940 + 0x1d, r.choice([0, 1, 2, 3, 10, 50, r.getrandbits(8)]))
+            rot = r.choice([(0xc0, 0x30, 0x0c, 0x03), (0x30, 0x0c, 0x03, 0xc0), (0x0c, 0x03, 0xc0, 0x30), (0x03, 0xc0, 0x30, 0x0c)])
+            em.wbytes(0x3c3d, list(rot))
+            if r.random() < 0.1: em.wb(0x3c3d + r.randint(0, 3), r.getrandbits(8))
+            em.wb(0x3c3c, r.choice([0, 0x55, 0xaa, 0xff, 0x01, 0x02, 0x03, 0xc0, 0x80, 0x40, 0x30, 0x10, 0x20, 0x0c, 0x08, 0x04, r.getrandbits(8)]))
+            em.wb(0x3c10, r.choice([0, 0, 0, 0x55, 0xaa, 0xc0, 0x40, 0x30, 0x10, r.getrandbits(8)]))
+            em.wbytes(0x3c41, [r.choice([0x10, 0xf0, 1, 0xff]) for _ in range(4)])
+            em.wb(0x3c38, r.choice([0, 1, 7, 14, 15, r.randint(0, 15)])); em.wb(0x3c39, r.choice([0, 1, 7, 14, 15, r.randint(0, 15)]))
+            em.wb(0x3c9f, r.choice([0, 0, 1]))
+            em.wb(0x3c18, 0)
+            for i in range(8): em.wb(0x3c78 + i, r.getrandbits(8))
+            for st in STUI: em.stub(st[1], st[0], st[2] if len(st) > 2 else None, st[3] if len(st) > 3 else None)
+        e.stubs.clear()
+        v = Rc.run(ip, None, setup, stops=STEPSTOPS)
+        res.append({'args': [ip], **v})
+    seen = set()
+    for d in res:
+        k = (d['args'][0], d['out']['stop'], len(d['fin']) // 3)
+        if k not in seen: seen.add(k); d['keep'] = True
+    return res
+
+PUI = [PTEXT, uistub('clrtext4', 0x43ba), ('noises', 0x1ab3, None, lambda e: [e.regs()['ax'] & 255]), uistub('delayt', 0x8377)]
+
+@unit('pool')
+def _(n, rnd):
+    """CODE+0x74BC gather / 0x7763 share: gems (16 bit), gold (24 bit) and food (8 bit) pooled into / split out of the current member"""
+    res = []
+    e = Emu(); Rc = Rec(e)
+    for _ in range(n):
+        r = rnd
+        ip = r.choice([0x74bc, 0x7763])
+        box = {}
+        def setup(em, ip=ip):
+            a, np_ = qworld(em, r)
+            for i in range(np_):
+                ra = em.rw(PARTYTAB + 2 * i)
+                for off in (0x31, 0x32, 0x39, 0x3a, 0x3b, 0x3e):
+                    em.wb(ra + off, r.choice([0, 0, 1, 3, 7, 20, 38, 40, 100, 200, 250, 255, r.getrandbits(8)]))
+            box['keys'] = [r.choice([0x31, 0x32, 0x33, 0x33, 0x1b, 0x20])] if r.random() < 0.95 else [0x39, 0x32]
+            for st in PUI + [make_wait(em, box['keys'])]: em.stub(st[1], st[0], st[2] if len(st) > 2 else None, st[3] if len(st) > 3 else None)
+        e.stubs.clear()
+        v = Rc.run(ip, None, setup, stops=(0x74b6,))
+        res.append({'args': box['keys'] + [ip], **v})
+    seen = set()
+    for d in res:
+        k = (d['args'][-1], d['args'][0], len(d['fin']) // 4)
+        if k not in seen: seen.add(k); d['keep'] = True
+    return res

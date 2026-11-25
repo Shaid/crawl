@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { mustMatch, nullBad } from './check.ts';
-import { QCast, Surprise, Rest, type WorldWrong } from '../world.ts';
+import { QCast, Surprise, Rest, Step, Pool, type WorldWrong } from '../world.ts';
 import { UseItem } from '../spells.ts';
 import { load } from './vectors.ts';
 import { StrictMem } from '../rules-mem.ts';
@@ -59,6 +59,27 @@ describe('resting CODE+0x6EE5 / 0x6F98', () => {
   it('null controls', () => {
     for (const w of ['restNoHalve', 'restNoAge', 'restNoLevelCut', 'restKeepStatus'] as const) {
       const n = nullBad('okrest', (m, v) => { const r = new Rest(m, v.args, w).run('okrest'); return { stop: r.stop, calls: r.calls }; });
+      expect(n, w).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('moving CODE+0x4D7E (forward), 0x4E81 (back), 0x4F43 / 0x4F7A (turn)', () => {
+  it('walls, doors, map edges, the encounter roll and turning match the game', () => mustMatch('step', (m, v) => { const r = new Step(m).run(v.args[0]); return { stop: r.stop, calls: r.calls }; }, 100));
+  it('null controls', () => {
+    for (const w of ['stepIgnoreDoorLayer', 'stepNoEncounterRoll'] as const) {
+      const n = nullBad('step', (m, v) => { const r = new Step(m, w).run(v.args[0]); return { stop: r.stop, calls: r.calls }; });
+      expect(n, w).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('pooling the party CODE+0x74BC (gather) / 0x7763 (share)', () => {
+  const run = (m: any, v: any) => { const ip = v.args[v.args.length - 1]; const r = new Pool(m, v.args.slice(0, -1)).run(ip === 0x74bc ? 'gather' : 'share'); return { stop: r.stop, calls: r.calls }; };
+  it('gems, gold and food match the game on every vector', () => mustMatch('pool', run, 100));
+  it('null controls', () => {
+    for (const w of ['poolFoodNoCap', 'poolGoldNoSat', 'poolShareNoRemainder'] as const) {
+      const n = nullBad('pool', (m, v) => { const ip = v.args[v.args.length - 1]; const r = new Pool(m, v.args.slice(0, -1), w).run(ip === 0x74bc ? 'gather' : 'share'); return { stop: r.stop, calls: r.calls }; });
       expect(n, w).toBeGreaterThan(0);
     }
   });
