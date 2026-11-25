@@ -40,6 +40,7 @@ cited by offset; ScummVM's (GPL) MM1 engine was **not** used as a source.
 | Chest-open flow 0x3740/0x3749 -> 0x3752 (trap roll, open / find-remove trap / detect, payout, class gate `trap` 0x3BE7) | `x86.ts` replay (`runTown`), section 6.1 | harness (3000 + 300 vectors; null controls) |
 | Inventory commands equip 0x7A67 / remove / trade / discard, combat option line `poption` 0xBE00 (class and alignment masks, equip slots) | `x86.ts` replay, section 6.2 | harness (3000 / 1500 / 1500 / 600 / 600 vectors; class-byte null controls) |
 | Terminal screens' own code: `getinfo` 0x46CB, `statue` 0x276C, `loadnext` chain 0x509D | `x86.ts` replay, section 6.3 | harness (600 / 600 / 800 vectors; input null controls) |
+| Maze layer bits 0x02 anti-magic / 0x08 no-rest / 0x20 dark | existing ports + `maze-bits.test.ts`, section 6.4 | harness (null controls) |
 | Still open: thievery/skills beyond lock/bash/search, class-specific rules beyond the inventory in section 5, internals of the terminal screens (`statue` 0x276C, `loadnext` chain, `encounter` 0x2F87 wrapper, `getinfo` 0x46CB, `gatgold` 0x7636), handlers' unreached 14 % | **open** | `mm1-rules-world`, `mm1-ovr-code` |
 
 ### Build guide (what a remake takes from this)
@@ -207,3 +208,15 @@ The overlay runs of section 5 stub these as terminals; they are now replayed who
 - **statue** (BP = statue number, doubled to index a word table; 16 or more selects entry 0): clears the text area, prints a header line and the statue's text pointer, a delay (`delay` 0x2461 with BX = 0xB), `clear7`, noise 2, prints the second text from a 16-entry table at DS:0xE4F, waits for a key, then `outbl2` (turn the party round 180 degrees, section 5.3). No state is changed beyond the facing swap.
 - **loadnext** (AL / BL = key words, BP = area class): shows the loading text, then `loadmaze` (screen key resolution of section 5.2, `readmaze_` and `ovloader_` stubbed and logged with the record offset DS:0x138 = index * 256 words), clears 0x20 bytes at DS:0x3CB8, then `loadtype` (monster picture slots from `getod(1..7)` through `getshape`), `resfrinn` (screen clears, command line, `draw`). The chain reads the *new* overlay's data (random overlay bytes in the vectors); screen/file/graphics leaves are stubs.
 - `x86.ts` gained `loop` (E2) for the 0x20-byte clear.
+
+### 6.4 Maze layer byte (page 1) bits 0x02 / 0x08 / 0x20 (`mm1-rules-world`, closed)
+
+The page-1 cell byte, loaded to `DS:3C10` by `draw` (section 5.1), is read by 18 sites in `MM.EXE`; by mask: `0x55` wall/door bits per side (movement, search, lock, bash: sections 3-4), `0x80` special cell (`stclr`, cleared by `erase`), and the three that were open:
+
+| bit | meaning | readers (CODE) | what the game does |
+|-----|---------|----------------|--------------------|
+| `0x02` | **anti-magic square** | non-combat cast `qcast` 0x8A2B, combat cast `comcast` 0xCA65, monster special ability 0xB3D3 | the spell / ability is refused with a message (in qcast the cost has already been paid when the gate prints its message; in comcast the gate is checked before the handler runs; the ability case prints and aborts; the ports reproduce each) |
+| `0x08` | **no-rest square** | `rest` 0x6EE8, the camp-type spell handler 0x941D | rest prints the refusal after noise 2 and returns (key wait); the spell handler takes its fail path 0x971F |
+| `0x20` | **dark cell** | cell loader `draw` (0xF78 / 0x11D8) | dark view unless the light counter DS:3C9C is non-zero (then it is decremented), section 5.1 |
+
+Grade: harness. The behaviour was already inside the harness-verified ports (`world.ts` QCast / Rest, `spells.ts` ComCast / MonsterAbility, `ovr.ts` cellLoad); `__tests__/maze-bits.test.ts` adds the census and null controls (flip the bit as the port sees it: the run must differ on some vector of `qcast`, `cast`, `rest` / `okrest`, `cellload`). > **Correction (2026-11-26):** `data-structure.md` listed `0x02` and `0x08` as "unidentified"; they are the anti-magic and no-rest flags above. (The remake cell fields in `tools/mm1/map.ts` are unchanged; add `noMagic` / `noRest` there if a remake wants them.)

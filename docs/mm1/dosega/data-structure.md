@@ -40,7 +40,7 @@ MM2 codec (`tools/mm2/map.ts` → `tools/mm1/map.ts`).
 > `S = (byte>>2)&3`, `E = (byte>>4)&3`, `N = (byte>>6)&3`; y+1 = north,
 > `idx = y*16+x`. Collision page: wall bits `0x55 & dirmask` (W 0x01, S 0x04,
 > E 0x10, N 0x40); `0x20` = cell-level DARK flag (`CELL_DARK`); `0x80` =
-> special/event cell; `0x02` and `0x08` unidentified** (not "per-direction
+> special/event cell; `0x02` = anti-magic square and `0x08` = no-rest square (identified 2026-11-26, game-rules.md section 6.4)** (not "per-direction
 > dark"). Engine/movement code was never affected (it repacks the raw
 > bytes); `tools/mm1|mm2/map.ts` field names and `dark` are fixed and
 > pinned by a real-data symmetry test with a null control. The old reading
