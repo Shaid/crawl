@@ -17,6 +17,8 @@ export class GameSession {
   loop!: ShellLoop<unknown, unknown, unknown>;
   seed = 0;
   readonly logLines: string[] = [];
+  /** raw engine events of the last `update` (empty when no tick ran), for a view surface */
+  lastEvents: readonly unknown[] = [];
   /** last error from a restore / import, for the UI */
   lastError: string | null = null;
   private region: Region;
@@ -58,6 +60,7 @@ export class GameSession {
   /** advance by real time; handles the event log and autosave. Returns the ticks that ran. */
   update(dtMs: number): number {
     const { ticks, events } = this.loop.update(dtMs);
+    this.lastEvents = events;
     if (ticks === 0) return 0;
     const d = this.found.entry.hints.describeEvent;
     for (const e of events) { const t = d ? d(e) : null; if (t) this.logLines.push(t); }

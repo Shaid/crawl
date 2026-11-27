@@ -32,10 +32,11 @@ export const bcEntry: EngineEntry = {
   bind: assets => bcEngine(assets),
   hints: {
     keymap: DEFAULT_KEYMAP,
-    help: 'W/S move, Q/E turn (hold to repeat), O open door, Space or 1-4 attack. Spell keys and the 3D view are in the walker page.',
+    help: 'W/S move, Q/E turn (hold to repeat), O open door (or click the door), Space or 1-4 attack. Spell keys are in the walker page only.',
     describeEvent: (e: BcEvent) => (QUIET.has(e.what) ? null : `${e.tick} ${describeEvent(e)}`),
     hud: bcHud,
     regions: { PAL: 160, NTSC: 1000 / 6 },
     viewUrl: '/tools/walker/index.html?game=blackcrypt&play=1',
+    viewFactory: async ctx => (await import('./view-factory')).createBcView(ctx),
   },
 };

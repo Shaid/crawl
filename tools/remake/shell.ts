@@ -6,6 +6,7 @@
 import { registry } from './engines';
 import { detectAll, type DataSource, type DetectionReport, type Found } from './detect';
 import { GameSession } from './session';
+import { ViewHost } from './viewhost';
 import { SlotStore, SlotError, localKV, memoryKV, type KV } from './slots';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import type { CoverageRow } from './engine';
@@ -106,10 +107,15 @@ function playView(s: GameSession, f: Found) {
   imp.onchange = async () => { const file = imp.files?.[0]; if (!file) return; msg.textContent = ''; await s.importFile(new Uint8Array(await file.arrayBuffer())).catch(fail); imp.value = ''; };
   const pause = el('button', { textContent: 'Pause' }); pause.onclick = () => { s.loop.paused = !s.loop.paused; pause.textContent = s.loop.paused ? 'Resume' : 'Pause'; };
   const rows = f.entry.engine.coverage();
-  const view = f.entry.hints.viewUrl ? el('a', { href: f.entry.hints.viewUrl, textContent: 'open the 3D view (walker page, separate session)', style: 'color:var(--accent)' }) : '';
-  root.replaceChildren(el('div', { class: 'row' }, back, el('strong', { textContent: f.detection.title }), pause, fresh, view),
-    el('div', { class: 'play' },
-      el('div', {}, hud, el('h3', { textContent: 'Event log' }), log, el('p', { class: 'tag', textContent: hints.help ?? '' }), msg),
+  // the picture: the shell owns the canvas and the layout; the entry's viewFactory fills it (none = the text HUD alone)
+  const canvas = el('canvas', { class: 'viewport', width: 320, height: 200 }), side = el('div', { class: 'viewside' }), viewNote = el('div', { class: 'tag' });
+  const host = new ViewHost(s, { canvas, side, setStatus: t => { viewNote.textContent = t; } });
+  const link = hints.viewUrl && !host.wanted ? el('a', { href: hints.viewUrl, textContent: 'open the 3D view (walker page, separate session)', style: 'color:var(--accent)' }) : '';
+  const stage = host.wanted ? el('div', { class: 'stage' }, el('div', { class: 'viewrow' }, canvas, side), viewNote) : null;
+  root.replaceChildren(el('div', { class: 'row' }, back, el('strong', { textContent: f.detection.title }), pause, fresh, link),
+    el('div', { class: `play${stage ? ' withview' : ''}` },
+      ...(stage ? [stage] : []),
+      el('div', { class: 'info' }, hud, el('h3', { textContent: 'Event log' }), log, el('p', { class: 'tag', textContent: hints.help ?? '' }), msg),
       el('div', {}, el('h3', { textContent: 'Save slots' }), el('div', { class: 'row' }, name, save), slotBox, el('div', { class: 'row' }, el('span', { class: 'tag', textContent: 'Import:' }), imp),
         el('h3', { textContent: 'Coverage' }), coverageBar(rows), coverageTable(rows))));
   renderSlots();
@@ -120,8 +126,10 @@ function playView(s: GameSession, f: Found) {
   window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur);
   let last = performance.now();
   const frame = (now: number) => {
-    if (session !== s) { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); return; }
-    const n = s.update(now - last); last = now;
+    if (session !== s) { host.dispose(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); return; }
+    const dt = now - last; const n = s.update(dt); last = now;
+    host.frame(dt, n);
+    if (host.error) viewNote.textContent = `3D view unavailable (text HUD only): ${host.error}`;
     if (n) { hud.textContent = s.hudLines().join('\n'); log.textContent = s.logLines.slice(-60).join('\n'); log.scrollTop = log.scrollHeight; renderSlots(); }
     else if (!hud.textContent) hud.textContent = s.hudLines().join('\n');
     requestAnimationFrame(frame);

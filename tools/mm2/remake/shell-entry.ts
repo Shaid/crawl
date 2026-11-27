@@ -31,5 +31,6 @@ export const mm2Entry: EngineEntry = {
     hud: (v: Mm2View) => hudLines(v, new Mm2Keys(), []).slice(0, 8),
     newGameOptions: { wanderPct: 5 },
     viewUrl: '/tools/walker/index.html?game=mm2&play=1',
+    viewFactory: async ctx => (await import('./view-factory')).createMm2View(ctx),
   },
 };

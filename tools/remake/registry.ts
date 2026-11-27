@@ -24,8 +24,37 @@ export interface ShellHints {
   regions?: Partial<Record<Region, number>>;
   /** options for `newGame(world, seed, opts)` */
   newGameOptions?: unknown;
-  /** a graphical front end for this title, if any (the shell itself draws text only) */
+  /** a graphical front end for this title on its own page, if any; the shell links to it only when there is no `viewFactory` */
   viewUrl?: string;
+  /**
+   * An in-shell graphical view: called once per session (and again after a slot load / new game, which replace the engine state) with the shell's canvas and panel area.
+   * Returns a surface the shell calls every animation frame with the engine's current View. Absent = the text HUD only (also the fallback when the factory throws).
+   */
+  viewFactory?(ctx: ViewContext): Promise<ViewSurface> | ViewSurface;
+}
+
+/** What the shell hands a `viewFactory`: the surfaces it owns and read-only access to the running game. The factory never sees the session or the engine's internals beyond `state()`. */
+export interface ViewContext {
+  /** the main picture: backing store 320x200, scaled by CSS; the shell owns its layout */
+  canvas: HTMLCanvasElement;
+  /** an empty element beside / under the picture for minimap-like panels the factory may fill */
+  side: HTMLElement;
+  /** the entry's `assetBase` ('' when absent) */
+  assetBase: string;
+  /** the engine's current state (changes identity only when a new game / slot is loaded, which rebuilds the surface) */
+  state(): unknown;
+  /** a command from the picture (a click) played on the next tick */
+  command(c: unknown): void;
+  /** one line of status for the shell to show */
+  setStatus(text: string): void;
+}
+
+/** What a view factory returns. */
+export interface ViewSurface {
+  /** once per animation frame. `view` = `engine.view(state)` now; `ticks` = engine ticks that ran since the last frame; `events` = their raw events (empty when none) */
+  render(view: unknown, frame: { dtMs: number; ticks: number; events: readonly unknown[] }): void;
+  /** called exactly once when the session ends (back to the launcher), or when a slot / new game replaces the state; remove listeners and DOM the factory added */
+  dispose(): void;
 }
 
 export interface EngineEntry {
