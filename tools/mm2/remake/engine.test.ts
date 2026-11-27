@@ -152,6 +152,14 @@ describe.skipIf(!have)('Mm2Engine scenarios (retail files)', () => {
     expect(paid).toBeGreaterThan(0);
   });
 
+  it('a combat spell at a lone monster needs no group prompt (the confirm auto-accepts inside the cast command)', () => {
+    const st = Mm2Engine.newGame(world(), 41); buff(st);
+    run(st, { kind: 'warp', screen: 17 }, { kind: 'encounter' });
+    if (st.mode === 'prompt') run(st, { kind: 'prompt', choice: 'attack' });
+    st.mem.w8(A(-30654), 1);
+    expect(() => run(st, { kind: 'cast', char: 4, spell: 3 })).not.toThrow();
+  });
+
   it('null control: no SP, no spell; an unknown spell is refused', () => {
     const st = Mm2Engine.newGame(world(), 9);
     run(st, { kind: 'warp', screen: 17 }, { kind: 'encounter' });
@@ -159,6 +167,20 @@ describe.skipIf(!have)('Mm2Engine scenarios (retail files)', () => {
     st.mem.w16(charPtr(st.mem, 4) + 0x58, 0);
     expect(at(run(st, { kind: 'cast', char: 4, spell: 3 }), 'cast-refused')[0]).toMatchObject({ why: 'sp' });
     expect(at(run(st, { kind: 'cast', char: 4, spell: 20 }), 'cast-refused')[0]).toMatchObject({ why: 'unknown' });
+  });
+
+  it('casts non-combat spells out of battle: First Aid heals the chosen member, Light burns SP and lights the party', () => {
+    const st = Mm2Engine.newGame(world(), 40);
+    const ch0 = charPtr(st.mem, 0);
+    st.mem.w16(ch0 + 0x5e, 1);
+    const sp0 = V(st).party[3].sp;
+    const ev = run(st, { kind: 'cast', char: 3, spell: 51, target: 0 });   // Gene Eric the Cleric: First Aid on Sir Felgar
+    expect(at(ev, 'cast')).toHaveLength(1);
+    expect(V(st).party[0].hp).toBeGreaterThan(1);
+    expect(V(st).party[3].sp).toBeLessThan(sp0);
+    const light0 = st.mem.r8(A(-31147));
+    expect(at(run(st, { kind: 'cast', char: 4, spell: 4 }), 'cast')).toHaveLength(1);
+    expect(st.mem.r8(A(-31147))).toBeGreaterThan(light0);
   });
 
   it('rest heals the wounded and eats one food each', () => {
@@ -294,9 +316,11 @@ describe.skipIf(!have)('parity: the engine adds nothing to the rules it calls', 
     spellSpCost(ref, ch, rec); spellGemGate(ref, ch, rec); spellSpGate(ref, ch);
     ref.w8(A(-31064), 0);
     expect(castSpell(ref, ch, 4).some(c => c[0] === 'dispCB')).toBe(true);
+    ref.w8(A(-16140), 1); ref.w8(A(-31209), 1);   // the handler runs inside the cast command (castSpell reports the dispatch and undoes its setup)
     ref.killHook = () => monsterDies(ref);
     const kills = { shift: () => { damageMonster(ref); return ref.r16(A(-3852)) === 0xffff ? 1 : 0; } } as unknown as number[];
     castCombat(ref, 3, { keys: [0x41], picks: [0x31, 0x31], kills });
+    ref.w8(A(-16140), ref.r8(A(-31064))); ref.w8(A(-31209), 0); ref.killHook = null;
     chargeCast(ref);
     run(st, { kind: 'cast', char: 4, spell: 3, target: 0 });
     expect(Buffer.from(st.mem.win).equals(Buffer.from(ref.win))).toBe(true);

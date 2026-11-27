@@ -231,7 +231,7 @@ function partyAct(st: Mm2State, idx: number, order: Order | null, emit: Emit) {
 function castParty(st: Mm2State, idx: number, spell: number, target: number, emit: Emit): boolean {
   const m = st.mem, ch = charPtr(m, idx), rec = A(-11006) + 2 * spell;
   if (!spellKnown(m, ch, spell)) { emit('cast-refused', { char: idx, spell, why: 'unknown' }); return false; }
-  if (m.r8(ch + 38) & 0x02) { emit('cast-refused', { char: idx, spell, why: 'silenced' }); return false; }   // hyp: condition bit 1 = silenced (message table, rest clears it)
+  if (m.r8(ch + 38) & 0x02) { emit('cast-refused', { char: idx, spell, why: 'silenced' }); return false; }   // condition bit 1 = silenced (effect table, game-rules 11.3); that the cast command refuses a silenced caster is hyp (the check lives in the UI)
   spellSpCost(m, ch, rec);
   const gem = spellGemGate(m, ch, rec); if (!gem.ok) { emit('cast-refused', { char: idx, spell, why: 'gems' }); return false; }
   const sp = spellSpGate(m, ch); if (!sp.ok) { emit('cast-refused', { char: idx, spell, why: 'sp' }); return false; }
@@ -241,15 +241,21 @@ function castParty(st: Mm2State, idx: number, spell: number, target: number, emi
   const disp = calls.find(c => c[0] === 'dispCB' || c[0] === 'dispNC');
   if (!disp) { m.w16(A(SPELL_COST_SLOT), 0); m.w16(A(SPELL_GEMS_SLOT), 0); emit('cast-refused', { char: idx, spell, why: calls.map(c => c[0] + c[1].join(':')).join(',') || 'gate' }); return false; }
   const io: CastIo & { ikeys: number[] } = { keys: [0x41 + target], picks: [0x31 + target, 0x31 + target], kills: killOracle(m), ikeys: [] };
+  // `castSpell` is the cast command with the dispatcher call stubbed (it reports `dispCB` / `dispNC`) and already undid its setup afterwards, so the handler runs between the two halves:
+  // A4-16140 = 1 (confirms auto-accept) and A4-31209 = 1 while it runs; afterwards A4-16140 = A4-31064 (did the spell happen), A4-31209 = 0 (rules4 `castSpell`, harness 13.1)
+  m.w8(A(-16140), 1); m.w8(A(-31209), 1);
   m.killHook = () => monsterDies(m);
   try {
-    if (disp[0] === 'dispCB') {
+    // in a fight the cast command's own routing decides (anywhere spells -> the non-combat handlers, the rest -> the combat ones); outside a fight the party menu goes to the
+    // non-combat dispatcher itself (game-rules 14.7, code), so a spell that only has a non-combat handler runs there
+    const nc = disp[0] === 'dispNC' || (m.r8(A(MODE)) !== 2 && (NC_SPELLS.includes(spell) || NC_SPELLS2.includes(spell)));
+    if (!nc) {
       if (!CB_SPELLS.includes(spell)) { emit('cast-unmodelled', { char: idx, spell }); m.w16(A(SPELL_COST_SLOT), 0); m.w16(A(SPELL_GEMS_SLOT), 0); return false; }
       castCombat(m, spell, io);
     } else if (NC_SPELLS.includes(spell)) castNonCombat(m, spell, io);
     else if (NC_SPELLS2.includes(spell)) castNonCombat2(m, spell, io);
     else { emit('cast-unmodelled', { char: idx, spell }); m.w16(A(SPELL_COST_SLOT), 0); m.w16(A(SPELL_GEMS_SLOT), 0); return false; }
-  } finally { m.killHook = null; }
+  } finally { m.killHook = null; m.w8(A(-16140), m.r8(A(-31064))); m.w8(A(-31209), 0); }
   const ok = m.r8(A(-31064)) !== 0;
   if (ok) chargeCast(m); else { m.w16(A(SPELL_COST_SLOT), 0); m.w16(A(SPELL_GEMS_SLOT), 0); }
   const after = monsters(m);
@@ -258,7 +264,7 @@ function castParty(st: Mm2State, idx: number, spell: number, target: number, emi
   return ok;
 }
 
-/** hyp: the spell book is 6 bytes (+0x51..+0x56) of the character's own school, bit (n & 7) of byte (n >> 3) for spell n of 0..47 (Sorcerer 0..47, Cleric 48..95) */
+/** the spell book is 6 bytes (+0x51..+0x56) of the character's own school: bit (n & 7) of byte (n >> 3) for spell n of 0..47 (harness 5.3 `learn_spell_level`; Sorcerer 0..47, Cleric 48..95) */
 function spellKnown(m: FlatMem, ch: number, spell: number): boolean {
   const n = spell % 48;
   return (m.r8(ch + 0x51 + (n >> 3)) >> (n & 7)) & 1 ? true : false;
@@ -266,7 +272,7 @@ function spellKnown(m: FlatMem, ch: number, spell: number): boolean {
 export function knownSpells(m: FlatMem, slot: number): number[] {
   const ch = charPtr(m, slot), cls = m.r8(ch + 15), out: number[] = [];
   if (cls !== 3 && cls !== 4 && cls !== 1 && cls !== 2) return out;
-  const base = cls === 3 || cls === 1 ? 48 : 0;   // hyp: Cleric / Paladin cast the cleric list, Sorcerer / Archer the sorcerer list
+  const base = cls === 3 || cls === 1 ? 48 : 0;   // Cleric / Paladin learn from the clerical table, Sorcerer / Archer from the sorcerous one (harness 5.3)
   for (let n = 0; n < 48; n++) if (spellKnown(m, ch, n)) out.push(base + n);
   return out;
 }
@@ -645,7 +651,7 @@ const COVERAGE: CoverageRow[] = [
   { area: 'Monster turn: flee, ability gate, melee / ranged / advance / spell', grade: 'harness', note: '11.1, 11.2, 15.1; monsters special CODE+0x1042C is open (stub)' },
   { area: 'Monster melee damage to a character, saves, 30 special effects', grade: 'harness', note: '4.1, 4.3, 11.3; the save flags of a melee hit are hyp (none)' },
   { area: 'Monster spell verbs and the four leaves', grade: 'harness', note: '13.5, 15.1; verbs 9, 11-14, 29 (v140E..v141F) are not derived (event only)' },
-  { area: 'Party spells: cast command, gates, 51 combat + 25 non-combat handlers, charge', grade: 'harness', note: '13, 14.5, 14.6, 15.1; the spell book bit order and who casts which list are hyp' },
+  { area: 'Party spells: cast command, gates, 51 combat + 25 non-combat handlers, charge', grade: 'harness', note: '13, 14.5, 14.6, 15.1; the book bits and school per class are 5.3 (harness); casting outside the cast command\'s own gates, e.g. which squares forbid it, is the map flag only' },
   { area: 'End of battle: XP split, kill reward, treasure roll', grade: 'harness', note: '4.6, 4.7, 12.3; the hand-over of gold / gems / loot to the party is the engine\'s policy (hyp, UI)' },
   { area: 'Rest, world clock and ageing', grade: 'harness', note: '5.5, 13.7; how much time a rest advances is open (the clock is not advanced by rest)' },
   { area: 'Doors: unlock, bash', grade: 'harness', note: '14.4; the trap effect picker is UI (the damage half is harnessed, 15.7, not wired)' },
