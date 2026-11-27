@@ -358,6 +358,20 @@ def main():
         'staticSlots': STATIC_SLOTS,
         'slots': slots,
     }
+    # Preserve what `export_dungeon_props.py` merged in (prop:* slots, its extra banks,
+    # floorItem / floorPlate): this exporter used to overwrite them (82 -> 34 slots), so
+    # the result depended on script order. Keys this script owns are always rewritten.
+    if SLOTS_PATH.exists():
+        old = json.loads(SLOTS_PATH.read_text())
+        kept = {k: v for k, v in old.get('slots', {}).items() if k not in slots}
+        slots.update(kept)
+        ids = {b['id'] for b in doc['banks']}
+        doc['banks'] += [b for b in old.get('banks', []) if b['id'] not in ids]
+        for extra in ('floorItem', 'floorPlate'):
+            if extra in old:
+                doc[extra] = old[extra]
+        if kept:
+            print(f'  preserved {len(kept)} slots from the existing file (prop:* etc, from export_dungeon_props.py)')
     paths.write_json(SLOTS_PATH, doc, pretty=True)
     print(f'  wrote {SLOTS_PATH} ({len(slots)} slots + {len(STATIC_SLOTS)} static)')
 
