@@ -46,6 +46,22 @@ Changes from the first draft, and why:
 - No rules DSL until 3-4 engines exist and real overlap is visible.
 - Every engine reports its coverage (harness / code / hyp / open) from its game-rules status block, so the shell can show it.
 
+## Shell (built 2026-11-27, `tools/remake/`)
+
+One browser app: `tools/remake/index.html` (dev server: `npm run dev`, open `/tools/remake/index.html`; `?launch=<engine id>` starts a detected game directly). Logic is in DOM-free modules, tested by `tools/remake/shell.test.ts` with a fake engine; `shell.ts` is the thin DOM layer.
+
+- `registry.ts` / `engines.ts`: the engine registry. An `EngineEntry` is data plus pure hooks: `{ id, title, dataDirs, assetBase?, engine, bind?, hints }`. `hints` = key map (`KeyMap`), help text, `describeEvent`, `hud(view)` lines, per-region tick ms, `newGameOptions`, optional `viewUrl`. `bind(assets)` returns the runtime engine when it needs more than `(files, variant)` (Black Crypt binds its rules tables). The shell imports no game rules.
+- `detect.ts`: a `DataSource` (list + read) supplies names and sizes; a `LazyFileSet` per candidate directory answers `has`/`size` from the listing and fetches bytes only when `detect`/`load` call `read` (sync contract, retried after the fetch). A throwing `detect` counts as not detected. Nothing is hashed or copied. In the dev server the source is `/data-index.json` (names and sizes, `vite.config.ts`) plus the existing `/data/*` middleware.
+- `session.ts`: `GameSession` = engine + world + state + `ShellLoop` + event log + slots + autosave. The world is re-loaded from the user's files on every restore.
+- `loop.ts`: the generic pacing (tick clock, tap protection, held-key repeat, command budget, catch-up cap), generalised from Black Crypt's `PlayLoop`, which is now a thin subclass.
+- `slots.ts`: save slots. Envelope (JSON, version 1): `{ format: 'crawl-slot', version, engine, variant, fingerprint, name, savedAt, tick, seed, data: base64(engine.save()) }`. `fingerprint` = `engine/variant/sorted detection evidence` (file names and sizes, no hashes). Stored in localStorage as `crawl.slot.<engine>.<name>` (autosave = slot `autosave`; IndexedDB would only be needed for very large saves). Export/import is the same envelope as a `.crawlsave` file. Restore checks engine, variant and fingerprint, re-loads the world, calls `engine.restore` and reports any throw as a `SlotError`, leaving the running game untouched.
+- `settings.ts`: region (PAL/NTSC, applied where an entry declares `regions`), volume (placeholder), autosave interval; localStorage `crawl.shell.settings`.
+- Coverage: the launcher shows a grade bar and per-area table from `engine.coverage()` for every registered engine, detected or not (missing-data games are greyed).
+
+**Register an engine:** export an `EngineEntry` from the title's folder (Black Crypt: `tools/blackcrypt/remake/shell-entry.ts`) and add one line to the `Registry` list in `tools/remake/engines.ts`.
+
+Black Crypt in the shell: text HUD, event log, move/turn/open/attack keys, slots, coverage. The 3D view stays on the walker page (`?game=blackcrypt&play=1`), which now takes its rules binding from the same entry (`bcEngine`) and the same `ShellLoop`; the two front ends are separate sessions. Spell keys and the live scene are walker-page only for now.
+
 ## Status
 
 First engine: Black Crypt (core under construction, see `docs/blackcrypt/remake-plan.md`). The contract is settled by that core and stays open to change when a second title (likely MM2 or W6) implements it.

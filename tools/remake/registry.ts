@@ -34,6 +34,8 @@ export interface EngineEntry {
   title: string;
   /** directories under the data root (relative, no trailing slash) in which this title's retail files may live; detection runs on each */
   dataDirs: string[];
+  /** URL prefix of this title's generated (non-retail) assets, for `bind`'s AssetAccess; e.g. '/assets/blackcrypt/amiga' */
+  assetBase?: string;
   /** the engine: needs `detect` and `coverage` to work without extra inputs */
   engine: AnyEngine;
   /** optional: produce the runtime engine when `load`/`step` need more than the shell supplies (e.g. BC binds its rules tables) */

@@ -27,6 +27,7 @@ export const bcEntry: EngineEntry = {
   id: 'blackcrypt',
   title: 'Black Crypt (Amiga)',
   dataDirs: ['blackcrypt/amiga'],
+  assetBase: '/assets/blackcrypt/amiga',
   engine: BcEngine,
   bind: assets => bcEngine(assets),
   hints: {

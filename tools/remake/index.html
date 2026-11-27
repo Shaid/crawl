@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crawl - game launcher</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <header id="bar">
+    <h1>Crawl</h1>
+    <span class="sub">play your own copies of the games; nothing is uploaded or bundled</span>
+    <span class="grow"></span>
+    <label>Region <select id="region"><option>PAL</option><option>NTSC</option></select></label>
+    <label>Volume <input id="volume" type="range" min="0" max="1" step="0.05" title="placeholder: no audio yet" /></label>
+    <label>Autosave <select id="autosave"><option value="0">off</option><option value="30">30 s</option><option value="60">60 s</option><option value="300">5 min</option></select></label>
+  </header>
+  <main id="root"></main>
+  <script type="module" src="shell.ts"></script>
+</body>
+</html>

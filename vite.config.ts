@@ -1,5 +1,5 @@
 import { resolve, normalize, sep } from 'node:path';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, statSync, readdirSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 
 /**
@@ -15,6 +15,22 @@ function serveDataDir(): Plugin {
     name: 'serve-data-dir',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        // `/data-index.json`: names and sizes of everything under data/ (depth <= 5), for the remake shell's detection pass (tools/remake). No file contents.
+        if (req.url?.split('?')[0] === '/data-index.json') {
+          const out: { path: string; size: number }[] = [];
+          const walk = (dir: string, rel: string, depth: number) => {
+            for (const d of readdirSync(dir, { withFileTypes: true })) {
+              if (d.name.startsWith('.')) continue;
+              const r = rel ? `${rel}/${d.name}` : d.name;
+              if (d.isDirectory()) { if (depth < 5) walk(resolve(dir, d.name), r, depth + 1); }
+              else if (d.isFile()) out.push({ path: r, size: statSync(resolve(dir, d.name)).size });
+            }
+          };
+          try { if (existsSync(dataRoot)) walk(dataRoot, '', 0); } catch { /* unreadable dir: list what we have */ }
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ files: out }));
+          return;
+        }
         if (!req.url || !req.url.startsWith('/data/')) return next();
 
         const relPath = decodeURIComponent(req.url.slice('/data/'.length).split('?')[0]);
