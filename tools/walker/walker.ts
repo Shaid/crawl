@@ -588,6 +588,12 @@ async function main() {
     play = await attachMm2Play({ getView: () => view, loadMap: (level, pose) => loadGame('mm2', level, pose), setStatus }, startLevel);
   }
 
+  // `?play=1` (Wizardry 6, Amiga): the step-based remake engine (tools/wizardry6/remake) drives pose and rules; the view only renders.
+  if (startGame === 'wizardry6' && w6Variant === 'amiga' && new URLSearchParams(window.location.search).get('play') === '1') {
+    const { attachW6Play } = await import('../wizardry6/remake/browser.ts');
+    play = await attachW6Play({ getView: () => view, loadMap: (level, pose) => loadGame('wizardry6', level, pose), setStatus }, startLevel);
+  }
+
   let lastTime = performance.now();
   function frame(now: number) {
     const dtMs = now - lastTime;
