@@ -755,6 +755,12 @@ async function main() {
     );
   }
 
+  // `?play=1` (Might & Magic II): the turn-based remake engine (tools/mm2/remake) drives pose and rules; the view only renders.
+  if (startGame === 'mm2' && new URLSearchParams(window.location.search).get('play') === '1') {
+    const { attachMm2Play } = await import('../mm2/remake/browser.ts');
+    play = await attachMm2Play({ getView: () => view, loadMap: (level, pose) => loadGame('mm2', level, pose), setStatus }, startLevel);
+  }
+
   let lastTime = performance.now();
   function frame(now: number) {
     const dtMs = now - lastTime;
