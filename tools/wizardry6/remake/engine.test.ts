@@ -475,6 +475,35 @@ describe.skipIf(!have)('Wizardry 6 engine on the retail files', () => {
     expect(opened).toBeGreaterThan(0);
   });
 
+
+  it('use item (a spell scroll), party swap, hide and run all go through the verified round', () => {
+    // use item: member 3 carries a MAGIC MISSILE scroll in slot 0; a seed where the cast roll succeeds uses it up
+    let used = false;
+    for (let seed = 1; seed < 40 && !used; seed++) {
+      const st = fight(seed, 8);
+      const p = A4 - 17922 + 3 * 0x1b0;
+      st.m.w16(p + 64, 335); st.m.w8(p + 68, 13); st.m.w8(p + 70, 1); st.m.w8(p + 428, 1);
+      run(st, { kind: 'planAll', plan: { act: 'hide' } }, { kind: 'plan', member: 3, plan: { act: 'useitem', slot: 0, tg: 1, ti: -3 } });
+      const ev = run(st, { kind: 'round' });
+      if (ev.some(e => e.what === 'useitem') && st.m.u8(p + 428) === 0) used = true;
+    }
+    expect(used).toBe(true);
+    // swap: member 0 moves to position 1 (the two records trade places)
+    const sw = fight(3, 8);
+    const names = E.view(sw).party.map(x => x.name);
+    run(sw, { kind: 'planAll', plan: { act: 'hide' } }, { kind: 'plan', member: 0, plan: { act: 'swap', to: 1 } });
+    const ev = run(sw, { kind: 'round' });
+    expect(ev.some(e => e.what === 'swap')).toBe(true);
+    expect(E.view(sw).party.map(x => x.name)).not.toEqual(names);
+    expect([...E.view(sw).party.map(x => x.name)].sort()).toEqual([...names].sort());
+    // run: a whole party running either gets away (the fight ends, the party retreats) or is refused; hide reports its roll
+    let fled = false;
+    for (let seed = 1; seed < 30 && !fled; seed++) { const st = fight(seed, 1); const ev2 = run(st, { kind: 'planAll', plan: { act: 'run' } }, { kind: 'round' }); if (ev2.some(e => e.what === 'fled')) { fled = true; expect(st.mode).toBe('explore'); } }
+    expect(fled).toBe(true);
+    const h = run(fight(2, 1), { kind: 'planAll', plan: { act: 'hide' } }, { kind: 'round' });
+    expect(h.some(e => e.what === 'hide')).toBe(true);
+  });
+
   it('events read as text', () => {
     const st = fresh(3);
     run(st, { kind: 'warp', level: 3, ...corridor(3) });
