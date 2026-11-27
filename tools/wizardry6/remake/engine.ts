@@ -212,27 +212,24 @@ function runEntity(st: W6State, emit: Emit, name: string, fx: Effect[], args?: s
 /** the per-cell entity scan LAB_06B6 followed by what its handlers asked for (a teleport re-scans at the destination, an encounter ends the scan) */
 function scanCell(st: W6State, emit: Emit): boolean {
   const m = st.m;
-  for (let guard = 0; guard < 1; guard++) {
-    const startLevel = st.pose.level;
+  {
+    let curLevel = st.pose.level;
     syncPose(st);
     const blk = L3_BASE + st.pose.level * L3_STRIDE, region = m.u16(G(-18330));
     m.w16(G(-18148), m.u8(blk + 1728 + region));
     m.w16(G(-18610), 5);
     const fx: Effect[] = [];
-    let moved = false;
     dispatchEntities(ctx(st), (name, f, args) => {
       const before = `${st.pose.level},${st.pose.x},${st.pose.y}`;
       runEntity(st, emit, name, f, args);
       if (`${st.pose.level},${st.pose.x},${st.pose.y}` !== before) {
-        moved = true;
         // a teleport: the game's scan restarts at the destination (the handler clears the continue flag, -10918)
         m.w16(G(-10918), 0);
-        if (st.pose.level !== startLevel) enterLevel(st, st.pose.level); else syncPose(st);
+        if (st.pose.level !== curLevel) { curLevel = st.pose.level; enterLevel(st, curLevel); } else syncPose(st);
         m.w16(G(-18148), m.u8(L3_BASE + st.pose.level * L3_STRIDE + 1728 + m.u16(G(-18330))));
       }
     }, fx);
     emitFx(st, fx, emit);
-    void moved;
     const state = s16(m.u16(G(-18610)));
     if (state === 5) return true;
     if (state === 10 || state === 0x12) return false;
@@ -240,7 +237,6 @@ function scanCell(st: W6State, emit: Emit): boolean {
     m.w16(G(-18610), 5);   // 9: the scan ended
     return true;
   }
-  return true;
 }
 
 /** a fight starts for the id in -15102 (written by a trigger or a wandering roll) */
@@ -334,7 +330,6 @@ function endFight(st: W6State, emit: Emit, w: CombatWorld): void {
   const pool = m.u32(G(-15300)) | 0;
   const { victory, fx } = w.finishFight(treasure);
   emitFx(st, fx, emit);
-  const gold0 = 0; void gold0;
   st.fight = null;
   if (s16(m.u16(G(-18608))) === 8 || !Array.from({ length: partySize(m) }, (_, i) => m.u8(P(i) + 417)).some(c => c === 0)) {
     st.mode = 'over'; emit('party-wiped'); return;
