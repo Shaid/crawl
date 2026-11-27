@@ -3,10 +3,11 @@
  * (tick clock, held keys, no DOM) and the live scene in `live-scene.ts` / `live-play.ts`. Enabled by `?game=blackcrypt&play=1` in the walker page (`&region=ntsc` for the
  * 10-vblank tick). Dev server only: the retail files are fetched from the Vite `/data/` middleware, never shipped.
  */
-import { BcEngine, describeEvent, type BcState, type BcRulesData } from './engine';
+import { BcEngine, describeEvent, type BcState } from './engine';
 import { fileSetFromMap } from '../../remake/engine';
 import { PlayLoop, DEFAULT_KEYMAP, type Region } from './play-loop';
 import { createBcLive, type BcLive } from './live-play';
+import { bcEngine } from './shell-entry';
 import type { BlackCryptView } from '../../walker/games';
 
 interface PoseLike { level: number; x: number; y: number; facing: 0 | 1 | 2 | 3 }
@@ -16,14 +17,12 @@ type LiveView = ViewLike & Pick<BlackCryptView, 'setLive' | 'refreshLive' | 'ban
 
 export async function attachBlackCryptPlay(host: PlayHost, level: number) {
   const q = new URLSearchParams(window.location.search);
+  // detection, rules tables and the engine factory are the shell's (tools/remake + shell-entry.ts); only the retail bytes are fetched here
   const names = ['bcdfs', 'bcdfp', 'bcdft'];
   const bytes = await Promise.all(names.map(async n => { const r = await fetch(`/data/blackcrypt/amiga/${n}`); if (!r.ok) throw new Error(`${n}: ${r.status}`); return new Uint8Array(await r.arrayBuffer()); }));
   const files = fileSetFromMap(new Map(names.map((n, i) => [n, bytes[i]])));
   const det = BcEngine.detect(files); if (!det) throw new Error('Black Crypt files not recognised');
-  const V = (await import('../rules_oracle/vectors.json')).default as unknown as { tables: BcRulesData['tables']; weaponBase: BcRulesData['weaponBase']; aiScripts: BcRulesData['scripts'] };
-  // the spell book tables come from the generated rules-tables.json (`spellBook`); without it the engine plays with no book (memorise does nothing)
-  const rt = (await (await fetch(`${host.assetBase}/data/rules-tables.json`)).json().catch(() => null)) as { spellBook?: { pageHead: number[]; pageNext: number[]; next: number[]; level: number[] } } | null;
-  const eng = BcEngine.withRules({ tables: V.tables, weaponBase: V.weaponBase, scripts: V.aiScripts, spells: rt?.spellBook });
+  const eng = await bcEngine({ json: async p => ((await fetch(`${host.assetBase}/${p}`)).json().catch(() => null)) });
   const world = eng.load(files, det.variant) as ReturnType<typeof BcEngine.load>;
   const groups = ((await (await fetch(`${host.assetBase}/data/monster-names.json`)).json()) as { groups: Parameters<typeof createBcLive>[0]['groups'] }).groups;
   const v0 = host.getView().pose;
