@@ -36,6 +36,9 @@ export async function attachW6Play(host: PlayHost, level: number) {
   });
   for (const code of (q.get('keys') ?? '').split(',')) if (code) queue.push(code);
   draw();
+  // the engine starts on its own level (12 by default); the walker page opens level 1 unless told otherwise, so load the engine's level before the first frame
+  const p0 = eng.view(st).pose;
+  if (host.getView().pose.level !== p0.level) await host.loadMap(p0.level, { level: p0.level, x: p0.x, y: p0.y, facing: p0.facing as 0 | 1 | 2 | 3 });
   return {
     update(_dtMs: number): PoseLike | null {
       if (!queue.length) return null;
